@@ -1,7 +1,7 @@
-@extends('app') 
+@extends('layouts.public') 
 @section('content')
-
-<main class="w-full bg-white overflow-x-hidden">
+@include('layouts.header')
+<main class="w-full bg-[#ffffff] overflow-x-hidden">
     <section class="relative w-full min-h-[85vh] flex items-center justify-center overflow-hidden py-10 md:py-20">
         
         <div class="absolute inset-0 z-0 flex items-center justify-center bg-[#7a3f91]">
@@ -75,43 +75,8 @@
         </div>
     </section>
 
-    <footer class="bg-[#2b0d3e] text-white pt-24 pb-12 px-6">
-        <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-16 border-b border-white/10 pb-16 mb-12 text-center md:text-left">
-            <div class="space-y-6">
-                <h3 class="text-3xl font-black text-[#c59dd9] uppercase italic tracking-tighter">PHILCST Alumni Connect</h3>
-                <p class="text-lg text-white/70 italic uppercase font-bold leading-relaxed">Empowering alumni through technology.</p>
-            </div>
-
-            <div class="space-y-6">
-                <h4 class="text-[#c59dd9] font-black uppercase text-sm tracking-widest">Our Location</h4>
-                <p class="flex items-start justify-center md:justify-start gap-4 text-lg text-white/80 uppercase font-medium">
-                    <i class="fa-solid fa-location-dot text-[#c59dd9] text-2xl mt-1"></i>
-                    <span>Old Nalsian Road, Nalsian, Calasiao, Philippines, 2418</span>
-                </p>
-                <div class="space-y-4 text-lg italic text-white/80 font-medium">
-                    <p class="flex items-center justify-center md:justify-start gap-4">
-                        <i class="fa-solid fa-phone text-[#c59dd9]"></i> (075) 522 8032
-                    </p>
-                    <p class="flex items-center justify-center md:justify-start gap-4">
-                        <i class="fa-solid fa-envelope text-[#c59dd9]"></i> philcstreg@yahoo.com
-                    </p>
-                </div>
-            </div>
-
-            <div class="space-y-6">
-                <h4 class="text-[#c59dd9] font-black uppercase text-sm tracking-widest">Social Connect</h4>
-                <div class="flex items-center justify-center md:justify-start space-x-4 bg-white/5 p-4 rounded-2xl hover:bg-white/10 transition-all cursor-pointer">
-                    <i class="fa-brands fa-facebook text-4xl text-[#c59dd9]"></i>
-                    <span class="font-black text-xs md:text-sm uppercase italic leading-tight">Philippine College of Science and Technology</span>
-                </div>
-            </div>
-        </div>
-        <div class="text-center text-xs tracking-[0.4em] text-white/40 uppercase font-black">
-            © 2026 PHILCST. All Rights Reserved.
-        </div>
-    </footer>
 </main>
-
+@include('layouts.footer')
 <style>
     /* Professional Smooth Scroll */
     html {
