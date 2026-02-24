@@ -26,6 +26,10 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::view('/admin/dashboard', 'admin.admin-dashboard')->name('admin.dashboard');
 });
 
+Route::middleware(['auth', 'admin'])->group(function () {
+    Route::view('/alumni/management', 'admin.alumni-management')->name('alumni.management');
+});
+
 // ✅ Logout
 Route::post('/logout', function () {
     Auth::logout();

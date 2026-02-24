@@ -32,9 +32,9 @@
                     Events
                 </a>
                 
-<a href="{{ route('login') }}" class="bg-[#2b0d3e] text-white px-6 py-2.5 rounded-full font-bold text-sm hover:bg-[#7a3f91] transition duration-300 shadow-md active:scale-95 uppercase">
-    LOGIN
-</a>
+                <a href="{{ route('login') }}" class="bg-[#2b0d3e] text-white px-6 py-2.5 rounded-full font-bold text-sm hover:bg-[#7a3f91] transition duration-300 shadow-md active:scale-95 uppercase">
+                    LOGIN
+                </a>
             </nav>
 
             <div class="lg:hidden flex items-center">

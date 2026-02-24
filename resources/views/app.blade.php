@@ -21,7 +21,7 @@
           @livewireStyles  {{-- ✅ KAILANGAN ITO --}}
     </head>
 <body>
-@include('layouts.header')
+
 
 
     {{ $slot }}   {{-- ✅ This is what Volt/Livewire expects --}}
