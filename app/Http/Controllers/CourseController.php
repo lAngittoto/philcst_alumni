@@ -13,13 +13,16 @@ class CourseController extends Controller
     public function index()
     {
         $courses = Course::orderBy('code')->get(['id', 'code', 'name']);
-
+        
         return response()->json([
             'success' => true,
             'courses' => $courses,
         ]);
     }
 
+    /**
+     * POST /courses — create a new course
+     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -28,16 +31,18 @@ class CourseController extends Controller
         ]);
 
         $validated['code'] = strtoupper($validated['code']);
-
         $course = Course::create($validated);
 
         return response()->json([
             'success' => true,
             'message' => 'Course added successfully.',
             'course'  => $course,
-        ]);
+        ], 201);
     }
 
+    /**
+     * PUT /courses/{course} — update an existing course
+     */
     public function update(Request $request, Course $course)
     {
         $validated = $request->validate([
@@ -46,7 +51,6 @@ class CourseController extends Controller
         ]);
 
         $validated['code'] = strtoupper($validated['code']);
-
         $course->update($validated);
 
         return response()->json([
@@ -56,8 +60,12 @@ class CourseController extends Controller
         ]);
     }
 
+    /**
+     * DELETE /courses/{course} — delete a course
+     */
     public function destroy(Course $course)
     {
+        // Check if any alumni are linked to this course
         if ($course->alumni()->exists()) {
             return response()->json([
                 'success' => false,
