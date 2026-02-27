@@ -8,11 +8,11 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 
-    <!-- Alpine.js -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
     <!-- Vite (Tailwind + App JS) -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+
+    <!-- Livewire Styles -->
+    @livewireStyles
 </head>
 <body class="antialiased">
 
@@ -67,12 +67,12 @@
                 <span class="font-medium tracking-wide">Dashboard</span>
             </a>
 
-            <a href="{{ route('alumni.management') }}" 
-               class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group {{ request()->is('alumni/management*') ? 'bg-white/20 border border-white/30 shadow-lg' : 'hover:bg-white/10' }}">
+            <a href="{{ route('user.management') }}" 
+               class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group {{ request()->is('user/management*') ? 'bg-white/20 border border-white/30 shadow-lg' : 'hover:bg-white/10' }}">
                 <div class="w-10 h-10 flex items-center justify-center rounded-lg bg-white/10 mr-4 shrink-0">
                     <i class="fa-solid fa-users-gear opacity-80"></i>
                 </div>
-                <span class="font-medium tracking-wide">Alumni Management</span>
+                <span class="font-medium tracking-wide">User Management</span>
             </a>
 
             <a href="/employment" class="flex items-center px-4 py-3 rounded-xl group hover:bg-white/10 transition-all duration-300">
@@ -156,6 +156,11 @@
     </main>
 
 </div>
+
+
+
+<!-- Livewire Scripts -->
+@livewireScripts
 
 <style>
 .no-scrollbar::-webkit-scrollbar { display: none; }

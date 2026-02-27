@@ -30,9 +30,10 @@ class AlumniRegistered extends Mailable
         return new Content(
             view: 'emails.alumni-registered',
             with: [
-                'alumni'           => $this->alumni,
+                'alumni'            => $this->alumni,
                 'temporaryPassword' => $this->temporaryPassword,
-                'studentId'        => $this->alumni->student_id,
+                'studentId'         => $this->alumni->student_id,
+                'loginUrl'          => config('app.url') . '/login',
             ],
         );
     }

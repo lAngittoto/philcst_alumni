@@ -1,5 +1,7 @@
 <?php
+
 namespace App\Models;
+
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -8,7 +10,10 @@ class Organizer extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected $table = 'organizer';  // ✅ Explicitly set table name (singular)
+    protected $table = 'organizer';
+    protected $primaryKey = 'id';
+    protected $keyType = 'int';
+    public $timestamps = true;
 
     protected $fillable = [
         'user_id',
@@ -69,6 +74,10 @@ class Organizer extends Model
      */
     public function scopeByDepartment($query, $department)
     {
+        if (!$department) {
+            return $query;
+        }
+
         return $query->where('department', $department);
     }
 
@@ -77,9 +86,11 @@ class Organizer extends Model
      */
     public function getProfilePhotoUrlAttribute()
     {
-        return $this->profile_photo 
-            ? asset('storage/' . $this->profile_photo) 
-            : null;
+        if ($this->profile_photo && file_exists(storage_path('app/public/' . $this->profile_photo))) {
+            return asset('storage/' . $this->profile_photo);
+        }
+
+        return asset('storage/alumni-photos/default.png');
     }
 
     /**
@@ -88,5 +99,71 @@ class Organizer extends Model
     public function getDisplayNameAttribute()
     {
         return "{$this->name} ({$this->id_number})";
+    }
+
+    /**
+     * Get status label
+     */
+    public function getStatusLabel(): string
+    {
+        return match ($this->status) {
+            'ACTIVE' => 'Active',
+            'INACTIVE' => 'Inactive',
+            'SUSPENDED' => 'Suspended',
+            default => 'Unknown',
+        };
+    }
+
+    /**
+     * Get status color for badges
+     */
+    public function getStatusColor(): string
+    {
+        return match ($this->status) {
+            'ACTIVE' => 'badge-ok',
+            'INACTIVE' => 'badge-warn',
+            'SUSPENDED' => 'badge-danger',
+            default => 'badge-gray',
+        };
+    }
+
+    /**
+     * Check if organizer is active
+     */
+    public function isActive(): bool
+    {
+        return $this->status === 'ACTIVE';
+    }
+
+    /**
+     * Mark as active
+     */
+    public function markActive(): void
+    {
+        $this->update(['status' => 'ACTIVE']);
+    }
+
+    /**
+     * Mark as inactive
+     */
+    public function markInactive(): void
+    {
+        $this->update(['status' => 'INACTIVE']);
+    }
+
+    /**
+     * Mark as suspended
+     */
+    public function markSuspended(): void
+    {
+        $this->update(['status' => 'SUSPENDED']);
+    }
+
+    /**
+     * Get first letter of name for avatar fallback
+     */
+    public function getAvatarLetter(): string
+    {
+        return strtoupper(substr($this->name, 0, 1));
     }
 }

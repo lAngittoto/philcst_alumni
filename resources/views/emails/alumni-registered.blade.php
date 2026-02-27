@@ -262,17 +262,16 @@
         <!-- Footer -->
         <div class="footer">
             <div class="footer-text">
-                <p style="margin-bottom: 10px;">© 2024 Philcst Alumni Connect. All rights reserved.</p>
+                <p style="margin-bottom: 10px;">© {{ date('Y') }} Philcst Alumni Connect. All rights reserved.</p>
                 <p>
-                    <a href="#">Contact Support</a> | 
-                    <a href="#">Privacy Policy</a> | 
-                    <a href="#">Terms of Service</a>
+                    Philippine College of Science and Technology
                 </p>
                 <p style="margin-top: 15px; font-size: 11px; color: #a78bda;">
                     This is an automated message. Please do not reply to this email.
                 </p>
             </div>
         </div>
+
     </div>
 </body>
 </html>

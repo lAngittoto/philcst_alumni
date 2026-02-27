@@ -1,4 +1,5 @@
 <?php
+
 use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\OrganizerController;
 use App\Http\Controllers\CourseController;
@@ -11,39 +12,37 @@ Route::get('/', fn() => view('home'));
 Route::get('/about', fn() => view('about'));
 Route::get('/events', fn() => view('events'));
 
-// --- Auth ---
+// --- Auth Routes ---
 Volt::route('/login', 'auth/login')->name('login');
 
 // --- Protected Routes (auth + admin) ---
 Route::middleware(['auth', 'admin'])->group(function () {
-    // Dashboard
+    
+    // Admin Dashboard
     Route::view('/admin/dashboard', 'admin.admin-dashboard')->name('admin.dashboard');
     Route::view('/yearbook', 'admin.yearbook')->name('admin.yearbook');
-
-    // Alumni Management
-    Route::get('/alumni/management',              [AlumniController::class, 'index'])->name('alumni.management');
-    Route::post('/alumni',                        [AlumniController::class, 'store'])->name('alumni.store');
-    Route::get('/alumni/{alumni}/edit',           [AlumniController::class, 'edit'])->name('alumni.edit');
-    Route::put('/alumni/{alumni}',                [AlumniController::class, 'update'])->name('alumni.update');
-    Route::delete('/alumni/{alumni}',             [AlumniController::class, 'destroy'])->name('alumni.destroy');
-    Route::post('/alumni/import',                 [AlumniController::class, 'import'])->name('alumni.import');
-    Route::post('/alumni/check-duplicate',        [AlumniController::class, 'checkDuplicate'])->name('alumni.checkDuplicate');
     
-    // Organizer Management
-    Route::post('/organizers',                    [OrganizerController::class, 'store'])->name('organizers.store');
-    Route::get('/organizers/{organizer}/edit',    [OrganizerController::class, 'edit'])->name('organizers.edit');
-    Route::put('/organizers/{organizer}',         [OrganizerController::class, 'update'])->name('organizers.update');
-    Route::delete('/organizers/{organizer}',      [OrganizerController::class, 'destroy'])->name('organizers.destroy');
-    Route::post('/organizers/import',             [OrganizerController::class, 'import'])->name('organizers.import');
-    Route::get('/organizers/export',              [OrganizerController::class, 'export'])->name('organizers.export');
-    Route::get('/organizers/data',                [OrganizerController::class, 'getData'])->name('organizers.getData');
-    Route::post('/organizers/check-duplicate',    [OrganizerController::class, 'checkDuplicate'])->name('organizers.checkDuplicate');
+    // Alumni Management - Using wrapper view (Livewire component inside)
+    Route::get('/user/management', fn() => view('livewire.admin.alumni-management-wrapper'))
+        ->name('user.management');
     
-    // Courses Routes
-    Route::post('/courses',                       [AlumniController::class, 'storeCourse'])->name('courses.store');
-    Route::put('/courses/{course}',               [AlumniController::class, 'updateCourse'])->name('courses.update');
-    Route::delete('/courses/{course}',            [AlumniController::class, 'destroyCourse'])->name('courses.destroy');
+    // Import Routes (Traditional POST for file upload)
+    Route::post('/alumni/import', [AlumniController::class, 'import'])
+        ->name('alumni.import');
+    Route::post('/organizers/import', [OrganizerController::class, 'import'])
+        ->name('organizers.import');
+    Route::get('/organizers/export', [OrganizerController::class, 'export'])
+        ->name('organizers.export');
     
+    // Course API Routes (JSON - for Livewire)
+    Route::get('/courses', [CourseController::class, 'index'])
+        ->name('courses.index');
+    Route::post('/courses', [CourseController::class, 'store'])
+        ->name('courses.store');
+    Route::put('/courses/{course}', [CourseController::class, 'update'])
+        ->name('courses.update');
+    Route::delete('/courses/{course}', [CourseController::class, 'destroy'])
+        ->name('courses.destroy');
 });
 
 // --- Logout ---

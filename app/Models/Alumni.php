@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Alumni extends Model
 {
@@ -45,8 +45,8 @@ class Alumni extends Model
         }
 
         return $query->where('name', 'like', "%{$search}%")
-                    ->orWhere('student_id', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%");
+            ->orWhere('student_id', 'like', "%{$search}%")
+            ->orWhere('email', 'like', "%{$search}%");
     }
 
     /**
@@ -82,12 +82,60 @@ class Alumni extends Model
     }
 
     /**
-     * Get status color
+     * Relationship with User (for login credentials)
      */
-
+    public function user()
+    {
+        return $this->hasOne(User::class, 'email', 'email');
+    }
 
     /**
-     * Get status icon
+     * Get status label with formatting
      */
+    public function getStatusLabel(): string
+    {
+        return match ($this->status) {
+            'VERIFIED' => 'Verified',
+            'PENDING' => 'Pending',
+            'REJECTED' => 'Rejected',
+            default => 'Unknown',
+        };
+    }
 
+    /**
+     * Get status color for badges
+     */
+    public function getStatusColor(): string
+    {
+        return match ($this->status) {
+            'VERIFIED' => 'badge-ok',
+            'PENDING' => 'badge-warn',
+            'REJECTED' => 'badge-danger',
+            default => 'badge-gray',
+        };
+    }
+
+    /**
+     * Check if alumni is verified
+     */
+    public function isVerified(): bool
+    {
+        return $this->status === 'VERIFIED';
+    }
+
+    /**
+     * Mark as verified
+     */
+    public function markVerified(): void
+    {
+        $this->update(['status' => 'VERIFIED']);
+    }
+
+    /**
+     * Get first letter of name for avatar fallback
+     */
+    public function getAvatarLetter(): string
+    {
+        return strtoupper(substr($this->name, 0, 1));
+    }
 }

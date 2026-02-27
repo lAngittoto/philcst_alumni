@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 
 class Course extends Model
 {
@@ -32,5 +32,34 @@ class Course extends Model
     public function alumni()
     {
         return $this->hasMany(Alumni::class, 'course_code', 'code');
+    }
+
+    /**
+     * Get count of alumni in this course
+     */
+    public function getAlumniCount(): int
+    {
+        return $this->alumni()->count();
+    }
+
+    /**
+     * Scope: Search courses by code or name
+     */
+    public function scopeSearch($query, $search)
+    {
+        if (!$search) {
+            return $query;
+        }
+
+        return $query->where('code', 'like', "%{$search}%")
+            ->orWhere('name', 'like', "%{$search}%");
+    }
+
+    /**
+     * Get full course name with code
+     */
+    public function getFullName(): string
+    {
+        return "{$this->code} — {$this->name}";
     }
 }

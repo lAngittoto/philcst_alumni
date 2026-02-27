@@ -13,21 +13,11 @@ class OrganizerRegistered extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public Organizer $organizer;
-    public string $password;
+    public function __construct(
+        public Organizer $organizer,
+        public string $password
+    ) {}
 
-    /**
-     * Create a new message instance.
-     */
-    public function __construct(Organizer $organizer, string $password)
-    {
-        $this->organizer = $organizer;
-        $this->password  = $password;
-    }
-
-    /**
-     * Get the message envelope.
-     */
     public function envelope(): Envelope
     {
         return new Envelope(
@@ -35,9 +25,6 @@ class OrganizerRegistered extends Mailable
         );
     }
 
-    /**
-     * Get the message content definition.
-     */
     public function content(): Content
     {
         return new Content(
@@ -45,6 +32,7 @@ class OrganizerRegistered extends Mailable
             with: [
                 'organizer' => $this->organizer,
                 'password'  => $this->password,
+                'loginUrl'  => config('app.url') . '/login',
             ],
         );
     }

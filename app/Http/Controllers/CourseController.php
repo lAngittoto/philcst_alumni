@@ -4,80 +4,109 @@ namespace App\Http\Controllers;
 
 use App\Models\Course;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class CourseController extends Controller
 {
     /**
-     * GET /courses — return all courses as JSON
+     * Get all courses as JSON
      */
     public function index()
     {
-        $courses = Course::orderBy('code')->get(['id', 'code', 'name']);
-        
         return response()->json([
             'success' => true,
-            'courses' => $courses,
+            'courses' => Course::orderBy('code')->get(),
         ]);
     }
 
     /**
-     * POST /courses — create a new course
+     * Store a new course
      */
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'code' => ['required', 'string', 'max:20', 'unique:courses,code'],
-            'name' => ['required', 'string', 'max:255'],
-        ]);
+        try {
+            $validated = $request->validate([
+                'code' => ['required', 'string', 'max:50', 'unique:courses,code'],
+                'name' => ['required', 'string', 'max:255'],
+            ]);
 
-        $validated['code'] = strtoupper($validated['code']);
-        $course = Course::create($validated);
+            $validated['code'] = strtoupper($validated['code']);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Course added successfully.',
-            'course'  => $course,
-        ], 201);
+            $course = Course::create($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Course added successfully!',
+                'course' => $course,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Course store failed: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to add course: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**
-     * PUT /courses/{course} — update an existing course
+     * Update a course
      */
     public function update(Request $request, Course $course)
     {
-        $validated = $request->validate([
-            'code' => ['required', 'string', 'max:20', "unique:courses,code,{$course->id}"],
-            'name' => ['required', 'string', 'max:255'],
-        ]);
+        try {
+            $validated = $request->validate([
+                'code' => ['required', 'string', 'max:50', 'unique:courses,code,' . $course->id],
+                'name' => ['required', 'string', 'max:255'],
+            ]);
 
-        $validated['code'] = strtoupper($validated['code']);
-        $course->update($validated);
+            $validated['code'] = strtoupper($validated['code']);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Course updated successfully.',
-            'course'  => $course->fresh(),
-        ]);
+            $course->update($validated);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Course updated successfully!',
+                'course' => $course,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Course update failed: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update course: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**
-     * DELETE /courses/{course} — delete a course
+     * Delete a course
      */
     public function destroy(Course $course)
     {
-        // Check if any alumni are linked to this course
-        if ($course->alumni()->exists()) {
+        try {
+            $course->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Course deleted successfully!',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Course delete failed: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot delete: alumni records are linked to this course.',
-            ], 422);
+                'message' => 'Failed to delete course: ' . $e->getMessage(),
+            ], 500);
         }
-
-        $course->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Course deleted successfully.',
-        ]);
     }
 }
