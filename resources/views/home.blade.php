@@ -37,17 +37,18 @@
         </div>
     </section>
     
+    
     <section class="py-24 px-6 w-full bg-[#ffffff]">
         <div class="max-w-[1400px] mx-auto"> 
             
             <div class="text-center mb-20" data-aos="fade-up">
                 <h2 class="text-4xl md:text-5xl font-black text-[#2b0d3e] uppercase tracking-tight">Everything You Need to Stay Connected</h2>
-                <p class="mt-6 text-[#7a3f91] font-bold text-xl md:text-2xl italic">A digital hub to keep alumni connected, informed, and engaged.</p>
+                <p class="mt-6 text-[#2b0d3e] font-bold text-xl md:text-2xl italic">A digital hub to keep alumni connected, informed, and engaged.</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-12 lg:gap-20">
 
-                <div class="p-10 bg-white shadow-[0_15px_50px_rgba(0,0,0,0.08)] rounded-[2rem] border-l-[10px] border-[#c59dd9] transition-all duration-500 hover:shadow-2xl"
+                <div class="p-10 bg-white shadow-[0_15px_50px_rgba(0,0,0,0.08)] rounded-[2rem] border-l-[10px] border-[#2b0d3e] transition-all duration-500 hover:shadow-2xl"
                      data-aos="fade-left"
                      data-aos-delay="100">
                     <i class="fa-solid fa-id-badge text-5xl text-[#7a3f91] mb-8"></i>
@@ -55,7 +56,7 @@
                     <p class="text-gray-500 font-medium leading-relaxed italic text-lg">Update your professional and academic journey with our secure alumni profiles.</p>
                 </div>
 
-                <div class="p-10 bg-white shadow-[0_15px_50px_rgba(0,0,0,0.08)] rounded-[2rem] border-l-[10px] border-[#7a3f91] transition-all duration-500 hover:shadow-2xl"
+                <div class="p-10 bg-white shadow-[0_15px_50px_rgba(0,0,0,0.08)] rounded-[2rem] border-l-[10px] border-[#2b0d3e] transition-all duration-500 hover:shadow-2xl"
                      data-aos="fade-left"
                      data-aos-delay="300">
                     <i class="fa-solid fa-calendar-check text-5xl text-[#7a3f91] mb-8"></i>

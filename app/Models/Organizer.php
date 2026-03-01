@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Models;
-
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -37,73 +35,60 @@ class Organizer extends Model
         'display_name',
     ];
 
-    /**
-     * Relationship: Organizer belongs to User
-     */
     public function user()
     {
         return $this->belongsTo(User::class);
     }
 
-    /**
-     * Scope: Get active organizers
-     */
     public function scopeActive($query)
     {
         return $query->where('status', 'ACTIVE');
     }
 
-    /**
-     * Scope: Get inactive organizers
-     */
     public function scopeInactive($query)
     {
         return $query->where('status', 'INACTIVE');
     }
 
-    /**
-     * Scope: Get suspended organizers
-     */
     public function scopeSuspended($query)
     {
         return $query->where('status', 'SUSPENDED');
     }
 
-    /**
-     * Scope: Get organizers by department
-     */
     public function scopeByDepartment($query, $department)
     {
         if (!$department) {
             return $query;
         }
-
         return $query->where('department', $department);
     }
 
     /**
-     * Get profile photo URL
+     * Get full profile photo URL via accessor
+     * NULL = show default
+     * Any other value = prepend storage/ and return
      */
     public function getProfilePhotoUrlAttribute()
     {
-        if ($this->profile_photo && file_exists(storage_path('app/public/' . $this->profile_photo))) {
+        // If NULL or empty, use default
+        if (!$this->profile_photo) {
+            return asset('storage/organizers/default.png');
+        }
+
+        // If it's a path starting with organizers/, prepend storage/
+        if (str_starts_with($this->profile_photo, 'organizers/')) {
             return asset('storage/' . $this->profile_photo);
         }
 
-        return asset('storage/alumni-photos/default.png');
+        // Fallback to default
+        return asset('storage/organizers/default.png');
     }
 
-    /**
-     * Get full display name
-     */
     public function getDisplayNameAttribute()
     {
         return "{$this->name} ({$this->id_number})";
     }
 
-    /**
-     * Get status label
-     */
     public function getStatusLabel(): string
     {
         return match ($this->status) {
@@ -114,9 +99,6 @@ class Organizer extends Model
         };
     }
 
-    /**
-     * Get status color for badges
-     */
     public function getStatusColor(): string
     {
         return match ($this->status) {
@@ -127,43 +109,49 @@ class Organizer extends Model
         };
     }
 
-    /**
-     * Check if organizer is active
-     */
     public function isActive(): bool
     {
         return $this->status === 'ACTIVE';
     }
 
-    /**
-     * Mark as active
-     */
     public function markActive(): void
     {
         $this->update(['status' => 'ACTIVE']);
     }
 
-    /**
-     * Mark as inactive
-     */
     public function markInactive(): void
     {
         $this->update(['status' => 'INACTIVE']);
     }
 
-    /**
-     * Mark as suspended
-     */
     public function markSuspended(): void
     {
         $this->update(['status' => 'SUSPENDED']);
     }
 
-    /**
-     * Get first letter of name for avatar fallback
-     */
     public function getAvatarLetter(): string
     {
         return strtoupper(substr($this->name, 0, 1));
+    }
+
+    /**
+     * Get full profile photo URL via method
+     * NULL = show default
+     * Any other value = prepend storage/ and return
+     */
+    public function getProfilePhotoUrl(): string
+    {
+        // If NULL or empty, use default
+        if (!$this->profile_photo) {
+            return asset('storage/organizers/default.png');
+        }
+
+        // If it's a path starting with organizers/, prepend storage/
+        if (str_starts_with($this->profile_photo, 'organizers/')) {
+            return asset('storage/' . $this->profile_photo);
+        }
+
+        // Fallback to default
+        return asset('storage/organizers/default.png');
     }
 }

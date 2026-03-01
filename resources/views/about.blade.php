@@ -1,6 +1,7 @@
 @extends('layouts.public')
 @section('content')
 @include('layouts.header')
+
 <style>
     html { scroll-behavior: smooth; }
     body { background-color: #7a3f91; margin: 0; padding: 0; overflow-x: hidden; }
@@ -9,41 +10,39 @@
 
 <main class="font-sans antialiased text-[#2b0d3e]">
 
-    <section class="min-h-[70vh] md:min-h-[85vh] w-full flex items-center justify-center px-4 sm:px-6 pt-10 pb-20"> 
-        <div class="w-full max-w-6xl bg-[#ffffff] prof-shadow rounded-[2rem] md:rounded-[3rem] overflow-hidden" 
-             data-aos="zoom-in" 
-             data-aos-duration="1500">
+    <section class="bg-[#7a3f91] py-12 md:py-24 px-4 md:px-6 relative overflow-hidden">
+        <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 relative z-10 mt-20">
             
-            <div class="hidden md:block">
-                <img src="{{ asset('images/mission-vision.jpg') }}" 
-                     alt="Mission and Vision" 
-                     class="w-full h-auto object-contain">
+            <div class="group bg-white/10 border border-white/20 p-8 md:p-16 lg:p-20 rounded-3xl backdrop-blur-md shadow-2xl transition-all duration-300 hover:-translate-y-2 hover:bg-white/[0.15]">
+                <div class="mb-6 inline-block">
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight">
+                        MISSION
+                    </h2>
+                    <div class="h-1.5 w-12 bg-purple-400 mt-2 rounded-full transition-all duration-500 group-hover:w-24"></div>
+                </div>
+
+                <p class="text-base sm:text-lg md:text-xl text-gray-100 leading-relaxed font-light">
+                    PhilCST provides quality education to students who are imbued with strong moral character through a well-balanced research and community-oriented learning environment that develops critical thinking for maximum development of individual talents and capabilities.
+                </p>
             </div>
 
-            <div class="block md:hidden p-8 space-y-10 text-center">
-                <div class="space-y-3">
-                    <h2 class="text-[#7a3f91] text-3xl font-black uppercase tracking-tighter">Mission</h2>
-                    <div class="h-1 w-12 bg-[#7a3f91] mx-auto rounded-full"></div>
-                    <p class="text-lg font-bold leading-relaxed text-[#2b0d3e]">
-                        PhilCST provides quality education to students who are imbued with strong moral character through a well-balanced research and community oriented learning environment that develops critical thinking for maximum development of individual talents and capabilities.
-                    </p>
+            <div class="group bg-white/10 border border-white/20 p-8 md:p-16 lg:p-20 rounded-3xl backdrop-blur-md shadow-2xl transition-all duration-300 hover:-translate-y-2 hover:bg-white/[0.15]">
+                <div class="mb-6 inline-block">
+                    <h2 class="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight">
+                        VISION
+                    </h2>
+                    <div class="h-1.5 w-12 bg-purple-400 mt-2 rounded-full transition-all duration-500 group-hover:w-24"></div>
                 </div>
 
-                <hr class="border-gray-100">
-
-                <div class="space-y-3">
-                    <h2 class="text-[#7a3f91] text-3xl font-black uppercase tracking-tighter">Vision</h2>
-                    <div class="h-1 w-12 bg-[#7a3f91] mx-auto rounded-full"></div>
-                    <p class="text-lg font-bold leading-relaxed text-[#2b0d3e]">
-                        PhilCST envision to produce graduates fully equipped with knowledge, values, and skills and who are globally competitive in their profession ever ready to render quality services.
-                    </p>
-                </div>
+                <p class="text-base sm:text-lg md:text-xl text-gray-100 leading-relaxed font-light">
+                    PhilCST envisions producing graduates fully equipped with knowledge, values, and skills who are globally competitive in their profession and ever ready to render quality services.
+                </p>
             </div>
 
         </div>
     </section>
 
-    <section class="max-w-7xl mx-auto px-4 sm:px-8 pb-32">
+    <section class="max-w-7xl mx-auto px-4 sm:px-8 py-20 md:py-32">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 md:gap-16 items-start">
             
             <article class="space-y-8" data-aos="fade-up">

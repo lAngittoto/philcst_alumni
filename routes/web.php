@@ -29,10 +29,6 @@ Route::middleware(['auth', 'admin'])->group(function () {
     // Import Routes (Traditional POST for file upload)
     Route::post('/alumni/import', [AlumniController::class, 'import'])
         ->name('alumni.import');
-    Route::post('/organizers/import', [OrganizerController::class, 'import'])
-        ->name('organizers.import');
-    Route::get('/organizers/export', [OrganizerController::class, 'export'])
-        ->name('organizers.export');
     
     // Course API Routes (JSON - for Livewire)
     Route::get('/courses', [CourseController::class, 'index'])

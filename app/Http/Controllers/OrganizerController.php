@@ -2,234 +2,120 @@
 
 namespace App\Http\Controllers;
 
-use App\Mail\OrganizerRegistered;
-use App\Models\Course;
 use App\Models\Organizer;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class OrganizerController extends Controller
 {
     /**
-     * Get or create default photo path
+     * Show organizers management page
      */
-    private function getDefaultPhotoPath(): string
+    public function index()
     {
-        $dest = 'alumni-photos/default.png';
-
-        if (Storage::disk('public')->exists($dest)) {
-            return $dest;
-        }
-
-        // Try to find existing default photo
-        $candidates = [
-            public_path('storage/alumni-photos/default.png'),
-            storage_path('app/public/alumni-photos/default.png'),
-            base_path('public/storage/alumni-photos/default.png'),
-        ];
-
-        foreach ($candidates as $src) {
-            if (file_exists($src) && is_readable($src)) {
-                $bytes = file_get_contents($src);
-                if ($bytes !== false) {
-                    Storage::disk('public')->makeDirectory('alumni-photos');
-                    Storage::disk('public')->put($dest, $bytes);
-                    return $dest;
-                }
-            }
-        }
-
-        // Generate fallback image
-        if (function_exists('imagecreatetruecolor')) {
-            $size = 128;
-            $img = imagecreatetruecolor($size, $size);
-            $bg = imagecolorallocate($img, 122, 63, 145);
-            $fg = imagecolorallocate($img, 255, 255, 255);
-            imagefill($img, 0, 0, $bg);
-            imagefilledellipse($img, 64, 42, 42, 42, $fg);
-            imagefilledellipse($img, 64, 106, 70, 56, $fg);
-            ob_start();
-            imagepng($img);
-            $bytes = ob_get_clean();
-            imagedestroy($img);
-        } else {
-            $bytes = base64_decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-            );
-        }
-
-        Storage::disk('public')->makeDirectory('alumni-photos');
-        Storage::disk('public')->put($dest, $bytes);
-        return $dest;
+        return view('organizers.management');
     }
 
     /**
-     * Import CSV/Excel file
+     * Store new organizer
      */
-    public function import(Request $request)
+    public function store(Request $request)
     {
-        $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:10240'],
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'unique:organizer,email', 'unique:users,email'],
+            'id_number' => ['required', 'string', 'unique:organizer,id_number'],
+            'department' => ['required', 'string'],
+            'photo' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
         ]);
 
         try {
-            $file = $request->file('file');
-            $path = $file->store('temp-imports');
-            $fullPath = storage_path('app/' . $path);
-            $rows = $this->parseFile($fullPath, $file->getClientOriginalExtension());
-
-            $imported = 0;
-            $errors = [];
-            $defaultPhoto = $this->getDefaultPhotoPath();
-
-            foreach ($rows as $index => $row) {
-                $rowNum = $index + 2;
-                $row = array_map('trim', $row);
-
-                // Validate required fields
-                if (empty($row['name']) || empty($row['email']) || empty($row['id_number']) || empty($row['department'])) {
-                    $errors[] = "Row {$rowNum}: Missing required fields (name, email, id_number, department).";
-                    continue;
-                }
-
-                // Check for duplicates
-                if (Organizer::where('email', $row['email'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Email '{$row['email']}' already exists.";
-                    continue;
-                }
-                if (Organizer::where('id_number', $row['id_number'])->exists()) {
-                    $errors[] = "Row {$rowNum}: ID Number '{$row['id_number']}' already exists.";
-                    continue;
-                }
-                if (User::where('email', $row['email'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Email '{$row['email']}' already in users.";
-                    continue;
-                }
-
-                // Validate department exists
-                $course = Course::where('code', strtoupper($row['department']))->first();
-                if (!$course) {
-                    $errors[] = "Row {$rowNum}: Department '{$row['department']}' not found.";
-                    continue;
-                }
-
-                // Create organizer and user
-                try {
-                    $tempPassword = Str::random(10);
-
-                    $user = User::create([
-                        'name' => $row['name'],
-                        'email' => $row['email'],
-                        'role' => 'organizer',
-                        'password' => Hash::make($tempPassword),
-                    ]);
-
-                    $organizer = Organizer::create([
-                        'user_id' => $user->id,
-                        'name' => $row['name'],
-                        'email' => $row['email'],
-                        'id_number' => $row['id_number'],
-                        'department' => strtoupper($row['department']),
-                        'profile_photo' => $defaultPhoto,
-                        'status' => 'ACTIVE',
-                    ]);
-
-                    try {
-                        Mail::send(new OrganizerRegistered($organizer, $tempPassword));
-                    } catch (\Exception $e) {
-                        Log::warning("Email not sent for organizer {$organizer->email}: " . $e->getMessage());
-                    }
-
-                    $imported++;
-                } catch (\Exception $e) {
-                    $errors[] = "Row {$rowNum}: " . $e->getMessage();
-                }
+            // Store photo if provided
+            $photoPath = 'organizers/default.png';
+            if ($request->hasFile('photo')) {
+                $file = $request->file('photo');
+                $filename = 'organizer-' . \Illuminate\Support\Str::uuid() . '.' . $file->getClientOriginalExtension();
+                $file->storeAs('organizers', $filename, 'public');
+                $photoPath = 'organizers/' . $filename;
             }
 
-            Storage::delete($path);
+            // Create user account
+            $password = \Illuminate\Support\Str::random(10);
+            $user = User::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($password),
+                'role' => 'organizer',
+            ]);
 
-            $message = "{$imported} organizers imported successfully.";
-            if (!empty($errors)) {
-                $shown = array_slice($errors, 0, 3);
-                $message .= ' Issues: ' . implode(' | ', $shown);
-                if (count($errors) > 3) {
-                    $message .= ' ... and ' . (count($errors) - 3) . ' more.';
-                }
-            }
+            // Create organizer record
+            $organizer = Organizer::create([
+                'user_id' => $user->id,
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'id_number' => $validated['id_number'],
+                'department' => strtoupper($validated['department']),
+                'profile_photo' => $photoPath,
+                'status' => 'ACTIVE',
+            ]);
 
-            return redirect()->route('alumni.management')->with('success', $message);
-
+            return redirect()->back()->with('success', "Organizer '{$organizer->name}' registered successfully!");
         } catch (\Exception $e) {
-            Log::error('Organizer import failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Import failed: ' . $e->getMessage());
+            Log::error('Organizer creation failed: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to register organizer: ' . $e->getMessage());
         }
     }
 
     /**
-     * Export organizers as CSV
+     * Update organizer
      */
-    public function export()
+    public function update(Request $request, $id)
     {
-        $organizers = Organizer::withoutTrashed()
-            ->orderBy('created_at', 'desc')
-            ->get();
+        try {
+            $organizer = Organizer::findOrFail($id);
 
-        $csv = "Name,ID Number,Email,Department,Status,Created At\n";
+            $validated = $request->validate([
+                'name' => ['sometimes', 'string', 'max:255'],
+                'email' => ['sometimes', 'email', 'unique:organizer,email,' . $id],
+                'department' => ['sometimes', 'string'],
+                'status' => ['sometimes', 'in:ACTIVE,INACTIVE,SUSPENDED'],
+            ]);
 
-        foreach ($organizers as $org) {
-            $csv .= "\"{$org->name}\",\"{$org->id_number}\",\"{$org->email}\",\"{$org->department}\",\"{$org->status}\",\"{$org->created_at}\"\n";
+            $organizer->update($validated);
+
+            return redirect()->back()->with('success', 'Organizer updated successfully!');
+        } catch (\Exception $e) {
+            Log::error('Organizer update failed: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to update organizer');
         }
-
-        return response($csv)
-            ->header('Content-Type', 'text/csv')
-            ->header('Content-Disposition', 'attachment; filename="organizers_' . date('Y-m-d') . '.csv"');
     }
 
     /**
-     * Parse CSV or Excel file
+     * Delete organizer
      */
-    private function parseFile(string $filePath, string $extension): array
+    public function destroy($id)
     {
-        $rows = [];
-        $headers = [];
-
-        if (in_array(strtolower($extension), ['csv', 'txt'])) {
-            $handle = fopen($filePath, 'r');
-            while (($line = fgetcsv($handle)) !== false) {
-                if (empty($headers)) {
-                    $headers = array_map('strtolower', array_map('trim', $line));
-                } elseif (count($line) === count($headers)) {
-                    $rows[] = array_combine($headers, $line);
-                }
+        try {
+            $organizer = Organizer::findOrFail($id);
+            
+            // Delete photo if not default
+            if ($organizer->profile_photo && strpos($organizer->profile_photo, 'default.png') === false) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($organizer->profile_photo);
             }
-            fclose($handle);
-        } else {
-            try {
-                $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
-                $sheet = $spreadsheet->getActiveSheet();
-                foreach ($sheet->getRowIterator() as $rowIndex => $row) {
-                    $cells = $row->getCellIterator();
-                    $rowData = [];
-                    foreach ($cells as $cell) {
-                        $rowData[] = (string)$cell->getValue();
-                    }
 
-                    if ($rowIndex === 1) {
-                        $headers = array_map('strtolower', array_map('trim', $rowData));
-                    } elseif (count($rowData) === count($headers)) {
-                        $rows[] = array_combine($headers, $rowData);
-                    }
-                }
-            } catch (\Exception $e) {
-                Log::error('Excel parsing failed: ' . $e->getMessage());
+            // Delete associated user
+            if ($organizer->user) {
+                $organizer->user()->delete();
             }
+
+            $organizer->delete();
+
+            return redirect()->back()->with('success', 'Organizer deleted successfully!');
+        } catch (\Exception $e) {
+            Log::error('Organizer deletion failed: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to delete organizer');
         }
-
-        return array_filter($rows, fn($r) => !empty($r['id_number']));
     }
 }

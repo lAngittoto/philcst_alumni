@@ -2,231 +2,279 @@
 
 namespace App\Http\Controllers;
 
-use App\Mail\AlumniRegistered;
 use App\Models\Alumni;
 use App\Models\Course;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class AlumniController extends Controller
 {
     /**
-     * Get or create default photo path
-     */
-    private function getDefaultPhotoPath(): string
-    {
-        $dest = 'alumni-photos/default.png';
-
-        if (Storage::disk('public')->exists($dest)) {
-            return $dest;
-        }
-
-        // Try to find existing default photo
-        $candidates = [
-            public_path('storage/alumni-photos/default.png'),
-            storage_path('app/public/alumni-photos/default.png'),
-            base_path('public/storage/alumni-photos/default.png'),
-        ];
-
-        foreach ($candidates as $src) {
-            if (file_exists($src) && is_readable($src)) {
-                $bytes = file_get_contents($src);
-                if ($bytes !== false) {
-                    Storage::disk('public')->makeDirectory('alumni-photos');
-                    Storage::disk('public')->put($dest, $bytes);
-                    return $dest;
-                }
-            }
-        }
-
-        // Generate fallback image if GD is available
-        if (function_exists('imagecreatetruecolor')) {
-            $size = 128;
-            $img = imagecreatetruecolor($size, $size);
-            $bg = imagecolorallocate($img, 122, 63, 145);
-            $fg = imagecolorallocate($img, 255, 255, 255);
-            imagefill($img, 0, 0, $bg);
-            imagefilledellipse($img, 64, 42, 42, 42, $fg);
-            imagefilledellipse($img, 64, 106, 70, 56, $fg);
-            ob_start();
-            imagepng($img);
-            $bytes = ob_get_clean();
-            imagedestroy($img);
-        } else {
-            $bytes = base64_decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
-            );
-        }
-
-        Storage::disk('public')->makeDirectory('alumni-photos');
-        Storage::disk('public')->put($dest, $bytes);
-        return $dest;
-    }
-
-    /**
-     * Import CSV/Excel file
+     * Import CSV/Excel file for Alumni
      */
     public function import(Request $request)
     {
-        $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:10240'],
-        ]);
-
         try {
+            if (!$request->hasFile('file')) {
+                return redirect()->back()->with('error', '❌ No file uploaded!');
+            }
+
+            $request->validate([
+                'file' => ['required', 'file', 'mimes:csv,txt,xlsx,xls', 'max:10240'],
+            ]);
+
             $file = $request->file('file');
-            $path = $file->store('temp-imports');
-            $fullPath = storage_path('app/' . $path);
-            $rows = $this->parseFile($fullPath, $file->getClientOriginalExtension());
+            $ext = strtolower($file->getClientOriginalExtension());
+            $tempPath = storage_path('app/temp-imports/' . uniqid() . '.' . $ext);
+
+            @mkdir(dirname($tempPath), 0777, true);
+            $file->move(dirname($tempPath), basename($tempPath));
+
+            $rows = $this->parseFile($tempPath, $ext);
+
+            if (empty($rows)) {
+                @unlink($tempPath);
+                return redirect()->back()->with('error', '❌ No valid data rows found in file!');
+            }
 
             $imported = 0;
             $errors = [];
-            $default = $this->getDefaultPhotoPath();
 
             foreach ($rows as $index => $row) {
                 $rowNum = $index + 2;
-                $row = array_map('trim', $row);
 
-                // Validate required fields
-                if (empty($row['student_id']) || empty($row['name']) || empty($row['email']) ||
-                    empty($row['course_code']) || empty($row['batch'])) {
-                    $errors[] = "Row {$rowNum}: Missing required fields (student_id, name, email, course_code, batch).";
+                foreach ($row as $key => $val) {
+                    $row[$key] = is_null($val) ? '' : trim((string) $val);
+                }
+
+                if (
+                    empty($row['name'] ?? '') ||
+                    empty($row['student_id'] ?? '') ||
+                    empty($row['email'] ?? '') ||
+                    empty($row['course_code'] ?? '') ||
+                    empty($row['year'] ?? '')
+                ) {
+                    $errors[] = "Row {$rowNum}: Missing required fields";
                     continue;
                 }
 
-                // Validate student ID format
-                if (!ctype_digit($row['student_id']) || strlen($row['student_id']) !== 8) {
-                    $errors[] = "Row {$rowNum}: Student ID must be exactly 8 digits.";
+                $rawId = preg_replace('/\D/', '', $row['student_id']);
+
+                if ($rawId === '' || strlen($rawId) > 8) {
+                    $errors[] = "Row {$rowNum}: Student ID must be 1–8 digits (got: {$row['student_id']})";
                     continue;
                 }
 
-                // Check for duplicates
-                if (Alumni::where('student_id', $row['student_id'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Student ID '{$row['student_id']}' already exists.";
+                $sid = str_pad($rawId, 8, '0', STR_PAD_LEFT);
+
+                if (Alumni::where('student_id', $sid)->exists()) {
+                    $errors[] = "Row {$rowNum}: Student ID {$sid} already exists";
                     continue;
                 }
                 if (Alumni::where('email', $row['email'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Email '{$row['email']}' already exists.";
+                    $errors[] = "Row {$rowNum}: Email {$row['email']} already registered";
                     continue;
                 }
                 if (User::where('email', $row['email'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Email '{$row['email']}' already exists in users.";
+                    $errors[] = "Row {$rowNum}: Email {$row['email']} already in system";
                     continue;
                 }
 
-                // Validate course exists
-                $course = Course::where('code', strtoupper($row['course_code']))->first();
+                $courseCode = strtoupper($row['course_code']);
+                $course = Course::where('code', $courseCode)->first();
                 if (!$course) {
-                    $errors[] = "Row {$rowNum}: Course '{$row['course_code']}' not found.";
+                    $errors[] = "Row {$rowNum}: Course {$courseCode} not found";
                     continue;
                 }
 
-                // Validate batch year
-                $batch = (int)$row['batch'];
-                if ($batch < 2000 || $batch > (int)date('Y')) {
-                    $errors[] = "Row {$rowNum}: Invalid batch year '{$batch}'.";
+                $year = (int) $row['year'];
+                if ($year < 2000 || $year > (int) date('Y')) {
+                    $errors[] = "Row {$rowNum}: Invalid year {$year}";
                     continue;
                 }
 
-                // Create alumni and user
+                if (!filter_var($row['email'], FILTER_VALIDATE_EMAIL)) {
+                    $errors[] = "Row {$rowNum}: Invalid email format";
+                    continue;
+                }
+
+                $status = 'VERIFIED';
+                if (!empty($row['status'] ?? '')) {
+                    $s = strtoupper($row['status']);
+                    if (in_array($s, ['VERIFIED', 'PENDING', 'REJECTED'])) {
+                        $status = $s;
+                    }
+                }
+
                 try {
-                    $photoPath = 'alumni-photos/' . Str::uuid() . '.png';
-                    Storage::disk('public')->copy($default, $photoPath);
-
-                    $alumni = Alumni::create([
-                        'student_id' => $row['student_id'],
-                        'name' => $row['name'],
-                        'email' => $row['email'],
-                        'course_code' => strtoupper($row['course_code']),
-                        'course_name' => $course->name,
-                        'batch' => $batch,
-                        'status' => 'VERIFIED',
-                        'profile_photo' => $photoPath,
+                    Alumni::create([
+                        'student_id'    => $sid,
+                        'name'          => $row['name'],
+                        'email'         => $row['email'],
+                        'course_code'   => $courseCode,
+                        'course_name'   => $course->name,
+                        'batch'         => $year,
+                        'status'        => $status,
+                        'profile_photo' => null, // NULL - will show default
                     ]);
 
                     $tempPassword = Str::random(10);
                     User::create([
-                        'name' => $alumni->name,
-                        'email' => $alumni->email,
+                        'name'     => $row['name'],
+                        'email'    => $row['email'],
                         'password' => Hash::make($tempPassword),
-                        'role' => 'alumni',
+                        'role'     => 'alumni',
                     ]);
-
-                    try {
-                        Mail::send(new AlumniRegistered($alumni, $tempPassword));
-                    } catch (\Exception $e) {
-                        Log::warning("Email not sent for alumni {$alumni->email}: " . $e->getMessage());
-                    }
 
                     $imported++;
                 } catch (\Exception $e) {
-                    $errors[] = "Row {$rowNum}: " . $e->getMessage();
+                    Log::error("Row {$rowNum} error: " . $e->getMessage());
+                    $errors[] = "Row {$rowNum}: Creation failed";
                 }
             }
 
-            Storage::delete($path);
+            @unlink($tempPath);
 
-            $message = "{$imported} alumni imported successfully.";
-            if (!empty($errors)) {
-                $shown = array_slice($errors, 0, 3);
-                $message .= ' Issues: ' . implode(' | ', $shown);
-                if (count($errors) > 3) {
-                    $message .= ' ... and ' . (count($errors) - 3) . ' more.';
+            if ($imported > 0) {
+                $msg = "✅ Successfully imported {$imported} alumni record" . ($imported > 1 ? 's' : '');
+                if (!empty($errors)) {
+                    $msg .= " | ⚠️ " . count($errors) . " row(s) had issues";
                 }
+                return redirect()->back()->with('success', $msg);
+            } else {
+                $msg = "❌ No alumni imported.";
+                if (!empty($errors)) {
+                    $shown = array_slice($errors, 0, 5);
+                    $msg .= "\n\n" . implode("\n", $shown);
+                    if (count($errors) > 5) {
+                        $msg .= "\n… and " . (count($errors) - 5) . " more row(s)";
+                    }
+                }
+                return redirect()->back()->with('error', $msg);
             }
 
-            return redirect()->route('alumni.management')->with('success', $message);
-
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return redirect()->back()->with('error', '❌ ' . implode(', ', $e->errors()['file'] ?? ['Invalid file']));
         } catch (\Exception $e) {
-            Log::error('Alumni import failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Import failed: ' . $e->getMessage());
+            Log::error('Alumni import error: ' . $e->getMessage());
+            return redirect()->back()->with('error', '❌ ' . $e->getMessage());
         }
     }
 
-    /**
-     * Parse CSV or Excel file
-     */
+    // ================================================================
+    // PARSER METHODS
+    // ================================================================
+
     private function parseFile(string $filePath, string $extension): array
     {
-        $rows = [];
+        try {
+            if (in_array($extension, ['csv', 'txt'])) {
+                return $this->parseCSV($filePath);
+            } elseif (in_array($extension, ['xlsx', 'xls'])) {
+                return $this->parseExcel($filePath);
+            }
+        } catch (\Exception $e) {
+            Log::error('Parse error: ' . $e->getMessage());
+        }
+        return [];
+    }
+
+    private function parseCSV(string $filePath): array
+    {
+        $rows    = [];
         $headers = [];
 
-        if (in_array(strtolower($extension), ['csv', 'txt'])) {
-            $handle = fopen($filePath, 'r');
+        if (($handle = fopen($filePath, 'r')) !== false) {
             while (($line = fgetcsv($handle)) !== false) {
+                if (empty($line) || (count($line) === 1 && empty($line[0]))) {
+                    continue;
+                }
+
                 if (empty($headers)) {
-                    $headers = array_map('strtolower', array_map('trim', $line));
-                } elseif (count($line) === count($headers)) {
-                    $rows[] = array_combine($headers, $line);
+                    $headers = array_map(fn($h) => strtolower(trim($h)), $line);
+                } else {
+                    if (count($line) >= count($headers)) {
+                        $row = [];
+                        foreach ($headers as $i => $header) {
+                            $val = $line[$i] ?? '';
+                            $row[$header] = ltrim($val, "'");
+                        }
+                        $rows[] = $row;
+                    }
                 }
             }
             fclose($handle);
-        } else {
-            try {
-                $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
-                $sheet = $spreadsheet->getActiveSheet();
-                foreach ($sheet->getRowIterator() as $rowIndex => $row) {
-                    $cells = $row->getCellIterator();
-                    $rowData = [];
-                    foreach ($cells as $cell) {
-                        $rowData[] = (string)$cell->getValue();
-                    }
-
-                    if ($rowIndex === 1) {
-                        $headers = array_map('strtolower', array_map('trim', $rowData));
-                    } elseif (count($rowData) === count($headers)) {
-                        $rows[] = array_combine($headers, $rowData);
-                    }
-                }
-            } catch (\Exception $e) {
-                Log::error('Excel parsing failed: ' . $e->getMessage());
-            }
         }
 
-        return array_filter($rows, fn($r) => !empty($r['student_id']));
+        return $rows;
+    }
+
+    private function parseExcel(string $filePath): array
+    {
+        $rows    = [];
+        $headers = [];
+
+        try {
+            if (!class_exists('PhpOffice\PhpSpreadsheet\IOFactory')) {
+                Log::warning('PhpSpreadsheet not installed');
+                return [];
+            }
+
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+            $sheet = $spreadsheet->getActiveSheet();
+
+            $rowIndex = 0;
+            $maxRows = min($sheet->getHighestRow(), 10000);
+
+            for ($row = 1; $row <= $maxRows; $row++) {
+                $rowData = [];
+                $isEmpty = true;
+
+                for ($col = 'A'; $col <= 'F'; $col++) {
+                    $cell = $sheet->getCell($col . $row);
+                    $value = $cell->getFormattedValue();
+                    
+                    if ($value === null || $value === '') {
+                        $value = $cell->getValue();
+                    }
+                    
+                    $rowData[] = is_null($value) ? '' : (string) $value;
+                    
+                    if (!empty($value)) {
+                        $isEmpty = false;
+                    }
+                }
+
+                if ($isEmpty) {
+                    continue;
+                }
+
+                $rowIndex++;
+
+                if ($rowIndex === 1) {
+                    $headers = array_map(fn($h) => strtolower(trim($h)), $rowData);
+                } else {
+                    $row_assoc = [];
+                    foreach ($headers as $i => $header) {
+                        $val = $rowData[$i] ?? '';
+                        $row_assoc[$header] = ltrim($val, "'");
+                    }
+                    if (!empty(array_filter($row_assoc))) {
+                        $rows[] = $row_assoc;
+                    }
+                }
+            }
+
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
+
+        } catch (\Exception $e) {
+            Log::error('Excel parse error: ' . $e->getMessage());
+        }
+
+        return $rows;
     }
 }
