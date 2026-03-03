@@ -14,6 +14,7 @@ class AlumniController extends Controller
 {
     /**
      * Import CSV/Excel file for Alumni
+     * Required columns: name, student_id, course_code, year, email
      */
     public function import(Request $request)
     {
@@ -50,54 +51,65 @@ class AlumniController extends Controller
                     $row[$key] = is_null($val) ? '' : trim((string) $val);
                 }
 
+                // Required fields: name, student_id, course_code, year, email
                 if (
                     empty($row['name'] ?? '') ||
                     empty($row['student_id'] ?? '') ||
-                    empty($row['email'] ?? '') ||
                     empty($row['course_code'] ?? '') ||
-                    empty($row['year'] ?? '')
+                    empty($row['year'] ?? '') ||
+                    empty($row['email'] ?? '')
                 ) {
-                    $errors[] = "Row {$rowNum}: Missing required fields";
+                    $errors[] = "Row {$rowNum}: Missing required fields (name, student_id, course_code, year, email)";
+                    continue;
+                }
+
+                // Validate name format (letters, spaces, hyphens, apostrophes only)
+                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', trim($row['name']))) {
+                    $errors[] = "Row {$rowNum}: Name contains invalid characters (letters, spaces, hyphens, apostrophes only)";
                     continue;
                 }
 
                 $rawId = preg_replace('/\D/', '', $row['student_id']);
 
                 if ($rawId === '' || strlen($rawId) > 8) {
-                    $errors[] = "Row {$rowNum}: Student ID must be 1–8 digits (got: {$row['student_id']})";
+                    $errors[] = "Row {$rowNum}: Student ID must be 1–8 digits";
                     continue;
                 }
 
                 $sid = str_pad($rawId, 8, '0', STR_PAD_LEFT);
 
+                // Check for duplicate student ID
                 if (Alumni::where('student_id', $sid)->exists()) {
-                    $errors[] = "Row {$rowNum}: Student ID {$sid} already exists";
-                    continue;
-                }
-                if (Alumni::where('email', $row['email'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Email {$row['email']} already registered";
-                    continue;
-                }
-                if (User::where('email', $row['email'])->exists()) {
-                    $errors[] = "Row {$rowNum}: Email {$row['email']} already in system";
+                    $errors[] = "Row {$rowNum}: Student ID '{$sid}' already exists";
                     continue;
                 }
 
-                $courseCode = strtoupper($row['course_code']);
+                // Check for duplicate email
+                if (Alumni::where('email', trim($row['email']))->exists()) {
+                    $errors[] = "Row {$rowNum}: Email '{$row['email']}' already exists";
+                    continue;
+                }
+                if (User::where('email', trim($row['email']))->exists()) {
+                    $errors[] = "Row {$rowNum}: Email '{$row['email']}' already exists in system";
+                    continue;
+                }
+
+                // Validate email format
+                if (!filter_var(trim($row['email']), FILTER_VALIDATE_EMAIL)) {
+                    $errors[] = "Row {$rowNum}: Invalid email format";
+                    continue;
+                }
+
+                $courseCode = strtoupper(trim($row['course_code']));
                 $course = Course::where('code', $courseCode)->first();
                 if (!$course) {
-                    $errors[] = "Row {$rowNum}: Course {$courseCode} not found";
+                    $errors[] = "Row {$rowNum}: Course '{$courseCode}' not found";
                     continue;
                 }
 
                 $year = (int) $row['year'];
                 if ($year < 2000 || $year > (int) date('Y')) {
                     $errors[] = "Row {$rowNum}: Invalid year {$year}";
-                    continue;
-                }
-
-                if (!filter_var($row['email'], FILTER_VALIDATE_EMAIL)) {
-                    $errors[] = "Row {$rowNum}: Invalid email format";
                     continue;
                 }
 
@@ -112,19 +124,19 @@ class AlumniController extends Controller
                 try {
                     Alumni::create([
                         'student_id'    => $sid,
-                        'name'          => $row['name'],
-                        'email'         => $row['email'],
+                        'name'          => trim($row['name']),
+                        'email'         => trim($row['email']),
                         'course_code'   => $courseCode,
                         'course_name'   => $course->name,
                         'batch'         => $year,
                         'status'        => $status,
-                        'profile_photo' => null, // NULL - will show default
+                        'profile_photo' => null,
                     ]);
 
                     $tempPassword = Str::random(10);
                     User::create([
-                        'name'     => $row['name'],
-                        'email'    => $row['email'],
+                        'name'     => trim($row['name']),
+                        'email'    => trim($row['email']),
                         'password' => Hash::make($tempPassword),
                         'role'     => 'alumni',
                     ]);
@@ -233,7 +245,7 @@ class AlumniController extends Controller
                 $rowData = [];
                 $isEmpty = true;
 
-                for ($col = 'A'; $col <= 'F'; $col++) {
+                for ($col = 'A'; $col <= 'Z'; $col++) {
                     $cell = $sheet->getCell($col . $row);
                     $value = $cell->getFormattedValue();
                     

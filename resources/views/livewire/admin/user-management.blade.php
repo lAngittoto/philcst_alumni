@@ -75,6 +75,13 @@ new class extends Component {
     public int $importFailCount = 0;
     public array $importErrors = [];
 
+    // Profile Modal
+    public ?int $viewingProfileId = null;
+    public string $viewingProfileType = 'alumni';
+    public $viewingProfile = null;
+    public $updatingProfilePhoto = null;
+    public bool $updatingProfile = false;
+
     protected string $paginationTheme = 'tailwind';
 
     #[On('showFlash')]
@@ -151,7 +158,6 @@ new class extends Component {
     
     public function openModal(string $modal): void { 
         $this->activeModal = $modal;
-        // Reset import state when opening modal
         if ($modal === 'importModal') {
             $this->resetImportState();
         }
@@ -160,6 +166,8 @@ new class extends Component {
     public function closeModal(): void { 
         $this->activeModal = '';
         $this->resetImportState();
+        $this->viewingProfileId = null;
+        $this->updatingProfilePhoto = null;
     }
 
     public function resetImportState(): void {
@@ -193,6 +201,11 @@ new class extends Component {
         $this->resetPage('orgPage');
     }
 
+    private function validateName(string $name): bool
+    {
+        return preg_match('/^[a-zA-Z\s\-\.\']+$/', $name) === 1;
+    }
+
     private function buildFullName(string $first, string $mi, string $last, string $suffix): string
     {
         $parts = array_filter([
@@ -213,6 +226,16 @@ new class extends Component {
         $this->registeringAlumni = true;
         
         try {
+            if (!$this->validateName(trim($this->regFirstName))) {
+                throw new \Exception('First name must contain only letters, spaces, hyphens, or apostrophes');
+            }
+            if (!$this->validateName(trim($this->regLastName))) {
+                throw new \Exception('Last name must contain only letters, spaces, hyphens, or apostrophes');
+            }
+            if (trim($this->regSuffix) !== '' && !preg_match('/^[a-zA-Z\s\.\,]+$/', $this->regSuffix)) {
+                throw new \Exception('Suffix must contain only letters, spaces, periods, or commas');
+            }
+
             $fullName = $this->buildFullName(
                 $this->regFirstName,
                 $this->regMiddleInitial,
@@ -275,7 +298,7 @@ new class extends Component {
             $this->alumniErrors = $e->errors();
         } catch (\Exception $e) {
             Log::error('Alumni creation failed: ' . $e->getMessage());
-            $this->alumniErrors = ['general' => ['Failed to register alumni: ' . $e->getMessage()]];
+            $this->alumniErrors = ['general' => [$e->getMessage()]];
         } finally {
             $this->registeringAlumni = false;
         }
@@ -318,6 +341,16 @@ new class extends Component {
         $this->registeringOrganizer = true;
         
         try {
+            if (!$this->validateName(trim($this->orgFirstName))) {
+                throw new \Exception('First name must contain only letters, spaces, hyphens, or apostrophes');
+            }
+            if (!$this->validateName(trim($this->orgLastName))) {
+                throw new \Exception('Last name must contain only letters, spaces, hyphens, or apostrophes');
+            }
+            if (trim($this->orgSuffix) !== '' && !preg_match('/^[a-zA-Z\s\.\,]+$/', $this->orgSuffix)) {
+                throw new \Exception('Suffix must contain only letters, spaces, periods, or commas');
+            }
+
             $fullName = $this->buildFullName(
                 $this->orgFirstName,
                 $this->orgMiddleInitial,
@@ -378,7 +411,7 @@ new class extends Component {
             $this->organizerErrors = $e->errors();
         } catch (\Exception $e) {
             Log::error('Organizer creation failed: ' . $e->getMessage());
-            $this->organizerErrors = ['general' => ['Failed to register organizer: ' . $e->getMessage()]];
+            $this->organizerErrors = ['general' => [$e->getMessage()]];
         } finally {
             $this->registeringOrganizer = false;
         }
@@ -448,7 +481,6 @@ new class extends Component {
             return;
         }
         
-        $this->savingCourse = true;
         try {
             if ($this->editingCourseId) {
                 Course::findOrFail($this->editingCourseId)->update(['code' => $code, 'name' => $name]);
@@ -465,8 +497,6 @@ new class extends Component {
                 ? 'A course with this code already exists.'
                 : 'Failed to save course.';
             $this->courseAlertType = 'error';
-        } finally {
-            $this->savingCourse = false;
         }
     }
 
@@ -503,10 +533,67 @@ new class extends Component {
         }
     }
 
+    public function viewProfile(int $id, string $type): void
+    {
+        try {
+            $this->viewingProfileType = $type;
+            if ($type === 'alumni') {
+                $this->viewingProfile = Alumni::findOrFail($id)->toArray();
+            } else {
+                $this->viewingProfile = Organizer::findOrFail($id)->toArray();
+            }
+            $this->viewingProfileId = $id;
+            $this->activeModal = 'viewProfile';
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to load profile');
+        }
+    }
+
+    public function updateProfilePhoto(): void
+    {
+        if (!$this->updatingProfilePhoto || !$this->viewingProfileId) {
+            return;
+        }
+
+        $this->updatingProfile = true;
+
+        try {
+            if ($this->viewingProfileType === 'alumni') {
+                $alumni = Alumni::findOrFail($this->viewingProfileId);
+                
+                if ($alumni->profile_photo && strpos($alumni->profile_photo, 'default.png') === false) {
+                    Storage::disk('public')->delete($alumni->profile_photo);
+                }
+
+                $photoPath = $this->storeAlumniPhoto($this->updatingProfilePhoto);
+                $alumni->update(['profile_photo' => $photoPath]);
+                $this->viewingProfile['profile_photo'] = $photoPath;
+            } else {
+                $organizer = Organizer::findOrFail($this->viewingProfileId);
+                
+                if ($organizer->profile_photo && strpos($organizer->profile_photo, 'default.png') === false) {
+                    Storage::disk('public')->delete($organizer->profile_photo);
+                }
+
+                $photoPath = $this->storeOrganizerPhoto($this->updatingProfilePhoto);
+                $organizer->update(['profile_photo' => $photoPath]);
+                $this->viewingProfile['profile_photo'] = $photoPath;
+            }
+
+            $this->updatingProfilePhoto = null;
+            $this->flash('success', 'Profile photo updated successfully!');
+        } catch (\Exception $e) {
+            Log::error('Profile photo update failed: ' . $e->getMessage());
+            $this->flash('error', 'Failed to update profile photo');
+        } finally {
+            $this->updatingProfile = false;
+        }
+    }
+
     public function processImportFile(): void
     {
         $this->importingFile = true;
-        $this->importStatus = 'Validating file...';
+        $this->importStatus = 'IMPORTING...';
         
         try {
             if (!$this->importFile) {
@@ -517,9 +604,6 @@ new class extends Component {
             $filename = $file->getClientOriginalName();
             $extension = strtolower($file->getClientOriginalExtension());
 
-            $this->importStatus = 'Reading file...';
-
-            // Support both CSV and Excel
             if ($extension === 'xlsx' || $extension === 'xls') {
                 $csv = $this->parseExcelFile($file->getRealPath());
             } else if ($extension === 'csv') {
@@ -533,7 +617,7 @@ new class extends Component {
             }
 
             $header = array_map('strtolower', $csv[0]);
-            $requiredFields = ['name', 'student_id', 'email', 'course_code', 'batch'];
+            $requiredFields = ['name', 'student_id', 'course_code', 'year', 'email'];
             
             foreach ($requiredFields as $field) {
                 if (!in_array($field, $header)) {
@@ -552,23 +636,25 @@ new class extends Component {
                 }
 
                 $this->importProgress = $i;
-                $this->importStatus = "Processing record {$i} of {$this->importTotal}...";
+                $this->importStatus = "IMPORTING... ({$i}/{$this->importTotal})";
 
                 $row = array_combine($header, array_slice($csv[$i], 0, count($header)));
                 
                 try {
-                    // Check if email already exists
-                    if (Alumni::where('email', trim($row['email']))->exists() || User::where('email', trim($row['email']))->exists()) {
+                    if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', trim($row['name']))) {
                         $this->importFailCount++;
-                        $this->importErrors[] = "Row {$i}: Email " . trim($row['email']) . " already exists";
+                        $this->importErrors[] = "Row {$i}: Name contains invalid characters";
                         continue;
                     }
 
-                    // Check if course exists
-                    $course = Course::where('code', strtoupper(trim($row['course_code'])))->first();
-                    if (!$course) {
+                    if (Alumni::where('email', trim($row['email']))->exists()) {
                         $this->importFailCount++;
-                        $this->importErrors[] = "Row {$i}: Course " . trim($row['course_code']) . " not found";
+                        $this->importErrors[] = "Row {$i}: Email '{$row['email']}' already exists";
+                        continue;
+                    }
+                    if (User::where('email', trim($row['email']))->exists()) {
+                        $this->importFailCount++;
+                        $this->importErrors[] = "Row {$i}: Email '{$row['email']}' already exists in system";
                         continue;
                     }
 
@@ -582,7 +668,20 @@ new class extends Component {
 
                     if (Alumni::where('student_id', $paddedStudentId)->exists()) {
                         $this->importFailCount++;
-                        $this->importErrors[] = "Row {$i}: Student ID already exists";
+                        $this->importErrors[] = "Row {$i}: Student ID '{$paddedStudentId}' already exists";
+                        continue;
+                    }
+
+                    $course = Course::where('code', strtoupper(trim($row['course_code'])))->first();
+                    if (!$course) {
+                        $this->importFailCount++;
+                        $this->importErrors[] = "Row {$i}: Course '{$row['course_code']}' not found";
+                        continue;
+                    }
+
+                    if (!filter_var(trim($row['email']), FILTER_VALIDATE_EMAIL)) {
+                        $this->importFailCount++;
+                        $this->importErrors[] = "Row {$i}: Invalid email format";
                         continue;
                     }
 
@@ -592,7 +691,7 @@ new class extends Component {
                         'email'         => trim($row['email']),
                         'course_code'   => strtoupper(trim($row['course_code'])),
                         'course_name'   => $course->name,
-                        'batch'         => (int)$row['batch'],
+                        'batch'         => (int)$row['year'],
                         'status'        => 'VERIFIED',
                     ]);
 
@@ -620,17 +719,20 @@ new class extends Component {
             $this->importStatus = 'Import completed!';
             $this->coursesList = Course::all()->toArray();
             
-            // Auto close modal after 2 seconds
-            $message = "✓ Imported {$this->importSuccessCount} alumni";
-            if ($this->importFailCount > 0) {
-                $message .= ", {$this->importFailCount} failed";
-            }
-
             sleep(2);
             $this->importFile = null;
             $this->activeModal = '';
             $this->resetAlumniFilters();
-            $this->flash('success', $message);
+
+            if ($this->importSuccessCount > 0) {
+                $message = "✓ Imported {$this->importSuccessCount} alumni";
+                if ($this->importFailCount > 0) {
+                    $message .= ", {$this->importFailCount} failed";
+                }
+                $this->flash('success', $message);
+            } else {
+                $this->flash('error', "Failed to import - Check your file for duplicate or invalid data");
+            }
 
         } catch (\Exception $e) {
             Log::error('Import error: ' . $e->getMessage());
@@ -693,53 +795,176 @@ new class extends Component {
 <div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden" style="height:90vh;">
 
     <style>
-        .scrollbar-thin::-webkit-scrollbar        { width:5px; height:5px; }
-        .scrollbar-thin::-webkit-scrollbar-track  { background:#f1f5f9; border-radius:10px; }
-        .scrollbar-thin::-webkit-scrollbar-thumb  { background:#cbd5e1; border-radius:10px; }
-        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
-
-        @keyframes slideInRight {
-            from { opacity: 0; transform: translateX(20px); }
-            to { opacity: 1; transform: translateX(0); }
+        :root {
+            --primary-color: #7a3f91;
+            --primary-dark: #6a3580;
+            --primary-light: #8a4fa1;
         }
 
-        @keyframes slideOutRight {
-            from { opacity: 1; transform: translateX(0); }
-            to { opacity: 0; transform: translateX(20px); }
+        * {
+            scroll-behavior: smooth;
+        }
+
+        .scrollbar-custom::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .scrollbar-custom::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .scrollbar-custom::-webkit-scrollbar-thumb {
+            background: rgba(122, 63, 145, 0.3);
+            border-radius: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .scrollbar-custom::-webkit-scrollbar-thumb:hover {
+            background: rgba(122, 63, 145, 0.6);
+        }
+
+        @keyframes slideInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
         }
 
-        @keyframes pulse-soft {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
         }
 
-        .modal-enter {
-            animation: slideInRight 0.3s ease-out;
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95) translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
         }
 
-        .modal-exit {
-            animation: slideOutRight 0.3s ease-in;
+        @keyframes progressPulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(122, 63, 145, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 0 8px rgba(122, 63, 145, 0);
+            }
         }
 
-        .flash-enter {
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .modal-animate {
+            animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .flash-animate {
             animation: slideInRight 0.4s ease-out;
         }
 
-        .progress-bar {
-            transition: width 0.3s ease-out;
+        .progress-animate {
+            animation: progressPulse 2s infinite;
         }
 
-        .loading-pulse {
-            animation: pulse-soft 1.5s ease-in-out infinite;
+        .spin-icon {
+            animation: spin 1s linear infinite;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #7a3f91, #6a3580);
+            color: white;
+            border: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #6a3580, #5a2f70);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(122, 63, 145, 0.25);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary:disabled {
+            background: linear-gradient(135deg, #cbd5e1, #94a3b8);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .input-focus {
+            transition: all 0.2s ease;
+        }
+
+        .input-focus:focus {
+            border-color: #7a3f91 !important;
+            box-shadow: 0 0 0 3px rgba(122, 63, 145, 0.1) !important;
+            outline: none !important;
+        }
+
+        .table-row-hover {
+            transition: all 0.2s ease;
+        }
+
+        .table-row-hover:hover {
+            background-color: rgba(122, 63, 145, 0.05);
+        }
+
+        .course-item {
+            transition: all 0.2s ease;
+        }
+
+        .course-item:hover {
+            transform: translateX(4px);
+            box-shadow: 0 4px 12px rgba(122, 63, 145, 0.15);
+        }
+
+        .status-badge {
+            font-weight: 600;
+            letter-spacing: 0.3px;
+        }
+
+        input, select, textarea {
+            border-color: rgba(122, 63, 145, 0.2) !important;
+        }
+
+        input:hover, select:hover, textarea:hover {
+            border-color: rgba(122, 63, 145, 0.4) !important;
         }
     </style>
 
-    <!-- FLASH MESSAGE - SMOOTH ANIMATIONS -->
+    <!-- FLASH MESSAGE -->
     @if($showFlash)
     <div x-data="{ visible: true }"
          x-effect="if (visible) { setTimeout(() => { visible = false; $wire.showFlash = false }, 5000) }"
@@ -750,7 +975,7 @@ new class extends Component {
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="opacity-100 translate-x-0"
          x-transition:leave-end="opacity-0 translate-x-6"
-         class="fixed top-5 right-6 z-50 flex items-start gap-3 px-6 py-4 rounded-xl shadow-lg max-w-sm border backdrop-blur-sm"
+         class="fixed top-5 right-6 z-50 flex items-start gap-3 px-6 py-4 rounded-lg shadow-lg max-w-sm border backdrop-blur-sm flash-animate"
          :class="'{{ $flashType }}' === 'success'
              ? 'bg-emerald-50/95 border-emerald-200 text-emerald-800'
              : '{{ $flashType }}' === 'info'
@@ -759,10 +984,10 @@ new class extends Component {
         <i class="fas mt-0.5 text-lg"
            :class="'{{ $flashType }}' === 'success' ? 'fa-check-circle' : '{{ $flashType }}' === 'info' ? 'fa-info-circle' : 'fa-exclamation-circle'"></i>
         <div class="flex-1 min-w-0">
-            <div class="font-bold text-lg">
+            <div class="font-semibold text-base">
                 {{ $flashType === 'success' ? '✓ Success!' : ($flashType === 'info' ? 'ℹ Info' : '✕ Error') }}
             </div>
-            <div class="text-base mt-1 leading-snug">{{ $flashMessage }}</div>
+            <div class="text-sm mt-1 leading-snug opacity-90">{{ $flashMessage }}</div>
         </div>
         <button @click="visible=false; $wire.showFlash=false" class="opacity-50 hover:opacity-100 shrink-0 mt-0.5 transition">
             <i class="fas fa-times text-base"></i>
@@ -774,37 +999,37 @@ new class extends Component {
     <div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-6">
 
         <!-- HEADER -->
-        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5 shrink-0">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5 shrink-0" style="animation: slideInDown 0.5s ease-out;">
             <div>
                 <h1 class="text-4xl font-bold text-slate-800 flex items-center gap-3">
-                    <div class="w-14 h-14 bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl flex items-center justify-center text-white shadow-lg">
+                    <div class="w-14 h-14 btn-primary rounded-lg flex items-center justify-center shadow-md">
                         <i class="fas fa-users text-xl"></i>
                     </div>
                     Alumni & Organizers
                 </h1>
-                <p class="text-slate-600 text-base mt-2 ml-0.5">Manage alumni and organizer records with ease</p>
+                <p class="text-slate-600 text-sm mt-2 ml-0.5">Manage alumni and organizer records efficiently</p>
             </div>
             <div class="flex flex-wrap gap-2 shrink-0">
                 @if($this->activeTab === 'alumni')
                     <button wire:click="openModal('registerAlumni')"
-                            class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-semibold hover:shadow-lg hover:from-purple-700 hover:to-purple-800 transition-all text-sm">
+                            class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
                         <i class="fas fa-user-plus"></i> Register Alumni
                     </button>
                     <button wire:click="openModal('importModal')"
-                            class="inline-flex items-center gap-2 px-5 py-3 border-2 border-purple-600 text-purple-600 rounded-lg font-semibold hover:bg-purple-50 transition text-sm">
+                            class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
                         <i class="fas fa-file-import"></i> Import
                     </button>
                     <button wire:click="openModal('manageCourses')"
-                            class="inline-flex items-center gap-2 px-5 py-3 border-2 border-purple-600 text-purple-600 rounded-lg font-semibold hover:bg-purple-50 transition text-sm">
+                            class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
                         <i class="fas fa-sliders"></i> Manage Courses
                     </button>
                 @elseif($this->activeTab === 'organizers')
                     <button wire:click="openModal('registerOrganizer')"
-                            class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-semibold hover:shadow-lg transition-all text-sm">
+                            class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
                         <i class="fas fa-users-gear"></i> Register Organizer
                     </button>
                     <button wire:click="openModal('manageCourses')"
-                            class="inline-flex items-center gap-2 px-5 py-3 border-2 border-purple-600 text-purple-600 rounded-lg font-semibold hover:bg-purple-50 transition text-sm">
+                            class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
                         <i class="fas fa-sliders"></i> Manage Courses
                     </button>
                 @endif
@@ -815,18 +1040,18 @@ new class extends Component {
         <div class="flex gap-2 mb-4 shrink-0">
             <button wire:click="switchTab('alumni')"
                     class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm
-                           {{ $this->activeTab==='alumni' ? 'bg-white text-purple-600 shadow-md border-2 border-purple-600' : 'bg-white/50 text-slate-600 border border-slate-200 hover:border-purple-400' }}">
+                           {{ $this->activeTab==='alumni' ? 'bg-white text-slate-800 shadow-sm' : 'bg-white/50 text-slate-600 hover:bg-white/70' }}">
                 <i class="fas fa-graduation-cap"></i> Alumni
             </button>
             <button wire:click="switchTab('organizers')"
                     class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm
-                           {{ $this->activeTab==='organizers' ? 'bg-white text-purple-600 shadow-md border-2 border-purple-600' : 'bg-white/50 text-slate-600 border border-slate-200 hover:border-purple-400' }}">
+                           {{ $this->activeTab==='organizers' ? 'bg-white text-slate-800 shadow-sm' : 'bg-white/50 text-slate-600 hover:bg-white/70' }}">
                 <i class="fas fa-users-gear"></i> Organizers
             </button>
         </div>
 
         <!-- TABLE PANEL -->
-        <div class="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+        <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden">
 
             {{-- ALUMNI TAB --}}
             @if($this->activeTab === 'alumni')
@@ -835,76 +1060,83 @@ new class extends Component {
             <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
                 <div class="relative flex-1 min-w-[200px] max-w-sm">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                    <input wire:model.live.debounce.400ms="alumniSearch" type="text" placeholder="Search name, ID, email…"
-                           class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none transition">
+                    <input wire:model.live="alumniSearch" type="text" placeholder="Search name, ID, email…"
+                           class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                 </div>
                 <select wire:model.live="alumniBatch"
-                        class="px-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:outline-none transition">
+                        class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                     <option value="">All Years</option>
                     @foreach($this->batches as $b)<option value="{{ $b }}">{{ $b }}</option>@endforeach
                 </select>
                 <select wire:model.live="alumniCourse"
-                        class="px-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:outline-none transition">
+                        class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                     <option value="">All Courses</option>
                     @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                 </select>
                 <select wire:model.live="alumniSort"
-                        class="px-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:outline-none transition">
+                        class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                     <option value="recent">Recent First</option>
                     <option value="oldest">Oldest First</option>
                 </select>
                 <button wire:click="resetAlumniFilters"
-                        class="px-4 py-3 text-slate-700 hover:bg-slate-200 rounded-lg border border-slate-300 transition text-sm font-medium">
+                        class="px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
                     <i class="fas fa-rotate-left mr-2"></i>Reset
                 </button>
             </div>
 
             <!-- Table -->
-            <div class="flex-1 overflow-auto scrollbar-thin">
+            <div class="flex-1 overflow-auto scrollbar-custom">
                 <table class="w-full">
-                    <thead class="bg-gradient-to-r from-purple-600 to-purple-700 text-white sticky top-0 z-10">
+                    <thead class="btn-primary text-white sticky top-0 z-10">
                         <tr>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Name</th>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Student ID</th>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Course</th>
-                            <th class="px-6 py-4 text-center text-sm font-bold uppercase tracking-wide whitespace-nowrap">Year</th>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Email</th>
-                            <th class="px-6 py-4 text-center text-sm font-bold uppercase tracking-wide whitespace-nowrap">Status</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Name</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Student ID</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Course</th>
+                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Year</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Email</th>
+                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Status</th>
+                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Action</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         @forelse($this->alumniRecords as $item)
-                        <tr class="hover:bg-purple-50/40 transition-colors">
+                        <tr class="table-row-hover">
                             <td class="px-6 py-4">
                                 <div class="flex items-center gap-3">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->name }}"
-                                         class="w-10 h-10 rounded-lg object-cover border border-purple-200 shrink-0">
-                                    <span class="font-semibold text-slate-900 text-base">{{ $item->name }}</span>
+                                         class="w-10 h-10 rounded-lg object-cover shrink-0">
+                                    <span class="font-semibold text-slate-900 text-sm">{{ $item->name }}</span>
                                 </div>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="font-mono text-slate-800 text-base font-semibold">{{ $item->student_id }}</span>
+                                <span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->student_id }}</span>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="inline-block px-3 py-2 bg-purple-100 text-purple-700 rounded-full text-sm font-bold">{{ $item->course_code }}</span>
+                                <span class="inline-block px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full text-xs font-semibold">{{ $item->course_code }}</span>
                             </td>
                             <td class="px-6 py-4 text-center">
-                                <span class="font-mono text-slate-800 text-base font-semibold">{{ $item->batch }}</span>
+                                <span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->batch }}</span>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="text-slate-800 text-base">{{ $item->email }}</span>
+                                <span class="text-slate-700 text-sm">{{ $item->email }}</span>
                             </td>
                             <td class="px-6 py-4 text-center">
                                 @php $sc = match($item->status) { 'VERIFIED'=>'bg-emerald-100 text-emerald-700','PENDING'=>'bg-amber-100 text-amber-700','REJECTED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600' }; @endphp
-                                <span class="inline-block px-3 py-2 rounded-full text-sm font-bold {{ $sc }}">{{ $item->status }}</span>
+                                <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold status-badge {{ $sc }}">{{ $item->status }}</span>
+                            </td>
+                            <td class="px-6 py-4 text-center">
+                                <button wire:click="viewProfile({{ $item->id }}, 'alumni')"
+                                        class="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
+                                    <i class="fas fa-eye"></i> View
+                                </button>
                             </td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="6" class="py-16 text-center">
+                            <td colspan="7" class="py-16 text-center">
                                 <i class="fas fa-users text-5xl text-slate-200 block mb-4"></i>
-                                <p class="font-semibold text-slate-400 text-lg">No alumni found</p>
-                                <p class="text-base text-slate-400 mt-1">Try adjusting your filters</p>
+                                <p class="font-semibold text-slate-400 text-base">No alumni found</p>
+                                <p class="text-sm text-slate-400 mt-1">Try adjusting your filters</p>
                             </td>
                         </tr>
                         @endforelse
@@ -917,19 +1149,19 @@ new class extends Component {
                 <div class="flex items-center justify-between">
                     <p class="text-slate-600 text-sm">
                         @php $total=$this->alumniRecords->total(); $pp=$this->alumniRecords->perPage(); $cp=$this->alumniRecords->currentPage(); $from=$total>0?($cp-1)*$pp+1:0; $to=min($cp*$pp,$total); @endphp
-                        Showing <b class="text-slate-800">{{ $from }}</b>–<b class="text-slate-800">{{ $to }}</b> of <b class="text-slate-800">{{ $total }}</b>
+                        Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span> of <span class="font-semibold text-slate-800">{{ $total }}</span>
                     </p>
                     <div class="flex gap-2 items-center">
                         @if($this->alumniRecords->onFirstPage())
-                            <button disabled class="px-4 py-2 bg-slate-300 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
+                            <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
                         @else
-                            <button wire:click="previousPage('alumniPage')" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition">← Prev</button>
+                            <button wire:click="previousPage('alumniPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">← Prev</button>
                         @endif
                         <span class="px-4 py-2 text-slate-700 text-sm font-medium">{{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}</span>
                         @if($this->alumniRecords->hasMorePages())
-                            <button wire:click="nextPage('alumniPage')" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition">Next →</button>
+                            <button wire:click="nextPage('alumniPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next →</button>
                         @else
-                            <button disabled class="px-4 py-2 bg-slate-300 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>
+                            <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>
                         @endif
                     </div>
                 </div>
@@ -943,67 +1175,74 @@ new class extends Component {
             <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
                 <div class="relative flex-1 min-w-[200px] max-w-sm">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                    <input wire:model.live.debounce.400ms="orgSearch" type="text" placeholder="Search name, ID, email…"
-                           class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none transition">
+                    <input wire:model.live="orgSearch" type="text" placeholder="Search name, ID, email…"
+                           class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                 </div>
                 <select wire:model.live="orgDepartment"
-                        class="px-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:outline-none transition">
+                        class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                     <option value="">All Departments</option>
                     @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                 </select>
                 <select wire:model.live="orgSort"
-                        class="px-4 py-3 border border-slate-300 rounded-lg text-sm bg-white focus:border-purple-600 focus:outline-none transition">
+                        class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                     <option value="recent">Recent First</option>
                     <option value="oldest">Oldest First</option>
                 </select>
                 <button wire:click="resetOrgFilters"
-                        class="px-4 py-3 text-slate-700 hover:bg-slate-200 rounded-lg border border-slate-300 transition text-sm font-medium">
+                        class="px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
                     <i class="fas fa-rotate-left mr-2"></i>Reset
                 </button>
             </div>
 
             <!-- Table -->
-            <div class="flex-1 overflow-auto scrollbar-thin">
+            <div class="flex-1 overflow-auto scrollbar-custom">
                 <table class="w-full">
-                    <thead class="bg-gradient-to-r from-purple-600 to-purple-700 text-white sticky top-0 z-10">
+                    <thead class="btn-primary text-white sticky top-0 z-10">
                         <tr>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Name</th>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Teacher ID</th>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Email</th>
-                            <th class="px-6 py-4 text-left text-sm font-bold uppercase tracking-wide whitespace-nowrap">Department</th>
-                            <th class="px-6 py-4 text-center text-sm font-bold uppercase tracking-wide whitespace-nowrap">Status</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Name</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Teacher ID</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Email</th>
+                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Department</th>
+                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Status</th>
+                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Action</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         @forelse($this->organizerRecords as $item)
-                        <tr class="hover:bg-purple-50/40 transition-colors">
+                        <tr class="table-row-hover">
                             <td class="px-6 py-4">
                                 <div class="flex items-center gap-3">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->name }}"
-                                         class="w-10 h-10 rounded-lg object-cover border border-purple-200 shrink-0">
-                                    <span class="font-semibold text-slate-900 text-base">{{ $item->name }}</span>
+                                         class="w-10 h-10 rounded-lg object-cover shrink-0">
+                                    <span class="font-semibold text-slate-900 text-sm">{{ $item->name }}</span>
                                 </div>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="font-mono text-slate-800 text-base font-semibold">{{ $item->id_number }}</span>
+                                <span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->id_number }}</span>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="text-slate-800 text-base">{{ $item->email }}</span>
+                                <span class="text-slate-700 text-sm">{{ $item->email }}</span>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="inline-block px-3 py-2 bg-purple-100 text-purple-700 rounded-full text-sm font-bold">{{ $item->department }}</span>
+                                <span class="inline-block px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full text-xs font-semibold">{{ $item->department }}</span>
                             </td>
                             <td class="px-6 py-4 text-center">
                                 @php $sc = match($item->status) { 'ACTIVE'=>'bg-emerald-100 text-emerald-700','INACTIVE'=>'bg-amber-100 text-amber-700','SUSPENDED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600' }; @endphp
-                                <span class="inline-block px-3 py-2 rounded-full text-sm font-bold {{ $sc }}">{{ $item->status }}</span>
+                                <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold status-badge {{ $sc }}">{{ $item->status }}</span>
+                            </td>
+                            <td class="px-6 py-4 text-center">
+                                <button wire:click="viewProfile({{ $item->id }}, 'organizer')"
+                                        class="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
+                                    <i class="fas fa-eye"></i> View
+                                </button>
                             </td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="5" class="py-16 text-center">
+                            <td colspan="6" class="py-16 text-center">
                                 <i class="fas fa-users-gear text-5xl text-slate-200 block mb-4"></i>
-                                <p class="font-semibold text-slate-400 text-lg">No organizers found</p>
-                                <p class="text-base text-slate-400 mt-1">Register an organizer to get started</p>
+                                <p class="font-semibold text-slate-400 text-base">No organizers found</p>
+                                <p class="text-sm text-slate-400 mt-1">Register an organizer to get started</p>
                             </td>
                         </tr>
                         @endforelse
@@ -1016,19 +1255,19 @@ new class extends Component {
                 <div class="flex items-center justify-between">
                     <p class="text-slate-600 text-sm">
                         @php $total=$this->organizerRecords->total(); $pp=$this->organizerRecords->perPage(); $cp=$this->organizerRecords->currentPage(); $from=$total>0?($cp-1)*$pp+1:0; $to=min($cp*$pp,$total); @endphp
-                        Showing <b class="text-slate-800">{{ $from }}</b>–<b class="text-slate-800">{{ $to }}</b> of <b class="text-slate-800">{{ $total }}</b>
+                        Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span> of <span class="font-semibold text-slate-800">{{ $total }}</span>
                     </p>
                     <div class="flex gap-2 items-center">
                         @if($this->organizerRecords->onFirstPage())
-                            <button disabled class="px-4 py-2 bg-slate-300 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
+                            <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
                         @else
-                            <button wire:click="previousPage('orgPage')" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition">← Prev</button>
+                            <button wire:click="previousPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">← Prev</button>
                         @endif
                         <span class="px-4 py-2 text-slate-700 text-sm font-medium">{{ $this->organizerRecords->currentPage() }} / {{ $this->organizerRecords->lastPage() }}</span>
                         @if($this->organizerRecords->hasMorePages())
-                            <button wire:click="nextPage('orgPage')" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition">Next →</button>
+                            <button wire:click="nextPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next →</button>
                         @else
-                            <button disabled class="px-4 py-2 bg-slate-300 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>
+                            <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>
                         @endif
                     </div>
                 </div>
@@ -1041,21 +1280,21 @@ new class extends Component {
 
         <!-- REGISTER ALUMNI MODAL -->
         @if($activeModal === 'registerAlumni')
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm modal-enter" @keydown.escape.window="$wire.closeModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin">
-                <div class="flex items-center justify-between px-8 py-6 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-t-2xl sticky top-0 z-10">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
+                <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
                     <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-user-plus text-2xl"></i> Register Alumni</h2>
                     <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
                 </div>
 
                 @if(count($alumniErrors) > 0)
-                <div class="bg-red-50 border-b-4 border-red-300 px-8 py-5">
-                    <p class="font-bold text-red-800 text-base mb-3">⚠️ Please fix the following errors:</p>
-                    <ul class="text-red-700 text-base space-y-2">
+                <div class="bg-red-50 border-b border-red-200 px-8 py-5">
+                    <p class="font-semibold text-red-800 text-sm mb-3">⚠️ Please fix the following errors:</p>
+                    <ul class="text-red-700 text-sm space-y-2">
                         @foreach($alumniErrors as $field => $messages)
                             @foreach($messages as $message)
                                 <li class="flex items-start gap-2">
-                                    <span class="text-red-500 mt-1">•</span>
+                                    <span class="text-red-500 mt-0.5">•</span>
                                     <span>{{ $message }}</span>
                                 </li>
                             @endforeach
@@ -1068,17 +1307,17 @@ new class extends Component {
 
                     <!-- PHOTO UPLOAD -->
                     <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
-                        <div class="border-3 border-dashed border-purple-300 rounded-2xl p-8 text-center cursor-pointer hover:border-purple-500 hover:bg-purple-50 transition"
+                        <label class="block text-sm font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
                              onclick="document.getElementById('regPhotoInput').click()">
                             @if($regPhoto)
-                                <img src="{{ $regPhoto->temporaryUrl() }}" alt="Preview" class="w-32 h-32 rounded-xl mx-auto mb-4 object-cover shadow-md border-4 border-purple-200">
-                                <p class="text-base text-emerald-600 font-bold">✓ Photo Selected</p>
-                                <p class="text-sm text-slate-500 mt-2">Click to change photo</p>
+                                <img src="{{ $regPhoto->temporaryUrl() }}" alt="Preview" class="w-32 h-32 rounded-lg mx-auto mb-4 object-cover shadow-md">
+                                <p class="text-sm text-emerald-600 font-semibold">✓ Photo Selected</p>
+                                <p class="text-xs text-slate-500 mt-2">Click to change photo</p>
                             @else
-                                <i class="fas fa-cloud-arrow-up text-5xl text-purple-300 block mb-3"></i>
-                                <p class="text-base text-slate-700 font-semibold">Click to Upload Photo</p>
-                                <p class="text-sm text-slate-600 mt-2">JPG, PNG, WebP · max 5 MB</p>
+                                <i class="fas fa-cloud-arrow-up text-4xl text-slate-400 block mb-3"></i>
+                                <p class="text-sm text-slate-700 font-semibold">Click to Upload Photo</p>
+                                <p class="text-xs text-slate-600 mt-2">JPG, PNG, WebP · max 5 MB</p>
                             @endif
                             <input type="file" id="regPhotoInput" wire:model="regPhoto" accept="image/*" class="hidden">
                         </div>
@@ -1086,88 +1325,90 @@ new class extends Component {
 
                     <!-- FULL NAME -->
                     <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Full Name <span class="text-red-500 text-lg">*</span></label>
-                        <div class="grid grid-cols-12 gap-3">
-                            <div class="col-span-5">
+                        <label class="block text-sm font-bold text-slate-800 mb-3">Full Name <span class="text-red-500">*</span></label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
                                 <input wire:model="regFirstName" type="text" placeholder="First Name"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">First <span class="text-red-400">*</span></p>
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">First Name <span class="text-red-400">*</span></p>
                             </div>
-                            <div class="col-span-2">
-                                <input wire:model="regMiddleInitial" type="text" placeholder="M.I." maxlength="5"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">M.I.</p>
-                            </div>
-                            <div class="col-span-5">
+                            <div>
                                 <input wire:model="regLastName" type="text" placeholder="Last Name"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">Last <span class="text-red-400">*</span></p>
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">Last Name <span class="text-red-400">*</span></p>
                             </div>
-                            <div class="col-span-3">
-                                <input wire:model="regSuffix" type="text" placeholder="Jr." maxlength="10"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">Suffix</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-3">
+                            <div>
+                                <input wire:model="regMiddleInitial" type="text" placeholder="Middle Initial" maxlength="5"
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial</p>
+                            </div>
+                            <div>
+                                <input wire:model="regSuffix" type="text" placeholder="Suffix (Jr., Sr.)" maxlength="10"
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix</p>
                             </div>
                         </div>
                         @if($regFirstName || $regLastName)
-                        <p class="text-base text-purple-600 font-bold mt-3 pl-1">
+                        <p class="text-sm text-purple-700 font-semibold mt-3 pl-1">
                             Preview: {{ trim("{$regFirstName} {$regMiddleInitial} {$regLastName}" . ($regSuffix ? ' '.$regSuffix : '')) }}
                         </p>
                         @endif
                     </div>
 
-                    <!-- STUDENT ID -->
-                    <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">
-                            Student ID <span class="text-red-500 text-lg">*</span>
-                            <span class="font-normal text-slate-600 text-sm">(up to 8 digits)</span>
-                        </label>
-                        <div class="relative">
-                            <input wire:model="regStudentId" type="text" placeholder="e.g. 12345"
-                                   maxlength="8" inputmode="numeric" pattern="\d*"
-                                   class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base font-mono focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                            @if($regStudentId && strlen($regStudentId) < 8)
-                            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500 font-mono">
-                                → {{ str_pad($regStudentId, 8, '0', STR_PAD_LEFT) }}
-                            </span>
-                            @endif
+                    <!-- STUDENT ID & EMAIL -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-bold text-slate-800 mb-3">
+                                Student ID <span class="text-red-500">*</span>
+                                <span class="font-normal text-slate-600 text-xs">(up to 8 digits)</span>
+                            </label>
+                            <div class="relative">
+                                <input wire:model="regStudentId" type="text" placeholder="e.g. 12345"
+                                       maxlength="8" inputmode="numeric" pattern="\d*"
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
+                                @if($regStudentId && strlen($regStudentId) < 8)
+                                <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-mono">
+                                    → {{ str_pad($regStudentId, 8, '0', STR_PAD_LEFT) }}
+                                </span>
+                                @endif
+                            </div>
                         </div>
-                    </div>
-
-                    <!-- EMAIL -->
-                    <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Email Address <span class="text-red-500 text-lg">*</span></label>
-                        <input wire:model="regEmail" type="email" placeholder="student@example.com"
-                               class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
+                        <div>
+                            <label class="block text-sm font-bold text-slate-800 mb-3">Email Address <span class="text-red-500">*</span></label>
+                            <input wire:model="regEmail" type="email" placeholder="student@example.com"
+                                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        </div>
                     </div>
 
                     <!-- COURSE & YEAR -->
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-base font-bold text-slate-800 mb-3">Course <span class="text-red-500 text-lg">*</span></label>
+                            <label class="block text-sm font-bold text-slate-800 mb-3">Course <span class="text-red-500">*</span></label>
                             <select wire:model="regCourseCode"
-                                    class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:outline-none text-slate-800">
+                                    class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                                 <option value="">Select Course</option>
                                 @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                             </select>
                         </div>
                         <div>
-                            <label class="block text-base font-bold text-slate-800 mb-3">Year <span class="text-red-500 text-lg">*</span></label>
+                            <label class="block text-sm font-bold text-slate-800 mb-3">Year <span class="text-red-500">*</span></label>
                             <input wire:model="regYear" type="number" placeholder="{{ date('Y') }}" min="2000" max="{{ date('Y') }}"
-                                   class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:outline-none text-slate-800">
+                                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         </div>
                     </div>
 
                     <!-- BUTTONS -->
                     <div class="flex gap-4 pt-3">
                         <button type="button" wire:click="closeModal"
-                                class="flex-1 px-6 py-3 border-2 border-slate-300 text-slate-800 rounded-lg text-base font-bold hover:bg-slate-100 transition">
+                                class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                             Cancel
                         </button>
                         <button type="submit" wire:loading.attr="disabled" wire:loading.class="opacity-50 cursor-not-allowed"
-                                class="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg text-base font-bold hover:shadow-lg transition flex items-center justify-center gap-2">
-                            <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner fa-spin"></i> Registering…</span>
-                            <span wire:loading.remove wire:target="registerAlumni"><i class="fas fa-user-check text-lg"></i> Register Alumni</span>
+                                class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+                            <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner spin-icon"></i> Registering…</span>
+                            <span wire:loading.remove wire:target="registerAlumni"><i class="fas fa-user-check text-base"></i> Register Alumni</span>
                         </button>
                     </div>
                 </form>
@@ -1177,21 +1418,21 @@ new class extends Component {
 
         <!-- REGISTER ORGANIZER MODAL -->
         @if($activeModal === 'registerOrganizer')
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm modal-enter" @keydown.escape.window="$wire.closeModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin">
-                <div class="flex items-center justify-between px-8 py-6 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-t-2xl sticky top-0 z-10">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
+                <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
                     <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-users-gear text-2xl"></i> Register Organizer</h2>
                     <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
                 </div>
 
                 @if(count($organizerErrors) > 0)
-                <div class="bg-red-50 border-b-4 border-red-300 px-8 py-5">
-                    <p class="font-bold text-red-800 text-base mb-3">⚠️ Please fix the following errors:</p>
-                    <ul class="text-red-700 text-base space-y-2">
+                <div class="bg-red-50 border-b border-red-200 px-8 py-5">
+                    <p class="font-semibold text-red-800 text-sm mb-3">⚠️ Please fix the following errors:</p>
+                    <ul class="text-red-700 text-sm space-y-2">
                         @foreach($organizerErrors as $field => $messages)
                             @foreach($messages as $message)
                                 <li class="flex items-start gap-2">
-                                    <span class="text-red-500 mt-1">•</span>
+                                    <span class="text-red-500 mt-0.5">•</span>
                                     <span>{{ $message }}</span>
                                 </li>
                             @endforeach
@@ -1204,17 +1445,17 @@ new class extends Component {
 
                     <!-- PHOTO UPLOAD -->
                     <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
-                        <div class="border-3 border-dashed border-purple-300 rounded-2xl p-8 text-center cursor-pointer hover:border-purple-500 hover:bg-purple-50 transition"
+                        <label class="block text-sm font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
                              onclick="document.getElementById('orgPhotoInput').click()">
                             @if($orgPhoto)
-                                <img src="{{ $orgPhoto->temporaryUrl() }}" alt="Preview" class="w-32 h-32 rounded-xl mx-auto mb-4 object-cover shadow-md border-4 border-purple-200">
-                                <p class="text-base text-emerald-600 font-bold">✓ Photo Selected</p>
-                                <p class="text-sm text-slate-500 mt-2">Click to change photo</p>
+                                <img src="{{ $orgPhoto->temporaryUrl() }}" alt="Preview" class="w-32 h-32 rounded-lg mx-auto mb-4 object-cover shadow-md">
+                                <p class="text-sm text-emerald-600 font-semibold">✓ Photo Selected</p>
+                                <p class="text-xs text-slate-500 mt-2">Click to change photo</p>
                             @else
-                                <i class="fas fa-cloud-arrow-up text-5xl text-purple-300 block mb-3"></i>
-                                <p class="text-base text-slate-700 font-semibold">Click to Upload Photo</p>
-                                <p class="text-sm text-slate-600 mt-2">JPG, PNG, WebP · max 5 MB</p>
+                                <i class="fas fa-cloud-arrow-up text-4xl text-slate-400 block mb-3"></i>
+                                <p class="text-sm text-slate-700 font-semibold">Click to Upload Photo</p>
+                                <p class="text-xs text-slate-600 mt-2">JPG, PNG, WebP · max 5 MB</p>
                             @endif
                             <input type="file" id="orgPhotoInput" wire:model="orgPhoto" accept="image/*" class="hidden">
                         </div>
@@ -1222,66 +1463,68 @@ new class extends Component {
 
                     <!-- FULL NAME -->
                     <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Full Name <span class="text-red-500 text-lg">*</span></label>
-                        <div class="grid grid-cols-12 gap-3">
-                            <div class="col-span-5">
+                        <label class="block text-sm font-bold text-slate-800 mb-3">Full Name <span class="text-red-500">*</span></label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
                                 <input wire:model="orgFirstName" type="text" placeholder="First Name"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">First <span class="text-red-400">*</span></p>
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">First Name <span class="text-red-400">*</span></p>
                             </div>
-                            <div class="col-span-2">
-                                <input wire:model="orgMiddleInitial" type="text" placeholder="M.I." maxlength="5"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">M.I.</p>
-                            </div>
-                            <div class="col-span-5">
+                            <div>
                                 <input wire:model="orgLastName" type="text" placeholder="Last Name"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">Last <span class="text-red-400">*</span></p>
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">Last Name <span class="text-red-400">*</span></p>
                             </div>
-                            <div class="col-span-3">
-                                <input wire:model="orgSuffix" type="text" placeholder="Jr." maxlength="10"
-                                       class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                                <p class="text-xs text-slate-500 mt-1 pl-1">Suffix</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-3">
+                            <div>
+                                <input wire:model="orgMiddleInitial" type="text" placeholder="Middle Initial" maxlength="5"
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial</p>
+                            </div>
+                            <div>
+                                <input wire:model="orgSuffix" type="text" placeholder="Suffix (Jr., Sr.)" maxlength="10"
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                                <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix</p>
                             </div>
                         </div>
                         @if($orgFirstName || $orgLastName)
-                        <p class="text-base text-purple-600 font-bold mt-3 pl-1">
+                        <p class="text-sm text-purple-700 font-semibold mt-3 pl-1">
                             Preview: {{ trim("{$orgFirstName} {$orgMiddleInitial} {$orgLastName}" . ($orgSuffix ? ' '.$orgSuffix : '')) }}
                         </p>
                         @endif
                     </div>
 
-                    <!-- TEACHER ID -->
-                    <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">
-                            Teacher ID <span class="text-red-500 text-lg">*</span>
-                            <span class="font-normal text-slate-600 text-sm">(up to 8 digits)</span>
-                        </label>
-                        <div class="relative">
-                            <input wire:model="orgTeacherId" type="text" placeholder="e.g. 12345"
-                                   maxlength="8" inputmode="numeric" pattern="\d*"
-                                   class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base font-mono focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
-                            @if($orgTeacherId && strlen($orgTeacherId) < 8)
-                            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500 font-mono">
-                                → {{ str_pad($orgTeacherId, 8, '0', STR_PAD_LEFT) }}
-                            </span>
-                            @endif
+                    <!-- TEACHER ID & EMAIL -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-bold text-slate-800 mb-3">
+                                Teacher ID <span class="text-red-500">*</span>
+                                <span class="font-normal text-slate-600 text-xs">(up to 8 digits)</span>
+                            </label>
+                            <div class="relative">
+                                <input wire:model="orgTeacherId" type="text" placeholder="e.g. 12345"
+                                       maxlength="8" inputmode="numeric" pattern="\d*"
+                                       class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
+                                @if($orgTeacherId && strlen($orgTeacherId) < 8)
+                                <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-mono">
+                                    → {{ str_pad($orgTeacherId, 8, '0', STR_PAD_LEFT) }}
+                                </span>
+                                @endif
+                            </div>
                         </div>
-                    </div>
-
-                    <!-- EMAIL -->
-                    <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Email Address <span class="text-red-500 text-lg">*</span></label>
-                        <input wire:model="orgEmail" type="email" placeholder="teacher@example.com"
-                               class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:ring-2 focus:ring-purple-600/20 focus:outline-none text-slate-800">
+                        <div>
+                            <label class="block text-sm font-bold text-slate-800 mb-3">Email Address <span class="text-red-500">*</span></label>
+                            <input wire:model="orgEmail" type="email" placeholder="teacher@example.com"
+                                   class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        </div>
                     </div>
 
                     <!-- DEPARTMENT -->
                     <div>
-                        <label class="block text-base font-bold text-slate-800 mb-3">Department <span class="text-red-500 text-lg">*</span></label>
+                        <label class="block text-sm font-bold text-slate-800 mb-3">Department <span class="text-red-500">*</span></label>
                         <select wire:model="orgDept"
-                                class="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-base focus:border-purple-600 focus:outline-none text-slate-800">
+                                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                             <option value="">Select Department</option>
                             @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }} — {{ $c->name }}</option>@endforeach
                         </select>
@@ -1290,13 +1533,13 @@ new class extends Component {
                     <!-- BUTTONS -->
                     <div class="flex gap-4 pt-3">
                         <button type="button" wire:click="closeModal"
-                                class="flex-1 px-6 py-3 border-2 border-slate-300 text-slate-800 rounded-lg text-base font-bold hover:bg-slate-100 transition">
+                                class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                             Cancel
                         </button>
                         <button type="submit" wire:loading.attr="disabled" wire:loading.class="opacity-50 cursor-not-allowed"
-                                class="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg text-base font-bold hover:shadow-lg transition flex items-center justify-center gap-2">
-                            <span wire:loading wire:target="registerOrganizer"><i class="fas fa-spinner fa-spin"></i> Registering…</span>
-                            <span wire:loading.remove wire:target="registerOrganizer"><i class="fas fa-users-gear text-lg"></i> Register Organizer</span>
+                                class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+                            <span wire:loading wire:target="registerOrganizer"><i class="fas fa-spinner spin-icon"></i> Registering…</span>
+                            <span wire:loading.remove wire:target="registerOrganizer"><i class="fas fa-users-gear text-base"></i> Register Organizer</span>
                         </button>
                     </div>
                 </form>
@@ -1304,44 +1547,44 @@ new class extends Component {
         </div>
         @endif
 
-        <!-- IMPORT MODAL - SMOOTH WITH PROGRESS -->
+        <!-- IMPORT MODAL -->
         @if($activeModal === 'importModal')
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm modal-enter" @keydown.escape.window="$wire.cancelImport()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl">
-                <div class="flex items-center justify-between px-8 py-6 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-t-2xl">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelImport()">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl modal-animate">
+                <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg">
                     <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-file-import text-2xl"></i> Import Alumni</h2>
                     <button wire:click="cancelImport" class="text-3xl leading-none hover:opacity-70 transition">×</button>
                 </div>
 
                 <div class="p-8 space-y-6">
                     @if(!$importingFile)
-                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                            <p class="text-blue-800 text-base"><strong>📋 Supports:</strong> CSV & Excel (.xlsx, .xls)</p>
-                            <p class="text-blue-700 text-sm mt-2">Required columns: name, student_id, email, course_code, batch</p>
+                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg">
+                            <p class="text-blue-800 text-sm"><strong>📋 Supports:</strong> CSV & Excel (.xlsx, .xls)</p>
+                            <p class="text-blue-700 text-xs mt-2"><strong>Required columns:</strong> name, student_id, course_code, year, email</p>
                         </div>
 
-                        <div class="border-3 border-dashed border-purple-300 rounded-2xl p-8 text-center cursor-pointer hover:border-purple-500 hover:bg-purple-50 transition"
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
                              @click="document.getElementById('importFile').click()">
                             @if($importFile)
                                 <i class="fas fa-check-circle text-5xl text-emerald-500 block mb-3"></i>
-                                <p class="text-base text-emerald-600 font-bold">✓ File Selected</p>
-                                <p class="text-sm text-slate-600 mt-2">{{ $importFile->getClientOriginalName() }}</p>
+                                <p class="text-sm text-emerald-600 font-semibold">✓ File Selected</p>
+                                <p class="text-xs text-slate-600 mt-2">{{ $importFile->getClientOriginalName() }}</p>
                             @else
-                                <i class="fas fa-file-csv text-5xl text-purple-300 block mb-3"></i>
-                                <p class="text-base text-slate-700 font-semibold">Click to Upload File</p>
-                                <p class="text-sm text-slate-600 mt-2">CSV or Excel format</p>
+                                <i class="fas fa-file-csv text-5xl text-slate-400 block mb-3"></i>
+                                <p class="text-sm text-slate-700 font-semibold">Click to Upload File</p>
+                                <p class="text-xs text-slate-600 mt-2">CSV or Excel format</p>
                             @endif
                             <input type="file" id="importFile" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
                         </div>
 
                         <div class="flex gap-3">
                             <button type="button" wire:click="cancelImport"
-                                    class="flex-1 px-6 py-3 border-2 border-slate-300 text-slate-800 rounded-lg text-base font-bold hover:bg-slate-100 transition">
+                                    class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                                 Cancel
                             </button>
                             <button type="button" wire:click="processImportFile" 
                                     :disabled="!$wire.importFile"
-                                    class="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg text-base font-bold hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2">
+                                    class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                                 <i class="fas fa-upload"></i> Import File
                             </button>
                         </div>
@@ -1350,49 +1593,52 @@ new class extends Component {
                         <div class="space-y-4">
                             <div>
                                 <div class="flex justify-between mb-2">
-                                    <p class="text-slate-800 font-semibold">{{ $importStatus }}</p>
-                                    <p class="text-slate-600 text-sm">{{ $importProgress }}/{{ $importTotal }}</p>
+                                    <p class="text-slate-800 font-semibold text-sm flex items-center gap-2">
+                                        <span>{{ $importStatus }}</span>
+                                        <i class="fas fa-spinner spin-icon text-purple-600"></i>
+                                    </p>
+                                    <p class="text-slate-600 text-xs font-mono">{{ $importProgress }}/{{ $importTotal }}</p>
                                 </div>
-                                <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                                    <div class="progress-bar bg-gradient-to-r from-purple-600 to-purple-700 h-full rounded-full" style="width: {{ $importTotal > 0 ? round(($importProgress / $importTotal) * 100) : 0 }}%"></div>
+                                <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                                    <div class="btn-primary h-full rounded-full progress-animate transition-all duration-300" style="width: {{ $importTotal > 0 ? round(($importProgress / $importTotal) * 100) : 0 }}%"></div>
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-3 gap-4 text-center">
-                                <div class="bg-emerald-50 rounded-lg p-4">
-                                    <p class="text-emerald-600 text-2xl font-bold">{{ $importSuccessCount }}</p>
-                                    <p class="text-emerald-700 text-sm">Success</p>
+                            <div class="grid grid-cols-3 gap-3 text-center">
+                                <div class="bg-emerald-50 rounded-lg p-4 border border-emerald-200">
+                                    <p class="text-emerald-600 text-xl font-bold">{{ $importSuccessCount }}</p>
+                                    <p class="text-emerald-700 text-xs mt-1">Success</p>
                                 </div>
-                                <div class="bg-slate-100 rounded-lg p-4">
-                                    <p class="text-slate-600 text-2xl font-bold">{{ $importProgress }}</p>
-                                    <p class="text-slate-700 text-sm">Processed</p>
+                                <div class="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                                    <p class="text-blue-600 text-xl font-bold">{{ $importProgress }}</p>
+                                    <p class="text-blue-700 text-xs mt-1">Processing</p>
                                 </div>
-                                <div class="bg-red-50 rounded-lg p-4">
-                                    <p class="text-red-600 text-2xl font-bold">{{ $importFailCount }}</p>
-                                    <p class="text-red-700 text-sm">Failed</p>
+                                <div class="bg-red-50 rounded-lg p-4 border border-red-200">
+                                    <p class="text-red-600 text-xl font-bold">{{ $importFailCount }}</p>
+                                    <p class="text-red-700 text-xs mt-1">Failed</p>
                                 </div>
                             </div>
 
                             @if(count($importErrors) > 0)
-                            <div class="bg-red-50 rounded-lg p-4 max-h-32 overflow-y-auto scrollbar-thin">
-                                <p class="text-red-800 font-semibold mb-2">Error Details:</p>
-                                <ul class="space-y-1 text-red-700 text-sm">
-                                    @foreach(array_slice($importErrors, 0, 5) as $error)
+                            <div class="bg-red-50 rounded-lg p-4 max-h-40 overflow-y-auto scrollbar-custom border border-red-200">
+                                <p class="text-red-800 font-semibold text-sm mb-2">❌ Error Details:</p>
+                                <ul class="space-y-1 text-red-700 text-xs">
+                                    @foreach(array_slice($importErrors, 0, 8) as $error)
                                         <li class="flex items-start gap-2">
-                                            <span>•</span>
+                                            <span class="text-red-600 font-bold mt-0.5">•</span>
                                             <span>{{ $error }}</span>
                                         </li>
                                     @endforeach
-                                    @if(count($importErrors) > 5)
-                                        <li class="text-red-600 italic">... and {{ count($importErrors) - 5 }} more errors</li>
+                                    @if(count($importErrors) > 8)
+                                        <li class="text-red-600 italic font-semibold">... and {{ count($importErrors) - 8 }} more errors</li>
                                     @endif
                                 </ul>
                             </div>
                             @endif
 
                             <button type="button" wire:click="cancelImport"
-                                    class="w-full px-6 py-3 border-2 border-slate-300 text-slate-800 rounded-lg text-base font-bold hover:bg-slate-100 transition">
-                                Cancel Import
+                                    class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
+                                Close
                             </button>
                         </div>
                     @endif
@@ -1403,9 +1649,9 @@ new class extends Component {
 
         <!-- MANAGE COURSES MODAL -->
         @if($activeModal === 'manageCourses')
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm modal-enter" @keydown.escape.window="$wire.closeModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-thin">
-                <div class="flex items-center justify-between px-8 py-6 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-t-2xl sticky top-0 z-10">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col modal-animate">
+                <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
                     <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-sliders text-2xl"></i> Manage Courses</h2>
                     <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
                 </div>
@@ -1419,9 +1665,9 @@ new class extends Component {
                      :class="'{{ $courseAlertType }}' === 'success'
                          ? 'bg-emerald-50 border-l-4 border-emerald-400'
                          : 'bg-red-50 border-l-4 border-red-400'"
-                     class="p-4 mx-8 mt-6 rounded">
+                     class="p-4 mx-8 mt-6 rounded-lg">
                     <p :class="'{{ $courseAlertType }}' === 'success' ? 'text-emerald-800' : 'text-red-800'"
-                       class="text-base font-semibold">
+                       class="text-sm font-semibold">
                         <i :class="'{{ $courseAlertType }}' === 'success' ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'"
                            class="mr-2"></i>
                         {{ $courseAlert }}
@@ -1429,68 +1675,69 @@ new class extends Component {
                 </div>
                 @endif
 
-                <div class="p-8 space-y-6">
+                <div class="flex-1 overflow-y-auto scrollbar-custom px-8 py-6 space-y-6">
                     <!-- ADD/EDIT FORM -->
                     <div class="border border-slate-200 rounded-lg p-6 bg-slate-50">
-                        <h3 class="text-lg font-bold text-slate-800 mb-4">
+                        <h3 class="text-base font-bold text-slate-800 mb-4">
                             {{ $editingCourseId ? '✏️ Edit Course' : '➕ Add New Course' }}
                         </h3>
                         <div class="space-y-4">
                             <div>
-                                <label class="block text-sm font-bold text-slate-700 mb-2">Course Code</label>
+                                <label class="block text-xs font-bold text-slate-700 mb-2">Course Code</label>
                                 <input wire:model="courseCode" type="text" placeholder="e.g. CS101" maxlength="20"
-                                       class="w-full px-4 py-2 border border-slate-300 rounded-lg text-base focus:border-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-600/20 transition">
+                                       class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                             </div>
                             <div>
-                                <label class="block text-sm font-bold text-slate-700 mb-2">Course Name</label>
+                                <label class="block text-xs font-bold text-slate-700 mb-2">Course Name</label>
                                 <input wire:model="courseName" type="text" placeholder="e.g. Computer Science" maxlength="100"
-                                       class="w-full px-4 py-2 border border-slate-300 rounded-lg text-base focus:border-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-600/20 transition">
+                                       class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                             </div>
                             <div class="flex gap-3 pt-2">
                                 @if($editingCourseId)
                                     <button type="button" wire:click="resetCourseForm"
-                                            class="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-base font-semibold hover:bg-slate-100 transition">
+                                            class="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-100 transition">
                                         Cancel
                                     </button>
                                 @endif
-                                <button type="button" wire:click="saveCourse" wire:loading.attr="disabled"
-                                        class="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg text-base font-semibold hover:shadow-lg transition flex items-center justify-center gap-2 {{ $savingCourse ? 'opacity-50' : '' }}">
-                                    <span wire:loading><i class="fas fa-spinner fa-spin"></i></span>
-                                    <span wire:loading.remove>{{ $editingCourseId ? 'Update Course' : 'Add Course' }}</span>
+                                <button type="button" wire:click="saveCourse"
+                                        class="flex-1 px-4 py-2 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+                                    {{ $editingCourseId ? 'Update Course' : 'Add Course' }}
                                 </button>
                             </div>
                         </div>
                     </div>
 
-                    <!-- COURSES LIST -->
+                    <!-- COURSES LIST WITH SCROLL -->
                     <div>
-                        <h3 class="text-lg font-bold text-slate-800 mb-4">📚 Existing Courses ({{ count($coursesList) }})</h3>
-                        <div class="space-y-3 max-h-96 overflow-y-auto scrollbar-thin">
+                        <h3 class="text-base font-bold text-slate-800 mb-4">📚 Existing Courses ({{ count($coursesList) }})</h3>
+                        <div class="space-y-2 max-h-64 overflow-y-auto scrollbar-custom pr-2">
                             @forelse($coursesList as $course)
-                            <div class="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:bg-purple-50/30 transition">
+                            <div class="course-item flex items-center justify-between p-4 border border-slate-200 rounded-lg bg-white">
                                 <div class="flex-1">
-                                    <p class="font-bold text-slate-800 text-base">{{ $course['code'] }}</p>
-                                    <p class="text-slate-600 text-sm">{{ $course['name'] }}</p>
+                                    <p class="font-semibold text-slate-800 text-sm">{{ $course['code'] }}</p>
+                                    <p class="text-slate-600 text-xs mt-1">{{ $course['name'] }}</p>
                                 </div>
-                                <div class="flex gap-2">
+                                <div class="flex gap-2 ml-4">
                                     <button wire:click="openEditCourse({{ $course['id'] }})"
-                                            class="px-3 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition font-semibold text-sm">
+                                            class="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition font-semibold text-xs border border-blue-200">
                                         <i class="fas fa-pencil"></i> Edit
                                     </button>
                                     <button wire:click="confirmDeleteCourse({{ $course['id'] }})"
-                                            class="px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition font-semibold text-sm">
+                                            class="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition font-semibold text-xs border border-red-200">
                                         <i class="fas fa-trash"></i> Delete
                                     </button>
                                 </div>
                             </div>
                             @empty
-                            <p class="text-center text-slate-500 py-8">No courses yet. Add one to get started!</p>
+                            <p class="text-center text-slate-500 py-8 text-sm">No courses yet. Add one to get started!</p>
                             @endforelse
                         </div>
                     </div>
+                </div>
 
+                <div class="px-8 py-4 border-t border-slate-200 bg-slate-50">
                     <button wire:click="closeModal"
-                            class="w-full px-6 py-3 border-2 border-slate-300 text-slate-800 rounded-lg text-base font-bold hover:bg-slate-100 transition">
+                            class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-100 transition">
                         Close
                     </button>
                 </div>
@@ -1500,31 +1747,75 @@ new class extends Component {
 
         <!-- DELETE COURSE CONFIRMATION MODAL -->
         @if($activeModal === 'deleteCourseConfirm')
-        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm modal-enter" @keydown.escape.window="$wire.closeModal()">
-            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
-                <div class="px-8 py-6 bg-red-50 border-b border-red-100 rounded-t-2xl">
-                    <h2 class="text-2xl font-bold text-red-800 flex items-center gap-3">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
+                <div class="px-8 py-6 bg-red-50 border-b border-red-200 rounded-t-lg">
+                    <h2 class="text-xl font-bold text-red-800 flex items-center gap-3">
                         <i class="fas fa-triangle-exclamation"></i> Delete Course
                     </h2>
                 </div>
 
                 <div class="p-8">
-                    <p class="text-slate-800 text-base mb-4">
+                    <p class="text-slate-800 text-sm mb-4">
                         Are you sure you want to delete <strong class="text-red-600">{{ $deleteCourseName }}</strong>?
                     </p>
-                    <p class="text-slate-600 text-sm mb-6">This action cannot be undone.</p>
+                    <p class="text-slate-600 text-xs mb-6">This action cannot be undone.</p>
 
                     <div class="flex gap-3">
                         <button type="button" wire:click="closeModal"
-                                class="flex-1 px-6 py-3 border-2 border-slate-300 text-slate-800 rounded-lg text-base font-bold hover:bg-slate-100 transition">
+                                class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                             Cancel
                         </button>
                         <button type="button" wire:click="deleteCourse" wire:loading.attr="disabled"
-                                class="flex-1 px-6 py-3 bg-red-600 text-white rounded-lg text-base font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 {{ $deletingCourse ? 'opacity-50' : '' }}">
-                            <span wire:loading><i class="fas fa-spinner fa-spin"></i></span>
+                                class="flex-1 px-6 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2">
+                            <span wire:loading><i class="fas fa-spinner spin-icon"></i></span>
                             <span wire:loading.remove>Delete</span>
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+        @endif
+
+        <!-- VIEW PROFILE MODAL -->
+        @if($activeModal === 'viewProfile' && $viewingProfile)
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
+                <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
+                    <h2 class="text-2xl font-bold">Profile</h2>
+                    <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+                </div>
+
+                <div class="p-8 space-y-6">
+                    <!-- Profile Photo Section -->
+                    <div class="text-center">
+                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}" 
+                             alt="{{ $viewingProfile['name'] }}"
+                             class="w-32 h-32 rounded-lg object-cover shadow-md mx-auto">
+                        
+                        <!-- Photo Upload Section -->
+                        <div class="mt-6 border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
+                             @click="document.getElementById('profilePhotoInput').click()">
+                            <i class="fas fa-camera text-3xl text-slate-400 block mb-2"></i>
+                            <p class="text-slate-700 font-semibold text-sm">Click to Update Photo</p>
+                            <p class="text-xs text-slate-600 mt-1">JPG, PNG, WebP · max 5 MB</p>
+                            <input type="file" id="profilePhotoInput" wire:model="updatingProfilePhoto" accept="image/*" class="hidden">
+                        </div>
+
+                        @if($updatingProfilePhoto)
+                        <button wire:click="updateProfilePhoto" wire:loading.attr="disabled"
+                                class="w-full mt-4 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
+                            <span wire:loading><i class="fas fa-spinner spin-icon"></i></span>
+                            <span wire:loading.remove><i class="fas fa-save"></i> Save Photo</span>
+                        </button>
+                        @endif
+                    </div>
+
+                    <!-- Close Button -->
+                    <button wire:click="closeModal"
+                            class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
+                        Close
+                    </button>
                 </div>
             </div>
         </div>

@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class OrganizerController extends Controller
 {
@@ -33,7 +34,7 @@ class OrganizerController extends Controller
 
         try {
             // Store photo if provided
-            $photoPath = 'organizers/default.png';
+            $photoPath = null;
             if ($request->hasFile('photo')) {
                 $file = $request->file('photo');
                 $filename = 'organizer-' . \Illuminate\Support\Str::uuid() . '.' . $file->getClientOriginalExtension();
@@ -81,7 +82,21 @@ class OrganizerController extends Controller
                 'email' => ['sometimes', 'email', 'unique:organizer,email,' . $id],
                 'department' => ['sometimes', 'string'],
                 'status' => ['sometimes', 'in:ACTIVE,INACTIVE,SUSPENDED'],
+                'photo' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
             ]);
+
+            // Handle photo upload
+            if ($request->hasFile('photo')) {
+                // Delete old photo if exists
+                if ($organizer->profile_photo && strpos($organizer->profile_photo, 'default.png') === false) {
+                    Storage::disk('public')->delete($organizer->profile_photo);
+                }
+
+                $file = $request->file('photo');
+                $filename = 'organizer-' . \Illuminate\Support\Str::uuid() . '.' . $file->getClientOriginalExtension();
+                $file->storeAs('organizers', $filename, 'public');
+                $validated['profile_photo'] = 'organizers/' . $filename;
+            }
 
             $organizer->update($validated);
 
@@ -102,7 +117,7 @@ class OrganizerController extends Controller
             
             // Delete photo if not default
             if ($organizer->profile_photo && strpos($organizer->profile_photo, 'default.png') === false) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete($organizer->profile_photo);
+                Storage::disk('public')->delete($organizer->profile_photo);
             }
 
             // Delete associated user
