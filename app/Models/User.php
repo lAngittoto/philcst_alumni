@@ -40,7 +40,20 @@ class User extends Authenticatable
     }
 
     /**
+     * Relationship: User has one Organizer record
+     */
+    public function organizer()
+    {
+        return $this->hasOne(\App\Models\Organizer::class);
+    }
+
+    /**
      * Get the attributes that should be cast.
+     *
+     * NOTE: 'password' cast is intentionally REMOVED.
+     * Laravel's 'hashed' cast auto-hashes on assignment via $model->password = 'plain'.
+     * Since we use Hash::make() explicitly before storing, the cast would double-hash.
+     * We control hashing manually in controllers/components.
      *
      * @return array<string, string>
      */
@@ -48,7 +61,7 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            'password' => 'hashed',
+            // 'password' => 'hashed',  <-- REMOVED: causes double-hashing
         ];
     }
 }

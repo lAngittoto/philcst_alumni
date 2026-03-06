@@ -1,250 +1,156 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Philcst Alumni Connect - Organizer Account Created</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 0; margin: 0;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); overflow: hidden;">
         
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f3f0f7;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 25px rgba(122, 63, 145, 0.15);
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #7a3f91 0%, #5a2d6f 100%);
-            padding: 40px 30px;
-            text-align: center;
-            color: #ffffff;
-        }
-        
-        .header h1 {
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            letter-spacing: -0.5px;
-        }
-        
-        .header p {
-            font-size: 14px;
-            opacity: 0.9;
-            font-weight: 500;
-        }
-        
-        .content {
-            padding: 40px 30px;
-        }
-        
-        .greeting {
-            font-size: 16px;
-            color: #333333;
-            margin-bottom: 25px;
-            line-height: 1.6;
-        }
-        
-        .greeting strong {
-            color: #7a3f91;
-        }
-        
-        .success-message {
-            background-color: #f0fdf4;
-            border-left: 4px solid #10b981;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 25px 0;
-            font-size: 14px;
-            color: #047857;
-        }
-        
-        .credentials-section {
-            background-color: #f9f5ff;
-            border: 2px dashed #d8b4fe;
-            border-radius: 10px;
-            padding: 25px;
-            margin: 30px 0;
-        }
-        
-        .credentials-label {
-            font-size: 12px;
-            font-weight: 700;
-            color: #7a3f91;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 20px;
-            display: block;
-        }
-        
-        .credential-item {
-            margin-bottom: 20px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #e9d5ff;
-        }
-        
-        .credential-item:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-            padding-bottom: 0;
-        }
-        
-        .credential-label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #666666;
-            text-transform: uppercase;
-            margin-bottom: 8px;
-            display: block;
-            letter-spacing: 0.5px;
-        }
-        
-        .credential-value {
-            font-size: 16px;
-            font-weight: 700;
-            color: #1f2937;
-            font-family: 'Courier New', monospace;
-            background-color: #ffffff;
-            padding: 12px 15px;
-            border-radius: 6px;
-            border: 1px solid #e5e7eb;
-            word-break: break-all;
-        }
-        
-        .info-text {
-            font-size: 13px;
-            color: #666666;
-            margin-top: 20px;
-            line-height: 1.6;
-            padding: 15px;
-            background-color: #f5f3ff;
-            border-radius: 6px;
-            border-left: 3px solid #7a3f91;
-        }
-        
-        .footer {
-            background-color: #f9f5ff;
-            padding: 25px 30px;
-            text-align: center;
-            border-top: 1px solid #e9d5ff;
-        }
-        
-        .footer-text {
-            font-size: 12px;
-            color: #9333ea;
-            line-height: 1.8;
-        }
-        
-        .footer-text a {
-            color: #7a3f91;
-            text-decoration: none;
-            font-weight: 600;
-        }
-        
-        .badge {
-            display: inline-block;
-            background-color: #7a3f91;
-            color: #ffffff;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 15px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        
-        <!-- Header -->
-        <div class="header">
-            <h1>🎓 Philcst Alumni Connect</h1>
-            <p>Organizer Account Created Successfully</p>
+        {{-- Header with Gradient --}}
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 50px 30px; text-align: center; color: white;">
+            <div style="font-size: 48px; margin-bottom: 15px;">
+                <i class="fa-solid fa-graduation-cap"></i>🎓
+            </div>
+            <h1 style="margin: 0 0 10px 0; font-size: 32px; font-weight: bold; letter-spacing: -0.5px;">
+                Welcome to PHILCST
+            </h1>
+            <p style="margin: 0; font-size: 16px; opacity: 0.95; font-weight: 300;">
+                Alumni Management System
+            </p>
         </div>
 
-        <!-- Content -->
-        <div class="content">
-
-            <span class="badge">Organizer</span>
-
-            <div class="greeting">
-                Hello <strong>{{ $organizer->name }}</strong>,
-            </div>
-
-            <div class="success-message">
-                ✓ Your organizer account has been created successfully!
-            </div>
-
-            <p style="font-size: 14px; color: #555555; line-height: 1.6; margin-bottom: 20px;">
-                You are now registered as an <strong>Organizer</strong> in the Philcst Alumni Management System.
-                Below are your login credentials.
+        {{-- Main Content --}}
+        <div style="padding: 50px 40px;">
+            
+            {{-- Greeting --}}
+            <p style="margin: 0 0 30px 0; font-size: 18px; color: #2b0d3e; font-weight: 600;">
+                Hi <strong>{{ $name }}</strong>,
             </p>
 
-            <!-- Credentials Section -->
-            <div class="credentials-section">
-                <span class="credentials-label">📋 Your Account Credentials</span>
+            {{-- Welcome Message --}}
+            <p style="margin: 0 0 25px 0; font-size: 15px; color: #555; line-height: 1.8;">
+                Your organizer account has been successfully created in the PHILCST Alumni Management System. 
+                Below are your login credentials to get started.
+            </p>
 
-                <div class="credential-item">
-                    <span class="credential-label">Email / Username</span>
-                    <div class="credential-value">{{ $organizer->email }}</div>
+            {{-- Credentials Box --}}
+            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #f0f4ff 100%); border: 2px solid #667eea; border-radius: 12px; padding: 30px; margin: 30px 0; position: relative;">
+                
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <div style="font-size: 24px; color: #667eea; margin-bottom: 8px;">
+                        🔐 Login Credentials
+                    </div>
+                    <p style="margin: 0; font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 1px;">
+                        Use these to access the system
+                    </p>
                 </div>
 
-                <div class="credential-item">
-                    <span class="credential-label">Temporary Password</span>
-                    <div class="credential-value">{{ $password }}</div>
+                {{-- ID Number Field --}}
+                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #ddd;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; color: #667eea; font-weight: bold; letter-spacing: 1px;">
+                        Teacher ID
+                    </p>
+                    <div style="background: white; border: 2px solid #667eea; border-radius: 8px; padding: 15px; text-align: center;">
+                        <p style="margin: 0; font-size: 24px; font-weight: bold; color: #2b0d3e; font-family: 'Courier New', monospace; letter-spacing: 2px;">
+                            {{ $idNumber }}
+                        </p>
+                    </div>
                 </div>
 
-                <div class="credential-item">
-                    <span class="credential-label">Department</span>
-                    <div class="credential-value">{{ $organizer->department }}</div>
+                {{-- Temporary Password Field --}}
+                <div style="margin-bottom: 15px;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; color: #667eea; font-weight: bold; letter-spacing: 1px;">
+                        Temporary Password
+                    </p>
+                    <div style="background: white; border: 2px solid #667eea; border-radius: 8px; padding: 15px; text-align: center;">
+                        <p style="margin: 0; font-size: 20px; font-weight: bold; color: #2b0d3e; font-family: 'Courier New', monospace; letter-spacing: 1px;">
+                            {{ $tempPassword }}
+                        </p>
+                    </div>
                 </div>
 
-                <div class="credential-item">
-                    <span class="credential-label">Account Status</span>
-                    <div class="credential-value">{{ $organizer->status }}</div>
-                </div>
             </div>
 
-            <!-- Important Info -->
-            <div class="info-text">
-                <strong style="color: #7a3f91;">⚠️ Important:</strong><br>
-                Your temporary password is case-sensitive. Please change it after your first login.
-                Keep your credentials secure and do not share them with anyone.
+            {{-- Important Notes --}}
+            <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 20px; border-radius: 6px; margin: 30px 0;">
+                <p style="margin: 0; font-size: 13px; color: #856404; line-height: 1.8;">
+                    <strong>⚠️ Important:</strong> This temporary password is valid only for your first login. 
+                    You will be required to change it immediately upon login. Please choose a strong password that includes uppercase letters, lowercase letters, numbers, and special characters.
+                </p>
             </div>
 
-            <p style="font-size: 14px; color: #555555; line-height: 1.6; margin-top: 25px;">
-                If you did not expect this account or have questions, please contact the system administrator.
+            {{-- Steps --}}
+            <div style="margin: 35px 0;">
+                <p style="margin: 0 0 20px 0; font-size: 13px; color: #2b0d3e; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Next Steps:
+                </p>
+                <ol style="margin: 0; padding: 0 0 0 25px; color: #555;">
+                    <li style="margin-bottom: 12px; font-size: 13px; line-height: 1.6;">
+                        Click the login button below or visit <strong>{{ $loginUrl }}</strong>
+                    </li>
+                    <li style="margin-bottom: 12px; font-size: 13px; line-height: 1.6;">
+                        Enter your Teacher ID: <strong>{{ $idNumber }}</strong>
+                    </li>
+                    <li style="margin-bottom: 12px; font-size: 13px; line-height: 1.6;">
+                        Enter the temporary password above
+                    </li>
+                    <li style="margin-bottom: 12px; font-size: 13px; line-height: 1.6;">
+                        You will be prompted to create a new, permanent password
+                    </li>
+                    <li style="font-size: 13px; line-height: 1.6;">
+                        Verify with the OTP sent to this email
+                    </li>
+                </ol>
+            </div>
+
+            {{-- Login Button --}}
+            <div style="text-align: center; margin: 35px 0;">
+                <a href="{{ $loginUrl }}" 
+                   style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: bold; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
+                    🚀 Login to System
+                </a>
+            </div>
+
+            {{-- Security Notice --}}
+            <div style="background-color: #e8f4f8; border-left: 5px solid #17a2b8; padding: 20px; border-radius: 6px; margin: 30px 0;">
+                <p style="margin: 0; font-size: 12px; color: #0c5460; line-height: 1.8;">
+                    <strong>🔒 Security Notice:</strong> Do not share your login credentials with anyone. 
+                    This email contains sensitive information. If you did not request this account, 
+                    please contact the system administrator immediately.
+                </p>
+            </div>
+
+            {{-- Contact Information --}}
+            <p style="margin: 30px 0 0 0; font-size: 13px; color: #999; line-height: 1.8;">
+                <strong>Account Details:</strong><br>
+                Name: {{ $name }}<br>
+                Email: {{ $email }}<br>
+                Department: {{ $department }}
+            </p>
+
+            <p style="margin: 20px 0 0 0; font-size: 12px; color: #999;">
+                If you have any questions or need technical support, please contact the IT Department.
             </p>
 
         </div>
 
-        <!-- Footer -->
-        <div class="footer">
-            <div class="footer-text">
-                <p style="margin-bottom: 10px;">© {{ date('Y') }} Philcst Alumni Connect. All rights reserved.</p>
-                <p>
-                    Philippine College of Science and Technology
-                </p>
-                <p style="margin-top: 15px; font-size: 11px; color: #a78bda;">
-                    This is an automated message. Please do not reply to this email.
-                </p>
-            </div>
+        {{-- Footer --}}
+        <div style="background-color: #f8f9fa; padding: 30px 40px; border-top: 1px solid #e0e0e0; text-align: center;">
+            <p style="margin: 0 0 15px 0; font-size: 13px; color: #666;">
+                <strong>Philippine College of Science and Technology</strong><br>
+                Alumni Management System
+            </p>
+            <p style="margin: 0 0 10px 0; font-size: 11px; color: #999;">
+                © {{ date('Y') }} PHILCST. All rights reserved.
+            </p>
+            <p style="margin: 0; font-size: 11px; color: #bbb;">
+                This is an automated email. Please do not reply directly to this message.
+            </p>
         </div>
 
     </div>
-</body>
-</html>
+
+    {{-- Additional Security Note --}}
+    <div style="text-align: center; margin-top: 30px; padding: 0 20px;">
+        <p style="margin: 0; font-size: 11px; color: #999; line-height: 1.8;">
+            This email was sent because an organizer account was created for you in the PHILCST Alumni System.<br>
+            If this was not you, please ignore this email or contact your administrator immediately.
+        </p>
+    </div>
+
+</div>

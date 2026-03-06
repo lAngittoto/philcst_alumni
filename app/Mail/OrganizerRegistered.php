@@ -11,17 +11,19 @@ use Illuminate\Queue\SerializesModels;
 
 class OrganizerRegistered extends Mailable
 {
+    // NOTE: ShouldQueue removed — same reason as OrganizerPasswordReset.
+    // Welcome emails must arrive immediately when admin creates the account.
     use Queueable, SerializesModels;
 
     public function __construct(
         public Organizer $organizer,
-        public string $password
+        public string $tempPassword,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Welcome to PHILCST Alumni System - Organizer Account Created',
+            subject: 'Welcome to PHILCST Alumni System - Your Account Has Been Created',
         );
     }
 
@@ -30,9 +32,13 @@ class OrganizerRegistered extends Mailable
         return new Content(
             view: 'emails.organizer-registered',
             with: [
-                'organizer' => $this->organizer,
-                'password'  => $this->password,
-                'loginUrl'  => config('app.url') . '/login',
+                'organizer'    => $this->organizer,
+                'idNumber'     => $this->organizer->id_number,
+                'tempPassword' => $this->tempPassword,
+                'loginUrl'     => url('/login'),
+                'name'         => $this->organizer->name,
+                'email'        => $this->organizer->email,
+                'department'   => $this->organizer->department,
             ],
         );
     }

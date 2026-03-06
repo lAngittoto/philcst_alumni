@@ -336,37 +336,62 @@ new class extends Component {
         <!-- FILTER BAR -->
         <div class="bg-white rounded-lg shadow-sm p-6 mb-6 shrink-0">
             <div class="flex flex-wrap gap-4 items-end">
-                <div class="flex-1 min-w-[250px]">
+                <!-- SHORT SEARCH BAR - PERSISTENT ACTIVE -->
+                <div class="w-80">
                     <label class="block text-sm font-semibold text-slate-800 mb-2">Search</label>
-                    <div class="relative">
-                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                        <input wire:model.live="search" type="text" placeholder="Search by name, ID, or email…"
-                               class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                    <div class="relative"
+                         x-data="{ 
+                             isActive: $wire.search !== '',
+                             isHovering: false
+                         }" 
+                         @mouseenter="isHovering = true; isActive = true"
+                         @mouseleave="isHovering = false; isActive = $wire.search !== ''"
+                         wire:key="search-bar">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none transition-colors duration-200"
+                           :class="isActive || $wire.search ? 'text-purple-600 font-bold' : 'text-slate-400'"></i>
+                        <input wire:model.live.debounce.150ms="search" 
+                               type="text" 
+                               placeholder="Search name, ID, email…"
+                               wire:key="search-input"
+                               class="w-full pl-10 py-2.5 rounded-lg text-sm bg-white transition-all duration-200 border"
+                               :class="(isActive || $wire.search) 
+                                   ? 'border-purple-400 shadow-md text-purple-900 font-semibold' 
+                                   : 'border-slate-300 text-slate-800'"
+                               style="outline: none !important; box-shadow: none !important;"
+                               @focus="isActive = true"
+                               @blur="isActive = $wire.search !== ''"
+                               @input="isActive = true"
+                               @keydown="isActive = true; $event.stopPropagation()"
+                               @keyup="isActive = true; $event.stopPropagation()"
+                               @click="isActive = true"
+                               autocomplete="off">
                     </div>
                 </div>
 
-                <div class="min-w-[180px]">
-                    <label class="block text-sm font-semibold text-slate-800 mb-2">All Batches</label>
+                <div class="min-w-[160px]">
+                    <label class="block text-sm font-semibold text-slate-800 mb-2">Batch</label>
                     <select wire:model.live="batch"
-                            class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm bg-white transition-all duration-200 focus:outline-none"
+                            style="outline: none !important;">
                         <option value="">All Batches</option>
                         @forelse($this->batches as $b)
                             <option value="{{ $b }}">{{ $b }}</option>
                         @empty
-                            <option disabled>No batches available</option>
+                            <option disabled>No batches</option>
                         @endforelse
                     </select>
                 </div>
 
-                <div class="min-w-[180px]">
-                    <label class="block text-sm font-semibold text-slate-800 mb-2">All Courses</label>
+                <div class="min-w-[160px]">
+                    <label class="block text-sm font-semibold text-slate-800 mb-2">Course</label>
                     <select wire:model.live="course"
-                            class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm bg-white transition-all duration-200 focus:outline-none"
+                            style="outline: none !important;">
                         <option value="">All Courses</option>
                         @forelse($this->courses as $c)
                             <option value="{{ $c->code }}">{{ $c->code }}</option>
                         @empty
-                            <option disabled>No courses available</option>
+                            <option disabled>No courses</option>
                         @endforelse
                     </select>
                 </div>

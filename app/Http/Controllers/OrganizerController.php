@@ -2,135 +2,212 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\OrganizerRegistered;
 use App\Models\Organizer;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 class OrganizerController extends Controller
 {
     /**
-     * Show organizers management page
-     */
-    public function index()
-    {
-        return view('organizers.management');
-    }
-
-    /**
-     * Store new organizer
+     * Create a new organizer account with temporary password
+     * This is typically called by admin/system
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'unique:organizer,email', 'unique:users,email'],
-            'id_number' => ['required', 'string', 'unique:organizer,id_number'],
-            'department' => ['required', 'string'],
-            'photo' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users|unique:organizer',
+            'id_number' => 'required|string|unique:organizer',
+            'department' => 'required|string|max:255',
         ]);
 
         try {
-            // Store photo if provided
-            $photoPath = null;
-            if ($request->hasFile('photo')) {
-                $file = $request->file('photo');
-                $filename = 'organizer-' . \Illuminate\Support\Str::uuid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('organizers', $filename, 'public');
-                $photoPath = 'organizers/' . $filename;
-            }
+            // Generate temporary password
+            $tempPassword = $this->generateTemporaryPassword();
 
             // Create user account
-            $password = \Illuminate\Support\Str::random(10);
             $user = User::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
-                'password' => Hash::make($password),
                 'role' => 'organizer',
+                'password' => Hash::make($tempPassword),
             ]);
 
             // Create organizer record
+            // NOTE: password_changed_at is NULL, which triggers first-time password change
             $organizer = Organizer::create([
                 'user_id' => $user->id,
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'id_number' => $validated['id_number'],
-                'department' => strtoupper($validated['department']),
-                'profile_photo' => $photoPath,
+                'department' => $validated['department'],
                 'status' => 'ACTIVE',
+                'password_changed_at' => null, // IMPORTANT: Triggers first-time password change on login
             ]);
 
-            return redirect()->back()->with('success', "Organizer '{$organizer->name}' registered successfully!");
+            // Send welcome email with temporary credentials
+            try {
+                Mail::to($organizer->email)->send(new OrganizerRegistered($organizer, $tempPassword));
+                Log::info('Welcome email sent to organizer: ' . $organizer->email);
+            } catch (\Exception $mailError) {
+                Log::warning('Failed to send welcome email to ' . $organizer->email . ': ' . $mailError->getMessage());
+                // Continue anyway - account is created
+            }
+
+            Log::info('Organizer account created: ' . $organizer->email . ' (ID: ' . $organizer->id_number . ')');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Organizer account created successfully. Welcome email sent.',
+                'organizer' => $organizer,
+                'tempPassword' => $tempPassword, // For display in admin panel only
+            ]);
+
         } catch (\Exception $e) {
-            Log::error('Organizer creation failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to register organizer: ' . $e->getMessage());
+            Log::error('Error creating organizer: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create organizer account: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
     /**
-     * Update organizer
+     * Generate a temporary password
+     * Format: Random combination of uppercase, lowercase, numbers, and special characters
+     * Example: 9NYgfcYFRn
      */
-    public function update(Request $request, $id)
+    private function generateTemporaryPassword(): string
     {
+        $uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        $lowercase = 'abcdefghijklmnopqrstuvwxyz';
+        $numbers = '0123456789';
+        $special = '@$!%*?&';
+
+        $password = '';
+        
+        // Ensure at least one of each required character type
+        $password .= $uppercase[random_int(0, strlen($uppercase) - 1)];
+        $password .= $lowercase[random_int(0, strlen($lowercase) - 1)];
+        $password .= $numbers[random_int(0, strlen($numbers) - 1)];
+        $password .= $special[random_int(0, strlen($special) - 1)];
+
+        // Fill the rest with random characters from all types
+        $allChars = $uppercase . $lowercase . $numbers . $special;
+        for ($i = 4; $i < 10; $i++) {
+            $password .= $allChars[random_int(0, strlen($allChars) - 1)];
+        }
+
+        // Shuffle to avoid predictable pattern
+        return str_shuffle($password);
+    }
+
+    /**
+     * Get organizer profile
+     */
+    public function show(Organizer $organizer)
+    {
+        return response()->json($organizer);
+    }
+
+    /**
+     * Update organizer profile (non-password fields)
+     */
+    public function update(Request $request, Organizer $organizer)
+    {
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'department' => 'sometimes|string|max:255',
+            'profile_photo' => 'sometimes|image|max:2048',
+        ]);
+
         try {
-            $organizer = Organizer::findOrFail($id);
-
-            $validated = $request->validate([
-                'name' => ['sometimes', 'string', 'max:255'],
-                'email' => ['sometimes', 'email', 'unique:organizer,email,' . $id],
-                'department' => ['sometimes', 'string'],
-                'status' => ['sometimes', 'in:ACTIVE,INACTIVE,SUSPENDED'],
-                'photo' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
-            ]);
-
-            // Handle photo upload
-            if ($request->hasFile('photo')) {
-                // Delete old photo if exists
-                if ($organizer->profile_photo && strpos($organizer->profile_photo, 'default.png') === false) {
-                    Storage::disk('public')->delete($organizer->profile_photo);
-                }
-
-                $file = $request->file('photo');
-                $filename = 'organizer-' . \Illuminate\Support\Str::uuid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('organizers', $filename, 'public');
-                $validated['profile_photo'] = 'organizers/' . $filename;
+            if ($request->hasFile('profile_photo')) {
+                $path = $request->file('profile_photo')->store('organizer-photos');
+                $validated['profile_photo'] = $path;
             }
 
             $organizer->update($validated);
 
-            return redirect()->back()->with('success', 'Organizer updated successfully!');
+            Log::info('Organizer profile updated: ' . $organizer->email);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile updated successfully',
+                'organizer' => $organizer,
+            ]);
+
         } catch (\Exception $e) {
-            Log::error('Organizer update failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to update organizer');
+            Log::error('Error updating organizer: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update profile: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
     /**
-     * Delete organizer
+     * Change organizer status (admin only)
      */
-    public function destroy($id)
+    public function updateStatus(Request $request, Organizer $organizer)
+    {
+        $validated = $request->validate([
+            'status' => 'required|in:ACTIVE,INACTIVE,SUSPENDED',
+        ]);
+
+        try {
+            $organizer->update(['status' => $validated['status']]);
+
+            Log::info('Organizer status updated: ' . $organizer->email . ' -> ' . $validated['status']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Status updated successfully',
+                'organizer' => $organizer,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error updating organizer status: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update status: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete organizer account (admin only)
+     */
+    public function destroy(Organizer $organizer)
     {
         try {
-            $organizer = Organizer::findOrFail($id);
+            $email = $organizer->email;
             
-            // Delete photo if not default
-            if ($organizer->profile_photo && strpos($organizer->profile_photo, 'default.png') === false) {
-                Storage::disk('public')->delete($organizer->profile_photo);
-            }
-
-            // Delete associated user
+            // Delete associated user account
             if ($organizer->user) {
-                $organizer->user()->delete();
+                $organizer->user->delete();
             }
-
+            
+            // Delete organizer record
             $organizer->delete();
 
-            return redirect()->back()->with('success', 'Organizer deleted successfully!');
+            Log::info('Organizer account deleted: ' . $email);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Organizer account deleted successfully',
+            ]);
+
         } catch (\Exception $e) {
-            Log::error('Organizer deletion failed: ' . $e->getMessage());
-            return redirect()->back()->with('error', 'Failed to delete organizer');
+            Log::error('Error deleting organizer: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete organizer: ' . $e->getMessage(),
+            ], 500);
         }
     }
 }

@@ -1,5 +1,7 @@
 <?php
+
 namespace App\Models;
+
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -21,13 +23,20 @@ class Organizer extends Model
         'department',
         'profile_photo',
         'status',
-        'notes',
+        'otp',
+        'otp_expires_at',
+        'password_reset_token',
+        'password_reset_initiated_at',
+        'password_changed_at',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
+        'otp_expires_at' => 'datetime',
+        'password_reset_initiated_at' => 'datetime',
+        'password_changed_at' => 'datetime',
     ];
 
     protected $appends = [
@@ -35,10 +44,100 @@ class Organizer extends Model
         'display_name',
     ];
 
+    // ===================================
+    // Relationships
+    // ===================================
+
     public function user()
     {
         return $this->belongsTo(User::class);
     }
+
+    // ===================================
+    // Password Change Helpers
+    // ===================================
+
+    /**
+     * Check if this is organizer's first time changing password
+     * 
+     * @return bool
+     */
+    public function needsPasswordChange(): bool
+    {
+        return $this->password_changed_at === null;
+    }
+
+    /**
+     * Check if OTP is valid and not expired
+     * 
+     * @param string $otp
+     * @return bool
+     */
+    public function isOtpValid(string $otp): bool
+    {
+        if (!$this->otp || !$this->otp_expires_at) {
+            return false;
+        }
+
+        // Check if OTP matches
+        if ($this->otp !== $otp) {
+            return false;
+        }
+
+        // Check if OTP has expired (compare with current time)
+        return now()->lessThanOrEqualTo($this->otp_expires_at);
+    }
+
+    /**
+     * Generate and store OTP for password reset
+     * OTP expires in 10 minutes
+     * 
+     * @return string
+     */
+    public function generateOtp(): string
+    {
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        
+        $this->update([
+            'otp' => $otp,
+            'otp_expires_at' => now()->addMinutes(10),
+        ]);
+
+        return $otp;
+    }
+
+    /**
+     * Clear OTP after successful verification
+     * 
+     * @return void
+     */
+    public function clearOtp(): void
+    {
+        $this->update([
+            'otp' => null,
+            'otp_expires_at' => null,
+        ]);
+    }
+
+    /**
+     * Mark password as successfully changed
+     * 
+     * @return void
+     */
+    public function markPasswordChanged(): void
+    {
+        $this->update([
+            'password_changed_at' => now(),
+            'password_reset_token' => null,
+            'password_reset_initiated_at' => null,
+            'otp' => null,
+            'otp_expires_at' => null,
+        ]);
+    }
+
+    // ===================================
+    // Scopes
+    // ===================================
 
     public function scopeActive($query)
     {
@@ -62,6 +161,15 @@ class Organizer extends Model
         }
         return $query->where('department', $department);
     }
+
+    public function scopeNeedsPasswordChange($query)
+    {
+        return $query->whereNull('password_changed_at');
+    }
+
+    // ===================================
+    // Accessors
+    // ===================================
 
     /**
      * Get full profile photo URL via accessor
@@ -88,6 +196,10 @@ class Organizer extends Model
     {
         return "{$this->name} ({$this->id_number})";
     }
+
+    // ===================================
+    // Status Helpers
+    // ===================================
 
     public function getStatusLabel(): string
     {

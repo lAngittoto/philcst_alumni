@@ -468,16 +468,19 @@ new class extends Component {
         $this->courseCode = $this->courseName = '';
         $this->courseAlert = '';
         $this->courseAlertType = '';
+        $this->savingCourse = false;
     }
 
     public function saveCourse(): void
     {
+        $this->savingCourse = true;
         $code = strtoupper(trim($this->courseCode));
         $name = trim($this->courseName);
         
         if (!$code || !$name) {
             $this->courseAlert = 'Code and Name are required.';
             $this->courseAlertType = 'error';
+            $this->savingCourse = false;
             return;
         }
         
@@ -497,6 +500,8 @@ new class extends Component {
                 ? 'A course with this code already exists.'
                 : 'Failed to save course.';
             $this->courseAlertType = 'error';
+        } finally {
+            $this->savingCourse = false;
         }
     }
 
@@ -592,8 +597,13 @@ new class extends Component {
 
     public function processImportFile(): void
     {
+        // Show importing state IMMEDIATELY
         $this->importingFile = true;
         $this->importStatus = 'IMPORTING...';
+        $this->importProgress = 0;
+        $this->importSuccessCount = 0;
+        $this->importFailCount = 0;
+        $this->importErrors = [];
         
         try {
             if (!$this->importFile) {
@@ -626,9 +636,6 @@ new class extends Component {
             }
 
             $this->importTotal = count($csv) - 1;
-            $this->importSuccessCount = 0;
-            $this->importFailCount = 0;
-            $this->importErrors = [];
 
             for ($i = 1; $i < count($csv); $i++) {
                 if (count($csv[$i]) < count($header)) {
@@ -719,7 +726,6 @@ new class extends Component {
             $this->importStatus = 'Import completed!';
             $this->coursesList = Course::all()->toArray();
             
-            sleep(2);
             $this->importFile = null;
             $this->activeModal = '';
             $this->resetAlumniFilters();
@@ -884,6 +890,18 @@ new class extends Component {
             }
         }
 
+        @keyframes dots {
+            0%, 20% {
+                content: '.';
+            }
+            40% {
+                content: '..';
+            }
+            60%, 100% {
+                content: '...';
+            }
+        }
+
         .modal-animate {
             animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
@@ -900,31 +918,20 @@ new class extends Component {
             animation: spin 1s linear infinite;
         }
 
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(3, end) infinite;
+        }
+
         .btn-primary {
             background: linear-gradient(135deg, #7a3f91, #6a3580);
             color: white;
             border: none;
-            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #6a3580, #5a2f70);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 16px rgba(122, 63, 145, 0.25);
-        }
-
-        .btn-primary:active {
-            transform: translateY(0);
         }
 
         .btn-primary:disabled {
             background: linear-gradient(135deg, #cbd5e1, #94a3b8);
             cursor: not-allowed;
-            transform: none;
-        }
-
-        .input-focus {
-            transition: all 0.2s ease;
         }
 
         .input-focus:focus {
@@ -942,25 +949,12 @@ new class extends Component {
         }
 
         .course-item {
-            transition: all 0.2s ease;
-        }
-
-        .course-item:hover {
-            transform: translateX(4px);
-            box-shadow: 0 4px 12px rgba(122, 63, 145, 0.15);
+            background: white;
         }
 
         .status-badge {
             font-weight: 600;
             letter-spacing: 0.3px;
-        }
-
-        input, select, textarea {
-            border-color: rgba(122, 63, 145, 0.2) !important;
-        }
-
-        input:hover, select:hover, textarea:hover {
-            border-color: rgba(122, 63, 145, 0.4) !important;
         }
     </style>
 
@@ -1059,8 +1053,8 @@ new class extends Component {
             <!-- Filter bar -->
             <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
                 <div class="relative flex-1 min-w-[200px] max-w-sm">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                    <input wire:model.live="alumniSearch" type="text" placeholder="Search name, ID, email…"
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+                    <input wire:model.live.debounce.150ms="alumniSearch" type="text" placeholder="Search name, ID, email…"
                            class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                 </div>
                 <select wire:model.live="alumniBatch"
@@ -1174,8 +1168,8 @@ new class extends Component {
             <!-- Filter bar -->
             <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
                 <div class="relative flex-1 min-w-[200px] max-w-sm">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                    <input wire:model.live="orgSearch" type="text" placeholder="Search name, ID, email…"
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+                    <input wire:model.live.debounce.150ms="orgSearch" type="text" placeholder="Search name, ID, email…"
                            class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
                 </div>
                 <select wire:model.live="orgDepartment"
@@ -1405,9 +1399,9 @@ new class extends Component {
                                 class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                             Cancel
                         </button>
-                        <button type="submit" wire:loading.attr="disabled" wire:loading.class="opacity-50 cursor-not-allowed"
+                        <button type="submit" wire:loading.attr="disabled" wire:target="registerAlumni" wire:loading.class="opacity-50 cursor-not-allowed"
                                 class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                            <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner spin-icon"></i> Registering…</span>
+                            <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner spin-icon"></i> <span class="loading-dots">Registering</span></span>
                             <span wire:loading.remove wire:target="registerAlumni"><i class="fas fa-user-check text-base"></i> Register Alumni</span>
                         </button>
                     </div>
@@ -1536,9 +1530,9 @@ new class extends Component {
                                 class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                             Cancel
                         </button>
-                        <button type="submit" wire:loading.attr="disabled" wire:loading.class="opacity-50 cursor-not-allowed"
+                        <button type="submit" wire:loading.attr="disabled" wire:target="registerOrganizer" wire:loading.class="opacity-50 cursor-not-allowed"
                                 class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                            <span wire:loading wire:target="registerOrganizer"><i class="fas fa-spinner spin-icon"></i> Registering…</span>
+                            <span wire:loading wire:target="registerOrganizer"><i class="fas fa-spinner spin-icon"></i> <span class="loading-dots">Registering</span></span>
                             <span wire:loading.remove wire:target="registerOrganizer"><i class="fas fa-users-gear text-base"></i> Register Organizer</span>
                         </button>
                     </div>
@@ -1582,10 +1576,11 @@ new class extends Component {
                                     class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                                 Cancel
                             </button>
-                            <button type="button" wire:click="processImportFile" 
-                                    :disabled="!$wire.importFile"
+                            <button type="button" wire:click="processImportFile" wire:loading.attr="disabled" wire:target="processImportFile"
+                                    @if(!$importFile) disabled @endif
                                     class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                                <i class="fas fa-upload"></i> Import File
+                                <span wire:loading wire:target="processImportFile"><i class="fas fa-spinner spin-icon"></i> <span class="loading-dots">IMPORTING</span></span>
+                                <span wire:loading.remove wire:target="processImportFile"><i class="fas fa-upload"></i> Import File</span>
                             </button>
                         </div>
                     @else
@@ -1594,8 +1589,8 @@ new class extends Component {
                             <div>
                                 <div class="flex justify-between mb-2">
                                     <p class="text-slate-800 font-semibold text-sm flex items-center gap-2">
-                                        <span>{{ $importStatus }}</span>
                                         <i class="fas fa-spinner spin-icon text-purple-600"></i>
+                                        <span class="loading-dots">{{ $importStatus }}</span>
                                     </p>
                                     <p class="text-slate-600 text-xs font-mono">{{ $importProgress }}/{{ $importTotal }}</p>
                                 </div>
@@ -1699,9 +1694,10 @@ new class extends Component {
                                         Cancel
                                     </button>
                                 @endif
-                                <button type="button" wire:click="saveCourse"
+                                <button type="button" wire:click="saveCourse" wire:loading.attr="disabled" wire:target="saveCourse"
                                         class="flex-1 px-4 py-2 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                                    {{ $editingCourseId ? 'Update Course' : 'Add Course' }}
+                                    <span wire:loading wire:target="saveCourse"><i class="fas fa-spinner spin-icon"></i> <span class="loading-dots">{{ $editingCourseId ? 'Updating' : 'Adding' }}</span></span>
+                                    <span wire:loading.remove wire:target="saveCourse">{{ $editingCourseId ? 'Update Course' : 'Add Course' }}</span>
                                 </button>
                             </div>
                         </div>
@@ -1766,10 +1762,10 @@ new class extends Component {
                                 class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
                             Cancel
                         </button>
-                        <button type="button" wire:click="deleteCourse" wire:loading.attr="disabled"
+                        <button type="button" wire:click="deleteCourse" wire:loading.attr="disabled" wire:target="deleteCourse"
                                 class="flex-1 px-6 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2">
-                            <span wire:loading><i class="fas fa-spinner spin-icon"></i></span>
-                            <span wire:loading.remove>Delete</span>
+                            <span wire:loading wire:target="deleteCourse"><i class="fas fa-spinner spin-icon"></i></span>
+                            <span wire:loading.remove wire:target="deleteCourse">Delete</span>
                         </button>
                     </div>
                 </div>
@@ -1789,24 +1785,33 @@ new class extends Component {
                 <div class="p-8 space-y-6">
                     <!-- Profile Photo Section -->
                     <div class="text-center">
-                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}" 
-                             alt="{{ $viewingProfile['name'] }}"
-                             class="w-32 h-32 rounded-lg object-cover shadow-md mx-auto">
+                        <!-- Display current photo or preview of new photo -->
+                        @if($updatingProfilePhoto)
+                            <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" 
+                                 alt="Preview"
+                                 class="w-32 h-32 rounded-lg object-cover shadow-md mx-auto">
+                        @else
+                            <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}" 
+                                 alt="{{ $viewingProfile['name'] }}"
+                                 class="w-32 h-32 rounded-lg object-cover shadow-md mx-auto">
+                        @endif
                         
                         <!-- Photo Upload Section -->
                         <div class="mt-6 border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
                              @click="document.getElementById('profilePhotoInput').click()">
                             <i class="fas fa-camera text-3xl text-slate-400 block mb-2"></i>
-                            <p class="text-slate-700 font-semibold text-sm">Click to Update Photo</p>
+                            <p class="text-slate-700 font-semibold text-sm">
+                                {{ $updatingProfilePhoto ? 'Change Photo' : 'Click to Update Photo' }}
+                            </p>
                             <p class="text-xs text-slate-600 mt-1">JPG, PNG, WebP · max 5 MB</p>
                             <input type="file" id="profilePhotoInput" wire:model="updatingProfilePhoto" accept="image/*" class="hidden">
                         </div>
 
                         @if($updatingProfilePhoto)
-                        <button wire:click="updateProfilePhoto" wire:loading.attr="disabled"
+                        <button wire:click="updateProfilePhoto" wire:loading.attr="disabled" wire:target="updateProfilePhoto"
                                 class="w-full mt-4 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                            <span wire:loading><i class="fas fa-spinner spin-icon"></i></span>
-                            <span wire:loading.remove><i class="fas fa-save"></i> Save Photo</span>
+                            <span wire:loading wire:target="updateProfilePhoto"><i class="fas fa-spinner spin-icon"></i> Saving...</span>
+                            <span wire:loading.remove wire:target="updateProfilePhoto"><i class="fas fa-save"></i> Save Photo</span>
                         </button>
                         @endif
                     </div>
