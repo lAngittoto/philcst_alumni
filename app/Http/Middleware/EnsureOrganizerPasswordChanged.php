@@ -1,28 +1,18 @@
 <?php
 namespace App\Http\Middleware;
-
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Middleware to ensure organizers change their password on first login
- * 
- * Checks if:
- * 1. User is authenticated
- * 2. User is an organizer
- * 3. password_changed_at is NULL (not yet changed)
- * 
- * If all conditions are true, redirects to password change wizard
- * Allows access to specific routes (logout, change-password, password endpoints)
+ * Middleware to ensure organizers:
+ * 1. Are ACTIVE (not INACTIVE/SUSPENDED) — if not, force logout
+ * 2. Have changed their password on first login
  */
 class EnsureOrganizerPasswordChanged
 {
-    /**
-     * Routes that are allowed even if password not changed
-     */
-    protected $except = [
+    protected array $exceptRouteNames = [
         'logout',
         'organizer.change-password',
         'organizer.send-otp',
@@ -30,56 +20,60 @@ class EnsureOrganizerPasswordChanged
         'organizer.confirm-password',
     ];
 
+    protected array $exceptPaths = [
+        'organizer/change-password',
+        'organizer/password',
+        'logout',
+    ];
+
     public function handle(Request $request, Closure $next): Response
     {
-        // Get authenticated user
         $user = auth()->user();
-        
-        // Only apply to authenticated organizers
+
+        // Only enforce for authenticated organizers
         if (!$user || $user->role !== 'organizer') {
-            Log::info('EnsureOrganizerPasswordChanged: User not organizer or not authenticated');
             return $next($request);
         }
 
-        // Get organizer record
         $organizer = $user->organizer;
-        
-        Log::info('EnsureOrganizerPasswordChanged: Checking organizer', [
-            'user_id' => $user->id,
-            'user_name' => $user->name,
-            'has_organizer' => $organizer ? 'yes' : 'no',
-            'organizer_id' => $organizer?->id,
-            'password_changed_at' => $organizer?->password_changed_at,
-            'current_route' => $request->route()?->getName(),
-            'current_path' => $request->path(),
-        ]);
-        
-        // If organizer doesn't exist, allow through
+
+        // No organizer record → let through (will error downstream)
         if (!$organizer) {
-            Log::warning('EnsureOrganizerPasswordChanged: Organizer record not found for user: ' . $user->id);
+            Log::warning("EnsureOrganizerPasswordChanged: No organizer record for user #{$user->id}");
             return $next($request);
         }
 
-        // If password_changed_at is NULL, password not yet changed
-        // Redirect to change password page unless in allowed routes
-        if ($organizer->password_changed_at === null) {
-            // Check if current route is in the exception list
-            $currentRoute = $request->route()?->getName();
-            
-            Log::info('EnsureOrganizerPasswordChanged: Password not changed yet', [
-                'current_route' => $currentRoute,
-                'is_exception' => in_array($currentRoute, $this->except) ? 'yes' : 'no',
-            ]);
-            
-            // If route name is not in exceptions, redirect to password change
-            if (!in_array($currentRoute, $this->except)) {
-                Log::info('EnsureOrganizerPasswordChanged: Redirecting to password change');
-                return redirect()->route('organizer.change-password');
-            }
-        } else {
-            Log::info('EnsureOrganizerPasswordChanged: Password already changed at: ' . $organizer->password_changed_at);
+        // ── BLOCK INACTIVE ORGANIZERS ──────────────────────────────────────
+        if (in_array($organizer->status, ['INACTIVE', 'SUSPENDED'])) {
+            Log::info("EnsureOrganizerPasswordChanged: Blocking {$organizer->status} organizer #{$organizer->id}");
+            auth()->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+            return redirect()->route('login')
+                ->withErrors(['email' => 'Your account has been deactivated. Please contact the administrator.']);
+        }
+        // ──────────────────────────────────────────────────────────────────
+
+        // Password already changed → allow everything
+        if ($organizer->password_changed_at !== null) {
+            return $next($request);
         }
 
-        return $next($request);
+        // Password NOT yet changed — check if current route is exempt
+        $routeName   = $request->route()?->getName();
+        $currentPath = $request->path();
+
+        if ($routeName && in_array($routeName, $this->exceptRouteNames)) {
+            return $next($request);
+        }
+
+        foreach ($this->exceptPaths as $path) {
+            if (str_starts_with($currentPath, $path)) {
+                return $next($request);
+            }
+        }
+
+        Log::info("EnsureOrganizerPasswordChanged: Redirecting organizer #{$organizer->id} to change-password (route: {$routeName})");
+        return redirect()->route('organizer.change-password');
     }
 }

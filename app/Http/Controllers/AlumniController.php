@@ -12,10 +12,7 @@ use Illuminate\Support\Str;
 
 class AlumniController extends Controller
 {
-    /**
-     * Import CSV/Excel file for Alumni
-     * Required columns: name, student_id, course_code, year, email
-     */
+
     public function import(Request $request)
     {
         try {
@@ -51,7 +48,6 @@ class AlumniController extends Controller
                     $row[$key] = is_null($val) ? '' : trim((string) $val);
                 }
 
-                // Required fields: name, student_id, course_code, year, email
                 if (
                     empty($row['name'] ?? '') ||
                     empty($row['student_id'] ?? '') ||
@@ -176,9 +172,6 @@ class AlumniController extends Controller
         }
     }
 
-    // ================================================================
-    // PARSER METHODS
-    // ================================================================
 
     private function parseFile(string $filePath, string $extension): array
     {

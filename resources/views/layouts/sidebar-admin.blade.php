@@ -32,7 +32,7 @@
         class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300 
                shadow-2xl lg:translate-x-0 lg:static lg:inset-0 
                flex flex-col h-full text-white overflow-hidden shrink-0"
-        style="background-color: #2b0d3e;"> {{-- DARK COLOR PARA SA SIDEBAR --}}
+        style="background-color: #2b0d3e;">
 
         <div class="flex items-center justify-between h-24 px-6 border-b border-white/10 shrink-0">
             <div class="text-left">
@@ -53,21 +53,23 @@
             
             @php
                 $sidebarLinks = [
-                    ['route' => 'admin.dashboard', 'icon' => 'gauge-high', 'label' => 'Dashboard', 'pattern' => 'admin/dashboard*'],
-                    ['route' => 'user.management', 'icon' => 'users-gear', 'label' => 'User Management', 'pattern' => 'user/management*'],
-                    ['url' => '/employment', 'icon' => 'chart-line', 'label' => 'Employment Tracking'],
-                    ['url' => '/events', 'icon' => 'calendar-check', 'label' => 'Events'],
-                    ['url' => '/jobs', 'icon' => 'briefcase', 'label' => 'Job Opportunities'],
-                    ['route' => 'admin.yearbook', 'icon' => 'book-open', 'label' => 'Yearbook'],
-                    ['url' => '/reports', 'icon' => 'file-export', 'label' => 'Reports'],
-                    ['url' => '/audit-logs', 'icon' => 'clipboard-list', 'label' => 'Audit Logs'],
+                    ['route' => 'admin.dashboard',  'icon' => 'gauge-high',      'label' => 'Dashboard',           'pattern' => 'admin/dashboard*'],
+                    ['route' => 'user.management',  'icon' => 'users-gear',      'label' => 'User Management',     'pattern' => 'user/management*'],
+                    ['url'   => '/employment',       'icon' => 'chart-line',      'label' => 'Employment Tracking', 'pattern' => 'employment*'],
+                    ['url'   => '/events',           'icon' => 'calendar-check',  'label' => 'Events',              'pattern' => 'events*'],
+                    ['url'   => '/jobs',             'icon' => 'briefcase',       'label' => 'Job Opportunities',   'pattern' => 'jobs*'],
+                    ['route' => 'admin.yearbook',    'icon' => 'book-open',       'label' => 'Yearbook',            'pattern' => 'yearbook*'],
+                    ['url'   => '/reports',          'icon' => 'file-export',     'label' => 'Reports',             'pattern' => 'reports*'],
+                    ['url'   => '/audit-logs',       'icon' => 'clipboard-list',  'label' => 'Audit Logs',          'pattern' => 'audit-logs*'],
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php
-                    $url = isset($link['route']) ? route($link['route']) : $link['url'];
-                    $isActive = isset($link['pattern']) ? request()->is($link['pattern']) : request()->is(ltrim($link['url'] ?? '', '/'));
+                    $url      = isset($link['route']) ? route($link['route']) : $link['url'];
+                    $isActive = isset($link['pattern'])
+                        ? request()->is($link['pattern'])
+                        : request()->is(ltrim($link['url'] ?? '', '/'));
                 @endphp
                 <a href="{{ $url }}" 
                    wire:navigate
@@ -86,7 +88,7 @@
                 @csrf
                 <button type="submit" 
                         class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background-color: #7a3f91;"> {{-- LIGHT COLOR PARA SA LOGOUT --}}
+                        style="background-color: #7a3f91;">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
             </form>

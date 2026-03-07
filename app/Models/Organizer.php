@@ -44,18 +44,13 @@ class Organizer extends Model
         'display_name',
     ];
 
-    // ===================================
-    // Relationships
-    // ===================================
-
     public function user()
     {
         return $this->belongsTo(User::class);
     }
 
-    // ===================================
     // Password Change Helpers
-    // ===================================
+
 
     /**
      * Check if this is organizer's first time changing password
@@ -135,9 +130,9 @@ class Organizer extends Model
         ]);
     }
 
-    // ===================================
+
     // Scopes
-    // ===================================
+
 
     public function scopeActive($query)
     {
@@ -167,9 +162,9 @@ class Organizer extends Model
         return $query->whereNull('password_changed_at');
     }
 
-    // ===================================
+
     // Accessors
-    // ===================================
+
 
     /**
      * Get full profile photo URL via accessor
@@ -197,9 +192,9 @@ class Organizer extends Model
         return "{$this->name} ({$this->id_number})";
     }
 
-    // ===================================
+
     // Status Helpers
-    // ===================================
+ 
 
     public function getStatusLabel(): string
     {
