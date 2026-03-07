@@ -69,6 +69,17 @@ new #[Layout('app')] class extends Component {
             Auth::login($user, false);
             RateLimiter::clear($this->throttleKey());
             session()->regenerate();
+
+            // ── First login: password not yet changed ──
+            if ($organizer->password_changed_at === null) {
+                // Clean up any stale data from previous incomplete attempts
+                session()->forget(['pending_password_plain', 'password_reset_step']);
+                // Set flag so middleware knows this is a fresh authenticated redirect
+                session()->put('organizer_requires_password_change', true);
+                $this->redirectRoute('organizer.change-password', navigate: true);
+                return;
+            }
+
             $this->redirectRoute('organizer.dashboard', navigate: true);
             return;
         }
@@ -197,7 +208,6 @@ new #[Layout('app')] class extends Component {
                         @click="show = !show"
                         class="absolute inset-y-0 right-0 pr-6 flex items-center text-[#7a3f91] hover:text-[#2b0d3e] transition-colors duration-300 focus:outline-none z-10"
                     >
-                        {{-- Use SVG to avoid the FA text rendering bug --}}
                         <svg x-show="!show" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                             <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>

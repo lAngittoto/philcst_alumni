@@ -1,5 +1,5 @@
 @extends('layouts.sidebar-admin')
 
 @section('content')
-    @livewire('admin.user-management')
+    @livewire('admin.partials.user-management')
 @endsection

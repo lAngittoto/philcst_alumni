@@ -40,15 +40,29 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        if (session()->has('password_reset_step')) {
-            $step = session('password_reset_step');
-            if ($step === 'otp_verification') {
-                $this->step    = 2;
-                $this->otpSent = true;
-            } elseif ($step === 'password_confirmed') {
-                $this->step        = 3;
-                $this->otpVerified = true;
-            }
+        // ── Clear stale/orphaned session data ──────────────────────────────
+        $resetStep       = session('password_reset_step');
+        $pendingPassword = session('pending_password_plain');
+
+        // Session says OTP was sent but organizer has no active OTP → stale
+        if ($resetStep === 'otp_verification' && !$organizer->otp) {
+            session()->forget(['pending_password_plain', 'password_reset_step']);
+            $resetStep = null;
+        }
+
+        // No pending password but session claims a step → stale
+        if (!$pendingPassword && in_array($resetStep, ['otp_verification', 'password_confirmed'])) {
+            session()->forget(['pending_password_plain', 'password_reset_step']);
+            $resetStep = null;
+        }
+
+        // Restore step only if session is genuinely valid
+        if ($resetStep === 'otp_verification' && $pendingPassword) {
+            $this->step    = 2;
+            $this->otpSent = true;
+        } elseif ($resetStep === 'password_confirmed' && $pendingPassword) {
+            $this->step        = 3;
+            $this->otpVerified = true;
         }
     }
 
@@ -88,7 +102,7 @@ new #[Layout('app')] class extends Component {
 
     public function sendOtp(): void
     {
-        $this->errorMessage  = '';
+        $this->errorMessage   = '';
         $this->successMessage = '';
 
         $this->validate([
@@ -134,7 +148,7 @@ new #[Layout('app')] class extends Component {
 
     public function verifyOtp(): void
     {
-        $this->errorMessage  = '';
+        $this->errorMessage   = '';
         $this->successMessage = '';
 
         $this->validate([
@@ -196,7 +210,13 @@ new #[Layout('app')] class extends Component {
                 ->update(['password' => Hash::make($pendingPassword)]);
 
             $organizer->markPasswordChanged();
-            session()->forget(['pending_password_plain', 'password_reset_step']);
+
+            // Clear ALL password-change related session data including the fresh-login flag
+            session()->forget([
+                'pending_password_plain',
+                'password_reset_step',
+                'organizer_requires_password_change',
+            ]);
 
             Log::info("Password changed for organizer: {$organizer->email}");
             $this->redirect(route('organizer.dashboard'));
@@ -209,7 +229,7 @@ new #[Layout('app')] class extends Component {
 
     public function resendOtp(): void
     {
-        $this->errorMessage  = '';
+        $this->errorMessage   = '';
         $this->successMessage = '';
 
         $organizer = auth()->user()->organizer;
@@ -279,15 +299,16 @@ new #[Layout('app')] class extends Component {
     <div class="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
 
         {{-- Top bar with step indicator --}}
-        <div class="px-6 pt-6 pb-4 border-b border-gray-100">
+        <div class="px-6 pt-6 pb-5 border-b border-gray-100">
+
             {{-- Title --}}
             <div class="flex items-center gap-3 mb-5">
-                <div class="w-9 h-9 rounded-xl bg-[#7a3f91]/10 flex items-center justify-center flex-shrink-0">
-                    <i class="fa-solid fa-key text-[#7a3f91] text-sm"></i>
+                <div class="w-11 h-11 rounded-xl bg-[#7a3f91]/10 flex items-center justify-center flex-shrink-0">
+                    <i class="fa-solid fa-key text-[#7a3f91] text-base"></i>
                 </div>
                 <div>
-                    <h1 class="text-base font-bold text-gray-900 leading-tight">Change Password</h1>
-                    <p class="text-xs text-gray-400">Set up your new secure password</p>
+                    <h1 class="text-lg font-bold text-gray-900 leading-tight">Change Password</h1>
+                    <p class="text-sm text-gray-400 mt-0.5">Set up your new secure password</p>
                 </div>
             </div>
 
@@ -295,16 +316,16 @@ new #[Layout('app')] class extends Component {
             <div class="flex items-center gap-1">
                 @foreach ([1 => 'Password', 2 => 'Verify OTP', 3 => 'Confirm'] as $i => $label)
                     <div class="flex items-center {{ $i < 3 ? 'flex-1' : '' }}">
-                        <div class="flex items-center gap-1.5 flex-shrink-0">
-                            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold transition-all
                                 {{ $i == $step ? 'bg-[#7a3f91] text-white' : ($i < $step ? 'bg-[#7a3f91]/20 text-[#7a3f91]' : 'bg-gray-100 text-gray-400') }}">
                                 @if ($i < $step)
-                                    <i class="fa-solid fa-check text-[10px]"></i>
+                                    <i class="fa-solid fa-check text-xs"></i>
                                 @else
                                     {{ $i }}
                                 @endif
                             </div>
-                            <span class="text-xs font-medium hidden sm:inline
+                            <span class="text-sm font-semibold hidden sm:inline
                                 {{ $i == $step ? 'text-gray-800' : ($i < $step ? 'text-[#7a3f91]' : 'text-gray-400') }}">
                                 {{ $label }}
                             </span>
@@ -322,29 +343,29 @@ new #[Layout('app')] class extends Component {
 
             {{-- Alerts --}}
             @if ($errorMessage)
-                <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-start gap-2.5 text-sm">
-                    <i class="fa-solid fa-circle-exclamation mt-0.5 flex-shrink-0 text-red-500"></i>
-                    <p>{{ $errorMessage }}</p>
+                <div class="mb-5 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-start gap-3">
+                    <i class="fa-solid fa-circle-exclamation mt-0.5 flex-shrink-0 text-red-500 text-base"></i>
+                    <p class="text-sm leading-relaxed">{{ $errorMessage }}</p>
                 </div>
             @endif
 
             @if ($successMessage)
-                <div class="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 flex items-start gap-2.5 text-sm">
-                    <i class="fa-solid fa-circle-check mt-0.5 flex-shrink-0 text-emerald-500"></i>
-                    <p>{{ $successMessage }}</p>
+                <div class="mb-5 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 flex items-start gap-3">
+                    <i class="fa-solid fa-circle-check mt-0.5 flex-shrink-0 text-emerald-500 text-base"></i>
+                    <p class="text-sm leading-relaxed">{{ $successMessage }}</p>
                 </div>
             @endif
 
             {{-- ═══ STEP 1 ═══ --}}
             @if ($step == 1)
-                <div class="space-y-4">
-                    <div class="mb-1">
-                        <h2 class="text-lg font-bold text-gray-900">Create New Password</h2>
-                        <p class="text-xs text-gray-400 mt-0.5">Min. 8 characters with good strength</p>
+                <div class="space-y-5">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900">Create New Password</h2>
+                        <p class="text-sm text-gray-400 mt-1">Min. 8 characters with good strength</p>
                     </div>
 
                     {{-- Requirements --}}
-                    <div class="grid grid-cols-1 gap-1">
+                    <div class="grid grid-cols-1 gap-1.5">
                         @foreach ([
                             [strlen($password) >= 8,                 '8+ characters'],
                             [preg_match('/[A-Z]/', $password),       'Uppercase (A–Z)'],
@@ -352,27 +373,27 @@ new #[Layout('app')] class extends Component {
                             [preg_match('/[0-9]/', $password),       'Number (0–9)'],
                             [preg_match('/[!@#$%^&*?]/', $password), 'Special char (!@#$%^&*?)'],
                         ] as [$met, $text])
-                            <div class="flex items-center gap-2 text-xs py-0.5">
-                                <span class="w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0
+                            <div class="flex items-center gap-2 py-0.5">
+                                <span class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0
                                     {{ $met ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-300' }}">
-                                    <i class="fa-solid {{ $met ? 'fa-check' : 'fa-circle' }} text-[8px]"></i>
+                                    <i class="fa-solid {{ $met ? 'fa-check' : 'fa-circle' }} text-[9px]"></i>
                                 </span>
-                                <span class="{{ $met ? 'text-emerald-700 font-medium' : 'text-gray-400' }}">{{ $text }}</span>
+                                <span class="text-sm {{ $met ? 'text-emerald-700 font-medium' : 'text-gray-400' }}">{{ $text }}</span>
                             </div>
                         @endforeach
                     </div>
 
                     {{-- Password field --}}
                     <div>
-                        <label class="block text-xs font-semibold text-gray-600 mb-1.5">New Password</label>
+                        <label class="block text-sm font-semibold text-gray-600 mb-2">New Password</label>
                         <div class="relative">
                             <input wire:model.live="password"
                                    type="{{ $showPassword ? 'text' : 'password' }}"
                                    placeholder="Enter new password" autocomplete="new-password"
-                                   class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/15 transition-all pr-10 bg-gray-50/50">
+                                   class="w-full px-4 py-3 text-base border border-gray-200 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/15 transition-all pr-12 bg-gray-50/50">
                             <button type="button" wire:click="$toggle('showPassword')"
-                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-[#7a3f91] transition-colors">
-                                <i class="fa-solid {{ $showPassword ? 'fa-eye-slash' : 'fa-eye' }} text-sm"></i>
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-300 hover:text-[#7a3f91] transition-colors">
+                                <i class="fa-solid {{ $showPassword ? 'fa-eye-slash' : 'fa-eye' }} text-base"></i>
                             </button>
                         </div>
                     </div>
@@ -380,13 +401,13 @@ new #[Layout('app')] class extends Component {
                     {{-- Strength bar --}}
                     @if ($password !== '')
                         <div>
-                            <div class="flex justify-between items-center mb-1">
-                                <span class="text-xs text-gray-400">Strength</span>
-                                <span class="text-xs font-bold {{ $this->getPasswordStrengthInfo()['color'] }}">
+                            <div class="flex justify-between items-center mb-1.5">
+                                <span class="text-sm text-gray-400 font-medium">Strength</span>
+                                <span class="text-sm font-bold {{ $this->getPasswordStrengthInfo()['color'] }}">
                                     {{ $this->getPasswordStrengthInfo()['label'] }}
                                 </span>
                             </div>
-                            <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
                                 <div class="h-full rounded-full transition-all duration-500 {{ $this->getPasswordStrengthInfo()['progressColor'] }} {{ $this->getPasswordStrengthInfo()['width'] }}"></div>
                             </div>
                         </div>
@@ -394,75 +415,91 @@ new #[Layout('app')] class extends Component {
 
                     {{-- Confirm password --}}
                     <div>
-                        <label class="block text-xs font-semibold text-gray-600 mb-1.5">Confirm Password</label>
+                        <label class="block text-sm font-semibold text-gray-600 mb-2">Confirm Password</label>
                         <div class="relative">
                             <input wire:model="password_confirmation"
                                    type="{{ $showConfirmPassword ? 'text' : 'password' }}"
                                    placeholder="Re-enter password" autocomplete="new-password"
-                                   class="w-full px-3 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/15 transition-all pr-10 bg-gray-50/50
+                                   class="w-full px-4 py-3 text-base border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/15 transition-all pr-12 bg-gray-50/50
                                        {{ $password_confirmation !== '' && $password !== $password_confirmation ? 'border-red-300 focus:border-red-400' : ($password_confirmation !== '' && $password === $password_confirmation ? 'border-emerald-300 focus:border-emerald-400' : 'border-gray-200 focus:border-[#7a3f91]') }}">
                             <button type="button" wire:click="$toggle('showConfirmPassword')"
-                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-[#7a3f91] transition-colors">
-                                <i class="fa-solid {{ $showConfirmPassword ? 'fa-eye-slash' : 'fa-eye' }} text-sm"></i>
+                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-300 hover:text-[#7a3f91] transition-colors">
+                                <i class="fa-solid {{ $showConfirmPassword ? 'fa-eye-slash' : 'fa-eye' }} text-base"></i>
                             </button>
                         </div>
                         @if ($password_confirmation !== '' && $password !== $password_confirmation)
-                            <p class="text-xs text-red-500 mt-1 flex items-center gap-1"><i class="fa-solid fa-xmark"></i> Passwords do not match</p>
+                            <p class="text-sm text-red-500 mt-1.5 flex items-center gap-1.5">
+                                <i class="fa-solid fa-xmark"></i> Passwords do not match
+                            </p>
                         @elseif ($password_confirmation !== '' && $password === $password_confirmation)
-                            <p class="text-xs text-emerald-600 mt-1 flex items-center gap-1"><i class="fa-solid fa-check"></i> Passwords match</p>
+                            <p class="text-sm text-emerald-600 mt-1.5 flex items-center gap-1.5">
+                                <i class="fa-solid fa-check"></i> Passwords match
+                            </p>
                         @endif
                     </div>
 
                     <button wire:click="sendOtp" wire:loading.attr="disabled" wire:target="sendOtp"
-                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] text-white py-2.5 rounded-xl font-semibold text-sm shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2 mt-2">
-                        <span wire:loading.remove wire:target="sendOtp"><i class="fa-solid fa-paper-plane mr-1 text-xs"></i> Send OTP to Email</span>
-                        <span wire:loading wire:target="sendOtp"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-xs"></i> Sending…</span>
+                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] text-white py-3 rounded-xl font-semibold text-base shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2 mt-1">
+                        <span wire:loading.remove wire:target="sendOtp">
+                            <i class="fa-solid fa-paper-plane mr-1"></i> Send OTP to Email
+                        </span>
+                        <span wire:loading wire:target="sendOtp">
+                            <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Sending…
+                        </span>
                     </button>
                 </div>
             @endif
 
             {{-- ═══ STEP 2 ═══ --}}
             @if ($step == 2)
-                <div class="space-y-4">
-                    <div class="mb-1">
-                        <h2 class="text-lg font-bold text-gray-900">Verify Your Email</h2>
-                        <p class="text-xs text-gray-400 mt-0.5">Enter the 6-digit code sent to your email</p>
+                <div class="space-y-5">
+                    <div>
+                        <h2 class="text-xl font-bold text-gray-900">Verify Your Email</h2>
+                        <p class="text-sm text-gray-400 mt-1">Enter the 6-digit code sent to your email</p>
                     </div>
 
                     {{-- Countdown --}}
-                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-center">
-                        <p class="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Code expires in</p>
-                        <div class="text-3xl font-bold font-mono text-[#7a3f91] tabular-nums" x-text="formattedTime">10:00</div>
-                        <p x-show="expired" x-cloak class="text-red-500 text-xs mt-2 font-semibold">
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-5 text-center">
+                        <p class="text-sm text-gray-400 mb-2 font-semibold uppercase tracking-wide">Code expires in</p>
+                        <div class="text-4xl font-bold font-mono text-[#7a3f91] tabular-nums" x-text="formattedTime">10:00</div>
+                        <p x-show="expired" x-cloak class="text-red-500 text-sm mt-2 font-semibold">
                             <i class="fa-solid fa-triangle-exclamation mr-1"></i> OTP expired — request a new one below.
                         </p>
                     </div>
 
                     {{-- OTP input --}}
                     <div>
-                        <label class="block text-xs font-semibold text-gray-600 mb-1.5">6-Digit Code</label>
+                        <label class="block text-sm font-semibold text-gray-600 mb-2">6-Digit Code</label>
                         <input wire:model="otp"
                                type="text" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
                                placeholder="000000" autocomplete="one-time-code"
-                               class="w-full px-4 py-3 text-center text-2xl font-bold tracking-[0.6em] border border-gray-200 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/15 transition-all bg-gray-50/50">
+                               class="w-full px-4 py-4 text-center text-3xl font-bold tracking-[0.6em] border border-gray-200 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/15 transition-all bg-gray-50/50">
                     </div>
 
-                    <div class="space-y-2 pt-1">
+                    <div class="space-y-3 pt-1">
                         <button wire:click="verifyOtp" wire:loading.attr="disabled" wire:target="verifyOtp"
-                                class="w-full bg-[#7a3f91] hover:bg-[#6a3080] text-white py-2.5 rounded-xl font-semibold text-sm shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2">
-                            <span wire:loading.remove wire:target="verifyOtp"><i class="fa-solid fa-shield-halved mr-1 text-xs"></i> Verify Code</span>
-                            <span wire:loading wire:target="verifyOtp"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-xs"></i> Verifying…</span>
+                                class="w-full bg-[#7a3f91] hover:bg-[#6a3080] text-white py-3 rounded-xl font-semibold text-base shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2">
+                            <span wire:loading.remove wire:target="verifyOtp">
+                                <i class="fa-solid fa-shield-halved mr-1"></i> Verify Code
+                            </span>
+                            <span wire:loading wire:target="verifyOtp">
+                                <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Verifying…
+                            </span>
                         </button>
 
                         <button wire:click="resendOtp" wire:loading.attr="disabled" wire:target="resendOtp" type="button"
-                                class="w-full bg-white text-[#7a3f91] py-2.5 rounded-xl font-semibold text-sm border border-[#7a3f91]/30 hover:border-[#7a3f91] hover:bg-[#7a3f91]/5 active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2">
-                            <span wire:loading.remove wire:target="resendOtp"><i class="fa-solid fa-rotate-right mr-1 text-xs"></i> Resend Code</span>
-                            <span wire:loading wire:target="resendOtp"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-xs"></i> Sending…</span>
+                                class="w-full bg-white text-[#7a3f91] py-3 rounded-xl font-semibold text-base border border-[#7a3f91]/30 hover:border-[#7a3f91] hover:bg-[#7a3f91]/5 active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2">
+                            <span wire:loading.remove wire:target="resendOtp">
+                                <i class="fa-solid fa-rotate-right mr-1"></i> Resend Code
+                            </span>
+                            <span wire:loading wire:target="resendOtp">
+                                <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Sending…
+                            </span>
                         </button>
                     </div>
 
                     <button wire:click="previousStep" type="button"
-                            class="w-full text-xs text-gray-400 py-1 text-center hover:text-[#7a3f91] transition-colors">
+                            class="w-full text-sm text-gray-400 py-1.5 text-center hover:text-[#7a3f91] transition-colors font-medium">
                         ← Back to Change Password
                     </button>
                 </div>
@@ -470,28 +507,32 @@ new #[Layout('app')] class extends Component {
 
             {{-- ═══ STEP 3 ═══ --}}
             @if ($step == 3)
-                <div class="space-y-4 text-center py-2">
+                <div class="space-y-5 text-center py-2">
                     <div class="flex justify-center">
-                        <div class="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center">
-                            <i class="fa-solid fa-check text-2xl text-emerald-500"></i>
+                        <div class="w-20 h-20 bg-emerald-100 rounded-2xl flex items-center justify-center">
+                            <i class="fa-solid fa-check text-3xl text-emerald-500"></i>
                         </div>
                     </div>
                     <div>
-                        <h2 class="text-xl font-bold text-gray-900 mb-1">Identity Verified</h2>
-                        <p class="text-sm text-gray-500">Your OTP has been confirmed. Click below to save your new password.</p>
+                        <h2 class="text-2xl font-bold text-gray-900 mb-2">Identity Verified</h2>
+                        <p class="text-base text-gray-500 leading-relaxed">Your OTP has been confirmed. Click below to save your new password.</p>
                     </div>
-                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-left text-sm text-gray-600 space-y-1.5">
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-left space-y-2.5">
                         @foreach (['Your new password will be saved securely', 'You\'ll be redirected to your Organizer Dashboard', 'Use your new password for all future logins'] as $item)
-                            <div class="flex items-start gap-2">
-                                <i class="fa-solid fa-circle-dot text-[#7a3f91]/50 text-xs mt-0.5 flex-shrink-0"></i>
-                                <span>{{ $item }}</span>
+                            <div class="flex items-start gap-2.5">
+                                <i class="fa-solid fa-circle-dot text-[#7a3f91]/50 text-sm mt-0.5 flex-shrink-0"></i>
+                                <span class="text-sm text-gray-600 leading-relaxed">{{ $item }}</span>
                             </div>
                         @endforeach
                     </div>
                     <button wire:click="confirmPassword" wire:loading.attr="disabled" wire:target="confirmPassword"
-                            class="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl font-semibold text-sm shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2 mt-2">
-                        <span wire:loading.remove wire:target="confirmPassword"><i class="fa-solid fa-arrow-right mr-1 text-xs"></i> Confirm & Go to Dashboard</span>
-                        <span wire:loading wire:target="confirmPassword"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-xs"></i> Saving…</span>
+                            class="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-semibold text-base shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2 mt-1">
+                        <span wire:loading.remove wire:target="confirmPassword">
+                            <i class="fa-solid fa-arrow-right mr-1"></i> Confirm & Go to Dashboard
+                        </span>
+                        <span wire:loading wire:target="confirmPassword">
+                            <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Saving…
+                        </span>
                     </button>
                 </div>
             @endif
@@ -500,7 +541,7 @@ new #[Layout('app')] class extends Component {
 
         {{-- Footer --}}
         <div class="px-6 pb-5 text-center">
-            <p class="text-xs text-gray-300">&copy; {{ date('Y') }} Philippine College of Science and Technology</p>
+            <p class="text-sm text-gray-300">&copy; {{ date('Y') }} Philippine College of Science and Technology</p>
         </div>
     </div>
 

@@ -18,6 +18,7 @@ class Course extends Model
         'code',
         'name',
         'description',
+        'college',
     ];
 
     protected $casts = [
