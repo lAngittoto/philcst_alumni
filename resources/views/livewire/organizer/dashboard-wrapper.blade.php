@@ -1,4 +1,4 @@
-@extends('layouts.sidebar-admin')
+@extends('layouts.sidebar-organizer')
 @section('content')
-    @livewire('admin.yearbook')
+    @livewire('organizer.dashboard')
 @endsection

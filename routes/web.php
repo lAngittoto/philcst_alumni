@@ -34,7 +34,7 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 
-    Route::view('/organizer/dashboard',   'organizer.dashboard')  ->name('organizer.dashboard');
+    Route::view('/organizer/dashboard', 'organizer.dashboard-wrapper')->name('organizer.dashboard');
     Route::view('/organizer/events',      'organizer.events')     ->name('organizer.events');
     Route::view('/organizer/jobs',        'organizer.jobs')       ->name('organizer.jobs');
     Route::view('/organizer/employment',  'organizer.employment') ->name('organizer.employment');
@@ -50,6 +50,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::get('/user/management', fn() => view('admin.alumni-management-wrapper'))->name('user.management');
     Route::get('/yearbook', fn() => view('admin.yearbook-wrapper'))->name('admin.yearbook');
+    Route::get('/job/posts', fn() => view('admin.job-posts-wrapper'))->name('job.posts');
 
     Route::post('/alumni/import', [AlumniController::class, 'import'])->name('alumni.import');
 
