@@ -1,13 +1,14 @@
 {{-- =====================================================
      ORGANIZERS TAB CONTENT
+     Always in the DOM (parent uses CSS hidden, not @if)
+     so wire:model.live.debounce is always initialized.
      ===================================================== --}}
 <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
 
-    {{-- SEARCH - plain wire:model, no wire:ignore, no Alpine searchBox --}}
     <div class="relative flex-1 min-w-[200px] max-w-sm">
         <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
         <input type="text"
-               wire:model.live.debounce.400ms="orgSearch"
+               wire:model.live.debounce.300ms="orgSearch"
                placeholder="Search name, ID, email…"
                class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus"
                autocomplete="off" spellcheck="false">
@@ -32,13 +33,12 @@
 <div class="relative flex-1 min-h-0"
      x-data="{ showScrollTop: false }">
     <div id="org-table-scroll"
-         x-ref="scrollArea"
          @scroll.passive="showScrollTop = $event.target.scrollTop > 200"
-         class="h-full overflow-auto scrollbar-custom tbl-container"
+         class="h-full overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
          wire:loading.class="tbl-loading"
-         wire:target="orgSearch,orgCollege,orgSort,resetOrgFilters,toggleOrganizerStatus">
-        <table class="w-full">
-            <thead class="btn-primary text-white sticky top-0 z-10">
+         wire:target="orgSearch,orgCollege,orgSort,resetOrgFilters,executeToggleOrganizerStatus">
+        <table class="w-full border-separate border-spacing-0">
+            <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
                 <tr>
                     <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Name</th>
                     <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Teacher ID</th>
@@ -80,73 +80,16 @@
                                     class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
                                 <i class="fas fa-eye"></i> View
                             </button>
-
-                            @if($item->status==='ACTIVE')
-                                <div x-data="{ open: false }" @keydown.escape.window="open=false">
-                                    <button @click="open=true"
-                                            class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200">
-                                        <i class="fas fa-ban"></i> Deactivate
-                                    </button>
-                                    <div x-show="open" x-transition
-                                         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-                                         style="display:none">
-                                        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-                                            <div class="flex items-center gap-3 mb-5">
-                                                <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center shrink-0">
-                                                    <i class="fas fa-ban text-red-600 text-lg"></i>
-                                                </div>
-                                                <div>
-                                                    <p class="font-bold text-slate-800 text-lg">Deactivate Organizer?</p>
-                                                    <p class="text-sm text-slate-500 mt-0.5">{{ $item->name }}</p>
-                                                </div>
-                                            </div>
-                                            <p class="text-base text-slate-600 mb-6">This organizer will no longer be able to log in. You can reactivate them at any time.</p>
-                                            <div class="flex gap-3">
-                                                <button @click="open=false"
-                                                        class="flex-1 px-4 py-3 border border-slate-300 text-slate-700 rounded-lg text-base font-bold hover:bg-slate-50 transition">
-                                                    Cancel
-                                                </button>
-                                                <button @click="open=false; $wire.toggleOrganizerStatus({{ $item->id }})"
-                                                        class="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg text-base font-bold hover:bg-red-700 transition">
-                                                    Yes, Deactivate
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                            @if($item->status === 'ACTIVE')
+                                <button wire:click="confirmToggleOrganizerStatus({{ $item->id }}, 'deactivate')"
+                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200">
+                                    <i class="fas fa-ban"></i> Deactivate
+                                </button>
                             @else
-                                <div x-data="{ open: false }" @keydown.escape.window="open=false">
-                                    <button @click="open=true"
-                                            class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-200">
-                                        <i class="fas fa-circle-check"></i> Activate
-                                    </button>
-                                    <div x-show="open" x-transition
-                                         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-                                         style="display:none">
-                                        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-                                            <div class="flex items-center gap-3 mb-5">
-                                                <div class="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
-                                                    <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
-                                                </div>
-                                                <div>
-                                                    <p class="font-bold text-slate-800 text-lg">Activate Organizer?</p>
-                                                    <p class="text-sm text-slate-500 mt-0.5">{{ $item->name }}</p>
-                                                </div>
-                                            </div>
-                                            <p class="text-base text-slate-600 mb-6">This organizer will be able to log in again.</p>
-                                            <div class="flex gap-3">
-                                                <button @click="open=false"
-                                                        class="flex-1 px-4 py-3 border border-slate-300 text-slate-700 rounded-lg text-base font-bold hover:bg-slate-50 transition">
-                                                    Cancel
-                                                </button>
-                                                <button @click="open=false; $wire.toggleOrganizerStatus({{ $item->id }})"
-                                                        class="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-lg text-base font-bold hover:bg-emerald-700 transition">
-                                                    Yes, Activate
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                                <button wire:click="confirmToggleOrganizerStatus({{ $item->id }}, 'activate')"
+                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-200">
+                                    <i class="fas fa-circle-check"></i> Activate
+                                </button>
                             @endif
                         </div>
                     </td>
@@ -171,9 +114,8 @@
             x-transition:leave="transition ease-in duration-150"
             x-transition:leave-start="opacity-100 scale-100"
             x-transition:leave-end="opacity-0 scale-75"
-            @click="$refs.scrollArea.scrollTo({ top: 0, behavior: 'smooth' })"
-            class="absolute bottom-4 right-4 z-20 w-10 h-10 btn-primary rounded-full shadow-lg
-                   flex items-center justify-center hover:shadow-xl transition-shadow"
+            @click="document.getElementById('org-table-scroll').scrollTo({ top: 0, behavior: 'smooth' })"
+            class="absolute bottom-4 right-4 z-20 w-10 h-10 btn-primary rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow"
             style="display:none"
             title="Back to top">
         <i class="fas fa-arrow-up text-sm"></i>

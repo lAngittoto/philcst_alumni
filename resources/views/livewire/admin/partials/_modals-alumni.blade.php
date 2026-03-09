@@ -22,6 +22,16 @@
         </div>
         @endif
         <form wire:submit="registerAlumni" class="p-8 space-y-6">
+
+            {{-- Reset button --}}
+            <div class="flex justify-end">
+                <button type="button" wire:click="$set('alumniErrors',[])"
+                        onclick="this.closest('form').querySelectorAll('input[type=text],input[type=email],input[type=number],select').forEach(el=>{el.value='';el.dispatchEvent(new Event('input'))})"
+                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition">
+                    <i class="fas fa-rotate-left"></i> Reset Form
+                </button>
+            </div>
+
             <div>
                 <label class="block text-sm font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
                 <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
@@ -37,69 +47,64 @@
                     <input type="file" id="regPhotoInput" wire:model="regPhoto" accept="image/*" class="hidden">
                 </div>
             </div>
+
             <div>
                 <label class="block text-sm font-bold text-slate-800 mb-3">Full Name <span class="text-red-500">*</span></label>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <input wire:model="regFirstName" type="text" placeholder="First Name"
+                        <input wire:model.defer="regFirstName" type="text" placeholder="First Name"
                                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <p class="text-xs text-slate-500 mt-1.5 pl-1">First Name <span class="text-red-400">*</span></p>
                     </div>
                     <div>
-                        <input wire:model="regLastName" type="text" placeholder="Last Name"
+                        <input wire:model.defer="regLastName" type="text" placeholder="Last Name"
                                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <p class="text-xs text-slate-500 mt-1.5 pl-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4 mt-3">
                     <div>
-                        <input wire:model="regMiddleInitial" type="text" placeholder="Middle Initial" maxlength="2"
+                        <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
                                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial</p>
+                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial <span class="text-slate-400">(letters only)</span></p>
                     </div>
                     <div>
-                        <input wire:model="regSuffix" type="text" placeholder="Suffix (Jr., Sr.)" maxlength="10"
+                        <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
                                class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix</p>
+                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix <span class="text-slate-400">(optional)</span></p>
                     </div>
                 </div>
-                @if($regFirstName||$regLastName)
-                <p class="text-sm text-purple-700 font-semibold mt-3 pl-1">
-                    Preview: {{ trim("{$regFirstName} {$regMiddleInitial} {$regLastName}".($regSuffix?' '.$regSuffix:'')) }}
-                </p>
-                @endif
             </div>
+
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Student ID <span class="text-red-500">*</span></label>
-                    <div class="relative">
-                        <input wire:model="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
-                               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
-                        @if($regStudentId&&strlen($regStudentId)<8)
-                        <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-mono">→ {{ str_pad($regStudentId,8,'0',STR_PAD_LEFT) }}</span>
-                        @endif
-                    </div>
+                    <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
+                           class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
+                    <p class="text-xs text-slate-500 mt-1.5 pl-1">Numbers only · will be padded to 8 digits</p>
                 </div>
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Email <span class="text-red-500">*</span></label>
-                    <input wire:model="regEmail" type="email" placeholder="student@example.com"
+                    <input wire:model.defer="regEmail" type="email" placeholder="student@example.com"
                            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                 </div>
             </div>
+
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Course <span class="text-red-500">*</span></label>
-                    <select wire:model="regCourseCode" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <select wire:model.defer="regCourseCode" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <option value="">Select Course</option>
                         @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Year <span class="text-red-500">*</span></label>
-                    <input wire:model="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999"
+                    <label class="block text-sm font-bold text-slate-800 mb-3">Batch Year <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999"
                            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                 </div>
             </div>
+
             <div class="flex gap-4 pt-3">
                 <button type="button" wire:click="closeModal"
                         class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
@@ -234,12 +239,12 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-2">Course Code</label>
-                        <input wire:model="courseCode" type="text" placeholder="e.g. CS101" maxlength="20"
+                        <input wire:model.defer="courseCode" type="text" placeholder="e.g. CS101" maxlength="20"
                                class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-2">Course Name</label>
-                        <input wire:model="courseName" type="text" placeholder="e.g. Computer Science" maxlength="100"
+                        <input wire:model.defer="courseName" type="text" placeholder="e.g. Computer Science" maxlength="100"
                                class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                     </div>
                     <div class="flex gap-3 pt-2">

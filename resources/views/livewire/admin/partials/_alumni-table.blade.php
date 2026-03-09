@@ -3,11 +3,21 @@
      ===================================================== --}}
 <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
 
-    {{-- SEARCH - plain wire:model, no wire:ignore, no Alpine searchBox --}}
-    <div class="relative flex-1 min-w-[200px] max-w-sm">
+    {{-- SEARCH — Alpine-controlled to prevent focus loss on re-render --}}
+    <div class="relative flex-1 min-w-[200px] max-w-sm"
+         x-data="{
+             query: @entangle('alumniSearch').live,
+             timer: null,
+             onInput(e) {
+                 clearTimeout(this.timer);
+                 this.timer = setTimeout(() => { this.query = e.target.value; }, 300);
+             }
+         }"
+         wire:ignore>
         <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
         <input type="text"
-               wire:model.live.debounce.400ms="alumniSearch"
+               :value="query"
+               @input="onInput($event)"
                placeholder="Search name, ID, email…"
                class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus"
                autocomplete="off" spellcheck="false">
@@ -35,13 +45,13 @@
 {{-- Table wrapper --}}
 <div class="relative flex-1 min-h-0"
      x-data="{ showScrollTop: false }">
-    <div x-ref="scrollArea"
+    <div id="alumni-table-scroll"
          @scroll.passive="showScrollTop = $event.target.scrollTop > 200"
-         class="h-full overflow-auto scrollbar-custom tbl-container"
+         class="h-full overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
          wire:loading.class="tbl-loading"
          wire:target="alumniSearch,alumniBatch,alumniCourse,alumniSort,resetAlumniFilters">
-        <table class="w-full">
-            <thead class="btn-primary text-white sticky top-0 z-10">
+        <table class="w-full border-separate border-spacing-0">
+            <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
                 <tr>
                     <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Name</th>
                     <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Student ID</th>
@@ -99,9 +109,8 @@
             x-transition:leave="transition ease-in duration-150"
             x-transition:leave-start="opacity-100 scale-100"
             x-transition:leave-end="opacity-0 scale-75"
-            @click="$refs.scrollArea.scrollTo({ top: 0, behavior: 'smooth' })"
-            class="absolute bottom-4 right-4 z-20 w-10 h-10 btn-primary rounded-full shadow-lg
-                   flex items-center justify-center hover:shadow-xl transition-shadow"
+            @click="document.getElementById('alumni-table-scroll').scrollTo({ top: 0, behavior: 'smooth' })"
+            class="absolute bottom-4 right-4 z-20 w-10 h-10 btn-primary rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow"
             style="display:none"
             title="Back to top">
         <i class="fas fa-arrow-up text-sm"></i>

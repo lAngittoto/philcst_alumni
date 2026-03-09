@@ -84,6 +84,11 @@ new class extends Component {
     public ?string $orgRenamingCollege     = null;
     public string  $orgRenameCollegeName   = '';
 
+    // ---- Toggle Organizer Status Confirm ----
+    public ?int   $pendingToggleId     = null;
+    public string $pendingToggleAction = '';
+    public string $pendingToggleName   = '';
+
     // ---- Import ----
     public        $importFile         = null;
     public bool   $importingFile      = false;
@@ -111,6 +116,12 @@ new class extends Component {
     public function handleShowFlash(string $type, string $message): void
     {
         $this->flash($type, $message);
+    }
+
+    #[On('setActiveTab')]
+    public function handleSetActiveTab(string $tab): void
+    {
+        $this->activeTab = $tab;
     }
 
     public function mount(): void
@@ -187,7 +198,12 @@ new class extends Component {
     #[Computed]
     public function orgDepartmentsGrouped()
     {
-        return Course::whereNotNull('college')->where('college','!=','')->orderBy('college')->orderBy('code')->get()->groupBy('college');
+        return Course::whereNotNull('college')
+            ->where('college','!=','')
+            ->orderBy('college')
+            ->orderBy('code')
+            ->get()
+            ->groupBy('college');
     }
 
     #[Computed]
@@ -258,7 +274,10 @@ new class extends Component {
 
     public function closeModal(): void
     {
-        $this->activeModal = '';
+        $this->activeModal         = '';
+        $this->pendingToggleId     = null;
+        $this->pendingToggleAction = '';
+        $this->pendingToggleName   = '';
         $this->resetImportState();
         $this->viewingProfileId     = null;
         $this->updatingProfilePhoto = null;
@@ -358,20 +377,43 @@ new class extends Component {
     {
         $this->alumniErrors=[]; $this->registeringAlumni=true;
         try {
-            if (!$this->validateName(trim($this->regFirstName))) throw new \Exception('First name must contain only letters, spaces, hyphens, or apostrophes');
-            if (!$this->validateName(trim($this->regLastName)))  throw new \Exception('Last name must contain only letters, spaces, hyphens, or apostrophes');
-            if (trim($this->regSuffix)!==''&&!preg_match('/^[a-zA-Z\s\.\,]+$/',$this->regSuffix)) throw new \Exception('Suffix must contain only letters, spaces, periods, or commas');
+            if (!$this->validateName(trim($this->regFirstName))) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (!$this->validateName(trim($this->regLastName)))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (trim($this->regMiddleInitial)!==''&&!preg_match('/^[a-zA-Z]+$/',trim($this->regMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
+            if (trim($this->regSuffix)!==''&&!preg_match('/^[a-zA-Z\.\s]+$/',trim($this->regSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
             $fullName=$this->buildFullName($this->regFirstName,$this->regMiddleInitial,$this->regLastName,$this->regSuffix);
             $this->validate([
                 'regFirstName'    =>['required','string','max:100'],
                 'regLastName'     =>['required','string','max:100'],
-                'regMiddleInitial'=>['nullable','string','max:2'],
+                'regMiddleInitial'=>['nullable','string','max:2','regex:/^[a-zA-Z]+$/'],
                 'regSuffix'       =>['nullable','string','max:10'],
                 'regStudentId'    =>['required','string','regex:/^\d{1,8}$/','unique:alumni,student_id'],
                 'regEmail'        =>['required','email','max:255','unique:alumni,email','unique:users,email'],
                 'regCourseCode'   =>['required','string','exists:courses,code'],
                 'regYear'         =>['required','integer','digits:4'],
                 'regPhoto'        =>['nullable','image','mimes:jpg,jpeg,png,webp','max:5120'],
+            ],[
+                'regFirstName.required'    => 'First name is required.',
+                'regFirstName.max'         => 'First name must not exceed 100 characters.',
+                'regLastName.required'     => 'Last name is required.',
+                'regLastName.max'          => 'Last name must not exceed 100 characters.',
+                'regMiddleInitial.max'     => 'Middle initial must be at most 2 characters.',
+                'regMiddleInitial.regex'   => 'Middle initial may only contain letters.',
+                'regSuffix.max'            => 'Suffix must not exceed 10 characters.',
+                'regStudentId.required'    => 'Student ID is required.',
+                'regStudentId.regex'       => 'Student ID must be 1 to 8 digits only (numbers only).',
+                'regStudentId.unique'      => 'This Student ID is already registered.',
+                'regEmail.required'        => 'Email address is required.',
+                'regEmail.email'           => 'Please enter a valid email address.',
+                'regEmail.unique'          => 'This email address is already taken.',
+                'regCourseCode.required'   => 'Please select a course.',
+                'regCourseCode.exists'     => 'The selected course does not exist.',
+                'regYear.required'         => 'Batch year is required.',
+                'regYear.integer'          => 'Batch year must be a valid year.',
+                'regYear.digits'           => 'Batch year must be exactly 4 digits (e.g. 2024).',
+                'regPhoto.image'           => 'Profile photo must be an image file.',
+                'regPhoto.mimes'           => 'Profile photo must be JPG, PNG, or WebP format.',
+                'regPhoto.max'             => 'Profile photo must not exceed 5MB.',
             ]);
             $paddedId=str_pad($this->regStudentId,8,'0',STR_PAD_LEFT);
             $course=Course::where('code',$this->regCourseCode)->firstOrFail();
@@ -407,20 +449,47 @@ new class extends Component {
     {
         $this->organizerErrors=[]; $this->registeringOrganizer=true;
         try {
-            if (!$this->validateName(trim($this->orgFirstName))) throw new \Exception('First name must contain only letters, spaces, hyphens, or apostrophes');
-            if (!$this->validateName(trim($this->orgLastName)))  throw new \Exception('Last name must contain only letters, spaces, hyphens, or apostrophes');
-            if (trim($this->orgSuffix)!==''&&!preg_match('/^[a-zA-Z\s\.\,]+$/',$this->orgSuffix)) throw new \Exception('Suffix must contain only letters, spaces, periods, or commas');
+            if (!$this->validateName(trim($this->orgFirstName))) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (!$this->validateName(trim($this->orgLastName)))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (trim($this->orgMiddleInitial)!==''&&!preg_match('/^[a-zA-Z]+$/',trim($this->orgMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
+            if (trim($this->orgSuffix)!==''&&!preg_match('/^[a-zA-Z\.\s]+$/',trim($this->orgSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
             $fullName=$this->buildFullName($this->orgFirstName,$this->orgMiddleInitial,$this->orgLastName,$this->orgSuffix);
             $this->validate([
                 'orgFirstName'    =>['required','string','max:100'],
                 'orgLastName'     =>['required','string','max:100'],
-                'orgMiddleInitial'=>['nullable','string','max:2'],
+                'orgMiddleInitial'=>['nullable','string','max:2','regex:/^[a-zA-Z]+$/'],
                 'orgSuffix'       =>['nullable','string','max:10'],
                 'orgTeacherId'    =>['required','string','regex:/^\d{1,8}$/','unique:organizer,id_number'],
                 'orgEmail'        =>['required','email','unique:organizer,email','unique:users,email'],
                 'orgDept'         =>['required','string','exists:courses,code'],
                 'orgPhoto'        =>['nullable','image','mimes:jpeg,png,jpg,webp','max:5120'],
+            ],[
+                'orgFirstName.required'    => 'First name is required.',
+                'orgFirstName.max'         => 'First name must not exceed 100 characters.',
+                'orgLastName.required'     => 'Last name is required.',
+                'orgLastName.max'          => 'Last name must not exceed 100 characters.',
+                'orgMiddleInitial.max'     => 'Middle initial must be at most 2 characters.',
+                'orgMiddleInitial.regex'   => 'Middle initial may only contain letters.',
+                'orgSuffix.max'            => 'Suffix must not exceed 10 characters.',
+                'orgTeacherId.required'    => 'Teacher ID is required.',
+                'orgTeacherId.regex'       => 'Teacher ID must be 1 to 8 digits only (numbers only).',
+                'orgTeacherId.unique'      => 'This Teacher ID is already registered.',
+                'orgEmail.required'        => 'Email address is required.',
+                'orgEmail.email'           => 'Please enter a valid email address.',
+                'orgEmail.unique'          => 'This email address is already taken.',
+                'orgDept.required'         => 'Please select a department.',
+                'orgDept.exists'           => 'The selected department does not exist.',
+                'orgPhoto.image'           => 'Profile photo must be an image file.',
+                'orgPhoto.mimes'           => 'Profile photo must be JPG, PNG, or WebP format.',
+                'orgPhoto.max'             => 'Profile photo must not exceed 5MB.',
             ]);
+
+            $deptCourse = Course::where('code', strtoupper($this->orgDept))->first();
+            if (!$deptCourse || empty($deptCourse->college)) {
+                $this->organizerErrors = ['orgDept' => ['The selected department is not assigned to any college. Please configure colleges first.']];
+                return;
+            }
+
             $paddedId=str_pad($this->orgTeacherId,8,'0',STR_PAD_LEFT);
             $photoPath=$this->orgPhoto?$this->storeOrganizerPhoto($this->orgPhoto):null;
             $tmp=Str::random(10);
@@ -536,32 +605,14 @@ new class extends Component {
     {
         $oldName = trim($this->orgRenamingCollege ?? '');
         $newName = trim($this->orgRenameCollegeName);
-
-        if (!$newName) {
-            $this->orgCourseAlert     = 'New college name is required.';
-            $this->orgCourseAlertType = 'error';
-            return;
-        }
-        if ($newName === $oldName) {
-            $this->cancelRenamingCollege();
-            return;
-        }
-        if (isset($this->orgCoursesList[$newName])) {
-            $this->orgCourseAlert     = "A college named \"{$newName}\" already exists.";
-            $this->orgCourseAlertType = 'error';
-            return;
-        }
+        if (!$newName) { $this->orgCourseAlert='New college name is required.'; $this->orgCourseAlertType='error'; return; }
+        if ($newName === $oldName) { $this->cancelRenamingCollege(); return; }
+        if (isset($this->orgCoursesList[$newName])) { $this->orgCourseAlert="A college named \"{$newName}\" already exists."; $this->orgCourseAlertType='error'; return; }
         try {
             Course::where('college', $oldName)->update(['college' => $newName]);
-            $this->orgCourseAlert     = "College renamed to \"{$newName}\" successfully.";
-            $this->orgCourseAlertType = 'success';
-            $this->cancelRenamingCollege();
-            $this->loadOrgCourses();
-            $this->coursesList = Course::all()->toArray();
-        } catch (\Exception $e) {
-            $this->orgCourseAlert     = 'Failed to rename: ' . $e->getMessage();
-            $this->orgCourseAlertType = 'error';
-        }
+            $this->orgCourseAlert="College renamed to \"{$newName}\" successfully."; $this->orgCourseAlertType='success';
+            $this->cancelRenamingCollege(); $this->loadOrgCourses(); $this->coursesList=Course::all()->toArray();
+        } catch (\Exception $e) { $this->orgCourseAlert='Failed to rename: '.$e->getMessage(); $this->orgCourseAlertType='error'; }
     }
 
     public function saveCollegeCourses(): void
@@ -604,15 +655,28 @@ new class extends Component {
     // Profile / Status
     // --------------------------------------------------
 
-    public function toggleOrganizerStatus(int $id): void
+    public function confirmToggleOrganizerStatus(int $id, string $action): void
     {
         try {
-            $organizer=Organizer::findOrFail($id);
-            $newStatus=$organizer->status==='ACTIVE'?'INACTIVE':'ACTIVE';
-            $organizer->update(['status'=>$newStatus]);
-            $verb=$newStatus==='ACTIVE'?'activated':'deactivated';
+            $organizer = Organizer::findOrFail($id);
+            $this->pendingToggleId     = $id;
+            $this->pendingToggleAction = $action;
+            $this->pendingToggleName   = $organizer->name;
+            $this->activeModal         = 'toggleOrganizerConfirm';
+        } catch (\Exception $e) { $this->flash('error','Could not find organizer.'); }
+    }
+
+    public function executeToggleOrganizerStatus(): void
+    {
+        if (!$this->pendingToggleId) return;
+        try {
+            $organizer = Organizer::findOrFail($this->pendingToggleId);
+            $newStatus = $this->pendingToggleAction === 'deactivate' ? 'INACTIVE' : 'ACTIVE';
+            $organizer->update(['status' => $newStatus]);
+            $verb = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
             $this->flash('success',"{$organizer->name} has been {$verb}.");
         } catch (\Exception $e) { Log::error('Toggle status: '.$e->getMessage()); $this->flash('error','Could not update status: '.$e->getMessage()); }
+        finally { $this->pendingToggleId=null; $this->pendingToggleAction=''; $this->pendingToggleName=''; $this->activeModal=''; }
     }
 
     public function viewProfile(int $id, string $type): void
@@ -649,7 +713,7 @@ new class extends Component {
 
 <style>
     :root{--primary-color:#7a3f91;}
-    *{scroll-behavior:smooth;}
+    html{scroll-behavior:smooth;}
     .scrollbar-custom::-webkit-scrollbar{width:6px;height:6px;}
     .scrollbar-custom::-webkit-scrollbar-track{background:transparent;}
     .scrollbar-custom::-webkit-scrollbar-thumb{background:rgba(122,63,145,.3);border-radius:10px;}
@@ -697,6 +761,25 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-100 shrink-0 transition"><i class="fas fa-times text-sm"></i></button>
 </div>
 
+{{--
+    Tab persistence: instead of dispatching setActiveTab (which causes a re-render
+    that can break wire:model bindings), we just set the PHP property directly.
+    Both tab panels are ALWAYS in the DOM — visibility is controlled by CSS display only.
+    This means wire:model.live on the organizer search is always mounted and always live.
+--}}
+<script>
+    document.addEventListener('livewire:init', () => {
+        Livewire.hook('component.init', ({ component }) => {
+            const saved = localStorage.getItem('admin_active_tab');
+            if (saved && saved !== 'alumni') {
+                setTimeout(() => {
+                    Livewire.dispatch('setActiveTab', { tab: saved });
+                }, 10);
+            }
+        });
+    });
+</script>
+
 <div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-6">
 
     {{-- HEADER --}}
@@ -709,33 +792,65 @@ new class extends Component {
             <p class="text-slate-600 text-sm mt-2 ml-0.5">Manage alumni and organizer records efficiently</p>
         </div>
         <div class="flex flex-wrap gap-2 shrink-0">
-            @if($this->activeTab==='alumni')
+            {{-- Always render both sets of buttons, CSS-hide the inactive one --}}
+            <div @class(['flex flex-wrap gap-2' => true, 'hidden' => $this->activeTab !== 'alumni'])>
                 <button wire:click="openModal('registerAlumni')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all"><i class="fas fa-user-plus"></i> Register Alumni</button>
                 <button wire:click="openModal('importModal')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200"><i class="fas fa-file-import"></i> Import</button>
                 <button wire:click="openModal('manageCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200"><i class="fas fa-sliders"></i> Manage Courses</button>
-            @elseif($this->activeTab==='organizers')
+            </div>
+            <div @class(['flex flex-wrap gap-2' => true, 'hidden' => $this->activeTab !== 'organizers'])>
                 <button wire:click="openModal('registerOrganizer')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all"><i class="fas fa-users-gear"></i> Register Organizer</button>
                 <button wire:click="openModal('manageOrgCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200"><i class="fas fa-building-columns"></i> Manage Colleges</button>
-            @endif
+            </div>
         </div>
     </div>
 
     {{-- TABS --}}
     <div class="flex gap-2 mb-4 shrink-0">
-        <button wire:click="switchTab('alumni')" class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='alumni'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}"><i class="fas fa-graduation-cap"></i> Alumni</button>
-        <button wire:click="switchTab('organizers')" class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='organizers'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}"><i class="fas fa-users-gear"></i> Organizers</button>
+        <button wire:click="switchTab('alumni')"
+                @click="localStorage.setItem('admin_active_tab', 'alumni')"
+                class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='alumni'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}">
+            <i class="fas fa-graduation-cap"></i> Alumni
+        </button>
+        <button wire:click="switchTab('organizers')"
+                @click="localStorage.setItem('admin_active_tab', 'organizers')"
+                class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='organizers'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}">
+            <i class="fas fa-users-gear"></i> Organizers
+        </button>
     </div>
 
-    {{-- TABLE PANEL --}}
+    {{-- TABLE PANEL
+         CRITICAL FIX: Both panels are ALWAYS rendered in the DOM.
+         We use CSS (hidden class) to show/hide them — NOT @if/@elseif.
+
+         Why: @if destroys and recreates the DOM on tab switch.
+         When the organizer tab is inactive on first load and then
+         setActiveTab fires from localStorage, Livewire re-renders the
+         whole component. Inside that re-render, the newly created
+         organizer partial gets fresh DOM elements — but Livewire's
+         wire:model.live binding on the search input is NOT re-initialized
+         because Livewire only initializes bindings on elements it morphs,
+         not on elements it newly creates mid-lifecycle.
+
+         By keeping both panels in the DOM always, wire:model.live on
+         the organizer search is initialized on first page load and
+         stays live forever, regardless of tab switching.
+    --}}
     <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden">
-        @if($this->activeTab==='alumni')
+
+        {{-- Alumni panel --}}
+        <div @class(['flex flex-col flex-1 min-h-0' => true, 'hidden' => $this->activeTab !== 'alumni'])>
             @include('livewire.admin.partials._alumni-table')
-        @elseif($this->activeTab==='organizers')
+        </div>
+
+        {{-- Organizers panel --}}
+        <div @class(['flex flex-col flex-1 min-h-0' => true, 'hidden' => $this->activeTab !== 'organizers'])>
             @include('livewire.admin.partials._organizers-table')
-        @endif
+        </div>
+
     </div>
 
-</div>{{-- end main content --}}
+</div>
 
 {{-- MODALS --}}
 @include('livewire.admin.partials._modals-alumni')
