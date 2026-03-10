@@ -89,76 +89,48 @@
                 </div>
             </div>
 
-            {{--
-                DEPARTMENT FIELD — Two-step:
-                Step 1: select a College from a dropdown (pure Alpine, no server round-trip)
-                Step 2: the department codes that belong to that college appear automatically
-                        as clickable pills. Clicking one sets the hidden wire:model field.
-
-                The full orgDepartmentsGrouped map is embedded as JSON so Alpine can filter
-                it client-side instantly without any extra Livewire request.
-            --}}
+            {{-- COLLEGE — single dropdown; dept codes appear below as read-only text after selection --}}
             <div>
-                <label class="block text-sm font-bold text-slate-800 mb-3">Department <span class="text-red-500">*</span></label>
-
+                <label class="block text-sm font-bold text-slate-800 mb-3">College <span class="text-red-500">*</span></label>
                 @if($this->orgDepartmentsGrouped->isEmpty())
                     <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start gap-2">
                         <i class="fas fa-triangle-exclamation mt-0.5 shrink-0"></i>
                         <span>No colleges configured yet. Please set up colleges first via <strong>Manage Colleges</strong>.</span>
                     </div>
                 @else
-                    {{-- Build the college→codes map for Alpine --}}
                     @php
-                        $collegeMap = [];
-                        foreach ($this->orgDepartmentsGrouped as $college => $depts) {
-                            $collegeMap[$college] = $depts->pluck('code')->toArray();
+                        // Build college → dept-codes map for Alpine (pure client-side, no extra request)
+                        $collegeDeptsMap = [];
+                        foreach ($this->orgDepartmentsGrouped as $collegeName => $depts) {
+                            $collegeDeptsMap[$collegeName] = $depts->pluck('code')->toArray();
                         }
                     @endphp
 
                     <div x-data="{
-                            map: {{ Js::from($collegeMap) }},
-                            selectedCollege: '',
-                            selectedDept: @entangle('orgDept').defer,
-                            get colleges() { return Object.keys(this.map); },
-                            get depts()    { return this.selectedCollege ? (this.map[this.selectedCollege] ?? []) : []; },
-                            pickDept(code) { this.selectedDept = code; }
+                            map: {{ Js::from($collegeDeptsMap) }},
+                            selected: @entangle('orgCollegeSelect').defer,
+                            get depts() { return this.selected ? (this.map[this.selected] ?? []) : []; }
                          }">
 
-                        {{-- Step 1: College picker --}}
-                        <select x-model="selectedCollege"
-                                @change="selectedDept = ''"
+                        <select x-model="selected"
                                 class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                             <option value="">— Select College —</option>
-                            <template x-for="col in colleges" :key="col">
-                                <option :value="col" x-text="col"></option>
-                            </template>
+                            @foreach($this->orgDepartmentsGrouped->keys() as $collegeName)
+                                <option value="{{ $collegeName }}">{{ $collegeName }}</option>
+                            @endforeach
                         </select>
 
-                        {{-- Step 2: Department codes (auto-shown after college is chosen) --}}
-                        <div x-show="selectedCollege !== ''" x-cloak class="mt-3">
-                            <p class="text-xs text-slate-500 mb-2 font-medium">
-                                Select a department in <span class="font-bold text-purple-700" x-text="selectedCollege"></span>:
-                            </p>
+                        {{-- Dept codes shown as text pills once a college is chosen --}}
+                        <div x-show="depts.length > 0" x-cloak class="mt-3">
+                            <p class="text-xs text-slate-500 mb-2 font-medium">Departments under this college:</p>
                             <div class="flex flex-wrap gap-2">
-                                <template x-for="dept in depts" :key="dept">
-                                    <button type="button"
-                                            @click="pickDept(dept)"
-                                            :class="selectedDept === dept
-                                                ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
-                                                : 'bg-white text-purple-700 border-purple-300 hover:bg-purple-50'"
-                                            class="px-4 py-2 rounded-lg border text-sm font-bold font-mono transition-all"
-                                            x-text="dept">
-                                    </button>
+                                <template x-for="code in depts" :key="code">
+                                    <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono"
+                                          x-text="code"></span>
                                 </template>
-                            </div>
-                            <div x-show="selectedDept !== ''" class="mt-2 flex items-center gap-2 text-xs text-emerald-700 font-semibold">
-                                <i class="fas fa-check-circle"></i>
-                                <span>Selected: <span class="font-mono" x-text="selectedDept"></span></span>
                             </div>
                         </div>
 
-                        {{-- Hidden input that actually holds the wire value --}}
-                        <input type="hidden" wire:model.defer="orgDept" :value="selectedDept">
                     </div>
                 @endif
             </div>

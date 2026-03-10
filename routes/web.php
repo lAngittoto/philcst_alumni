@@ -36,7 +36,7 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 
     Route::view('/organizer/dashboard', 'organizer.dashboard-wrapper')->name('organizer.dashboard');
     Route::view('/organizer/events',      'organizer.events')     ->name('organizer.events');
-    Route::view('/organizer/jobs',        'organizer.jobs')       ->name('organizer.jobs');
+    Route::view('/organizer/job/management',        'organizer.job-management-wrapper')       ->name('organizer.job/management');
     Route::view('/organizer/employment',  'organizer.employment') ->name('organizer.employment');
     Route::view('/organizer/reports',     'organizer.reports')    ->name('organizer.reports');
 });

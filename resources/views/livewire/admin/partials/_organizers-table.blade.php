@@ -1,14 +1,29 @@
 {{-- =====================================================
      ORGANIZERS TAB CONTENT
-     Always in the DOM (parent uses CSS hidden, not @if)
-     so wire:model.live.debounce is always initialized.
      ===================================================== --}}
 <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
 
-    <div class="relative flex-1 min-w-[200px] max-w-sm">
+    {{--
+        SEARCH — wire:ignore stops Livewire morphing this input on every re-render
+        (morphing destroys focus so you have to re-click after each keystroke).
+        Alpine owns the local value; $wire.set() pushes it to Livewire after 150 ms.
+        $wire.$watch syncs back when resetOrgFilters clears orgSearch server-side.
+        $wire.set() is safe here because both tab panels are always in the DOM
+        (CSS hidden, never @if-destroyed), so the element is never detached.
+    --}}
+    <div class="relative flex-1 min-w-[200px] max-w-sm"
+         wire:ignore
+         x-data="{
+             q: '',
+             init() {
+                 this.q = $wire.orgSearch ?? '';
+                 $wire.$watch('orgSearch', val => { if (val !== this.q) this.q = val; });
+             }
+         }">
         <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
         <input type="text"
-               wire:model.live.debounce.300ms="orgSearch"
+               x-model="q"
+               @input.debounce.150ms="$wire.set('orgSearch', q)"
                placeholder="Search name, ID, email…"
                class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus"
                autocomplete="off" spellcheck="false">
@@ -18,6 +33,7 @@
         <option value="">All Colleges</option>
         @foreach($this->orgColleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
     </select>
+
     <select wire:model.live="orgSort" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
         <option value="recent">Recent First</option>
         <option value="oldest">Oldest First</option>
@@ -50,7 +66,6 @@
             </thead>
             <tbody class="divide-y divide-slate-100">
                 @forelse($this->organizerRecords as $item)
-                @php $collegeName=$this->getCollegeForCourse($item->department); @endphp
                 <tr class="table-row-hover">
                     <td class="px-6 py-4">
                         <div class="flex items-center gap-3">
@@ -62,13 +77,17 @@
                     <td class="px-6 py-4"><span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->id_number }}</span></td>
                     <td class="px-6 py-4"><span class="text-slate-700 text-sm">{{ $item->email }}</span></td>
                     <td class="px-6 py-4">
-                        <span class="block font-semibold text-slate-800 text-sm leading-snug">{{ $collegeName }}</span>
+                        {{-- department stores the college name; look up its dept codes for display --}}
+                        <span class="block font-semibold text-slate-800 text-sm leading-snug">{{ $item->department }}</span>
+                        @php $deptCodes = $this->getCollegeDepts($item->department); @endphp
+                        @if(count($deptCodes))
                         <div class="flex flex-wrap gap-1 mt-1">
-                            @foreach($this->getCollegeDepts($item->department) as $deptCode)
+                            @foreach($deptCodes as $deptCode)
                                 <span class="text-xs font-mono font-semibold text-purple-700">{{ $deptCode }}</span>
                                 @if(!$loop->last)<span class="text-slate-300 text-xs">·</span>@endif
                             @endforeach
                         </div>
+                        @endif
                     </td>
                     <td class="px-6 py-4 text-center">
                         @php $sc=match($item->status){'ACTIVE'=>'bg-emerald-100 text-emerald-700','INACTIVE'=>'bg-amber-100 text-amber-700','SUSPENDED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600'}; @endphp

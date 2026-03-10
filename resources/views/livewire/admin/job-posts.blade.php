@@ -219,7 +219,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden" style="height:90vh;">
+<div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-50 overflow-hidden" style="height:90vh;">
 
 <style>
     :root { --primary: #7a3f91; --primary-dark: #6a3580; }

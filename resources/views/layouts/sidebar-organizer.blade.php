@@ -85,10 +85,10 @@
                         'pattern' => 'organizer/events*',
                     ],
                     [
-                        'route'   => 'organizer.jobs',
+                        'route'   => 'organizer.job/management',
                         'icon'    => 'briefcase',
-                        'label'   => 'Job Posting',
-                        'pattern' => 'organizer/jobs*',
+                        'label'   => 'Job Management',
+                        'pattern' => 'organizer/job/management*',
                     ],
                     [
                         'route'   => 'organizer.employment',
