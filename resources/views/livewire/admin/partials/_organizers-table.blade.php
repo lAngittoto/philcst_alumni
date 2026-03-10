@@ -4,12 +4,9 @@
 <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
 
     {{--
-        SEARCH — wire:ignore stops Livewire morphing this input on every re-render
-        (morphing destroys focus so you have to re-click after each keystroke).
+        SEARCH — wire:ignore stops Livewire morphing this input on every re-render.
         Alpine owns the local value; $wire.set() pushes it to Livewire after 150 ms.
         $wire.$watch syncs back when resetOrgFilters clears orgSearch server-side.
-        $wire.set() is safe here because both tab panels are always in the DOM
-        (CSS hidden, never @if-destroyed), so the element is never detached.
     --}}
     <div class="relative flex-1 min-w-[200px] max-w-sm"
          wire:ignore
@@ -24,7 +21,7 @@
         <input type="text"
                x-model="q"
                @input.debounce.150ms="$wire.set('orgSearch', q)"
-               placeholder="Search name, ID, email…"
+               placeholder="Search name, ID, email..."
                class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus"
                autocomplete="off" spellcheck="false">
     </div>
@@ -74,12 +71,33 @@
                             <span class="font-semibold text-slate-900 text-sm">{{ $item->name }}</span>
                         </div>
                     </td>
-                    <td class="px-6 py-4"><span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->id_number }}</span></td>
-                    <td class="px-6 py-4"><span class="text-slate-700 text-sm">{{ $item->email }}</span></td>
                     <td class="px-6 py-4">
-                        {{-- department stores the college name; look up its dept codes for display --}}
-                        <span class="block font-semibold text-slate-800 text-sm leading-snug">{{ $item->department }}</span>
-                        @php $deptCodes = $this->getCollegeDepts($item->department); @endphp
+                        <span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->id_number }}</span>
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="text-slate-700 text-sm">{{ $item->email }}</span>
+                    </td>
+                    <td class="px-6 py-4">
+                        @php
+                            // Support both old records (department = course code e.g. "BSIT")
+                            // and new records (department = college name e.g. "Computer Studies").
+                            // If a college with that exact name exists, use it directly.
+                            // Otherwise assume it's a course code and resolve its college name.
+                            $dept = $item->department;
+                            $directMatch = \App\Models\Course::where('college', $dept)->exists();
+                            if ($directMatch) {
+                                $collegeName = $dept;
+                            } else {
+                                $collegeName = \App\Models\Course::where('code', $dept)->value('college') ?? $dept;
+                            }
+                            $deptCodes = \App\Models\Course::where('college', $collegeName)
+                                ->orderBy('code')
+                                ->pluck('code')
+                                ->toArray();
+                        @endphp
+                        <span class="block font-semibold text-slate-800 text-sm leading-snug">
+                            {{ $collegeName }}
+                        </span>
                         @if(count($deptCodes))
                         <div class="flex flex-wrap gap-1 mt-1">
                             @foreach($deptCodes as $deptCode)
@@ -90,12 +108,21 @@
                         @endif
                     </td>
                     <td class="px-6 py-4 text-center">
-                        @php $sc=match($item->status){'ACTIVE'=>'bg-emerald-100 text-emerald-700','INACTIVE'=>'bg-amber-100 text-amber-700','SUSPENDED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600'}; @endphp
-                        <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold {{ $sc }}">{{ $item->status }}</span>
+                        @php
+                            $sc = match($item->status) {
+                                'ACTIVE'    => 'bg-emerald-100 text-emerald-700',
+                                'INACTIVE'  => 'bg-amber-100 text-amber-700',
+                                'SUSPENDED' => 'bg-red-100 text-red-700',
+                                default     => 'bg-slate-100 text-slate-600',
+                            };
+                        @endphp
+                        <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold {{ $sc }}">
+                            {{ $item->status }}
+                        </span>
                     </td>
                     <td class="px-6 py-4 text-center">
                         <div class="flex items-center justify-center gap-2">
-                            <button wire:click="viewProfile({{ $item->id }},'organizer')"
+                            <button wire:click="viewProfile({{ $item->id }}, 'organizer')"
                                     class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
                                 <i class="fas fa-eye"></i> View
                             </button>
@@ -145,21 +172,31 @@
 <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
     <div class="flex items-center justify-between">
         @php
-            $total=$this->organizerRecords->total();$pp=$this->organizerRecords->perPage();
-            $cp=$this->organizerRecords->currentPage();$from=$total>0?($cp-1)*$pp+1:0;$to=min($cp*$pp,$total);
+            $total = $this->organizerRecords->total();
+            $pp    = $this->organizerRecords->perPage();
+            $cp    = $this->organizerRecords->currentPage();
+            $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+            $to    = min($cp * $pp, $total);
         @endphp
-        <p class="text-slate-600 text-sm">Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span> of <span class="font-semibold text-slate-800">{{ $total }}</span></p>
+        <p class="text-slate-600 text-sm">
+            Showing
+            <span class="font-semibold text-slate-800">{{ $from }}&ndash;{{ $to }}</span>
+            of
+            <span class="font-semibold text-slate-800">{{ $total }}</span>
+        </p>
         <div class="flex gap-2 items-center">
             @if($this->organizerRecords->onFirstPage())
-                <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
+                <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">&larr; Prev</button>
             @else
-                <button wire:click="previousPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">← Prev</button>
+                <button wire:click="previousPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">&larr; Prev</button>
             @endif
-            <span class="px-4 py-2 text-slate-700 text-sm font-medium">{{ $this->organizerRecords->currentPage() }} / {{ $this->organizerRecords->lastPage() }}</span>
+            <span class="px-4 py-2 text-slate-700 text-sm font-medium">
+                {{ $this->organizerRecords->currentPage() }} / {{ $this->organizerRecords->lastPage() }}
+            </span>
             @if($this->organizerRecords->hasMorePages())
-                <button wire:click="nextPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next →</button>
+                <button wire:click="nextPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next &rarr;</button>
             @else
-                <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>
+                <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next &rarr;</button>
             @endif
         </div>
     </div>

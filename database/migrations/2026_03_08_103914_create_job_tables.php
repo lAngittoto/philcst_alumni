@@ -1,9 +1,7 @@
 <?php
-
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-
 return new class extends Migration
 {
     public function up(): void
@@ -15,12 +13,11 @@ return new class extends Migration
             $table->id();
             $table->enum('type', ['company_type', 'employment_type', 'experience_level', 'target_college']);
             $table->string('label');
+            $table->string('default_location')->nullable();
             $table->timestamps();
-
             $table->index('type');
             $table->index(['type', 'label']);
         });
-
         // --------------------------------------------------------
         // job_postings — actual job postings by organizer
         // --------------------------------------------------------
@@ -40,7 +37,6 @@ return new class extends Migration
             $table->enum('status', ['ACTIVE', 'INACTIVE', 'EXPIRED'])->default('ACTIVE');
             $table->timestamps();
             $table->softDeletes();
-
             $table->index('organizer_id');
             $table->index('status');
             $table->index('deadline');
@@ -51,7 +47,6 @@ return new class extends Migration
             $table->index('deleted_at');
         });
     }
-
     public function down(): void
     {
         Schema::dropIfExists('job_postings');
