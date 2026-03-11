@@ -1,0 +1,120 @@
+/* =====================================================
+   USER MANAGEMENT — standalone CSS
+   Drop this in public/css/ and @vite / link it in
+   your layout instead of the <style> block in the
+   Livewire component.
+   ===================================================== */
+
+:root {
+    --primary-color: #7a3f91;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+/* ---------- Scrollbar ---------- */
+.scrollbar-custom::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.scrollbar-custom::-webkit-scrollbar-track {
+    background: transparent;
+}
+.scrollbar-custom::-webkit-scrollbar-thumb {
+    background: rgba(122, 63, 145, 0.3);
+    border-radius: 10px;
+}
+.scrollbar-custom::-webkit-scrollbar-thumb:hover {
+    background: rgba(122, 63, 145, 0.6);
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes slideInDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modalSlideIn {
+    from { opacity: 0; transform: scale(0.95) translateY(10px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+/* ---------- Utility classes ---------- */
+.modal-animate {
+    animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.spin-icon {
+    animation: spin 1s linear infinite;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #7a3f91, #6a3580);
+    color: #fff;
+    border: none;
+}
+
+.btn-primary:disabled {
+    background: linear-gradient(135deg, #cbd5e1, #94a3b8);
+    cursor: not-allowed;
+}
+
+.input-focus:focus {
+    border-color: #7a3f91 !important;
+    box-shadow: 0 0 0 3px rgba(122, 63, 145, 0.1) !important;
+    outline: none !important;
+}
+
+.table-row-hover {
+    transition: background-color 0.15s ease;
+}
+.table-row-hover:hover {
+    background-color: rgba(122, 63, 145, 0.05);
+}
+
+.college-card {
+    border-left: 4px solid #7a3f91;
+}
+
+.course-check-row {
+    transition: all 0.15s;
+}
+.course-check-row:hover {
+    background: rgba(122, 63, 145, 0.07);
+}
+.course-check-row.is-selected {
+    background: rgba(122, 63, 145, 0.12);
+    border-color: #9b59c4 !important;
+}
+
+/* ---------- Table loading state ---------- */
+.tbl-container {
+    transition: opacity 0.15s ease;
+}
+.tbl-loading {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/* ---------- Header slide-in ---------- */
+.header-slide {
+    animation: slideInDown 0.5s ease-out;
+}
+
+/* ---------- Skeleton shimmer (optional fast-loading UX) ---------- */
+@keyframes shimmer {
+    0%   { background-position: -800px 0; }
+    100% { background-position:  800px 0; }
+}
+.skeleton {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s ease infinite;
+    border-radius: 4px;
+}

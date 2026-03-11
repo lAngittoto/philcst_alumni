@@ -18,6 +18,12 @@ use Illuminate\Support\Str;
 new class extends Component {
     use WithPagination, WithFileUploads;
 
+    // Remove alumniPage / orgPage from the URL query string → clean URLs
+    protected function queryString(): array
+    {
+        return [];
+    }
+
     // ---- Tabs / UI state ----
     public string $activeTab   = 'alumni';
     public string $activeModal = '';
@@ -53,8 +59,8 @@ new class extends Component {
     public string $orgSuffix         = '';
     public string $orgTeacherId      = '';
     public string $orgEmail          = '';
-    public string $orgDept           = '';   // stores course CODE (still used internally)
-    public string $orgCollegeSelect  = '';   // NEW: the college the admin picks in the form
+    public string $orgDept           = '';
+    public string $orgCollegeSelect  = '';
     public        $orgPhoto          = null;
     public bool   $registeringOrganizer = false;
     public array  $organizerErrors      = [];
@@ -119,23 +125,20 @@ new class extends Component {
         $this->flash($type, $message);
     }
 
-    // REMOVED setActiveTab handler — tab is always 'alumni' on fresh page load.
-    // Switching tabs only happens via switchTab() within the same session.
-
     public function mount(): void
     {
         $this->coursesList = Course::all()->toArray();
         $this->regYear     = (string) date('Y');
         $this->loadOrgCourses();
 
-        if (session()->has('success')) { $msg=session('success'); session()->forget('success'); $this->dispatch('showFlash',type:'success',message:$msg); }
-        if (session()->has('error'))   { $msg=session('error');   session()->forget('error');   $this->dispatch('showFlash',type:'error',message:$msg); }
+        if (session()->has('success')) { $msg = session('success'); session()->forget('success'); $this->dispatch('showFlash', type: 'success', message: $msg); }
+        if (session()->has('error'))   { $msg = session('error');   session()->forget('error');   $this->dispatch('showFlash', type: 'error',   message: $msg); }
     }
 
     private function loadOrgCourses(): void
     {
         $grouped = [];
-        foreach (Course::whereNotNull('college')->where('college','!=','')->orderBy('college')->orderBy('code')->get() as $c) {
+        foreach (Course::whereNotNull('college')->where('college', '!=', '')->orderBy('college')->orderBy('code')->get() as $c) {
             $grouped[$c->college][] = $c->toArray();
         }
         $this->orgCoursesList = $grouped;
@@ -162,13 +165,13 @@ new class extends Component {
     {
         $q = Alumni::query();
         if ($this->alumniSearch) {
-            $q->where(fn($s) => $s->where('name','like',"%{$this->alumniSearch}%")
-                ->orWhere('student_id','like',"%{$this->alumniSearch}%")
-                ->orWhere('email','like',"%{$this->alumniSearch}%"));
+            $q->where(fn($s) => $s->where('name', 'like', "%{$this->alumniSearch}%")
+                ->orWhere('student_id', 'like', "%{$this->alumniSearch}%")
+                ->orWhere('email', 'like', "%{$this->alumniSearch}%"));
         }
         if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
         if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
-        $q->when($this->alumniSort==='oldest', fn($q)=>$q->orderBy('created_at'), fn($q)=>$q->orderByDesc('created_at'));
+        $q->when($this->alumniSort === 'oldest', fn($q) => $q->orderBy('created_at'), fn($q) => $q->orderByDesc('created_at'));
         return $q->paginate(100, ['*'], 'alumniPage');
     }
 
@@ -177,27 +180,27 @@ new class extends Component {
     {
         $q = Organizer::withoutTrashed();
         if ($this->orgSearch) {
-            $q->where(fn($s) => $s->where('name','like',"%{$this->orgSearch}%")
-                ->orWhere('email','like',"%{$this->orgSearch}%")
-                ->orWhere('id_number','like',"%{$this->orgSearch}%"));
+            $q->where(fn($s) => $s->where('name', 'like', "%{$this->orgSearch}%")
+                ->orWhere('email', 'like', "%{$this->orgSearch}%")
+                ->orWhere('id_number', 'like', "%{$this->orgSearch}%"));
         }
         if ($this->orgCollege) {
-            $codes = Course::where('college',$this->orgCollege)->pluck('code')->toArray();
+            $codes = Course::where('college', $this->orgCollege)->pluck('code')->toArray();
             $q->whereIn('department', $codes);
         }
-        $q->when($this->orgSort==='oldest', fn($q)=>$q->orderBy('created_at'), fn($q)=>$q->orderByDesc('created_at'));
+        $q->when($this->orgSort === 'oldest', fn($q) => $q->orderBy('created_at'), fn($q) => $q->orderByDesc('created_at'));
         return $q->paginate(100, ['*'], 'orgPage');
     }
 
-    #[Computed] public function courses()    { return Course::orderBy('code')->get(); }
-    #[Computed] public function batches()    { return Alumni::distinct()->orderByDesc('batch')->pluck('batch'); }
-    #[Computed] public function orgColleges(){ return Course::whereNotNull('college')->where('college','!=','')->distinct()->orderBy('college')->pluck('college'); }
+    #[Computed] public function courses()     { return Course::orderBy('code')->get(); }
+    #[Computed] public function batches()     { return Alumni::distinct()->orderByDesc('batch')->pluck('batch'); }
+    #[Computed] public function orgColleges() { return Course::whereNotNull('college')->where('college', '!=', '')->distinct()->orderBy('college')->pluck('college'); }
 
     #[Computed]
     public function orgDepartmentsGrouped()
     {
         return Course::whereNotNull('college')
-            ->where('college','!=','')
+            ->where('college', '!=', '')
             ->orderBy('college')
             ->orderBy('code')
             ->get()
@@ -216,21 +219,21 @@ new class extends Component {
 
     public function getCollegeForCourse(string $code): string
     {
-        return Course::where('code',$code)->value('college') ?? $code;
+        return Course::where('code', $code)->value('college') ?? $code;
     }
 
     public function getCollegeDepts(string $code): array
     {
-        $college = Course::where('code',$code)->value('college');
+        $college = Course::where('code', $code)->value('college');
         if (!$college) return [$code];
-        return Course::where('college',$college)->orderBy('code')->pluck('code')->toArray();
+        return Course::where('college', $college)->orderBy('code')->pluck('code')->toArray();
     }
 
     public function getPhotoUrl(?string $path): string
     {
         if (!$path || str_contains($path, 'default.png')) return asset('storage/alumni-photos/default.png');
-        if (str_starts_with($path,'alumni-photos/') || str_starts_with($path,'organizers/'))
-            return Storage::disk('public')->exists($path) ? asset('storage/'.$path) : asset('storage/alumni-photos/default.png');
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/'))
+            return Storage::disk('public')->exists($path) ? asset('storage/' . $path) : asset('storage/alumni-photos/default.png');
         return asset('storage/alumni-photos/default.png');
     }
 
@@ -242,7 +245,7 @@ new class extends Component {
     private function buildFullName(string $f, string $m, string $l, string $s): string
     {
         $n = implode(' ', array_filter([trim($f), trim($m), trim($l)]));
-        if (trim($s) !== '') $n .= ' '.trim($s);
+        if (trim($s) !== '') $n .= ' ' . trim($s);
         return $n;
     }
 
@@ -255,7 +258,7 @@ new class extends Component {
     // Modal / Tab
     // --------------------------------------------------
 
-    public function switchTab(string $tab): void  { $this->activeTab = $tab; }
+    public function switchTab(string $tab): void { $this->activeTab = $tab; }
 
     public function openModal(string $modal): void
     {
@@ -275,90 +278,327 @@ new class extends Component {
         $this->updatingProfilePhoto = null;
     }
 
-    public function resetAlumniFilters(): void { $this->alumniSearch=$this->alumniBatch=$this->alumniCourse=''; $this->alumniSort='recent'; $this->resetPage('alumniPage'); }
-    public function resetOrgFilters(): void    { $this->orgSearch=$this->orgCollege=''; $this->orgSort='recent'; $this->resetPage('orgPage'); }
+    public function resetAlumniFilters(): void { $this->alumniSearch = $this->alumniBatch = $this->alumniCourse = ''; $this->alumniSort = 'recent'; $this->resetPage('alumniPage'); }
+    public function resetOrgFilters(): void    { $this->orgSearch = $this->orgCollege = ''; $this->orgSort = 'recent'; $this->resetPage('orgPage'); }
 
     // --------------------------------------------------
-    // Import
+    // Import — REWRITTEN FOR SPEED
+    // Changes vs original:
+    //   1. All course / email / student-id lookups pre-loaded into PHP arrays (0 per-row DB reads)
+    //   2. Valid rows collected then bulk-inserted in chunks of 100 (2 queries total vs 2 × N)
+    //   3. Emails QUEUED via Mail::queue() — non-blocking (requires queue worker)
+    //   4. Intra-file duplicate detection (same email twice in the Excel)
+    //   5. importErrors capped at 200 entries so Livewire payload stays small
     // --------------------------------------------------
 
     public function resetImportState(): void
     {
-        $this->importFile=null; $this->importingFile=false; $this->importStatus='';
-        $this->importProgress=0; $this->importTotal=0; $this->importSuccessCount=0;
-        $this->importFailCount=0; $this->importErrors=[];
+        $this->importFile         = null;
+        $this->importingFile      = false;
+        $this->importStatus       = '';
+        $this->importProgress     = 0;
+        $this->importTotal        = 0;
+        $this->importSuccessCount = 0;
+        $this->importFailCount    = 0;
+        $this->importErrors       = [];
     }
 
-    public function cancelImport(): void { $this->resetImportState(); $this->activeModal=''; $this->flash('info','Import cancelled.'); }
+    public function cancelImport(): void
+    {
+        $this->resetImportState();
+        $this->activeModal = '';
+        $this->flash('info', 'Import cancelled.');
+    }
 
     public function processImportFile(): void
     {
-        $this->importingFile=true; $this->importStatus='Preparing...';
-        $this->importProgress=0; $this->importSuccessCount=0; $this->importFailCount=0; $this->importErrors=[];
+        // No time limit for this method — large files need more than 60 seconds
+        set_time_limit(0);
+
+        $this->importingFile      = true;
+        $this->importStatus       = 'Preparing…';
+        $this->importProgress     = 0;
+        $this->importSuccessCount = 0;
+        $this->importFailCount    = 0;
+        $this->importErrors       = [];
+
         try {
-            if (!$this->importFile) throw new \Exception('No file selected');
+            if (!$this->importFile) {
+                throw new \Exception('No file selected.');
+            }
+
             $ext = strtolower($this->importFile->getClientOriginalExtension());
-            if ($ext==='xlsx'||$ext==='xls') $csv=$this->parseExcelFile($this->importFile->getRealPath());
-            elseif ($ext==='csv') $csv=array_map('str_getcsv',file($this->importFile->getRealPath()));
-            else throw new \Exception('File must be .csv or .xlsx/.xls');
-            if (count($csv)<2) throw new \Exception('File is empty or has no data rows.');
-            $header=array_map('trim',array_map('strtolower',$csv[0]));
-            foreach (['name','student_id','course_code','year','email'] as $f)
-                if (!in_array($f,$header)) throw new \Exception("Missing required column: \"{$f}\"");
-            $this->importTotal=count($csv)-1;
-            for ($i=1; $i<count($csv); $i++) {
-                if (count(array_filter($csv[$i],fn($v)=>trim($v)!==''))===0) continue;
-                if (count($csv[$i])<count($header)) continue;
-                $this->importProgress=$i;
-                $row=array_combine($header,array_slice($csv[$i],0,count($header)));
-                $name=trim($row['name']??''); $email=strtolower(trim($row['email']??''));
-                $rawId=trim($row['student_id']??''); $code=strtoupper(trim($row['course_code']??'')); $year=trim($row['year']??'');
-                try {
-                    if (!$name) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Name is empty."; continue; }
-                    if (!preg_match('/^[a-zA-Z\s\-\.\']+$/',$name)) { $this->importFailCount++; $this->importErrors[]="Row {$i}: Name \"{$name}\" contains invalid characters."; continue; }
-                    if (!filter_var($email,FILTER_VALIDATE_EMAIL)) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Email \"{$email}\" is not a valid email address."; continue; }
-                    if (Alumni::where('email',$email)->exists()) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Email \"{$email}\" is already registered as an alumni."; continue; }
-                    if (User::where('email',$email)->exists())   { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Email \"{$email}\" is already used by an existing account."; continue; }
-                    if (!$rawId||!preg_match('/^\d{1,8}$/',$rawId)) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Student ID \"{$rawId}\" must be 1–8 digits."; continue; }
-                    $sid=str_pad($rawId,8,'0',STR_PAD_LEFT);
-                    if (Alumni::where('student_id',$sid)->exists()) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Student ID \"{$sid}\" is already registered."; continue; }
-                    $course=Course::where('code',$code)->first();
-                    if (!$course) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Course code \"{$code}\" does not exist."; continue; }
-                    $batchYear=(int)$year;
-                    if ($batchYear<2000||$batchYear>date('Y')) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): Year \"{$year}\" is invalid (must be 2000–".date('Y').")."; continue; }
-                    $alumni=Alumni::create(['name'=>$name,'student_id'=>$sid,'email'=>$email,'course_code'=>$code,'course_name'=>$course->name,'batch'=>$batchYear,'status'=>'VERIFIED']);
-                    $tmp=Str::random(10);
-                    User::create(['name'=>$name,'email'=>$email,'password'=>Hash::make($tmp),'role'=>'alumni']);
-                    try{Mail::to($email)->send(new \App\Mail\AlumniRegistered($alumni,$tmp));}catch(\Exception $me){Log::warning('Import email: '.$me->getMessage());}
-                    $this->importSuccessCount++;
-                } catch (\Exception $e) { $this->importFailCount++; $this->importErrors[]="Row {$i} ({$name}): ".$e->getMessage(); }
-            }
-            $this->importStatus='Done!'; $this->coursesList=Course::all()->toArray(); $this->importFile=null;
-            $this->activeModal=''; $this->resetAlumniFilters();
-            if ($this->importSuccessCount>0) {
-                $msg="Successfully imported {$this->importSuccessCount} alumni.";
-                if ($this->importFailCount>0) $msg.=" {$this->importFailCount} row(s) were skipped.";
-                $this->flash('success',$msg);
+
+            if ($ext === 'xlsx' || $ext === 'xls') {
+                $rows = $this->parseExcelFile($this->importFile->getRealPath());
+            } elseif ($ext === 'csv') {
+                $rows = array_map('str_getcsv', file($this->importFile->getRealPath()));
             } else {
-                $this->flash('error',"No alumni were imported. All {$this->importFailCount} row(s) had errors.");
+                throw new \Exception('File must be .csv or .xlsx/.xls.');
             }
-        } catch (\Exception $e) { Log::error('Import error: '.$e->getMessage()); $this->importStatus='Error: '.$e->getMessage(); $this->importingFile=false; }
+
+            if (count($rows) < 2) {
+                throw new \Exception('File is empty or has no data rows.');
+            }
+
+            // Build header map
+            $header = array_map('trim', array_map('strtolower', $rows[0]));
+            foreach (['name', 'student_id', 'course_code', 'year', 'email'] as $required) {
+                if (!in_array($required, $header, true)) {
+                    throw new \Exception("Missing required column: \"{$required}\".");
+                }
+            }
+
+            $this->importTotal = count($rows) - 1;
+
+            // -------------------------------------------------------
+            // PRE-LOAD all lookup data — eliminates all per-row DB queries
+            // -------------------------------------------------------
+
+            // course code => course name  (uppercased keys)
+            $courseMap = Course::pluck('name', 'code')
+                ->mapWithKeys(fn($name, $code) => [strtoupper($code) => $name])
+                ->toArray();
+
+            // Existing emails / student IDs as hash-sets for O(1) lookup
+            $existingAlumniEmails = Alumni::pluck('email')
+                ->mapWithKeys(fn($e) => [strtolower($e) => true])
+                ->toArray();
+
+            $existingAlumniIds = Alumni::pluck('student_id')
+                ->mapWithKeys(fn($id) => [$id => true])
+                ->toArray();
+
+            $existingUserEmails = User::pluck('email')
+                ->mapWithKeys(fn($e) => [strtolower($e) => true])
+                ->toArray();
+
+            // -------------------------------------------------------
+            // VALIDATION PASS — collect valid rows, reject invalid ones
+            // -------------------------------------------------------
+            $toInsertAlumni    = [];
+            $toInsertUsers     = [];
+            $emailJobs         = [];
+            $seenEmailsInFile  = [];
+            $seenIdsInFile     = [];
+            $maxErrorsStored   = 200;
+
+            for ($i = 1; $i < count($rows); $i++) {
+                $this->importProgress = $i;
+
+                // Skip fully blank rows
+                if (count(array_filter($rows[$i], fn($v) => trim((string) $v) !== '')) === 0) {
+                    continue;
+                }
+                if (count($rows[$i]) < count($header)) {
+                    continue;
+                }
+
+                $row   = array_combine($header, array_slice($rows[$i], 0, count($header)));
+                $name  = trim($row['name']        ?? '');
+                $email = strtolower(trim($row['email']       ?? ''));
+                $rawId = trim($row['student_id']  ?? '');
+                $code  = strtoupper(trim($row['course_code'] ?? ''));
+                $year  = trim($row['year']        ?? '');
+
+                $label = "Row {$i}" . ($name ? " ({$name})" : '');
+
+                if (!$name) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Name is empty.");
+                    continue;
+                }
+                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $name)) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Name \"{$name}\" contains invalid characters.");
+                    continue;
+                }
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Email \"{$email}\" is not a valid email address.");
+                    continue;
+                }
+                if (isset($existingAlumniEmails[$email]) || isset($seenEmailsInFile[$email])) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Email \"{$email}\" is already registered as an alumni.");
+                    continue;
+                }
+                if (isset($existingUserEmails[$email]) || isset($seenEmailsInFile[$email])) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Email \"{$email}\" is already used by an existing account.");
+                    continue;
+                }
+                if (!$rawId || !preg_match('/^\d{1,8}$/', $rawId)) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Student ID \"{$rawId}\" must be 1–8 digits.");
+                    continue;
+                }
+                $sid = str_pad($rawId, 8, '0', STR_PAD_LEFT);
+                if (isset($existingAlumniIds[$sid]) || isset($seenIdsInFile[$sid])) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Student ID \"{$sid}\" is already registered.");
+                    continue;
+                }
+                if (!isset($courseMap[$code])) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Course code \"{$code}\" does not exist.");
+                    continue;
+                }
+                $batchYear = (int) $year;
+                if ($batchYear < 2000 || $batchYear > (int) date('Y')) {
+                    $this->recordImportError($maxErrorsStored, "{$label}: Year \"{$year}\" is invalid (must be 2000–" . date('Y') . ").");
+                    continue;
+                }
+
+                // Row passed all checks — stage for bulk insert
+                $now = now()->toDateTimeString();
+                $tmp = Str::random(10);
+
+                // Use bcrypt rounds=4 for bulk import temp passwords.
+                // BCRYPT_ROUNDS=12 (production default) takes ~300ms per hash —
+                // that's 5 minutes for 1000 rows. These are one-time temp passwords
+                // sent via email; users set their own password on first login,
+                // so low rounds here are perfectly safe.
+                $hashedTmp = password_hash($tmp, PASSWORD_BCRYPT, ['cost' => 4]);
+
+                $toInsertAlumni[] = [
+                    'name'        => $name,
+                    'student_id'  => $sid,
+                    'email'       => $email,
+                    'course_code' => $code,
+                    'course_name' => $courseMap[$code],
+                    'batch'       => $batchYear,
+                    'status'      => 'VERIFIED',
+                    'created_at'  => $now,
+                    'updated_at'  => $now,
+                ];
+
+                $toInsertUsers[] = [
+                    'name'       => $name,
+                    'email'      => $email,
+                    'password'   => $hashedTmp,
+                    'role'       => 'alumni',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                $emailJobs[] = [
+                    'name'        => $name,
+                    'email'       => $email,
+                    'tmp'         => $tmp,
+                    'course_code' => $code,
+                    'course_name' => $courseMap[$code],
+                    'batch'       => $batchYear,
+                    'sid'         => $sid,
+                ];
+
+                // Mark as seen so intra-file duplicates are caught
+                $seenEmailsInFile[$email] = true;
+                $seenIdsInFile[$sid]      = true;
+            }
+
+            // -------------------------------------------------------
+            // BULK INSERT in chunks of 100
+            // -------------------------------------------------------
+            $chunkSize = 100;
+
+            foreach (array_chunk($toInsertAlumni, $chunkSize) as $chunk) {
+                Alumni::insert($chunk);
+            }
+            foreach (array_chunk($toInsertUsers, $chunkSize) as $chunk) {
+                User::insert($chunk);
+            }
+
+            $this->importSuccessCount = count($toInsertAlumni);
+
+            // -------------------------------------------------------
+            // QUEUE welcome emails (non-blocking)
+            // Requires:  QUEUE_CONNECTION=database in .env
+            //            php artisan queue:table && php artisan migrate
+            //            php artisan queue:work   (keep running)
+            // -------------------------------------------------------
+            if ($this->importSuccessCount > 0) {
+                $insertedAlumni = Alumni::whereIn('email', array_column($emailJobs, 'email'))
+                    ->get()
+                    ->keyBy(fn($a) => strtolower($a->email));
+
+                foreach ($emailJobs as $job) {
+                    try {
+                        $alumniModel = $insertedAlumni[strtolower($job['email'])] ?? null;
+                        if ($alumniModel) {
+                            Mail::to($job['email'])
+                                ->queue(new \App\Mail\AlumniRegistered($alumniModel, $job['tmp']));
+                        }
+                    } catch (\Exception $me) {
+                        Log::warning('Import queue email failed: ' . $me->getMessage());
+                    }
+                }
+            }
+
+            // -------------------------------------------------------
+            // Wrap up
+            // -------------------------------------------------------
+            $this->importStatus  = 'Done!';
+            $this->importingFile = false;
+            $this->coursesList   = Course::all()->toArray();
+            $this->importFile    = null;
+            $this->activeModal   = '';
+            $this->resetAlumniFilters();
+
+            if ($this->importSuccessCount > 0) {
+                $msg = "Successfully imported {$this->importSuccessCount} alumni.";
+                if ($this->importFailCount > 0) {
+                    $msg .= " {$this->importFailCount} row(s) were skipped.";
+                }
+                $this->flash('success', $msg);
+            } else {
+                $this->flash('error', "No alumni were imported. All {$this->importFailCount} row(s) had errors.");
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Import error: ' . $e->getMessage());
+            $this->importStatus  = 'Error: ' . $e->getMessage();
+            $this->importingFile = false;
+        }
     }
 
-    private function parseExcelFile($path): array
+    /**
+     * Cap stored import errors so the Livewire payload stays small on large files.
+     */
+    private function recordImportError(int $max, string $msg): void
+    {
+        $this->importFailCount++;
+        if (count($this->importErrors) < $max) {
+            $this->importErrors[] = $msg;
+        } elseif (count($this->importErrors) === $max) {
+            $this->importErrors[] = '… (further errors truncated to keep the page responsive)';
+        }
+    }
+
+    private function parseExcelFile(string $path): array
     {
         try {
-            $reader=\PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
-            $reader->setReadDataOnly(true); $reader->setReadEmptyCells(false);
-            $sheet=$reader->load($path)->getActiveSheet();
-            $rows=[]; $highestRow=$sheet->getHighestDataRow(); $highestCol=$sheet->getHighestDataColumn();
-            foreach ($sheet->getRowIterator(1,$highestRow) as $row) {
-                $rd=[]; $ci=$row->getCellIterator('A',$highestCol); $ci->setIterateOnlyExistingCells(false);
-                foreach ($ci as $cell) $rd[]=$cell->getValue();
-                $rows[]=$rd;
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
+            $reader->setReadDataOnly(true);
+            $reader->setReadEmptyCells(false);
+
+            $spreadsheet = $reader->load($path);
+            $sheet       = $spreadsheet->getActiveSheet();
+
+            $rows       = [];
+            $highestRow = $sheet->getHighestDataRow();
+            $highestCol = $sheet->getHighestDataColumn();
+
+            foreach ($sheet->getRowIterator(1, $highestRow) as $row) {
+                $rd = [];
+                $ci = $row->getCellIterator('A', $highestCol);
+                $ci->setIterateOnlyExistingCells(false);
+                foreach ($ci as $cell) {
+                    $rd[] = $cell->getValue();
+                }
+                $rows[] = $rd;
             }
+
+            // Free memory immediately
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
+
             return $rows;
-        } catch (\Exception $e) { throw new \Exception('Excel parse failed: '.$e->getMessage()); }
+        } catch (\Exception $e) {
+            throw new \Exception('Excel parse failed: ' . $e->getMessage());
+        }
     }
 
     // --------------------------------------------------
@@ -367,70 +607,108 @@ new class extends Component {
 
     public function registerAlumni(): void
     {
-        $this->alumniErrors=[]; $this->registeringAlumni=true;
+        $this->alumniErrors      = [];
+        $this->registeringAlumni = true;
         try {
             if (!$this->validateName(trim($this->regFirstName))) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
             if (!$this->validateName(trim($this->regLastName)))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (trim($this->regMiddleInitial)!==''&&!preg_match('/^[a-zA-Z]+$/',trim($this->regMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
-            if (trim($this->regSuffix)!==''&&!preg_match('/^[a-zA-Z\.\s]+$/',trim($this->regSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
-            $fullName=$this->buildFullName($this->regFirstName,$this->regMiddleInitial,$this->regLastName,$this->regSuffix);
+            if (trim($this->regMiddleInitial) !== '' && !preg_match('/^[a-zA-Z]+$/', trim($this->regMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
+            if (trim($this->regSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->regSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
+
+            $fullName = $this->buildFullName($this->regFirstName, $this->regMiddleInitial, $this->regLastName, $this->regSuffix);
+
             $this->validate([
-                'regFirstName'    =>['required','string','max:100'],
-                'regLastName'     =>['required','string','max:100'],
-                'regMiddleInitial'=>['nullable','string','max:2','regex:/^[a-zA-Z]+$/'],
-                'regSuffix'       =>['nullable','string','max:10'],
-                'regStudentId'    =>['required','string','regex:/^\d{1,8}$/','unique:alumni,student_id'],
-                'regEmail'        =>['required','email','max:255','unique:alumni,email','unique:users,email'],
-                'regCourseCode'   =>['required','string','exists:courses,code'],
-                'regYear'         =>['required','integer','digits:4'],
-                'regPhoto'        =>['nullable','image','mimes:jpg,jpeg,png,webp','max:5120'],
-            ],[
-                'regFirstName.required'    => 'First name is required.',
-                'regFirstName.max'         => 'First name must not exceed 100 characters.',
-                'regLastName.required'     => 'Last name is required.',
-                'regLastName.max'          => 'Last name must not exceed 100 characters.',
-                'regMiddleInitial.max'     => 'Middle initial must be at most 2 characters.',
-                'regMiddleInitial.regex'   => 'Middle initial may only contain letters.',
-                'regSuffix.max'            => 'Suffix must not exceed 10 characters.',
-                'regStudentId.required'    => 'Student ID is required.',
-                'regStudentId.regex'       => 'Student ID must be 1 to 8 digits only (numbers only).',
-                'regStudentId.unique'      => 'This Student ID is already registered.',
-                'regEmail.required'        => 'Email address is required.',
-                'regEmail.email'           => 'Please enter a valid email address.',
-                'regEmail.unique'          => 'This email address is already taken.',
-                'regCourseCode.required'   => 'Please select a course.',
-                'regCourseCode.exists'     => 'The selected course does not exist.',
-                'regYear.required'         => 'Batch year is required.',
-                'regYear.integer'          => 'Batch year must be a valid year.',
-                'regYear.digits'           => 'Batch year must be exactly 4 digits (e.g. 2024).',
-                'regPhoto.image'           => 'Profile photo must be an image file.',
-                'regPhoto.mimes'           => 'Profile photo must be JPG, PNG, or WebP format.',
-                'regPhoto.max'             => 'Profile photo must not exceed 5MB.',
+                'regFirstName'     => ['required', 'string', 'max:100'],
+                'regLastName'      => ['required', 'string', 'max:100'],
+                'regMiddleInitial' => ['nullable', 'string', 'max:2', 'regex:/^[a-zA-Z]+$/'],
+                'regSuffix'        => ['nullable', 'string', 'max:10'],
+                'regStudentId'     => ['required', 'string', 'regex:/^\d{1,8}$/', 'unique:alumni,student_id'],
+                'regEmail'         => ['required', 'email', 'max:255', 'unique:alumni,email', 'unique:users,email'],
+                'regCourseCode'    => ['required', 'string', 'exists:courses,code'],
+                'regYear'          => ['required', 'integer', 'digits:4'],
+                'regPhoto'         => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            ], [
+                'regFirstName.required'  => 'First name is required.',
+                'regFirstName.max'       => 'First name must not exceed 100 characters.',
+                'regLastName.required'   => 'Last name is required.',
+                'regLastName.max'        => 'Last name must not exceed 100 characters.',
+                'regMiddleInitial.max'   => 'Middle initial must be at most 2 characters.',
+                'regMiddleInitial.regex' => 'Middle initial may only contain letters.',
+                'regSuffix.max'          => 'Suffix must not exceed 10 characters.',
+                'regStudentId.required'  => 'Student ID is required.',
+                'regStudentId.regex'     => 'Student ID must be 1 to 8 digits only (numbers only).',
+                'regStudentId.unique'    => 'This Student ID is already registered.',
+                'regEmail.required'      => 'Email address is required.',
+                'regEmail.email'         => 'Please enter a valid email address.',
+                'regEmail.unique'        => 'This email address is already taken.',
+                'regCourseCode.required' => 'Please select a course.',
+                'regCourseCode.exists'   => 'The selected course does not exist.',
+                'regYear.required'       => 'Batch year is required.',
+                'regYear.integer'        => 'Batch year must be a valid year.',
+                'regYear.digits'         => 'Batch year must be exactly 4 digits (e.g. 2024).',
+                'regPhoto.image'         => 'Profile photo must be an image file.',
+                'regPhoto.mimes'         => 'Profile photo must be JPG, PNG, or WebP format.',
+                'regPhoto.max'           => 'Profile photo must not exceed 5MB.',
             ]);
-            $paddedId=str_pad($this->regStudentId,8,'0',STR_PAD_LEFT);
-            $course=Course::where('code',$this->regCourseCode)->firstOrFail();
-            $photoPath=$this->regPhoto?$this->storeAlumniPhoto($this->regPhoto):null;
-            $alumni=Alumni::create(['name'=>$fullName,'student_id'=>$paddedId,'email'=>$this->regEmail,'course_code'=>$this->regCourseCode,'course_name'=>$course->name,'batch'=>(int)$this->regYear,'status'=>'VERIFIED','profile_photo'=>$photoPath]);
-            $tmp=Str::random(10); User::create(['name'=>$fullName,'email'=>$this->regEmail,'password'=>Hash::make($tmp),'role'=>'alumni']);
-            try{Mail::to($alumni->email)->send(new \App\Mail\AlumniRegistered($alumni,$tmp));}catch(\Exception $e){Log::warning('Email:'.$e->getMessage());}
-            $this->resetRegAlumniForm(); $this->flash('success',"Alumni '{$fullName}' registered successfully!"); $this->activeModal='';
-        } catch (\Illuminate\Validation\ValidationException $e) { $this->alumniErrors=$e->errors(); }
-          catch (\Exception $e) { Log::error('Alumni:'.$e->getMessage()); $this->alumniErrors=['general'=>[$e->getMessage()]]; }
-          finally { $this->registeringAlumni=false; }
+
+            $paddedId  = str_pad($this->regStudentId, 8, '0', STR_PAD_LEFT);
+            $course    = Course::where('code', $this->regCourseCode)->firstOrFail();
+            $photoPath = $this->regPhoto ? $this->storeAlumniPhoto($this->regPhoto) : null;
+
+            $alumni = Alumni::create([
+                'name'          => $fullName,
+                'student_id'    => $paddedId,
+                'email'         => $this->regEmail,
+                'course_code'   => $this->regCourseCode,
+                'course_name'   => $course->name,
+                'batch'         => (int) $this->regYear,
+                'status'        => 'VERIFIED',
+                'profile_photo' => $photoPath,
+            ]);
+
+            $tmp = Str::random(10);
+            User::create(['name' => $fullName, 'email' => $this->regEmail, 'password' => Hash::make($tmp), 'role' => 'alumni']);
+
+            try {
+                Mail::to($alumni->email)->queue(new \App\Mail\AlumniRegistered($alumni, $tmp));
+            } catch (\Exception $e) {
+                Log::warning('Email: ' . $e->getMessage());
+            }
+
+            $this->resetRegAlumniForm();
+            $this->flash('success', "Alumni '{$fullName}' registered successfully!");
+            $this->activeModal = '';
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->alumniErrors = $e->errors();
+        } catch (\Exception $e) {
+            Log::error('Alumni: ' . $e->getMessage());
+            $this->alumniErrors = ['general' => [$e->getMessage()]];
+        } finally {
+            $this->registeringAlumni = false;
+        }
     }
 
     private function storeAlumniPhoto($p): ?string
     {
         if (!$p) return null;
-        try { $f="alumni-".Str::uuid().".".$p->getClientOriginalExtension(); $r=$p->storeAs('alumni-photos',$f,'public'); return $r===false?null:"alumni-photos/{$f}"; }
-        catch (\Exception $e) { Log::error('Photo:'.$e->getMessage()); return null; }
+        try {
+            $f = "alumni-" . Str::uuid() . "." . $p->getClientOriginalExtension();
+            $r = $p->storeAs('alumni-photos', $f, 'public');
+            return $r === false ? null : "alumni-photos/{$f}";
+        } catch (\Exception $e) {
+            Log::error('Photo: ' . $e->getMessage());
+            return null;
+        }
     }
 
     private function resetRegAlumniForm(): void
     {
-        $this->regFirstName=$this->regMiddleInitial=$this->regLastName=$this->regSuffix='';
-        $this->regStudentId=$this->regEmail=$this->regCourseCode='';
-        $this->regPhoto=null; $this->regYear=(string)date('Y'); $this->alumniErrors=[];
+        $this->regFirstName = $this->regMiddleInitial = $this->regLastName = $this->regSuffix = '';
+        $this->regStudentId = $this->regEmail = $this->regCourseCode = '';
+        $this->regPhoto     = null;
+        $this->regYear      = (string) date('Y');
+        $this->alumniErrors = [];
     }
 
     // --------------------------------------------------
@@ -439,76 +717,105 @@ new class extends Component {
 
     public function registerOrganizer(): void
     {
-        $this->organizerErrors=[]; $this->registeringOrganizer=true;
+        $this->organizerErrors      = [];
+        $this->registeringOrganizer = true;
         try {
             if (!$this->validateName(trim($this->orgFirstName))) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
             if (!$this->validateName(trim($this->orgLastName)))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (trim($this->orgMiddleInitial)!==''&&!preg_match('/^[a-zA-Z]+$/',trim($this->orgMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
-            if (trim($this->orgSuffix)!==''&&!preg_match('/^[a-zA-Z\.\s]+$/',trim($this->orgSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
-            $fullName=$this->buildFullName($this->orgFirstName,$this->orgMiddleInitial,$this->orgLastName,$this->orgSuffix);
+            if (trim($this->orgMiddleInitial) !== '' && !preg_match('/^[a-zA-Z]+$/', trim($this->orgMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
+            if (trim($this->orgSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->orgSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
 
-            // orgCollegeSelect holds the college name; validate it exists
+            $fullName = $this->buildFullName($this->orgFirstName, $this->orgMiddleInitial, $this->orgLastName, $this->orgSuffix);
+
             $college = trim($this->orgCollegeSelect);
             if (!$college) throw new \Exception('Please select a college.');
 
-            // For storage we store the college name directly in the `department` column
-            // (previously stored a course code — now we store the college name itself).
             $this->orgDept = $college;
 
             $this->validate([
-                'orgFirstName'    =>['required','string','max:100'],
-                'orgLastName'     =>['required','string','max:100'],
-                'orgMiddleInitial'=>['nullable','string','max:2','regex:/^[a-zA-Z]+$/'],
-                'orgSuffix'       =>['nullable','string','max:10'],
-                'orgTeacherId'    =>['required','string','regex:/^\d{1,8}$/','unique:organizer,id_number'],
-                'orgEmail'        =>['required','email','unique:organizer,email','unique:users,email'],
-                'orgDept'         =>['required','string'],
-                'orgPhoto'        =>['nullable','image','mimes:jpeg,png,jpg,webp','max:5120'],
-            ],[
-                'orgFirstName.required'    => 'First name is required.',
-                'orgFirstName.max'         => 'First name must not exceed 100 characters.',
-                'orgLastName.required'     => 'Last name is required.',
-                'orgLastName.max'          => 'Last name must not exceed 100 characters.',
-                'orgMiddleInitial.max'     => 'Middle initial must be at most 2 characters.',
-                'orgMiddleInitial.regex'   => 'Middle initial may only contain letters.',
-                'orgSuffix.max'            => 'Suffix must not exceed 10 characters.',
-                'orgTeacherId.required'    => 'Teacher ID is required.',
-                'orgTeacherId.regex'       => 'Teacher ID must be 1 to 8 digits only (numbers only).',
-                'orgTeacherId.unique'      => 'This Teacher ID is already registered.',
-                'orgEmail.required'        => 'Email address is required.',
-                'orgEmail.email'           => 'Please enter a valid email address.',
-                'orgEmail.unique'          => 'This email address is already taken.',
-                'orgDept.required'         => 'Please select a college.',
-                'orgPhoto.image'           => 'Profile photo must be an image file.',
-                'orgPhoto.mimes'           => 'Profile photo must be JPG, PNG, or WebP format.',
-                'orgPhoto.max'             => 'Profile photo must not exceed 5MB.',
+                'orgFirstName'     => ['required', 'string', 'max:100'],
+                'orgLastName'      => ['required', 'string', 'max:100'],
+                'orgMiddleInitial' => ['nullable', 'string', 'max:2', 'regex:/^[a-zA-Z]+$/'],
+                'orgSuffix'        => ['nullable', 'string', 'max:10'],
+                'orgTeacherId'     => ['required', 'string', 'regex:/^\d{1,8}$/', 'unique:organizer,id_number'],
+                'orgEmail'         => ['required', 'email', 'unique:organizer,email', 'unique:users,email'],
+                'orgDept'          => ['required', 'string'],
+                'orgPhoto'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+            ], [
+                'orgFirstName.required'  => 'First name is required.',
+                'orgFirstName.max'       => 'First name must not exceed 100 characters.',
+                'orgLastName.required'   => 'Last name is required.',
+                'orgLastName.max'        => 'Last name must not exceed 100 characters.',
+                'orgMiddleInitial.max'   => 'Middle initial must be at most 2 characters.',
+                'orgMiddleInitial.regex' => 'Middle initial may only contain letters.',
+                'orgSuffix.max'          => 'Suffix must not exceed 10 characters.',
+                'orgTeacherId.required'  => 'Teacher ID is required.',
+                'orgTeacherId.regex'     => 'Teacher ID must be 1 to 8 digits only (numbers only).',
+                'orgTeacherId.unique'    => 'This Teacher ID is already registered.',
+                'orgEmail.required'      => 'Email address is required.',
+                'orgEmail.email'         => 'Please enter a valid email address.',
+                'orgEmail.unique'        => 'This email address is already taken.',
+                'orgDept.required'       => 'Please select a college.',
+                'orgPhoto.image'         => 'Profile photo must be an image file.',
+                'orgPhoto.mimes'         => 'Profile photo must be JPG, PNG, or WebP format.',
+                'orgPhoto.max'           => 'Profile photo must not exceed 5MB.',
             ]);
 
-            $paddedId=str_pad($this->orgTeacherId,8,'0',STR_PAD_LEFT);
-            $photoPath=$this->orgPhoto?$this->storeOrganizerPhoto($this->orgPhoto):null;
-            $tmp=Str::random(10);
-            $user=User::create(['name'=>$fullName,'email'=>$this->orgEmail,'role'=>'organizer','password'=>Hash::make($tmp)]);
-            // department column now stores the college name directly
-            $organizer=Organizer::create(['user_id'=>$user->id,'name'=>$fullName,'email'=>$this->orgEmail,'id_number'=>$paddedId,'department'=>$college,'profile_photo'=>$photoPath,'status'=>'ACTIVE']);
-            try{Mail::to($organizer->email)->send(new \App\Mail\OrganizerRegistered($organizer,$tmp));}catch(\Exception $e){Log::warning('Email:'.$e->getMessage());}
-            $this->resetOrgForm(); $this->flash('success',"Organizer '{$fullName}' registered successfully!"); $this->activeModal='';
-        } catch (\Illuminate\Validation\ValidationException $e) { $this->organizerErrors=$e->errors(); }
-          catch (\Exception $e) { Log::error('Organizer:'.$e->getMessage()); $this->organizerErrors=['general'=>[$e->getMessage()]]; }
-          finally { $this->registeringOrganizer=false; }
+            $paddedId  = str_pad($this->orgTeacherId, 8, '0', STR_PAD_LEFT);
+            $photoPath = $this->orgPhoto ? $this->storeOrganizerPhoto($this->orgPhoto) : null;
+            $tmp       = Str::random(10);
+
+            $user = User::create(['name' => $fullName, 'email' => $this->orgEmail, 'role' => 'organizer', 'password' => Hash::make($tmp)]);
+
+            $organizer = Organizer::create([
+                'user_id'       => $user->id,
+                'name'          => $fullName,
+                'email'         => $this->orgEmail,
+                'id_number'     => $paddedId,
+                'department'    => $college,
+                'profile_photo' => $photoPath,
+                'status'        => 'ACTIVE',
+            ]);
+
+            try {
+                Mail::to($organizer->email)->queue(new \App\Mail\OrganizerRegistered($organizer, $tmp));
+            } catch (\Exception $e) {
+                Log::warning('Email: ' . $e->getMessage());
+            }
+
+            $this->resetOrgForm();
+            $this->flash('success', "Organizer '{$fullName}' registered successfully!");
+            $this->activeModal = '';
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->organizerErrors = $e->errors();
+        } catch (\Exception $e) {
+            Log::error('Organizer: ' . $e->getMessage());
+            $this->organizerErrors = ['general' => [$e->getMessage()]];
+        } finally {
+            $this->registeringOrganizer = false;
+        }
     }
 
     private function storeOrganizerPhoto($p): ?string
     {
         if (!$p) return null;
-        try { $f="organizer-".Str::uuid().".".$p->getClientOriginalExtension(); $r=$p->storeAs('organizers',$f,'public'); return $r===false?null:"organizers/{$f}"; }
-        catch (\Exception $e) { Log::error('OrgPhoto:'.$e->getMessage()); return null; }
+        try {
+            $f = "organizer-" . Str::uuid() . "." . $p->getClientOriginalExtension();
+            $r = $p->storeAs('organizers', $f, 'public');
+            return $r === false ? null : "organizers/{$f}";
+        } catch (\Exception $e) {
+            Log::error('OrgPhoto: ' . $e->getMessage());
+            return null;
+        }
     }
 
     private function resetOrgForm(): void
     {
-        $this->orgFirstName=$this->orgMiddleInitial=$this->orgLastName=$this->orgSuffix='';
-        $this->orgTeacherId=$this->orgEmail=$this->orgDept=$this->orgCollegeSelect='';
-        $this->orgPhoto=null; $this->organizerErrors=[];
+        $this->orgFirstName = $this->orgMiddleInitial = $this->orgLastName = $this->orgSuffix = '';
+        $this->orgTeacherId = $this->orgEmail = $this->orgDept = $this->orgCollegeSelect = '';
+        $this->orgPhoto         = null;
+        $this->organizerErrors  = [];
     }
 
     // --------------------------------------------------
@@ -517,40 +824,91 @@ new class extends Component {
 
     public function openEditCourse(int $id): void
     {
-        try { $c=Course::findOrFail($id); $this->editingCourseId=$c->id; $this->courseCode=$c->code; $this->courseName=$c->name; $this->courseAlert=''; $this->courseAlertType=''; }
-        catch (\Exception $e) { $this->courseAlert='Failed to load course.'; $this->courseAlertType='error'; }
+        try {
+            $c = Course::findOrFail($id);
+            $this->editingCourseId = $c->id;
+            $this->courseCode      = $c->code;
+            $this->courseName      = $c->name;
+            $this->courseAlert     = '';
+            $this->courseAlertType = '';
+        } catch (\Exception $e) {
+            $this->courseAlert     = 'Failed to load course.';
+            $this->courseAlertType = 'error';
+        }
     }
 
-    public function resetCourseForm(): void { $this->editingCourseId=null; $this->courseCode=$this->courseName=''; $this->courseAlert=''; $this->courseAlertType=''; $this->savingCourse=false; }
+    public function resetCourseForm(): void
+    {
+        $this->editingCourseId = null;
+        $this->courseCode      = $this->courseName = '';
+        $this->courseAlert     = '';
+        $this->courseAlertType = '';
+        $this->savingCourse    = false;
+    }
 
     public function saveCourse(): void
     {
-        $this->savingCourse=true;
-        $code=strtoupper(trim($this->courseCode)); $name=trim($this->courseName);
-        if (!$code||!$name) { $this->courseAlert='Code and Name are required.'; $this->courseAlertType='error'; $this->savingCourse=false; return; }
+        $this->savingCourse = true;
+        $code = strtoupper(trim($this->courseCode));
+        $name = trim($this->courseName);
+
+        if (!$code || !$name) {
+            $this->courseAlert     = 'Code and Name are required.';
+            $this->courseAlertType = 'error';
+            $this->savingCourse    = false;
+            return;
+        }
+
         try {
-            if ($this->editingCourseId) { Course::findOrFail($this->editingCourseId)->update(['code'=>$code,'name'=>$name]); $this->courseAlert='Course updated!'; }
-            else { Course::create(['code'=>$code,'name'=>$name]); $this->courseAlert='Course added!'; }
-            $this->courseAlertType='success'; $this->coursesList=Course::all()->toArray(); $this->resetCourseForm();
-        } catch (\Exception $e) { $this->courseAlert=str_contains($e->getMessage(),'Duplicate')?'Code already exists.':'Failed to save.'; $this->courseAlertType='error'; }
-        finally { $this->savingCourse=false; }
+            if ($this->editingCourseId) {
+                Course::findOrFail($this->editingCourseId)->update(['code' => $code, 'name' => $name]);
+                $this->courseAlert = 'Course updated!';
+            } else {
+                Course::create(['code' => $code, 'name' => $name]);
+                $this->courseAlert = 'Course added!';
+            }
+            $this->courseAlertType = 'success';
+            $this->coursesList     = Course::all()->toArray();
+            $this->resetCourseForm();
+        } catch (\Exception $e) {
+            $this->courseAlert     = str_contains($e->getMessage(), 'Duplicate') ? 'Code already exists.' : 'Failed to save.';
+            $this->courseAlertType = 'error';
+        } finally {
+            $this->savingCourse = false;
+        }
     }
 
     public function confirmDeleteCourse(int $id): void
     {
-        try { $c=Course::findOrFail($id); $this->deleteCourseId=$id; $this->deleteCourseName=$c->name; $this->activeModal='deleteCourseConfirm'; }
-        catch (\Exception $e) { $this->courseAlert='Failed.'; $this->courseAlertType='error'; }
+        try {
+            $c = Course::findOrFail($id);
+            $this->deleteCourseId   = $id;
+            $this->deleteCourseName = $c->name;
+            $this->activeModal      = 'deleteCourseConfirm';
+        } catch (\Exception $e) {
+            $this->courseAlert     = 'Failed.';
+            $this->courseAlertType = 'error';
+        }
     }
 
     public function deleteCourse(): void
     {
-        $this->deletingCourse=true;
+        $this->deletingCourse = true;
         try {
             Course::findOrFail($this->deleteCourseId)->delete();
-            $this->courseAlert='Deleted!'; $this->courseAlertType='success';
-            $this->coursesList=Course::all()->toArray(); $this->deleteCourseId=null; $this->deleteCourseName=''; $this->activeModal='manageCourses';
-        } catch (\Exception $e) { $this->courseAlert='Failed.'; $this->courseAlertType='error'; $this->activeModal='manageCourses'; }
-        finally { $this->deletingCourse=false; }
+            $this->courseAlert      = 'Deleted!';
+            $this->courseAlertType  = 'success';
+            $this->coursesList      = Course::all()->toArray();
+            $this->deleteCourseId   = null;
+            $this->deleteCourseName = '';
+            $this->activeModal      = 'manageCourses';
+        } catch (\Exception $e) {
+            $this->courseAlert     = 'Failed.';
+            $this->courseAlertType = 'error';
+            $this->activeModal     = 'manageCourses';
+        } finally {
+            $this->deletingCourse = false;
+        }
     }
 
     // --------------------------------------------------
@@ -559,28 +917,54 @@ new class extends Component {
 
     public function resetOrgCourseForm(): void
     {
-        $this->orgNewCollegeName=''; $this->orgAddingToCollege=null; $this->orgSelectedCourseCodes=[];
-        $this->savingOrgCourse=false; $this->orgCourseAlert=''; $this->orgCourseAlertType='';
-        $this->deleteOrgCollegeName=null; $this->deleteOrgCourseName='';
-        $this->orgRenamingCollege=null; $this->orgRenameCollegeName='';
+        $this->orgNewCollegeName      = '';
+        $this->orgAddingToCollege     = null;
+        $this->orgSelectedCourseCodes = [];
+        $this->savingOrgCourse        = false;
+        $this->orgCourseAlert         = '';
+        $this->orgCourseAlertType     = '';
+        $this->deleteOrgCollegeName   = null;
+        $this->deleteOrgCourseName    = '';
+        $this->orgRenamingCollege     = null;
+        $this->orgRenameCollegeName   = '';
     }
 
     public function addCollege(): void
     {
-        $name=trim($this->orgNewCollegeName);
-        if (!$name) { $this->orgCourseAlert='College name is required.'; $this->orgCourseAlertType='error'; return; }
-        if (isset($this->orgCoursesList[$name])) { $this->orgCourseAlert="College '{$name}' already exists."; $this->orgCourseAlertType='error'; return; }
-        $this->orgAddingToCollege=$name; $this->orgSelectedCourseCodes=[]; $this->orgNewCollegeName=''; $this->orgCourseAlert=''; $this->orgCourseAlertType='';
+        $name = trim($this->orgNewCollegeName);
+        if (!$name) {
+            $this->orgCourseAlert     = 'College name is required.';
+            $this->orgCourseAlertType = 'error';
+            return;
+        }
+        if (isset($this->orgCoursesList[$name])) {
+            $this->orgCourseAlert     = "College '{$name}' already exists.";
+            $this->orgCourseAlertType = 'error';
+            return;
+        }
+        $this->orgAddingToCollege     = $name;
+        $this->orgSelectedCourseCodes = [];
+        $this->orgNewCollegeName      = '';
+        $this->orgCourseAlert         = '';
+        $this->orgCourseAlertType     = '';
     }
 
     public function startEditingCollege(string $college): void
     {
-        $this->orgAddingToCollege=$college;
-        $this->orgSelectedCourseCodes=Course::where('college',$college)->pluck('code')->toArray();
-        $this->orgCourseAlert=''; $this->orgCourseAlertType='';
+        $this->orgAddingToCollege     = $college;
+        $this->orgSelectedCourseCodes = Course::where('college', $college)->pluck('code')->toArray();
+        $this->orgCourseAlert         = '';
+        $this->orgCourseAlertType     = '';
     }
 
-    public function cancelAddingCourses(): void { $this->orgAddingToCollege=null; $this->orgSelectedCourseCodes=[]; $this->orgNewCollegeName=''; $this->orgCourseAlert=''; $this->orgCourseAlertType=''; }
+    public function cancelAddingCourses(): void
+    {
+        $this->orgAddingToCollege     = null;
+        $this->orgSelectedCourseCodes = [];
+        $this->orgNewCollegeName      = '';
+        $this->orgCourseAlert         = '';
+        $this->orgCourseAlertType     = '';
+    }
 
     public function startRenamingCollege(string $college): void
     {
@@ -600,46 +984,97 @@ new class extends Component {
     {
         $oldName = trim($this->orgRenamingCollege ?? '');
         $newName = trim($this->orgRenameCollegeName);
-        if (!$newName) { $this->orgCourseAlert='New college name is required.'; $this->orgCourseAlertType='error'; return; }
-        if ($newName === $oldName) { $this->cancelRenamingCollege(); return; }
-        if (isset($this->orgCoursesList[$newName])) { $this->orgCourseAlert="A college named \"{$newName}\" already exists."; $this->orgCourseAlertType='error'; return; }
+
+        if (!$newName) {
+            $this->orgCourseAlert     = 'New college name is required.';
+            $this->orgCourseAlertType = 'error';
+            return;
+        }
+        if ($newName === $oldName) {
+            $this->cancelRenamingCollege();
+            return;
+        }
+        if (isset($this->orgCoursesList[$newName])) {
+            $this->orgCourseAlert     = "A college named \"{$newName}\" already exists.";
+            $this->orgCourseAlertType = 'error';
+            return;
+        }
+
         try {
             Course::where('college', $oldName)->update(['college' => $newName]);
-            // Also update organizer department column if it stored the college name
             Organizer::where('department', $oldName)->update(['department' => $newName]);
-            $this->orgCourseAlert="College renamed to \"{$newName}\" successfully."; $this->orgCourseAlertType='success';
-            $this->cancelRenamingCollege(); $this->loadOrgCourses(); $this->coursesList=Course::all()->toArray();
-        } catch (\Exception $e) { $this->orgCourseAlert='Failed to rename: '.$e->getMessage(); $this->orgCourseAlertType='error'; }
+            $this->orgCourseAlert     = "College renamed to \"{$newName}\" successfully.";
+            $this->orgCourseAlertType = 'success';
+            $this->cancelRenamingCollege();
+            $this->loadOrgCourses();
+            $this->coursesList = Course::all()->toArray();
+        } catch (\Exception $e) {
+            $this->orgCourseAlert     = 'Failed to rename: ' . $e->getMessage();
+            $this->orgCourseAlertType = 'error';
+        }
     }
 
     public function saveCollegeCourses(): void
     {
-        $this->savingOrgCourse=true;
-        $college=trim($this->orgAddingToCollege??'');
-        if (!$college) { $this->orgCourseAlert='College name missing.'; $this->orgCourseAlertType='error'; $this->savingOrgCourse=false; return; }
-        if (empty($this->orgSelectedCourseCodes)) { $this->orgCourseAlert='Select at least one course.'; $this->orgCourseAlertType='error'; $this->savingOrgCourse=false; return; }
+        $this->savingOrgCourse = true;
+        $college = trim($this->orgAddingToCollege ?? '');
+
+        if (!$college) {
+            $this->orgCourseAlert     = 'College name missing.';
+            $this->orgCourseAlertType = 'error';
+            $this->savingOrgCourse    = false;
+            return;
+        }
+        if (empty($this->orgSelectedCourseCodes)) {
+            $this->orgCourseAlert     = 'Select at least one course.';
+            $this->orgCourseAlertType = 'error';
+            $this->savingOrgCourse    = false;
+            return;
+        }
+
         try {
-            Course::where('college',$college)->whereNotIn('code',$this->orgSelectedCourseCodes)->update(['college'=>null]);
-            Course::whereIn('code',$this->orgSelectedCourseCodes)->update(['college'=>$college]);
-            $this->orgCourseAlert="Saved '{$college}' with ".count($this->orgSelectedCourseCodes)." department(s)!";
-            $this->orgCourseAlertType='success'; $this->orgAddingToCollege=null; $this->orgSelectedCourseCodes=[];
-            $this->loadOrgCourses(); $this->coursesList=Course::all()->toArray();
-        } catch (\Exception $e) { $this->orgCourseAlert='Failed: '.$e->getMessage(); $this->orgCourseAlertType='error'; }
-        finally { $this->savingOrgCourse=false; }
+            Course::where('college', $college)->whereNotIn('code', $this->orgSelectedCourseCodes)->update(['college' => null]);
+            Course::whereIn('code', $this->orgSelectedCourseCodes)->update(['college' => $college]);
+            $this->orgCourseAlert     = "Saved '{$college}' with " . count($this->orgSelectedCourseCodes) . " department(s)!";
+            $this->orgCourseAlertType = 'success';
+            $this->orgAddingToCollege     = null;
+            $this->orgSelectedCourseCodes = [];
+            $this->loadOrgCourses();
+            $this->coursesList = Course::all()->toArray();
+        } catch (\Exception $e) {
+            $this->orgCourseAlert     = 'Failed: ' . $e->getMessage();
+            $this->orgCourseAlertType = 'error';
+        } finally {
+            $this->savingOrgCourse = false;
+        }
     }
 
-    public function confirmDeleteCollege(string $college): void { $this->deleteOrgCollegeName=$college; $this->deleteOrgCourseName=$college; $this->activeModal='deleteOrgCollegeConfirm'; }
+    public function confirmDeleteCollege(string $college): void
+    {
+        $this->deleteOrgCollegeName = $college;
+        $this->deleteOrgCourseName  = $college;
+        $this->activeModal          = 'deleteOrgCollegeConfirm';
+    }
 
     public function deleteOrgCollege(): void
     {
-        $this->deletingOrgCourse=true;
+        $this->deletingOrgCourse = true;
         try {
-            Course::where('college',$this->deleteOrgCollegeName)->update(['college'=>null]);
-            $this->orgCourseAlert="College '{$this->deleteOrgCollegeName}' removed."; $this->orgCourseAlertType='success';
-            $this->deleteOrgCollegeName=null; $this->deleteOrgCourseName='';
-            $this->loadOrgCourses(); $this->coursesList=Course::all()->toArray(); $this->activeModal='manageOrgCourses';
-        } catch (\Exception $e) { $this->orgCourseAlert='Failed.'; $this->orgCourseAlertType='error'; $this->activeModal='manageOrgCourses'; }
-        finally { $this->deletingOrgCourse=false; }
+            Course::where('college', $this->deleteOrgCollegeName)->update(['college' => null]);
+            $this->orgCourseAlert     = "College '{$this->deleteOrgCollegeName}' removed.";
+            $this->orgCourseAlertType = 'success';
+            $this->deleteOrgCollegeName = null;
+            $this->deleteOrgCourseName  = '';
+            $this->loadOrgCourses();
+            $this->coursesList = Course::all()->toArray();
+            $this->activeModal = 'manageOrgCourses';
+        } catch (\Exception $e) {
+            $this->orgCourseAlert     = 'Failed.';
+            $this->orgCourseAlertType = 'error';
+            $this->activeModal        = 'manageOrgCourses';
+        } finally {
+            $this->deletingOrgCourse = false;
+        }
     }
 
     // --------------------------------------------------
@@ -654,7 +1089,9 @@ new class extends Component {
             $this->pendingToggleAction = $action;
             $this->pendingToggleName   = $organizer->name;
             $this->activeModal         = 'toggleOrganizerConfirm';
-        } catch (\Exception $e) { $this->flash('error','Could not find organizer.'); }
+        } catch (\Exception $e) {
+            $this->flash('error', 'Could not find organizer.');
+        }
     }
 
     public function executeToggleOrganizerStatus(): void
@@ -665,67 +1102,69 @@ new class extends Component {
             $newStatus = $this->pendingToggleAction === 'deactivate' ? 'INACTIVE' : 'ACTIVE';
             $organizer->update(['status' => $newStatus]);
             $verb = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
-            $this->flash('success',"{$organizer->name} has been {$verb}.");
-        } catch (\Exception $e) { Log::error('Toggle status: '.$e->getMessage()); $this->flash('error','Could not update status: '.$e->getMessage()); }
-        finally { $this->pendingToggleId=null; $this->pendingToggleAction=''; $this->pendingToggleName=''; $this->activeModal=''; }
+            $this->flash('success', "{$organizer->name} has been {$verb}.");
+        } catch (\Exception $e) {
+            Log::error('Toggle status: ' . $e->getMessage());
+            $this->flash('error', 'Could not update status: ' . $e->getMessage());
+        } finally {
+            $this->pendingToggleId     = null;
+            $this->pendingToggleAction = '';
+            $this->pendingToggleName   = '';
+            $this->activeModal         = '';
+        }
     }
 
     public function viewProfile(int $id, string $type): void
     {
         try {
-            $this->viewingProfileType=$type;
-            $this->viewingProfile=$type==='alumni'?Alumni::findOrFail($id)->toArray():Organizer::findOrFail($id)->toArray();
-            $this->viewingProfileId=$id; $this->activeModal='viewProfile';
-        } catch (\Exception $e) { $this->flash('error','Failed to load profile'); }
+            $this->viewingProfileType = $type;
+            $this->viewingProfile     = $type === 'alumni'
+                ? Alumni::findOrFail($id)->toArray()
+                : Organizer::findOrFail($id)->toArray();
+            $this->viewingProfileId = $id;
+            $this->activeModal      = 'viewProfile';
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to load profile');
+        }
     }
 
     public function updateProfilePhoto(): void
     {
-        if (!$this->updatingProfilePhoto||!$this->viewingProfileId) return;
-        $this->updatingProfile=true;
+        if (!$this->updatingProfilePhoto || !$this->viewingProfileId) return;
+        $this->updatingProfile = true;
         try {
-            if ($this->viewingProfileType==='alumni') {
-                $a=Alumni::findOrFail($this->viewingProfileId);
-                if ($a->profile_photo&&!str_contains($a->profile_photo,'default.png')) Storage::disk('public')->delete($a->profile_photo);
-                $p=$this->storeAlumniPhoto($this->updatingProfilePhoto); $a->update(['profile_photo'=>$p]); $this->viewingProfile['profile_photo']=$p;
+            if ($this->viewingProfileType === 'alumni') {
+                $a = Alumni::findOrFail($this->viewingProfileId);
+                if ($a->profile_photo && !str_contains($a->profile_photo, 'default.png')) {
+                    Storage::disk('public')->delete($a->profile_photo);
+                }
+                $p = $this->storeAlumniPhoto($this->updatingProfilePhoto);
+                $a->update(['profile_photo' => $p]);
+                $this->viewingProfile['profile_photo'] = $p;
             } else {
-                $o=Organizer::findOrFail($this->viewingProfileId);
-                if ($o->profile_photo&&!str_contains($o->profile_photo,'default.png')) Storage::disk('public')->delete($o->profile_photo);
-                $p=$this->storeOrganizerPhoto($this->updatingProfilePhoto); $o->update(['profile_photo'=>$p]); $this->viewingProfile['profile_photo']=$p;
+                $o = Organizer::findOrFail($this->viewingProfileId);
+                if ($o->profile_photo && !str_contains($o->profile_photo, 'default.png')) {
+                    Storage::disk('public')->delete($o->profile_photo);
+                }
+                $p = $this->storeOrganizerPhoto($this->updatingProfilePhoto);
+                $o->update(['profile_photo' => $p]);
+                $this->viewingProfile['profile_photo'] = $p;
             }
-            $this->updatingProfilePhoto=null; $this->flash('success','Photo updated!');
-        } catch (\Exception $e) { Log::error('Photo update:'.$e->getMessage()); $this->flash('error','Failed to update photo'); }
-        finally { $this->updatingProfile=false; }
+            $this->updatingProfilePhoto = null;
+            $this->flash('success', 'Photo updated!');
+        } catch (\Exception $e) {
+            Log::error('Photo update: ' . $e->getMessage());
+            $this->flash('error', 'Failed to update photo');
+        } finally {
+            $this->updatingProfile = false;
+        }
     }
 };
 ?>
 
 <div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-50 overflow-hidden" style="height:90vh">
 
-<style>
-    :root{--primary-color:#7a3f91;}
-    html{scroll-behavior:smooth;}
-    .scrollbar-custom::-webkit-scrollbar{width:6px;height:6px;}
-    .scrollbar-custom::-webkit-scrollbar-track{background:transparent;}
-    .scrollbar-custom::-webkit-scrollbar-thumb{background:rgba(122,63,145,.3);border-radius:10px;}
-    .scrollbar-custom::-webkit-scrollbar-thumb:hover{background:rgba(122,63,145,.6);}
-    @keyframes slideInDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
-    @keyframes modalSlideIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
-    @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-    .modal-animate{animation:modalSlideIn .3s cubic-bezier(.16,1,.3,1);}
-    .spin-icon{animation:spin 1s linear infinite;}
-    .btn-primary{background:linear-gradient(135deg,#7a3f91,#6a3580);color:white;border:none;}
-    .btn-primary:disabled{background:linear-gradient(135deg,#cbd5e1,#94a3b8);cursor:not-allowed;}
-    .input-focus:focus{border-color:#7a3f91!important;box-shadow:0 0 0 3px rgba(122,63,145,.1)!important;outline:none!important;}
-    .table-row-hover{transition:background-color .15s ease;}
-    .table-row-hover:hover{background-color:rgba(122,63,145,.05);}
-    .college-card{border-left:4px solid #7a3f91;}
-    .course-check-row{transition:all .15s;}
-    .course-check-row:hover{background:rgba(122,63,145,.07);}
-    .course-check-row.is-selected{background:rgba(122,63,145,.12);border-color:#9b59c4!important;}
-    .tbl-container{transition:opacity .2s ease;}
-    .tbl-loading{opacity:.45;pointer-events:none;}
-</style>
+<link rel="stylesheet" href="{{ asset('css/user-management.css') }}">
 
 {{-- FLASH --}}
 <div x-data="{
@@ -788,12 +1227,6 @@ new class extends Component {
         </button>
     </div>
 
-    {{--
-        Both panels are ALWAYS in the DOM — toggled via CSS only, never @if/@else.
-        This keeps all wire:model / Alpine bindings live at all times, which
-        prevents the "$wire.set is not a function" crash that happens when a
-        wire:ignore element is destroyed and re-created mid-lifecycle.
-    --}}
     <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden">
 
         {{-- Alumni panel --}}

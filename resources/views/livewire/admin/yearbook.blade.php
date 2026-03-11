@@ -59,7 +59,7 @@ new class extends Component {
             $q->where('course_code', $this->course);
         }
 
-        return $q->orderByDesc('created_at')->paginate(24);
+        return $q->orderByDesc('created_at')->paginate(100);
     }
 
     public function resetFilters(): void

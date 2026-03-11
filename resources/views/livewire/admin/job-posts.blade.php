@@ -21,8 +21,6 @@ new class extends Component {
     public string $filterType   = '';
 
     // ── Manage Options Modal ──────────────────────────────────
-    // NOTE: Requires migration — add `default_location` nullable string column to job_options table:
-    //   $table->string('default_location')->nullable()->after('label');
     public bool   $showManageModal = false;
     public string $activeOptionTab = 'company_type';
     public string $optionModalMode = 'add';
@@ -32,10 +30,8 @@ new class extends Component {
     public array  $optionErrors    = [];
 
     // ── Company Type Location Assignment ─────────────────────
-    // When admin clicks "Location" button on a company type row,
-    // this inline form opens below that row to set/update its default_location.
-    public ?int   $assignLocationForId    = null;   // company_type option id being assigned
-    public string $assignLocationValue    = '';     // the location string being typed
+    public ?int   $assignLocationForId    = null;
+    public string $assignLocationValue    = '';
     public array  $assignLocationErrors   = [];
 
     // ── View Full Job Modal ───────────────────────────────────
@@ -80,7 +76,6 @@ new class extends Component {
     public function updatingFilterStatus() { $this->resetPage(); }
     public function updatingFilterType()   { $this->resetPage(); }
 
-    // Auto-fill location when company type is changed in the edit modal
     public function updatedEditCompanyType(string $value): void
     {
         if ($value === '') return;
@@ -183,15 +178,14 @@ new class extends Component {
     public function saveOption(): void
     {
         $this->optionErrors = [];
-
         $label = trim($this->optionLabel);
 
         try {
-                $this->validate();
-            } catch (\Illuminate\Validation\ValidationException $e) {
-                $this->optionErrors = collect($e->errors())->map(fn($v) => $v[0])->toArray();
-                return;
-            }
+            $this->validate();
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->optionErrors = collect($e->errors())->map(fn($v) => $v[0])->toArray();
+            return;
+        }
 
         app(JobController::class)->saveOption(
             ['type' => $this->optionType, 'label' => $label],
@@ -231,7 +225,6 @@ new class extends Component {
         $this->assignLocationForId  = $id;
         $this->assignLocationValue  = $opt->default_location ?? '';
         $this->assignLocationErrors = [];
-        // Close the option edit form so they don't conflict
         $this->resetOptionForm();
     }
 
@@ -248,7 +241,6 @@ new class extends Component {
         $loc = trim($this->assignLocationValue);
 
         if ($loc === '') {
-            // Allow clearing the location — treat empty as remove
             JobOption::where('id', $this->assignLocationForId)
                 ->update(['default_location' => null]);
             $this->dispatch('flash-message', type: 'success', message: 'Default location removed.');
@@ -444,7 +436,8 @@ new class extends Component {
     .header-animate   { animation:slideInDown .4s ease-out }
 
     /* ── Buttons ── */
-    .btn-primary          { background:linear-gradient(135deg,#7a3f91,#5e2f72); color:#fff; border:none; transition:all .2s }
+    /* No transform/scale on hover — background + shadow lang */
+    .btn-primary          { background:linear-gradient(135deg,#7a3f91,#5e2f72); color:#fff; border:none; transition:background .2s, box-shadow .2s }
     .btn-primary:hover:not(:disabled) { background:linear-gradient(135deg,#8b4aa5,#6a3580); box-shadow:0 4px 14px rgba(122,63,145,.35) }
     .btn-primary:disabled { background:linear-gradient(135deg,#cbd5e1,#94a3b8); cursor:not-allowed; box-shadow:none }
 
@@ -461,6 +454,9 @@ new class extends Component {
     .table-row-hover:hover      { background-color:rgba(122,63,145,.04) }
     .tbl-container              { transition:opacity .15s ease }
     .tbl-loading                { opacity:.4; pointer-events:none }
+
+    /* thead — no hover effect at all, static lang */
+    .tbl-container thead tr th  { pointer-events:none }
 
     /* ── Manage Options tabs ── */
     .manage-tab-active   { background:#7a3f91; color:#fff; border-color:#7a3f91 }
@@ -524,7 +520,7 @@ new class extends Component {
     {{-- ── TABLE PANEL ──────────────────────────────────────────── --}}
     <div class="flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
 
-        {{-- Filters --}}
+        {{-- Filters — NO refreshing spinner --}}
         <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/80 flex flex-wrap gap-3 items-center shrink-0">
 
             {{-- Search --}}
@@ -569,12 +565,7 @@ new class extends Component {
                 <i class="fas fa-rotate-left text-xs"></i> Reset
             </button>
 
-            {{-- Spinner --}}
-            <span wire:loading wire:target="search,filterStatus,filterType,resetFilters"
-                  class="flex items-center gap-1.5 text-purple-500 text-sm">
-                <i class="fas fa-spinner spin-icon"></i>
-                <span class="text-xs font-medium">Refreshing...</span>
-            </span>
+            {{-- NO refreshing spinner here --}}
         </div>
 
         {{-- Table --}}
@@ -583,7 +574,8 @@ new class extends Component {
              wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
             <table class="w-full border-separate border-spacing-0">
                 <thead style="position:sticky;top:0;z-index:10;">
-                    <tr class="btn-primary text-white text-left">
+                    {{-- No hover/transition on thead row --}}
+                    <tr class="btn-primary text-white text-left" style="pointer-events:none;">
                         <th class="px-5 py-4 text-xs font-bold uppercase tracking-wider">Job Title</th>
                         <th class="px-5 py-4 text-xs font-bold uppercase tracking-wider">Company</th>
                         <th class="px-5 py-4 text-xs font-bold uppercase tracking-wider">Type</th>
@@ -633,14 +625,19 @@ new class extends Component {
                             @endif
                         </td>
 
-                        {{-- Deadline --}}
+                        {{-- Deadline — color changes based on urgency --}}
                         <td class="px-5 py-3.5">
-                            <span class="text-sm font-bold {{ now()->gt($job->deadline) ? 'text-red-500' : 'text-slate-700' }}">
-                                {{ \Carbon\Carbon::parse($job->deadline)->format('M d, Y') }}
+@php
+    $dl = \Carbon\Carbon::parse($job->deadline);
+    $daysLeft = now()->diffInDays($dl, false);
+    $dlDateClass = 'text-slate-700 font-semibold';
+    $dlSubClass  = 'text-slate-400';
+    $dlLabel     = $daysLeft < 0 ? 'Expired' : $dl->diffForHumans();
+@endphp
+                            <span class="text-sm {{ $dlDateClass }}">
+                                {{ $dl->format('M d, Y') }}
                             </span>
-                            <p class="text-xs mt-0.5 {{ now()->gt($job->deadline) ? 'text-red-400' : 'text-slate-400' }}">
-                                {{ now()->gt($job->deadline) ? 'Expired' : \Carbon\Carbon::parse($job->deadline)->diffForHumans() }}
-                            </p>
+                            <p class="text-xs mt-0.5 {{ $dlSubClass }}">{{ $dlLabel }}</p>
                         </td>
 
                         {{-- Status --}}
@@ -759,8 +756,6 @@ new class extends Component {
 
 {{-- ════════════════════════════════════════════════════════════
      MODAL: Configure Job Options
-     Tabs: Company Type, Employment Type, Experience Level, Location
-     Must click X or Cancel — no backdrop click to dismiss
 ════════════════════════════════════════════════════════════ --}}
 @if($showManageModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
@@ -982,7 +977,6 @@ new class extends Component {
                 </div>
                 @endforeach
 
-                {{-- Posted By — name + college combined --}}
                 @php
                     $orgDept2 = $job->organizer?->department ?? '';
                     $hasCollege2 = $orgDept2 !== '' && \App\Models\Course::where('college', $orgDept2)->exists();
@@ -1000,7 +994,6 @@ new class extends Component {
                     @endif
                 </div>
 
-                {{-- Last Updated --}}
                 <div class="bg-slate-50 rounded-xl p-4 border border-slate-200">
                     <p class="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
                         <i class="fas fa-clock-rotate-left text-purple-500"></i> Last Updated
@@ -1008,7 +1001,6 @@ new class extends Component {
                     <p class="text-sm font-bold text-slate-800">{{ $job->updated_at->diffForHumans() }}</p>
                     <p class="text-xs font-semibold text-slate-500 mt-0.5">{{ $job->updated_at->format('M d, Y · g:i A') }}</p>
                 </div>
-
             </div>
 
             <div>
@@ -1064,7 +1056,6 @@ new class extends Component {
 
         <div class="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-8 py-6 space-y-5">
 
-            {{-- Job Title + Company --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Job Title <span class="text-red-500">*</span></label>
@@ -1080,7 +1071,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Company Type + Location --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Company Type <span class="text-red-500">*</span></label>
@@ -1107,7 +1097,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Employment Type + Experience Level --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Employment Type <span class="text-red-500">*</span></label>
@@ -1133,7 +1122,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Salary + Deadline --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Salary <span class="text-slate-400 font-normal">(Optional)</span></label>
@@ -1156,7 +1144,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Description --}}
             <div>
                 <label class="form-label">Job Description <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="editDescription" rows="7"
