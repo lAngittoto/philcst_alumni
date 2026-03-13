@@ -18,28 +18,24 @@ use Illuminate\Support\Str;
 new class extends Component {
     use WithPagination, WithFileUploads;
 
-    // Remove alumniPage / orgPage from the URL query string → clean URLs
-    protected function queryString(): array
-    {
-        return [];
-    }
+    protected function queryString(): array { return []; }
 
-    // ---- Tabs / UI state ----
+    // ── UI State ──────────────────────────────────────────
     public string $activeTab   = 'alumni';
     public string $activeModal = '';
 
-    // ---- Alumni filters ----
+    // ── Alumni Filters ────────────────────────────────────
     public string $alumniSearch = '';
     public string $alumniBatch  = '';
     public string $alumniCourse = '';
     public string $alumniSort   = 'recent';
 
-    // ---- Organizer filters ----
+    // ── Organizer Filters ─────────────────────────────────
     public string $orgSearch  = '';
     public string $orgCollege = '';
     public string $orgSort    = 'recent';
 
-    // ---- Register Alumni ----
+    // ── Register Alumni ───────────────────────────────────
     public string $regFirstName     = '';
     public string $regMiddleInitial = '';
     public string $regLastName      = '';
@@ -52,20 +48,20 @@ new class extends Component {
     public bool   $registeringAlumni = false;
     public array  $alumniErrors      = [];
 
-    // ---- Register Organizer ----
-    public string $orgFirstName      = '';
-    public string $orgMiddleInitial  = '';
-    public string $orgLastName       = '';
-    public string $orgSuffix         = '';
-    public string $orgTeacherId      = '';
-    public string $orgEmail          = '';
-    public string $orgDept           = '';
-    public string $orgCollegeSelect  = '';
-    public        $orgPhoto          = null;
+    // ── Register Organizer ────────────────────────────────
+    public string $orgFirstName         = '';
+    public string $orgMiddleInitial     = '';
+    public string $orgLastName          = '';
+    public string $orgSuffix            = '';
+    public string $orgTeacherId         = '';
+    public string $orgEmail             = '';
+    public string $orgDept              = '';
+    public string $orgCollegeSelect     = '';
+    public        $orgPhoto             = null;
     public bool   $registeringOrganizer = false;
     public array  $organizerErrors      = [];
 
-    // ---- Alumni Courses ----
+    // ── Course Management ─────────────────────────────────
     public array   $coursesList      = [];
     public string  $courseCode       = '';
     public string  $courseName       = '';
@@ -77,7 +73,7 @@ new class extends Component {
     public string  $deleteCourseName = '';
     public bool    $deletingCourse   = false;
 
-    // ---- Organizer Colleges ----
+    // ── College Management ────────────────────────────────
     public array   $orgCoursesList         = [];
     public string  $orgNewCollegeName      = '';
     public ?string $orgAddingToCollege     = null;
@@ -91,12 +87,12 @@ new class extends Component {
     public ?string $orgRenamingCollege     = null;
     public string  $orgRenameCollegeName   = '';
 
-    // ---- Toggle Organizer Status Confirm ----
+    // ── Organizer Status Toggle ───────────────────────────
     public ?int   $pendingToggleId     = null;
     public string $pendingToggleAction = '';
     public string $pendingToggleName   = '';
 
-    // ---- Import ----
+    // ── Import ────────────────────────────────────────────
     public        $importFile         = null;
     public bool   $importingFile      = false;
     public string $importStatus       = '';
@@ -104,20 +100,22 @@ new class extends Component {
     public int    $importTotal        = 0;
     public int    $importSuccessCount = 0;
     public int    $importFailCount    = 0;
+    public int    $importDuplicateCount = 0;
     public array  $importErrors       = [];
+    public array  $importDuplicates   = [];
 
-    // ---- Profile ----
-    public ?int   $viewingProfileId    = null;
-    public string $viewingProfileType  = 'alumni';
-    public        $viewingProfile      = null;
+    // ── Profile ───────────────────────────────────────────
+    public ?int   $viewingProfileId     = null;
+    public string $viewingProfileType   = 'alumni';
+    public        $viewingProfile       = null;
     public        $updatingProfilePhoto = null;
-    public bool   $updatingProfile     = false;
+    public bool   $updatingProfile      = false;
 
     protected string $paginationTheme = 'tailwind';
 
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
     // Lifecycle
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
 
     #[On('showFlash')]
     public function handleShowFlash(string $type, string $message): void
@@ -131,8 +129,14 @@ new class extends Component {
         $this->regYear     = (string) date('Y');
         $this->loadOrgCourses();
 
-        if (session()->has('success')) { $msg = session('success'); session()->forget('success'); $this->dispatch('showFlash', type: 'success', message: $msg); }
-        if (session()->has('error'))   { $msg = session('error');   session()->forget('error');   $this->dispatch('showFlash', type: 'error',   message: $msg); }
+        if (session()->has('success')) {
+            $msg = session()->pull('success');
+            $this->dispatch('showFlash', type: 'success', message: $msg);
+        }
+        if (session()->has('error')) {
+            $msg = session()->pull('error');
+            $this->dispatch('showFlash', type: 'error', message: $msg);
+        }
     }
 
     private function loadOrgCourses(): void
@@ -144,9 +148,9 @@ new class extends Component {
         $this->orgCoursesList = $grouped;
     }
 
-    // --------------------------------------------------
-    // Filter reset triggers
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
+    // Filter Watchers
+    // ─────────────────────────────────────────────────────
 
     public function updatingAlumniSearch() { $this->resetPage('alumniPage'); }
     public function updatingOrgSearch()    { $this->resetPage('orgPage'); }
@@ -156,16 +160,17 @@ new class extends Component {
     public function updatingOrgCollege()   { $this->resetPage('orgPage'); }
     public function updatingOrgSort()      { $this->resetPage('orgPage'); }
 
-    // --------------------------------------------------
-    // Computed properties
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
+    // Computed Properties
+    // ─────────────────────────────────────────────────────
 
     #[Computed]
     public function alumniRecords()
     {
         $q = Alumni::query();
         if ($this->alumniSearch) {
-            $q->where(fn($s) => $s->where('name', 'like', "%{$this->alumniSearch}%")
+            $q->where(fn($s) => $s
+                ->where('name', 'like', "%{$this->alumniSearch}%")
                 ->orWhere('student_id', 'like', "%{$this->alumniSearch}%")
                 ->orWhere('email', 'like', "%{$this->alumniSearch}%"));
         }
@@ -180,7 +185,8 @@ new class extends Component {
     {
         $q = Organizer::withoutTrashed();
         if ($this->orgSearch) {
-            $q->where(fn($s) => $s->where('name', 'like', "%{$this->orgSearch}%")
+            $q->where(fn($s) => $s
+                ->where('name', 'like', "%{$this->orgSearch}%")
                 ->orWhere('email', 'like', "%{$this->orgSearch}%")
                 ->orWhere('id_number', 'like', "%{$this->orgSearch}%"));
         }
@@ -201,39 +207,32 @@ new class extends Component {
     {
         return Course::whereNotNull('college')
             ->where('college', '!=', '')
-            ->orderBy('college')
-            ->orderBy('code')
-            ->get()
-            ->groupBy('college');
+            ->orderBy('college')->orderBy('code')
+            ->get()->groupBy('college');
     }
 
     #[Computed]
-    public function allCoursesForAssign()
-    {
-        return Course::orderBy('code')->get();
-    }
+    public function allCoursesForAssign() { return Course::orderBy('code')->get(); }
 
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
     // Helpers
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
 
     public function getCollegeForCourse(string $code): string
     {
         return Course::where('code', $code)->value('college') ?? $code;
     }
 
-    public function getCollegeDepts(string $code): array
-    {
-        $college = Course::where('code', $code)->value('college');
-        if (!$college) return [$code];
-        return Course::where('college', $college)->orderBy('code')->pluck('code')->toArray();
-    }
-
     public function getPhotoUrl(?string $path): string
     {
-        if (!$path || str_contains($path, 'default.png')) return asset('storage/alumni-photos/default.png');
+        if (!$path || str_contains($path, 'default.png'))
+            return asset('storage/alumni-photos/default.png');
+
         if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/'))
-            return Storage::disk('public')->exists($path) ? asset('storage/' . $path) : asset('storage/alumni-photos/default.png');
+            return Storage::disk('public')->exists($path)
+                ? asset('storage/' . $path)
+                : asset('storage/alumni-photos/default.png');
+
         return asset('storage/alumni-photos/default.png');
     }
 
@@ -254,9 +253,9 @@ new class extends Component {
         $this->dispatch('flash-message', type: $type, message: $msg);
     }
 
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
     // Modal / Tab
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
 
     public function switchTab(string $tab): void { $this->activeTab = $tab; }
 
@@ -269,38 +268,45 @@ new class extends Component {
 
     public function closeModal(): void
     {
-        $this->activeModal         = '';
-        $this->pendingToggleId     = null;
-        $this->pendingToggleAction = '';
-        $this->pendingToggleName   = '';
-        $this->resetImportState();
+        $this->activeModal          = '';
+        $this->pendingToggleId      = null;
+        $this->pendingToggleAction  = '';
+        $this->pendingToggleName    = '';
         $this->viewingProfileId     = null;
         $this->updatingProfilePhoto = null;
+        $this->resetImportState();
     }
 
-    public function resetAlumniFilters(): void { $this->alumniSearch = $this->alumniBatch = $this->alumniCourse = ''; $this->alumniSort = 'recent'; $this->resetPage('alumniPage'); }
-    public function resetOrgFilters(): void    { $this->orgSearch = $this->orgCollege = ''; $this->orgSort = 'recent'; $this->resetPage('orgPage'); }
+    public function resetAlumniFilters(): void
+    {
+        $this->alumniSearch = $this->alumniBatch = $this->alumniCourse = '';
+        $this->alumniSort   = 'recent';
+        $this->resetPage('alumniPage');
+    }
 
-    // --------------------------------------------------
-    // Import — REWRITTEN FOR SPEED
-    // Changes vs original:
-    //   1. All course / email / student-id lookups pre-loaded into PHP arrays (0 per-row DB reads)
-    //   2. Valid rows collected then bulk-inserted in chunks of 100 (2 queries total vs 2 × N)
-    //   3. Emails QUEUED via Mail::queue() — non-blocking (requires queue worker)
-    //   4. Intra-file duplicate detection (same email twice in the Excel)
-    //   5. importErrors capped at 200 entries so Livewire payload stays small
-    // --------------------------------------------------
+    public function resetOrgFilters(): void
+    {
+        $this->orgSearch = $this->orgCollege = '';
+        $this->orgSort   = 'recent';
+        $this->resetPage('orgPage');
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Import
+    // ─────────────────────────────────────────────────────
 
     public function resetImportState(): void
     {
-        $this->importFile         = null;
-        $this->importingFile      = false;
-        $this->importStatus       = '';
-        $this->importProgress     = 0;
-        $this->importTotal        = 0;
-        $this->importSuccessCount = 0;
-        $this->importFailCount    = 0;
-        $this->importErrors       = [];
+        $this->importFile           = null;
+        $this->importingFile        = false;
+        $this->importStatus         = '';
+        $this->importProgress       = 0;
+        $this->importTotal          = 0;
+        $this->importSuccessCount   = 0;
+        $this->importFailCount      = 0;
+        $this->importDuplicateCount = 0;
+        $this->importErrors         = [];
+        $this->importDuplicates     = [];
     }
 
     public function cancelImport(): void
@@ -312,87 +318,68 @@ new class extends Component {
 
     public function processImportFile(): void
     {
-        // No time limit for this method — large files need more than 60 seconds
         set_time_limit(0);
 
-        $this->importingFile      = true;
-        $this->importStatus       = 'Preparing…';
-        $this->importProgress     = 0;
-        $this->importSuccessCount = 0;
-        $this->importFailCount    = 0;
-        $this->importErrors       = [];
+        $this->importingFile        = true;
+        $this->importStatus         = 'Validating…';
+        $this->importProgress       = 0;
+        $this->importSuccessCount   = 0;
+        $this->importFailCount      = 0;
+        $this->importDuplicateCount = 0;
+        $this->importErrors         = [];
+        $this->importDuplicates     = [];
 
         try {
-            if (!$this->importFile) {
-                throw new \Exception('No file selected.');
-            }
+            if (!$this->importFile) throw new \Exception('No file selected.');
 
             $ext = strtolower($this->importFile->getClientOriginalExtension());
+            $rows = match(true) {
+                in_array($ext, ['xlsx', 'xls']) => $this->parseExcelFile($this->importFile->getRealPath()),
+                $ext === 'csv'                  => array_map('str_getcsv', file($this->importFile->getRealPath())),
+                default                         => throw new \Exception('File must be .csv or .xlsx/.xls.'),
+            };
 
-            if ($ext === 'xlsx' || $ext === 'xls') {
-                $rows = $this->parseExcelFile($this->importFile->getRealPath());
-            } elseif ($ext === 'csv') {
-                $rows = array_map('str_getcsv', file($this->importFile->getRealPath()));
-            } else {
-                throw new \Exception('File must be .csv or .xlsx/.xls.');
-            }
-
-            if (count($rows) < 2) {
-                throw new \Exception('File is empty or has no data rows.');
-            }
+            if (count($rows) < 2) throw new \Exception('File is empty or has no data rows.');
 
             // Build header map
             $header = array_map('trim', array_map('strtolower', $rows[0]));
             foreach (['name', 'student_id', 'course_code', 'year', 'email'] as $required) {
-                if (!in_array($required, $header, true)) {
+                if (!in_array($required, $header, true))
                     throw new \Exception("Missing required column: \"{$required}\".");
-                }
             }
 
             $this->importTotal = count($rows) - 1;
 
-            // -------------------------------------------------------
-            // PRE-LOAD all lookup data — eliminates all per-row DB queries
-            // -------------------------------------------------------
-
-            // course code => course name  (uppercased keys)
+            // ── Pre-load all lookup data (zero per-row DB queries) ──
             $courseMap = Course::pluck('name', 'code')
                 ->mapWithKeys(fn($name, $code) => [strtoupper($code) => $name])
                 ->toArray();
 
-            // Existing emails / student IDs as hash-sets for O(1) lookup
             $existingAlumniEmails = Alumni::pluck('email')
-                ->mapWithKeys(fn($e) => [strtolower($e) => true])
-                ->toArray();
+                ->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
 
             $existingAlumniIds = Alumni::pluck('student_id')
-                ->mapWithKeys(fn($id) => [$id => true])
-                ->toArray();
+                ->mapWithKeys(fn($id) => [$id => true])->toArray();
 
             $existingUserEmails = User::pluck('email')
-                ->mapWithKeys(fn($e) => [strtolower($e) => true])
-                ->toArray();
+                ->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
 
-            // -------------------------------------------------------
-            // VALIDATION PASS — collect valid rows, reject invalid ones
-            // -------------------------------------------------------
-            $toInsertAlumni    = [];
-            $toInsertUsers     = [];
-            $emailJobs         = [];
-            $seenEmailsInFile  = [];
-            $seenIdsInFile     = [];
-            $maxErrorsStored   = 200;
+            // ── FIRST PASS: validate ALL rows before inserting anything ──
+            $toInsertAlumni   = [];
+            $toInsertUsers    = [];
+            $emailJobs        = [];
+            $seenEmailsInFile = [];
+            $seenIdsInFile    = [];
+            $validationErrors = [];
+            $duplicates       = [];
+            $maxErrorsStored  = 200;
 
             for ($i = 1; $i < count($rows); $i++) {
                 $this->importProgress = $i;
 
-                // Skip fully blank rows
-                if (count(array_filter($rows[$i], fn($v) => trim((string) $v) !== '')) === 0) {
-                    continue;
-                }
-                if (count($rows[$i]) < count($header)) {
-                    continue;
-                }
+                // Skip blank rows
+                if (count(array_filter($rows[$i], fn($v) => trim((string)$v) !== '')) === 0) continue;
+                if (count($rows[$i]) < count($header)) continue;
 
                 $row   = array_combine($header, array_slice($rows[$i], 0, count($header)));
                 $name  = trim($row['name']        ?? '');
@@ -400,57 +387,67 @@ new class extends Component {
                 $rawId = trim($row['student_id']  ?? '');
                 $code  = strtoupper(trim($row['course_code'] ?? ''));
                 $year  = trim($row['year']        ?? '');
+                $label = "Row " . ($i + 1) . ($name ? " ({$name})" : '');
 
-                $label = "Row {$i}" . ($name ? " ({$name})" : '');
-
+                // ── Name validation ──
                 if (!$name) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Name is empty.");
+                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Name is empty.");
                     continue;
                 }
                 if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $name)) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Name \"{$name}\" contains invalid characters.");
+                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Name \"{$name}\" contains invalid characters (letters, spaces, hyphens, apostrophes only).");
                     continue;
                 }
+
+                // ── Email validation ──
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Email \"{$email}\" is not a valid email address.");
+                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Email \"{$email}\" is not a valid email address.");
                     continue;
                 }
+
+                // ── Duplicate detection ──
                 if (isset($existingAlumniEmails[$email]) || isset($seenEmailsInFile[$email])) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Email \"{$email}\" is already registered as an alumni.");
+                    $source = isset($existingAlumniEmails[$email]) ? 'already exists in the system' : 'appears more than once in this file';
+                    $duplicates[] = "{$label}: Email \"{$email}\" — {$source}.";
+                    $this->importDuplicateCount++;
                     continue;
                 }
-                if (isset($existingUserEmails[$email]) || isset($seenEmailsInFile[$email])) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Email \"{$email}\" is already used by an existing account.");
+                if (isset($existingUserEmails[$email])) {
+                    $duplicates[] = "{$label}: Email \"{$email}\" — already used by an existing account.";
+                    $this->importDuplicateCount++;
                     continue;
                 }
+
+                // ── Student ID validation ──
                 if (!$rawId || !preg_match('/^\d{1,8}$/', $rawId)) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Student ID \"{$rawId}\" must be 1–8 digits.");
+                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Student ID \"{$rawId}\" must be 1–8 digits (numbers only).");
                     continue;
                 }
                 $sid = str_pad($rawId, 8, '0', STR_PAD_LEFT);
+
                 if (isset($existingAlumniIds[$sid]) || isset($seenIdsInFile[$sid])) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Student ID \"{$sid}\" is already registered.");
+                    $source = isset($existingAlumniIds[$sid]) ? 'already exists in the system' : 'appears more than once in this file';
+                    $duplicates[] = "{$label}: Student ID \"{$sid}\" — {$source}.";
+                    $this->importDuplicateCount++;
                     continue;
                 }
+
+                // ── Course validation ──
                 if (!isset($courseMap[$code])) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Course code \"{$code}\" does not exist.");
+                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Course code \"{$code}\" does not exist in the system.");
                     continue;
                 }
+
+                // ── Year validation — accepts any 4-digit numeric year ──
                 $batchYear = (int) $year;
-                if ($batchYear < 2000 || $batchYear > (int) date('Y')) {
-                    $this->recordImportError($maxErrorsStored, "{$label}: Year \"{$year}\" is invalid (must be 2000–" . date('Y') . ").");
+                if (!preg_match('/^\d{4}$/', (string) $year) || $batchYear < 1000) {
+                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Year \"{$year}\" is invalid (must be a 4-digit year e.g. 2024).");
                     continue;
                 }
 
-                // Row passed all checks — stage for bulk insert
-                $now = now()->toDateTimeString();
-                $tmp = Str::random(10);
-
-                // Use bcrypt rounds=4 for bulk import temp passwords.
-                // BCRYPT_ROUNDS=12 (production default) takes ~300ms per hash —
-                // that's 5 minutes for 1000 rows. These are one-time temp passwords
-                // sent via email; users set their own password on first login,
-                // so low rounds here are perfectly safe.
+                // ── Row passed — stage for insert ──
+                $now      = now()->toDateTimeString();
+                $tmp      = Str::random(10);
                 $hashedTmp = password_hash($tmp, PASSWORD_BCRYPT, ['cost' => 4]);
 
                 $toInsertAlumni[] = [
@@ -464,7 +461,6 @@ new class extends Component {
                     'created_at'  => $now,
                     'updated_at'  => $now,
                 ];
-
                 $toInsertUsers[] = [
                     'name'       => $name,
                     'email'      => $email,
@@ -473,53 +469,47 @@ new class extends Component {
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
-
-                $emailJobs[] = [
-                    'name'        => $name,
-                    'email'       => $email,
-                    'tmp'         => $tmp,
-                    'course_code' => $code,
+                $emailJobs[] = compact('name', 'email', 'tmp', 'code', 'batchYear', 'sid') + [
                     'course_name' => $courseMap[$code],
+                    'course_code' => $code,
                     'batch'       => $batchYear,
-                    'sid'         => $sid,
                 ];
 
-                // Mark as seen so intra-file duplicates are caught
                 $seenEmailsInFile[$email] = true;
                 $seenIdsInFile[$sid]      = true;
             }
 
-            // -------------------------------------------------------
-            // BULK INSERT in chunks of 100
-            // -------------------------------------------------------
-            $chunkSize = 100;
+            // ── Store all error categories ──
+            $this->importErrors     = $validationErrors;
+            $this->importDuplicates = $duplicates;
+            $this->importFailCount  = count($validationErrors);
 
-            foreach (array_chunk($toInsertAlumni, $chunkSize) as $chunk) {
-                Alumni::insert($chunk);
+            // ── If any HARD validation errors exist, abort entirely ──
+            if (count($validationErrors) > 0) {
+                $this->importStatus  = 'Validation Failed';
+                $this->importingFile = false;
+                $this->importFile    = null;
+                return;
             }
-            foreach (array_chunk($toInsertUsers, $chunkSize) as $chunk) {
-                User::insert($chunk);
-            }
+
+            // ── No hard errors — bulk insert valid rows ──
+            $this->importStatus = 'Importing…';
+
+            foreach (array_chunk($toInsertAlumni, 100) as $chunk) Alumni::insert($chunk);
+            foreach (array_chunk($toInsertUsers,  100) as $chunk) User::insert($chunk);
 
             $this->importSuccessCount = count($toInsertAlumni);
 
-            // -------------------------------------------------------
-            // QUEUE welcome emails (non-blocking)
-            // Requires:  QUEUE_CONNECTION=database in .env
-            //            php artisan queue:table && php artisan migrate
-            //            php artisan queue:work   (keep running)
-            // -------------------------------------------------------
+            // ── Queue welcome emails (non-blocking) ──
             if ($this->importSuccessCount > 0) {
                 $insertedAlumni = Alumni::whereIn('email', array_column($emailJobs, 'email'))
-                    ->get()
-                    ->keyBy(fn($a) => strtolower($a->email));
+                    ->get()->keyBy(fn($a) => strtolower($a->email));
 
                 foreach ($emailJobs as $job) {
                     try {
                         $alumniModel = $insertedAlumni[strtolower($job['email'])] ?? null;
                         if ($alumniModel) {
-                            Mail::to($job['email'])
-                                ->queue(new \App\Mail\AlumniRegistered($alumniModel, $job['tmp']));
+                            Mail::to($job['email'])->queue(new \App\Mail\AlumniRegistered($alumniModel, $job['tmp']));
                         }
                     } catch (\Exception $me) {
                         Log::warning('Import queue email failed: ' . $me->getMessage());
@@ -527,25 +517,17 @@ new class extends Component {
                 }
             }
 
-            // -------------------------------------------------------
-            // Wrap up
-            // -------------------------------------------------------
-            $this->importStatus  = 'Done!';
+            // ── Wrap up ──
+            $this->importStatus  = 'Done';
             $this->importingFile = false;
             $this->coursesList   = Course::all()->toArray();
             $this->importFile    = null;
-            $this->activeModal   = '';
-            $this->resetAlumniFilters();
 
-            if ($this->importSuccessCount > 0) {
-                $msg = "Successfully imported {$this->importSuccessCount} alumni.";
-                if ($this->importFailCount > 0) {
-                    $msg .= " {$this->importFailCount} row(s) were skipped.";
-                }
-                $this->flash('success', $msg);
-            } else {
-                $this->flash('error', "No alumni were imported. All {$this->importFailCount} row(s) had errors.");
+            if ($this->importSuccessCount === 0 && $this->importDuplicateCount > 0) {
+                $this->importStatus = 'All Duplicates';
             }
+
+            $this->resetAlumniFilters();
 
         } catch (\Exception $e) {
             Log::error('Import error: ' . $e->getMessage());
@@ -554,16 +536,13 @@ new class extends Component {
         }
     }
 
-    /**
-     * Cap stored import errors so the Livewire payload stays small on large files.
-     */
-    private function recordImportError(int $max, string $msg): void
+    private function _addValidationError(array &$errors, int $max, string $msg): void
     {
         $this->importFailCount++;
-        if (count($this->importErrors) < $max) {
-            $this->importErrors[] = $msg;
-        } elseif (count($this->importErrors) === $max) {
-            $this->importErrors[] = '… (further errors truncated to keep the page responsive)';
+        if (count($errors) < $max) {
+            $errors[] = $msg;
+        } elseif (count($errors) === $max) {
+            $errors[] = '… (additional errors truncated — fix the listed issues first)';
         }
     }
 
@@ -573,47 +552,46 @@ new class extends Component {
             $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
             $reader->setReadDataOnly(true);
             $reader->setReadEmptyCells(false);
-
             $spreadsheet = $reader->load($path);
             $sheet       = $spreadsheet->getActiveSheet();
-
-            $rows       = [];
-            $highestRow = $sheet->getHighestDataRow();
-            $highestCol = $sheet->getHighestDataColumn();
+            $rows        = [];
+            $highestRow  = $sheet->getHighestDataRow();
+            $highestCol  = $sheet->getHighestDataColumn();
 
             foreach ($sheet->getRowIterator(1, $highestRow) as $row) {
                 $rd = [];
                 $ci = $row->getCellIterator('A', $highestCol);
                 $ci->setIterateOnlyExistingCells(false);
-                foreach ($ci as $cell) {
-                    $rd[] = $cell->getValue();
-                }
+                foreach ($ci as $cell) $rd[] = $cell->getValue();
                 $rows[] = $rd;
             }
 
-            // Free memory immediately
             $spreadsheet->disconnectWorksheets();
             unset($spreadsheet);
-
             return $rows;
         } catch (\Exception $e) {
             throw new \Exception('Excel parse failed: ' . $e->getMessage());
         }
     }
 
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
     // Alumni Registration
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
 
     public function registerAlumni(): void
     {
         $this->alumniErrors      = [];
         $this->registeringAlumni = true;
+
         try {
-            if (!$this->validateName(trim($this->regFirstName))) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (!$this->validateName(trim($this->regLastName)))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (trim($this->regMiddleInitial) !== '' && !preg_match('/^[a-zA-Z]+$/', trim($this->regMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
-            if (trim($this->regSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->regSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
+            if (!$this->validateName(trim($this->regFirstName)))
+                throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (!$this->validateName(trim($this->regLastName)))
+                throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (trim($this->regMiddleInitial) !== '' && !preg_match('/^[a-zA-Z]+$/', trim($this->regMiddleInitial)))
+                throw new \Exception('Middle initial may only contain letters.');
+            if (trim($this->regSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->regSuffix)))
+                throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
 
             $fullName = $this->buildFullName($this->regFirstName, $this->regMiddleInitial, $this->regLastName, $this->regSuffix);
 
@@ -625,30 +603,15 @@ new class extends Component {
                 'regStudentId'     => ['required', 'string', 'regex:/^\d{1,8}$/', 'unique:alumni,student_id'],
                 'regEmail'         => ['required', 'email', 'max:255', 'unique:alumni,email', 'unique:users,email'],
                 'regCourseCode'    => ['required', 'string', 'exists:courses,code'],
-                'regYear'          => ['required', 'integer', 'digits:4'],
+                'regYear'          => ['required', 'digits:4'],
                 'regPhoto'         => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             ], [
-                'regFirstName.required'  => 'First name is required.',
-                'regFirstName.max'       => 'First name must not exceed 100 characters.',
-                'regLastName.required'   => 'Last name is required.',
-                'regLastName.max'        => 'Last name must not exceed 100 characters.',
-                'regMiddleInitial.max'   => 'Middle initial must be at most 2 characters.',
-                'regMiddleInitial.regex' => 'Middle initial may only contain letters.',
-                'regSuffix.max'          => 'Suffix must not exceed 10 characters.',
-                'regStudentId.required'  => 'Student ID is required.',
-                'regStudentId.regex'     => 'Student ID must be 1 to 8 digits only (numbers only).',
-                'regStudentId.unique'    => 'This Student ID is already registered.',
-                'regEmail.required'      => 'Email address is required.',
-                'regEmail.email'         => 'Please enter a valid email address.',
-                'regEmail.unique'        => 'This email address is already taken.',
-                'regCourseCode.required' => 'Please select a course.',
-                'regCourseCode.exists'   => 'The selected course does not exist.',
-                'regYear.required'       => 'Batch year is required.',
-                'regYear.integer'        => 'Batch year must be a valid year.',
-                'regYear.digits'         => 'Batch year must be exactly 4 digits (e.g. 2024).',
-                'regPhoto.image'         => 'Profile photo must be an image file.',
-                'regPhoto.mimes'         => 'Profile photo must be JPG, PNG, or WebP format.',
-                'regPhoto.max'           => 'Profile photo must not exceed 5MB.',
+                'regStudentId.unique'  => 'This Student ID is already registered.',
+                'regStudentId.regex'   => 'Student ID must be 1–8 digits (numbers only).',
+                'regEmail.unique'      => 'This email address is already taken.',
+                'regCourseCode.exists' => 'The selected course does not exist.',
+                'regYear.digits'       => 'Batch year must be exactly 4 digits (e.g. 2024).',
+                'regPhoto.max'         => 'Profile photo must not exceed 5MB.',
             ]);
 
             $paddedId  = str_pad($this->regStudentId, 8, '0', STR_PAD_LEFT);
@@ -711,25 +674,29 @@ new class extends Component {
         $this->alumniErrors = [];
     }
 
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
     // Organizer Registration
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
 
     public function registerOrganizer(): void
     {
         $this->organizerErrors      = [];
         $this->registeringOrganizer = true;
+
         try {
-            if (!$this->validateName(trim($this->orgFirstName))) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (!$this->validateName(trim($this->orgLastName)))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (trim($this->orgMiddleInitial) !== '' && !preg_match('/^[a-zA-Z]+$/', trim($this->orgMiddleInitial))) throw new \Exception('Middle initial may only contain letters.');
-            if (trim($this->orgSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->orgSuffix))) throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
+            if (!$this->validateName(trim($this->orgFirstName)))
+                throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (!$this->validateName(trim($this->orgLastName)))
+                throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
+            if (trim($this->orgMiddleInitial) !== '' && !preg_match('/^[a-zA-Z]+$/', trim($this->orgMiddleInitial)))
+                throw new \Exception('Middle initial may only contain letters.');
+            if (trim($this->orgSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->orgSuffix)))
+                throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
 
             $fullName = $this->buildFullName($this->orgFirstName, $this->orgMiddleInitial, $this->orgLastName, $this->orgSuffix);
+            $college  = trim($this->orgCollegeSelect);
 
-            $college = trim($this->orgCollegeSelect);
             if (!$college) throw new \Exception('Please select a college.');
-
             $this->orgDept = $college;
 
             $this->validate([
@@ -742,30 +709,23 @@ new class extends Component {
                 'orgDept'          => ['required', 'string'],
                 'orgPhoto'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
             ], [
-                'orgFirstName.required'  => 'First name is required.',
-                'orgFirstName.max'       => 'First name must not exceed 100 characters.',
-                'orgLastName.required'   => 'Last name is required.',
-                'orgLastName.max'        => 'Last name must not exceed 100 characters.',
-                'orgMiddleInitial.max'   => 'Middle initial must be at most 2 characters.',
-                'orgMiddleInitial.regex' => 'Middle initial may only contain letters.',
-                'orgSuffix.max'          => 'Suffix must not exceed 10 characters.',
-                'orgTeacherId.required'  => 'Teacher ID is required.',
-                'orgTeacherId.regex'     => 'Teacher ID must be 1 to 8 digits only (numbers only).',
-                'orgTeacherId.unique'    => 'This Teacher ID is already registered.',
-                'orgEmail.required'      => 'Email address is required.',
-                'orgEmail.email'         => 'Please enter a valid email address.',
-                'orgEmail.unique'        => 'This email address is already taken.',
-                'orgDept.required'       => 'Please select a college.',
-                'orgPhoto.image'         => 'Profile photo must be an image file.',
-                'orgPhoto.mimes'         => 'Profile photo must be JPG, PNG, or WebP format.',
-                'orgPhoto.max'           => 'Profile photo must not exceed 5MB.',
+                'orgTeacherId.unique' => 'This Teacher ID is already registered.',
+                'orgTeacherId.regex'  => 'Teacher ID must be 1–8 digits (numbers only).',
+                'orgEmail.unique'     => 'This email address is already taken.',
+                'orgDept.required'    => 'Please select a college.',
+                'orgPhoto.max'        => 'Profile photo must not exceed 5MB.',
             ]);
 
             $paddedId  = str_pad($this->orgTeacherId, 8, '0', STR_PAD_LEFT);
             $photoPath = $this->orgPhoto ? $this->storeOrganizerPhoto($this->orgPhoto) : null;
             $tmp       = Str::random(10);
 
-            $user = User::create(['name' => $fullName, 'email' => $this->orgEmail, 'role' => 'organizer', 'password' => Hash::make($tmp)]);
+            $user = User::create([
+                'name'     => $fullName,
+                'email'    => $this->orgEmail,
+                'role'     => 'organizer',
+                'password' => Hash::make($tmp),
+            ]);
 
             $organizer = Organizer::create([
                 'user_id'       => $user->id,
@@ -814,13 +774,13 @@ new class extends Component {
     {
         $this->orgFirstName = $this->orgMiddleInitial = $this->orgLastName = $this->orgSuffix = '';
         $this->orgTeacherId = $this->orgEmail = $this->orgDept = $this->orgCollegeSelect = '';
-        $this->orgPhoto         = null;
-        $this->organizerErrors  = [];
+        $this->orgPhoto        = null;
+        $this->organizerErrors = [];
     }
 
-    // --------------------------------------------------
-    // Alumni Course Management
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
+    // Course Management
+    // ─────────────────────────────────────────────────────
 
     public function openEditCourse(int $id): void
     {
@@ -871,7 +831,7 @@ new class extends Component {
             $this->coursesList     = Course::all()->toArray();
             $this->resetCourseForm();
         } catch (\Exception $e) {
-            $this->courseAlert     = str_contains($e->getMessage(), 'Duplicate') ? 'Code already exists.' : 'Failed to save.';
+            $this->courseAlert     = str_contains($e->getMessage(), 'Duplicate') ? 'Course code already exists.' : 'Failed to save.';
             $this->courseAlertType = 'error';
         } finally {
             $this->savingCourse = false;
@@ -896,14 +856,14 @@ new class extends Component {
         $this->deletingCourse = true;
         try {
             Course::findOrFail($this->deleteCourseId)->delete();
-            $this->courseAlert      = 'Deleted!';
+            $this->courseAlert      = 'Course deleted!';
             $this->courseAlertType  = 'success';
             $this->coursesList      = Course::all()->toArray();
             $this->deleteCourseId   = null;
             $this->deleteCourseName = '';
             $this->activeModal      = 'manageCourses';
         } catch (\Exception $e) {
-            $this->courseAlert     = 'Failed.';
+            $this->courseAlert     = 'Failed to delete.';
             $this->courseAlertType = 'error';
             $this->activeModal     = 'manageCourses';
         } finally {
@@ -911,9 +871,9 @@ new class extends Component {
         }
     }
 
-    // --------------------------------------------------
-    // Organizer College Management
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
+    // College Management
+    // ─────────────────────────────────────────────────────
 
     public function resetOrgCourseForm(): void
     {
@@ -990,10 +950,7 @@ new class extends Component {
             $this->orgCourseAlertType = 'error';
             return;
         }
-        if ($newName === $oldName) {
-            $this->cancelRenamingCollege();
-            return;
-        }
+        if ($newName === $oldName) { $this->cancelRenamingCollege(); return; }
         if (isset($this->orgCoursesList[$newName])) {
             $this->orgCourseAlert     = "A college named \"{$newName}\" already exists.";
             $this->orgCourseAlertType = 'error';
@@ -1077,9 +1034,9 @@ new class extends Component {
         }
     }
 
-    // --------------------------------------------------
-    // Profile / Status
-    // --------------------------------------------------
+    // ─────────────────────────────────────────────────────
+    // Organizer Status Toggle
+    // ─────────────────────────────────────────────────────
 
     public function confirmToggleOrganizerStatus(int $id, string $action): void
     {
@@ -1104,7 +1061,6 @@ new class extends Component {
             $verb = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
             $this->flash('success', "{$organizer->name} has been {$verb}.");
         } catch (\Exception $e) {
-            Log::error('Toggle status: ' . $e->getMessage());
             $this->flash('error', 'Could not update status: ' . $e->getMessage());
         } finally {
             $this->pendingToggleId     = null;
@@ -1113,6 +1069,10 @@ new class extends Component {
             $this->activeModal         = '';
         }
     }
+
+    // ─────────────────────────────────────────────────────
+    // Profile Management
+    // ─────────────────────────────────────────────────────
 
     public function viewProfile(int $id, string $type): void
     {
@@ -1132,20 +1092,19 @@ new class extends Component {
     {
         if (!$this->updatingProfilePhoto || !$this->viewingProfileId) return;
         $this->updatingProfile = true;
+
         try {
             if ($this->viewingProfileType === 'alumni') {
                 $a = Alumni::findOrFail($this->viewingProfileId);
-                if ($a->profile_photo && !str_contains($a->profile_photo, 'default.png')) {
+                if ($a->profile_photo && !str_contains($a->profile_photo, 'default.png'))
                     Storage::disk('public')->delete($a->profile_photo);
-                }
                 $p = $this->storeAlumniPhoto($this->updatingProfilePhoto);
                 $a->update(['profile_photo' => $p]);
                 $this->viewingProfile['profile_photo'] = $p;
             } else {
                 $o = Organizer::findOrFail($this->viewingProfileId);
-                if ($o->profile_photo && !str_contains($o->profile_photo, 'default.png')) {
+                if ($o->profile_photo && !str_contains($o->profile_photo, 'default.png'))
                     Storage::disk('public')->delete($o->profile_photo);
-                }
                 $p = $this->storeOrganizerPhoto($this->updatingProfilePhoto);
                 $o->update(['profile_photo' => $p]);
                 $this->viewingProfile['profile_photo'] = $p;
@@ -1153,7 +1112,6 @@ new class extends Component {
             $this->updatingProfilePhoto = null;
             $this->flash('success', 'Photo updated!');
         } catch (\Exception $e) {
-            Log::error('Photo update: ' . $e->getMessage());
             $this->flash('error', 'Failed to update photo');
         } finally {
             $this->updatingProfile = false;
@@ -1166,10 +1124,10 @@ new class extends Component {
 
 <link rel="stylesheet" href="{{ asset('css/user-management.css') }}">
 
-{{-- FLASH --}}
+{{-- ── FLASH TOAST ──────────────────────────────────────────────────────── --}}
 <div x-data="{
-        show:false,type:'success',msg:'',timer:null,
-        display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}
+        show:false, type:'success', msg:'', timer:null,
+        display(t,m){ this.type=t; this.msg=m; this.show=true; clearTimeout(this.timer); this.timer=setTimeout(()=>this.show=false,10000); }
      }"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show"
@@ -1180,10 +1138,18 @@ new class extends Component {
      x-transition:leave-start="opacity-100 translate-x-0"
      x-transition:leave-end="opacity-0 translate-x-6"
      class="fixed top-5 right-6 z-50 flex items-start gap-3 px-6 py-4 rounded-lg shadow-xl max-w-sm border backdrop-blur-sm"
-     :class="type==='success'?'bg-emerald-50 border-emerald-200 text-emerald-800':type==='info'?'bg-blue-50 border-blue-200 text-blue-800':'bg-red-50 border-red-200 text-red-800'"
+     :class="{
+         'bg-emerald-50 border-emerald-200 text-emerald-800': type==='success',
+         'bg-blue-50 border-blue-200 text-blue-800': type==='info',
+         'bg-red-50 border-red-200 text-red-800': type==='error'
+     }"
      style="display:none">
     <i class="fas mt-0.5 text-lg flex-shrink-0"
-       :class="type==='success'?'fa-check-circle text-emerald-500':type==='info'?'fa-info-circle text-blue-500':'fa-exclamation-circle text-red-500'"></i>
+       :class="{
+           'fa-check-circle text-emerald-500': type==='success',
+           'fa-info-circle text-blue-500': type==='info',
+           'fa-exclamation-circle text-red-500': type==='error'
+       }"></i>
     <div class="flex-1 min-w-0">
         <div class="font-semibold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></div>
         <div class="text-sm mt-0.5 leading-snug opacity-90" x-text="msg"></div>
@@ -1193,29 +1159,41 @@ new class extends Component {
 
 <div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-6">
 
-    {{-- HEADER --}}
+    {{-- ── HEADER ────────────────────────────────────────────────────────── --}}
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5 shrink-0" style="animation:slideInDown .5s ease-out;">
         <div>
             <h1 class="text-4xl font-bold text-slate-800 flex items-center gap-3">
-                <div class="w-14 h-14 btn-primary rounded-lg flex items-center justify-center shadow-md"><i class="fas fa-users text-xl"></i></div>
+                <div class="w-14 h-14 btn-primary rounded-lg flex items-center justify-center shadow-md">
+                    <i class="fas fa-users text-xl"></i>
+                </div>
                 Alumni & Organizers
             </h1>
             <p class="text-slate-600 text-sm mt-2 ml-0.5">Manage alumni and organizer records efficiently</p>
         </div>
         <div class="flex flex-wrap gap-2 shrink-0">
             <div @class(['flex flex-wrap gap-2' => true, 'hidden' => $this->activeTab !== 'alumni'])>
-                <button wire:click="openModal('registerAlumni')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all"><i class="fas fa-user-plus"></i> Register Alumni</button>
-                <button wire:click="openModal('importModal')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200"><i class="fas fa-file-import"></i> Import</button>
-                <button wire:click="openModal('manageCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200"><i class="fas fa-sliders"></i> Manage Courses</button>
+                <button wire:click="openModal('registerAlumni')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
+                    <i class="fas fa-user-plus"></i> Register Alumni
+                </button>
+                <button wire:click="openModal('importModal')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
+                    <i class="fas fa-file-import"></i> Import
+                </button>
+                <button wire:click="openModal('manageCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
+                    <i class="fas fa-sliders"></i> Manage Courses
+                </button>
             </div>
             <div @class(['flex flex-wrap gap-2' => true, 'hidden' => $this->activeTab !== 'organizers'])>
-                <button wire:click="openModal('registerOrganizer')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all"><i class="fas fa-users-gear"></i> Register Organizer</button>
-                <button wire:click="openModal('manageOrgCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200"><i class="fas fa-building-columns"></i> Manage Colleges</button>
+                <button wire:click="openModal('registerOrganizer')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
+                    <i class="fas fa-users-gear"></i> Register Organizer
+                </button>
+                <button wire:click="openModal('manageOrgCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
+                    <i class="fas fa-building-columns"></i> Manage Colleges
+                </button>
             </div>
         </div>
     </div>
 
-    {{-- TABS --}}
+    {{-- ── TABS ───────────────────────────────────────────────────────────── --}}
     <div class="flex gap-2 mb-4 shrink-0">
         <button wire:click="switchTab('alumni')"
                 class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='alumni'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}">
@@ -1228,22 +1206,17 @@ new class extends Component {
     </div>
 
     <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden">
-
-        {{-- Alumni panel --}}
         <div @class(['flex flex-col flex-1 min-h-0' => true, 'hidden' => $this->activeTab !== 'alumni'])>
             @include('livewire.admin.partials._alumni-table')
         </div>
-
-        {{-- Organizers panel --}}
         <div @class(['flex flex-col flex-1 min-h-0' => true, 'hidden' => $this->activeTab !== 'organizers'])>
             @include('livewire.admin.partials._organizers-table')
         </div>
-
     </div>
 
 </div>
 
-{{-- MODALS --}}
+{{-- ── MODALS ─────────────────────────────────────────────────────────────── --}}
 @include('livewire.admin.partials._modals-alumni')
 @include('livewire.admin.partials._modals-organizer')
 

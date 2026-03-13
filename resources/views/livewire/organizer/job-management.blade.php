@@ -1,6 +1,9 @@
 <?php
 /**
  * FILE: resources/views/livewire/organizer/job-management.blade.php
+ *
+ * FIX: "Updated by" badge now checks ($updaterName !== null) instead of diffInSeconds > 5
+ *      so it always shows when updated_by is recorded.
  */
 
 use Livewire\Volt\Component;
@@ -21,6 +24,7 @@ new class extends Component {
     public string $search       = '';
     public string $filterStatus = '';
     public string $filterType   = '';
+    public string $filterSort   = 'recent'; // recent | oldest
 
     // ── Create / Edit ─────────────────────────────────────────
     public bool   $showFormModal = false;
@@ -59,6 +63,7 @@ new class extends Component {
     public function updatingSearch()       { $this->resetPage(); }
     public function updatingFilterStatus() { $this->resetPage(); }
     public function updatingFilterType()   { $this->resetPage(); }
+    public function updatingFilterSort()   { $this->resetPage(); }
 
     // Auto-fill company name + location when company type changes
     public function updatedCompanyType(string $value): void
@@ -68,11 +73,9 @@ new class extends Component {
             ->where('label', $value)
             ->first();
         if ($opt) {
-            // If PHILCST (or any type whose label contains 'PHILCST'), lock company name
             if (str_contains(strtoupper($opt->label), 'PHILCST')) {
                 $this->companyName = $opt->label;
             }
-            // Auto-fill location if default_location is set
             if (!empty($opt->default_location)) {
                 $this->location = $opt->default_location;
             }
@@ -85,7 +88,7 @@ new class extends Component {
     public function jobPostings()
     {
         return app(OrganizerJobController::class)
-            ->getJobs($this->search, $this->filterStatus, $this->filterType, 20);
+            ->getJobs($this->search, $this->filterStatus, $this->filterType, 20, $this->filterSort);
     }
 
     #[Computed]
@@ -121,6 +124,7 @@ new class extends Component {
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = $this->filterType = '';
+        $this->filterSort = 'recent';
         $this->resetPage();
     }
 
@@ -135,6 +139,12 @@ new class extends Component {
     public function openEditModal(int $id): void
     {
         $job = app(OrganizerJobController::class)->getJob($id);
+
+        // Block editing inactive jobs
+        if ($job->status === 'INACTIVE') {
+            $this->dispatch('flash-message', type: 'error', message: 'Cannot edit an inactive job posting. Activate it first.');
+            return;
+        }
 
         $this->isEditing       = true;
         $this->editingJobId    = $id;
@@ -195,6 +205,8 @@ new class extends Component {
         $ctrl = app(OrganizerJobController::class);
 
         if ($this->isEditing) {
+            $data['updated_by']      = auth()->user()->name;
+            $data['updated_by_role'] = 'organizer';
             $ctrl->updateJob($this->editingJobId, $data);
             $this->dispatch('flash-message', type: 'success', message: 'Job posting updated successfully!');
         } else {
@@ -365,13 +377,11 @@ new class extends Component {
         {{-- Filters --}}
         <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
 
-            <div class="relative flex-1 min-w-[200px] max-w-sm"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',val=>{if(val!==this.q)this.q=val;});}}">
+            <div class="relative flex-1 min-w-[200px] max-w-sm">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
-                <input type="text" x-model="q"
-                       @input.debounce.150ms="$wire.set('search',q)"
-                       placeholder="Search title, company…"
+                <input type="text"
+                       wire:model.live.debounce.200ms="search"
+                       placeholder="Search title, company..."
                        class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus"
                        autocomplete="off">
             </div>
@@ -391,12 +401,19 @@ new class extends Component {
                 @endforeach
             </select>
 
+            {{-- Sort --}}
+            <select wire:model.live="filterSort"
+                    class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                <option value="recent">Recent First</option>
+                <option value="oldest">Oldest First</option>
+            </select>
+
             <button wire:click="resetFilters"
                     class="px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
                 <i class="fas fa-rotate-left mr-2"></i>Reset
             </button>
 
-            <span wire:loading wire:target="search,filterStatus,filterType,resetFilters">
+            <span wire:loading wire:target="search,filterStatus,filterType,filterSort,resetFilters">
                 <i class="fas fa-spinner spin-icon text-purple-500 text-sm"></i>
             </span>
         </div>
@@ -404,13 +421,13 @@ new class extends Component {
         {{-- Table --}}
         <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
              wire:loading.class="tbl-loading"
-             wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
+             wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage">
             <table class="w-full border-separate border-spacing-0">
                 <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
                     <tr>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Job Title</th>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Company</th>
-                        <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Type</th>
+                        <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Type</th>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Deadline</th>
                         <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Status</th>
                         <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Actions</th>
@@ -420,18 +437,18 @@ new class extends Component {
                     @forelse($this->jobPostings as $job)
                     <tr class="table-row-hover">
 
-                        {{-- Job Title only --}}
+                        {{-- Job Title --}}
                         <td class="px-6 py-4">
                             <p class="font-semibold text-slate-900 text-sm">{{ $job->job_title }}</p>
                         </td>
 
-                        {{-- Company name only --}}
+                        {{-- Company --}}
                         <td class="px-6 py-4">
                             <p class="font-semibold text-slate-700 text-sm">{{ $job->company_name }}</p>
                         </td>
 
-                        {{-- Employment Type only --}}
-                        <td class="px-6 py-4">
+                        {{-- Employment Type --}}
+                        <td class="px-6 py-4 text-center">
                             <span class="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
                                 {{ $job->employment_type }}
                             </span>
@@ -439,7 +456,7 @@ new class extends Component {
 
                         {{-- Deadline --}}
                         <td class="px-6 py-4">
-                            <span class="text-sm font-semibold {{ now()->gt($job->deadline) ? 'text-red-500' : 'text-slate-700' }}">
+                            <span class="text-sm font-semibold text-slate-700">
                                 {{ \Carbon\Carbon::parse($job->deadline)->format('M d, Y') }}
                             </span>
                             @if(now()->gt($job->deadline))
@@ -456,7 +473,7 @@ new class extends Component {
                             </span>
                         </td>
 
-                        {{-- Actions — View, Delete only (no Edit) --}}
+                        {{-- Actions --}}
                         <td class="px-6 py-4 text-center">
                             <div class="flex items-center justify-center gap-2">
                                 <button wire:click="viewJob({{ $job->id }})"
@@ -573,7 +590,7 @@ new class extends Component {
                     <label class="form-label">Company Type <span class="text-red-500">*</span></label>
                     <select wire:model.live="companyType"
                             class="form-input {{ isset($formErrors['companyType']) ? 'field-error' : '' }}">
-                        <option value="">— Select Company Type —</option>
+                        <option value="">Select Company Type</option>
                         @foreach($this->jobOptions->get('company_type', collect()) as $opt)
                             <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                         @endforeach
@@ -618,7 +635,7 @@ new class extends Component {
                     <label class="form-label">Employment Type <span class="text-red-500">*</span></label>
                     <select wire:model.defer="employmentType"
                             class="form-input {{ isset($formErrors['employmentType']) ? 'field-error' : '' }}">
-                        <option value="">— Select Type —</option>
+                        <option value="">Select Employment Type</option>
                         @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
                             <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                         @endforeach
@@ -629,7 +646,7 @@ new class extends Component {
                     <label class="form-label">Experience Level <span class="text-red-500">*</span></label>
                     <select wire:model.defer="experienceLevel"
                             class="form-input {{ isset($formErrors['experienceLevel']) ? 'field-error' : '' }}">
-                        <option value="">— Select Level —</option>
+                        <option value="">Select Experience Level</option>
                         @foreach($this->jobOptions->get('experience_level', collect()) as $opt)
                             <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                         @endforeach
@@ -659,37 +676,38 @@ new class extends Component {
                     Target College
                     <span class="text-slate-400 font-normal text-xs">(Optional — blank = visible to all colleges)</span>
                 </label>
-                <div x-data="{
-                        map: {{ Js::from($this->collegeMap) }},
-                        selected: @entangle('targetCollege').defer,
-                        get depts() { return this.selected ? (this.map[this.selected] ?? []) : []; }
-                     }">
-                    <select x-model="selected" class="form-input">
-                        <option value="">All Colleges</option>
-                        @foreach($this->collegesWithDepts as $c)
-                            <option value="{{ $c['name'] }}">{{ $c['name'] }}</option>
+                {{-- wire:model.live ensures value is synced to Livewire immediately on change --}}
+                <select wire:model.live="targetCollege" class="form-input">
+                    <option value="">All Colleges</option>
+                    @foreach($this->collegesWithDepts as $c)
+                        <option value="{{ $c['name'] }}">{{ $c['name'] }}</option>
+                    @endforeach
+                </select>
+                {{-- Show dept chips based on current Livewire value --}}
+                @php
+                    $selectedCollegeDepts = collect($this->collegesWithDepts)
+                        ->firstWhere('name', $this->targetCollege)['codes'] ?? [];
+                @endphp
+                @if(count($selectedCollegeDepts) > 0)
+                <div class="mt-3">
+                    <p class="text-xs text-slate-500 mb-2 font-medium">
+                        <i class="fas fa-graduation-cap mr-1 text-purple-400"></i>
+                        Departments under this college:
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        @foreach($selectedCollegeDepts as $dCode)
+                            <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono">{{ $dCode }}</span>
                         @endforeach
-                    </select>
-                    <div x-show="depts.length > 0" x-cloak class="mt-3">
-                        <p class="text-xs text-slate-500 mb-2 font-medium">
-                            <i class="fas fa-graduation-cap mr-1 text-purple-400"></i>
-                            Departments under this college:
-                        </p>
-                        <div class="flex flex-wrap gap-2">
-                            <template x-for="code in depts" :key="code">
-                                <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono"
-                                      x-text="code"></span>
-                            </template>
-                        </div>
                     </div>
                 </div>
+                @endif
             </div>
 
             {{-- Job Description --}}
             <div>
                 <label class="form-label">Job Description <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="description" rows="6"
-                          placeholder="Describe the role, responsibilities, qualifications…"
+                          placeholder="Describe the role, responsibilities, qualifications..."
                           class="form-input resize-none {{ isset($formErrors['description']) ? 'field-error' : '' }}"></textarea>
                 @if(isset($formErrors['description']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['description'] }}</p>@endif
             </div>
@@ -704,7 +722,7 @@ new class extends Component {
             <button wire:click="saveJob"
                     wire:loading.attr="disabled" wire:target="saveJob"
                     class="flex-1 px-6 py-3 btn-primary rounded-xl text-sm font-bold flex items-center justify-center gap-2">
-                <span wire:loading wire:target="saveJob"><i class="fas fa-spinner spin-icon"></i> Saving…</span>
+                <span wire:loading wire:target="saveJob"><i class="fas fa-spinner spin-icon"></i> Saving...</span>
                 <span wire:loading.remove wire:target="saveJob">
                     <i class="fas fa-{{ $isEditing ? 'floppy-disk' : 'paper-plane' }} mr-1.5"></i>
                     {{ $isEditing ? 'Save Changes' : 'Post Job' }}
@@ -720,15 +738,10 @@ new class extends Component {
 ════════════════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingJob)
 @php
-    $job = $this->viewingJob;
-    // Determine who last updated: compare updated_at vs created_at
-    // If updated_at > created_at by more than 5 seconds, someone edited it
-    $wasEdited = $job->updated_at->diffInSeconds($job->created_at) > 5;
-    // Check if last editor is admin (user role = admin) or organizer
-    // We use the job's organizer to compare — if updated_at != created_at the admin may have changed it
-    // We rely on a simple heuristic: if admin page updated it, updated_by would differ
-    // Since we don't track updated_by, we show "Admin" if status was changed, else organizer name
-    $updaterLabel = $wasEdited ? 'Admin or Organizer' : $job->organizer?->name;
+    $job         = $this->viewingJob;
+    $updaterName = $job->updated_by ?? null;
+    $updaterRole = $job->updated_by_role ?? null;
+    $wasEdited   = $updaterName !== null;
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
     <div class="relative bg-white rounded-2xl shadow-2xl modal-animate flex flex-col"
@@ -770,7 +783,7 @@ new class extends Component {
 
                 <div class="info-card">
                     <div class="info-card-label"><i class="fas fa-location-dot text-purple-500"></i> Location</div>
-                    <div class="info-card-value">{{ $job->location ?? '—' }}</div>
+                    <div class="info-card-value">{{ $job->location ?? 'Not specified' }}</div>
                 </div>
 
                 <div class="info-card">
@@ -797,14 +810,16 @@ new class extends Component {
                 <div class="info-card col-span-2">
                     <div class="info-card-label"><i class="fas fa-clock-rotate-left text-purple-500"></i> Last Updated</div>
                     <div class="info-card-value">{{ $job->updated_at->diffForHumans() }}</div>
-                    <div class="info-card-sub">
-                        {{ $job->updated_at->format('M d, Y · g:i A') }}
-                        @if($wasEdited)
-                            <span class="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-bold">
-                                <i class="fas fa-pen text-[9px] mr-0.5"></i>Edited
-                            </span>
-                        @endif
-                    </div>
+                    <div class="info-card-sub">{{ $job->updated_at->format('M d, Y · g:i A') }}</div>
+                    {{-- ✅ FIX: Badge shows whenever updated_by is present --}}
+                    @if($wasEdited)
+                        <div class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold
+                            {{ $updaterRole === 'admin' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-blue-50 text-blue-700 border border-blue-200' }}">
+                            <i class="fas fa-{{ $updaterRole === 'admin' ? 'shield-halved' : 'user' }} text-[10px]"></i>
+                            Updated by: {{ $updaterName }}
+                            <span class="opacity-60 font-normal">({{ $updaterRole === 'admin' ? 'Admin' : 'Organizer' }})</span>
+                        </div>
+                    @endif
                 </div>
 
             </div>
@@ -847,16 +862,20 @@ new class extends Component {
                     class="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-bold">
                 <i class="fas fa-xmark mr-1"></i> Close
             </button>
-            <button wire:click="openEditModal({{ $job->id }})"
-                    class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-blue-600 hover:bg-blue-50 rounded-lg transition border border-blue-200">
-                <i class="fas fa-pen"></i> Edit
-            </button>
             @if($job->status === 'ACTIVE')
+                <button wire:click="openEditModal({{ $job->id }})"
+                        class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-blue-600 hover:bg-blue-50 rounded-lg transition border border-blue-200">
+                    <i class="fas fa-pen"></i> Edit
+                </button>
                 <button wire:click="confirmToggle({{ $job->id }})"
                         class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-amber-600 hover:bg-amber-50 rounded-lg transition border border-amber-200">
                     <i class="fas fa-ban"></i> Deactivate
                 </button>
             @elseif($job->status === 'INACTIVE')
+                <span class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-slate-400 rounded-lg border border-slate-200 cursor-not-allowed bg-slate-50"
+                      title="Activate the job first to edit it">
+                    <i class="fas fa-lock"></i> Editing Locked
+                </span>
                 <button wire:click="confirmToggle({{ $job->id }})"
                         class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-200">
                     <i class="fas fa-circle-check"></i> Activate

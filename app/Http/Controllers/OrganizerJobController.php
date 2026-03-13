@@ -28,7 +28,6 @@ class OrganizerJobController extends Controller
             return $default;
         }
 
-        // Support organizers/ and alumni-photos/ paths
         $disk = Storage::disk('public');
         if ($disk->exists($path)) {
             return asset('storage/' . $path);
@@ -41,12 +40,14 @@ class OrganizerJobController extends Controller
 
     /**
      * Paginated list of the organizer's own jobs.
+     * ✅ FIX: added $filterSort parameter (was missing, caused "too few arguments" error)
      */
     public function getJobs(
         string $search       = '',
         string $filterStatus = '',
         string $filterType   = '',
-        int    $perPage      = 15
+        int    $perPage      = 15,
+        string $filterSort   = 'recent'   // ← was missing
     ) {
         $org = $this->getOrganizer();
         if (!$org) return OrganizerJob::whereRaw('0=1')->paginate($perPage);
@@ -63,7 +64,10 @@ class OrganizerJobController extends Controller
         if ($filterStatus !== '') $q->where('status', $filterStatus);
         if ($filterType   !== '') $q->where('employment_type', $filterType);
 
-        return $q->orderByDesc('created_at')->paginate($perPage);
+        $direction = $filterSort === 'oldest' ? 'asc' : 'desc';
+        $q->orderBy('created_at', $direction);
+
+        return $q->paginate($perPage);
     }
 
     /**
@@ -89,7 +93,6 @@ class OrganizerJobController extends Controller
 
     /**
      * Colleges with their dept course codes — for target college picker.
-     * Returns: [ ['name' => 'College of CS', 'codes' => ['BSIT','BSCS']], ... ]
      */
     public function getCollegesWithDepts(): array
     {
@@ -137,7 +140,7 @@ class OrganizerJobController extends Controller
     public function updateJob(int $id, array $data): OrganizerJob
     {
         $job = $this->getJob($id);
-        $job->update($data);
+        $job->update($data);   // updated_by/updated_by_role now save correctly via $fillable
         return $job->fresh();
     }
 

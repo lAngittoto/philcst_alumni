@@ -1,6 +1,11 @@
 <?php
 /**
  * FILE: resources/views/livewire/admin/jobs.blade.php
+ *
+ * FIXES:
+ *  1. Admin edit modal now blocks INACTIVE jobs (same guard as organizer).
+ *  2. Salary/Deadline icon-overlap removed — icons dropped, plain inputs used.
+ *  3. "Updated by" badge now checks ($updaterName !== null) instead of diffInSeconds > 5.
  */
 
 use Livewire\Volt\Component;
@@ -19,6 +24,7 @@ new class extends Component {
     public string $search       = '';
     public string $filterStatus = '';
     public string $filterType   = '';
+    public string $filterSort   = 'recent'; // recent | oldest
 
     // ── Manage Options Modal ──────────────────────────────────
     public bool   $showManageModal = false;
@@ -50,6 +56,7 @@ new class extends Component {
     public string $editSalary      = '';
     public string $editDeadline    = '';
     public string $editDescription = '';
+    public string $editTargetCollege = '';
     public array  $editErrors      = [];
 
     // ── Toggle Status Confirmation ────────────────────────────
@@ -75,6 +82,7 @@ new class extends Component {
     public function updatingSearch()       { $this->resetPage(); }
     public function updatingFilterStatus() { $this->resetPage(); }
     public function updatingFilterType()   { $this->resetPage(); }
+    public function updatingFilterSort()   { $this->resetPage(); }
 
     public function updatedEditCompanyType(string $value): void
     {
@@ -95,7 +103,7 @@ new class extends Component {
             ->select([
                 'id','organizer_id','job_title','company_name','company_type',
                 'location','employment_type','experience_level',
-                'target_college','salary','deadline','status','created_at',
+                'target_college','salary','deadline','status','created_at','updated_at','updated_by','updated_by_role',
             ]);
 
         if ($this->search !== '') {
@@ -108,7 +116,9 @@ new class extends Component {
         if ($this->filterStatus !== '') $q->where('status', $this->filterStatus);
         if ($this->filterType   !== '') $q->where('employment_type', $this->filterType);
 
-        return $q->orderByDesc('created_at')->paginate(20);
+        $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
+
+        return $q->paginate(20);
     }
 
     // ── Computed: Job Options ─────────────────────────────────
@@ -128,10 +138,28 @@ new class extends Component {
         return app(JobController::class)->getJob($this->viewingJobId);
     }
 
+    // ── Computed: Colleges ────────────────────────────────────
+    #[Computed]
+    public function collegesWithDepts(): array
+    {
+        return app(\App\Http\Controllers\OrganizerJobController::class)->getCollegesWithDepts();
+    }
+
+    #[Computed]
+    public function collegeMap(): array
+    {
+        $map = [];
+        foreach ($this->collegesWithDepts as $c) {
+            $map[$c['name']] = $c['codes'];
+        }
+        return $map;
+    }
+
     // ── Reset Filters ─────────────────────────────────────────
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = $this->filterType = '';
+        $this->filterSort = 'recent';
         $this->resetPage();
     }
 
@@ -285,19 +313,27 @@ new class extends Component {
     public function openEditModal(int $id): void
     {
         $job = app(JobController::class)->getJob($id);
-        $this->editingJobId    = $id;
-        $this->editJobTitle    = $job->job_title;
-        $this->editCompany     = $job->company_name;
-        $this->editCompanyType = $job->company_type;
-        $this->editLocation    = $job->location ?? '';
-        $this->editEmpType     = $job->employment_type;
-        $this->editExpLevel    = $job->experience_level;
-        $this->editSalary      = $job->salary ?? '';
-        $this->editDeadline    = $job->deadline->format('Y-m-d');
-        $this->editDescription = $job->description;
-        $this->editErrors      = [];
-        $this->showViewModal   = false;
-        $this->showEditModal   = true;
+
+        // ✅ FIX: Block editing INACTIVE jobs — same guard as organizer side
+        if ($job->status === 'INACTIVE') {
+            $this->dispatch('flash-message', type: 'error', message: 'Cannot edit an inactive job posting. Activate it first.');
+            return;
+        }
+
+        $this->editingJobId      = $id;
+        $this->editJobTitle      = $job->job_title;
+        $this->editCompany       = $job->company_name;
+        $this->editCompanyType   = $job->company_type;
+        $this->editLocation      = $job->location ?? '';
+        $this->editEmpType       = $job->employment_type;
+        $this->editExpLevel      = $job->experience_level;
+        $this->editSalary        = $job->salary ?? '';
+        $this->editDeadline      = $job->deadline->format('Y-m-d');
+        $this->editDescription   = $job->description;
+        $this->editTargetCollege = $job->target_college ?? '';
+        $this->editErrors        = [];
+        $this->showViewModal     = false;
+        $this->showEditModal     = true;
     }
 
     public function closeEditModal(): void
@@ -344,6 +380,9 @@ new class extends Component {
             'salary'           => trim($this->editSalary) ?: null,
             'deadline'         => $this->editDeadline,
             'description'      => trim($this->editDescription),
+            'target_college'   => trim($this->editTargetCollege) ?: null,
+            'updated_by'       => auth()->user()->name,
+            'updated_by_role'  => 'admin',
         ]);
 
         $this->dispatch('flash-message', type: 'success', message: 'Job posting updated successfully.');
@@ -353,11 +392,12 @@ new class extends Component {
 
     private function resetEditFields(): void
     {
-        $this->editingJobId = null;
-        $this->editJobTitle = $this->editCompany = $this->editCompanyType = '';
-        $this->editLocation = $this->editEmpType = $this->editExpLevel   = '';
-        $this->editSalary   = $this->editDeadline = $this->editDescription = '';
-        $this->editErrors   = [];
+        $this->editingJobId      = null;
+        $this->editJobTitle      = $this->editCompany = $this->editCompanyType = '';
+        $this->editLocation      = $this->editEmpType = $this->editExpLevel    = '';
+        $this->editSalary        = $this->editDeadline = $this->editDescription = '';
+        $this->editTargetCollege = '';
+        $this->editErrors        = [];
     }
 
     // ── Toggle Status ─────────────────────────────────────────
@@ -436,7 +476,6 @@ new class extends Component {
     .header-animate   { animation:slideInDown .4s ease-out }
 
     /* ── Buttons ── */
-    /* No transform/scale on hover — background + shadow lang */
     .btn-primary          { background:linear-gradient(135deg,#7a3f91,#5e2f72); color:#fff; border:none; transition:background .2s, box-shadow .2s }
     .btn-primary:hover:not(:disabled) { background:linear-gradient(135deg,#8b4aa5,#6a3580); box-shadow:0 4px 14px rgba(122,63,145,.35) }
     .btn-primary:disabled { background:linear-gradient(135deg,#cbd5e1,#94a3b8); cursor:not-allowed; box-shadow:none }
@@ -445,6 +484,7 @@ new class extends Component {
     .form-label  { display:block; font-size:.78rem; font-weight:700; color:#374151; margin-bottom:.45rem; letter-spacing:.01em }
     .form-input  { width:100%; padding:.625rem 1rem; border:1.5px solid #e2e8f0; border-radius:.5rem; font-size:.875rem; color:#1e293b; background:#fff; transition:border-color .15s, box-shadow .15s }
     .form-input:focus { border-color:#7a3f91 !important; box-shadow:0 0 0 3px rgba(122,63,145,.12) !important; outline:none !important }
+    .form-input:disabled,.form-input[readonly] { background:#f1f5f9; color:#64748b; cursor:not-allowed }
     .form-error  { font-size:.74rem; color:#ef4444; margin-top:.35rem; display:flex; align-items:center; gap:.3rem }
     .field-error { border-color:#f87171 !important; background:#fff8f8 !important }
     .field-hint  { font-size:.72rem; color:#94a3b8; margin-top:.3rem }
@@ -454,8 +494,6 @@ new class extends Component {
     .table-row-hover:hover      { background-color:rgba(122,63,145,.04) }
     .tbl-container              { transition:opacity .15s ease }
     .tbl-loading                { opacity:.4; pointer-events:none }
-
-    /* thead — no hover effect at all, static lang */
     .tbl-container thead tr th  { pointer-events:none }
 
     /* ── Manage Options tabs ── */
@@ -467,6 +505,12 @@ new class extends Component {
 
     /* ── Input focus (filter bar) ── */
     .input-focus:focus { border-color:#7a3f91 !important; box-shadow:0 0 0 3px rgba(122,63,145,.1) !important; outline:none !important }
+
+    /* ── Info cards (view modal) ── */
+    .info-card { background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:.75rem; padding:1rem }
+    .info-card-label { font-size:.68rem; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.07em; margin-bottom:.4rem; display:flex; align-items:center; gap:.4rem }
+    .info-card-value { font-size:.875rem; font-weight:700; color:#1e293b }
+    .info-card-sub { font-size:.75rem; font-weight:600; color:#64748b; margin-top:.2rem }
 </style>
 
 {{-- ── FLASH ────────────────────────────────────────────────── --}}
@@ -520,7 +564,7 @@ new class extends Component {
     {{-- ── TABLE PANEL ──────────────────────────────────────────── --}}
     <div class="flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
 
-        {{-- Filters — NO refreshing spinner --}}
+        {{-- Filters --}}
         <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/80 flex flex-wrap gap-3 items-center shrink-0">
 
             {{-- Search --}}
@@ -559,22 +603,26 @@ new class extends Component {
                 @endforeach
             </select>
 
+            {{-- Sort --}}
+            <select wire:model.live="filterSort"
+                    class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus transition">
+                <option value="recent">Recent First</option>
+                <option value="oldest">Oldest First</option>
+            </select>
+
             {{-- Reset --}}
             <button wire:click="resetFilters"
                     class="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-bold flex items-center gap-1.5">
                 <i class="fas fa-rotate-left text-xs"></i> Reset
             </button>
-
-            {{-- NO refreshing spinner here --}}
         </div>
 
         {{-- Table --}}
         <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
              wire:loading.class="tbl-loading"
-             wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
+             wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage">
             <table class="w-full border-separate border-spacing-0">
                 <thead style="position:sticky;top:0;z-index:10;">
-                    {{-- No hover/transition on thead row --}}
                     <tr class="btn-primary text-white text-left" style="pointer-events:none;">
                         <th class="px-5 py-4 text-xs font-bold uppercase tracking-wider">Job Title</th>
                         <th class="px-5 py-4 text-xs font-bold uppercase tracking-wider">Company</th>
@@ -625,19 +673,17 @@ new class extends Component {
                             @endif
                         </td>
 
-                        {{-- Deadline — color changes based on urgency --}}
+                        {{-- Deadline --}}
                         <td class="px-5 py-3.5">
-@php
-    $dl = \Carbon\Carbon::parse($job->deadline);
-    $daysLeft = now()->diffInDays($dl, false);
-    $dlDateClass = 'text-slate-700 font-semibold';
-    $dlSubClass  = 'text-slate-400';
-    $dlLabel     = $daysLeft < 0 ? 'Expired' : $dl->diffForHumans();
-@endphp
-                            <span class="text-sm {{ $dlDateClass }}">
+                            @php
+                                $dl = \Carbon\Carbon::parse($job->deadline);
+                                $daysLeft = now()->diffInDays($dl, false);
+                                $dlLabel  = $daysLeft < 0 ? 'Expired' : $dl->diffForHumans();
+                            @endphp
+                            <span class="text-sm font-semibold text-slate-700">
                                 {{ $dl->format('M d, Y') }}
                             </span>
-                            <p class="text-xs mt-0.5 {{ $dlSubClass }}">{{ $dlLabel }}</p>
+                            <p class="text-xs mt-0.5 text-slate-400">{{ $dlLabel }}</p>
                         </td>
 
                         {{-- Status --}}
@@ -656,7 +702,7 @@ new class extends Component {
 
                         {{-- Actions --}}
                         <td class="px-5 py-3.5 text-center">
-                            <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                            <div class="flex items-center justify-center gap-1.5">
 
                                 <button wire:click="viewJob({{ $job->id }})"
                                         title="View full details"
@@ -696,8 +742,7 @@ new class extends Component {
                             <p class="font-bold text-slate-400 text-base">No job postings found</p>
                             <p class="text-sm text-slate-400 mt-1">
                                 @if($search || $filterStatus || $filterType)
-                                    Try adjusting your filters or
-                                    <button wire:click="resetFilters" class="text-purple-600 underline font-semibold">reset them</button>.
+                                    Try adjusting your filters.
                                 @else
                                     No postings have been submitted yet.
                                 @endif
@@ -921,7 +966,12 @@ new class extends Component {
      MODAL: View Full Job Details
 ════════════════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingJob)
-@php $job = $this->viewingJob; @endphp
+@php
+    $job         = $this->viewingJob;
+    $updaterName = $job->updated_by ?? null;
+    $updaterRole = $job->updated_by_role ?? null;
+    $wasEdited   = $updaterName !== null;
+@endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
     <div class="relative bg-white rounded-2xl shadow-2xl modal-animate flex flex-col"
          style="width:660px;max-width:95vw;max-height:90vh;">
@@ -963,19 +1013,23 @@ new class extends Component {
             </div>
 
             <div class="grid grid-cols-2 gap-3">
-                @foreach([
-                    ['icon' => 'location-dot',   'label' => 'Location',  'value' => $job->location ?? '—'],
-                    ['icon' => 'money-bill-wave', 'label' => 'Salary',    'value' => $job->salary ?? 'Not disclosed'],
-                    ['icon' => 'calendar-xmark',  'label' => 'Deadline',  'value' => \Carbon\Carbon::parse($job->deadline)->format('F d, Y')],
-                    ['icon' => 'calendar-plus',   'label' => 'Posted On', 'value' => $job->created_at->format('M d, Y')],
-                ] as $info)
-                <div class="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                    <p class="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                        <i class="fas fa-{{ $info['icon'] }} text-purple-500"></i> {{ $info['label'] }}
-                    </p>
-                    <p class="text-sm font-bold text-slate-800">{{ $info['value'] }}</p>
+                <div class="info-card">
+                    <div class="info-card-label"><i class="fas fa-location-dot text-purple-500"></i> Location</div>
+                    <div class="info-card-value">{{ $job->location ?? 'Not specified' }}</div>
                 </div>
-                @endforeach
+                <div class="info-card">
+                    <div class="info-card-label"><i class="fas fa-money-bill-wave text-purple-500"></i> Salary</div>
+                    <div class="info-card-value">{{ $job->salary ?? 'Not disclosed' }}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-label"><i class="fas fa-calendar-xmark text-purple-500"></i> Deadline</div>
+                    <div class="info-card-value">{{ \Carbon\Carbon::parse($job->deadline)->format('F d, Y') }}</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-card-label"><i class="fas fa-calendar-plus text-purple-500"></i> Posted On</div>
+                    <div class="info-card-value">{{ $job->created_at->format('M d, Y') }}</div>
+                    <div class="info-card-sub">{{ $job->created_at->format('g:i A') }}</div>
+                </div>
 
                 @php
                     $orgDept2 = $job->organizer?->department ?? '';
@@ -984,27 +1038,56 @@ new class extends Component {
                         ? ($hasCollege2 ? $orgDept2 : (\App\Models\Course::where('code', $orgDept2)->value('college') ?? $orgDept2))
                         : null;
                 @endphp
-                <div class="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                    <p class="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                        <i class="fas fa-user-tie text-purple-500"></i> Posted By
-                    </p>
-                    <p class="text-sm font-bold text-slate-800">{{ $job->organizer?->name ?? '—' }}</p>
+                <div class="info-card">
+                    <div class="info-card-label"><i class="fas fa-user-tie text-purple-500"></i> Posted By</div>
+                    <div class="info-card-value">{{ $job->organizer?->name ?? 'N/A' }}</div>
                     @if($postedByCollege)
-                        <p class="text-xs font-semibold text-slate-500 mt-0.5">{{ $postedByCollege }}</p>
+                        <div class="info-card-sub">{{ $postedByCollege }}</div>
                     @endif
                 </div>
 
-                <div class="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                    <p class="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                        <i class="fas fa-clock-rotate-left text-purple-500"></i> Last Updated
-                    </p>
-                    <p class="text-sm font-bold text-slate-800">{{ $job->updated_at->diffForHumans() }}</p>
-                    <p class="text-xs font-semibold text-slate-500 mt-0.5">{{ $job->updated_at->format('M d, Y · g:i A') }}</p>
+                <div class="info-card">
+                    <div class="info-card-label"><i class="fas fa-clock-rotate-left text-purple-500"></i> Last Updated</div>
+                    <div class="info-card-value">{{ $job->updated_at->diffForHumans() }}</div>
+                    <div class="info-card-sub">{{ $job->updated_at->format('M d, Y · g:i A') }}</div>
+                    {{-- ✅ FIX: Badge shows whenever updated_by is present --}}
+                    @if($wasEdited)
+                        <div class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold
+                            {{ $updaterRole === 'admin' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-blue-50 text-blue-700 border border-blue-200' }}">
+                            <i class="fas fa-{{ $updaterRole === 'admin' ? 'shield-halved' : 'user' }} text-[10px]"></i>
+                            Updated by: {{ $updaterName }}
+                            <span class="opacity-60 font-normal">({{ $updaterRole === 'admin' ? 'Admin' : 'Organizer' }})</span>
+                        </div>
+                    @endif
                 </div>
             </div>
 
+            {{-- Target College --}}
+            @if($job->target_college)
+            @php
+                $viewDepts = \App\Models\Course::where('college', $job->target_college)
+                    ->orderBy('code')->pluck('code')->toArray();
+            @endphp
+            <div class="bg-purple-50 rounded-xl p-4 border border-purple-200">
+                <p class="info-card-label text-purple-600"><i class="fas fa-building-columns text-purple-500"></i> Target College</p>
+                <p class="font-extrabold text-purple-900 text-sm">{{ $job->target_college }}</p>
+                @if(count($viewDepts))
+                <div class="flex flex-wrap gap-2 mt-2">
+                    @foreach($viewDepts as $dc)
+                        <span class="px-2.5 py-1 bg-white text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono">{{ $dc }}</span>
+                    @endforeach
+                </div>
+                @endif
+            </div>
+            @else
+            <div class="info-card">
+                <p class="info-card-label"><i class="fas fa-building-columns text-purple-500"></i> Target College</p>
+                <p class="info-card-value text-slate-400 italic font-normal">Visible to all colleges</p>
+            </div>
+            @endif
+
             <div>
-                <p class="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Job Description</p>
+                <p class="info-card-label mb-2"><i class="fas fa-align-left text-purple-500"></i> Job Description</p>
                 <div class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{{ $job->description }}</div>
             </div>
         </div>
@@ -1014,10 +1097,18 @@ new class extends Component {
                     class="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-bold">
                 <i class="fas fa-xmark mr-1"></i> Close
             </button>
+            @if($job->status === 'ACTIVE')
             <button wire:click="openEditModal({{ $job->id }})"
                     class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-blue-600 hover:bg-blue-50 rounded-lg transition border border-blue-200">
                 <i class="fas fa-pen-to-square"></i> Update / Edit
             </button>
+            @else
+            {{-- ✅ FIX: INACTIVE shows locked state just like organizer --}}
+            <span class="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold text-slate-400 rounded-lg border border-slate-200 cursor-not-allowed bg-slate-50"
+                  title="Activate the job first to edit it">
+                <i class="fas fa-lock"></i> Editing Locked
+            </span>
+            @endif
         </div>
     </div>
 </div>
@@ -1056,27 +1147,21 @@ new class extends Component {
 
         <div class="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-8 py-6 space-y-5">
 
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="form-label">Job Title <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="editJobTitle" type="text" placeholder="e.g. Software Engineer"
-                           class="form-input {{ isset($editErrors['editJobTitle']) ? 'field-error' : '' }}">
-                    @if(isset($editErrors['editJobTitle']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
-                </div>
-                <div>
-                    <label class="form-label">Company Name <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="editCompany" type="text" placeholder="e.g. Acme Corp"
-                           class="form-input {{ isset($editErrors['editCompany']) ? 'field-error' : '' }}">
-                    @if(isset($editErrors['editCompany']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editCompany'] }}</p>@endif
-                </div>
+            {{-- Job Title --}}
+            <div>
+                <label class="form-label">Job Title <span class="text-red-500">*</span></label>
+                <input wire:model.defer="editJobTitle" type="text" placeholder="e.g. Software Engineer"
+                       class="form-input {{ isset($editErrors['editJobTitle']) ? 'field-error' : '' }}">
+                @if(isset($editErrors['editJobTitle']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
             </div>
 
+            {{-- Company Type + Company Name --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Company Type <span class="text-red-500">*</span></label>
                     <select wire:model.live="editCompanyType"
                             class="form-input {{ isset($editErrors['editCompanyType']) ? 'field-error' : '' }}">
-                        <option value="">— Select Company Type —</option>
+                        <option value="">Select Company Type</option>
                         @foreach($this->jobOptions->get('company_type', collect()) as $opt)
                             <option value="{{ $opt->label }}" @selected($editCompanyType === $opt->label)>{{ $opt->label }}</option>
                         @endforeach
@@ -1084,25 +1169,37 @@ new class extends Component {
                     @if(isset($editErrors['editCompanyType']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
                 </div>
                 <div>
-                    <label class="form-label">
-                        Location <span class="text-red-500">*</span>
-                        <span class="text-slate-400 font-normal text-[11px] ml-1">(City, Province or Remote)</span>
-                    </label>
-                    <input wire:model="editLocation" type="text"
-                           placeholder="e.g. Tuguegarao, Cagayan / Remote / Hybrid - Manila"
-                           maxlength="120"
-                           class="form-input {{ isset($editErrors['editLocation']) ? 'field-error' : '' }}">
-                    <p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Auto-filled when a company type with a default location is selected. You can still edit it manually.</p>
-                    @if(isset($editErrors['editLocation']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editLocation'] }}</p>@endif
+                    <label class="form-label">Company Name <span class="text-red-500">*</span></label>
+                    @php $editIsPhilcst = str_contains(strtoupper($editCompanyType), 'PHILCST'); @endphp
+                    <input wire:model.defer="editCompany" type="text" placeholder="e.g. Acme Corp"
+                           @if($editIsPhilcst) readonly @endif
+                           class="form-input {{ isset($editErrors['editCompany']) ? 'field-error' : '' }} {{ $editIsPhilcst ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : '' }}">
+                    @if($editIsPhilcst)<p class="field-hint"><i class="fas fa-lock text-[10px] mr-1"></i>Auto-set based on selected company type.</p>@endif
+                    @if(isset($editErrors['editCompany']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editCompany'] }}</p>@endif
                 </div>
             </div>
 
+            {{-- Location --}}
+            <div>
+                <label class="form-label">
+                    Location <span class="text-red-500">*</span>
+                    <span class="text-slate-400 font-normal text-[11px] ml-1">(City, Province or Remote)</span>
+                </label>
+                <input wire:model="editLocation" type="text"
+                       placeholder="e.g. Tuguegarao, Cagayan / Remote / Hybrid - Manila"
+                       maxlength="120"
+                       class="form-input {{ isset($editErrors['editLocation']) ? 'field-error' : '' }}">
+                <p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Auto-filled when a company type with a default location is selected. You can still edit it manually.</p>
+                @if(isset($editErrors['editLocation']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editLocation'] }}</p>@endif
+            </div>
+
+            {{-- Employment Type + Experience Level --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Employment Type <span class="text-red-500">*</span></label>
                     <select wire:model.defer="editEmpType"
                             class="form-input {{ isset($editErrors['editEmpType']) ? 'field-error' : '' }}">
-                        <option value="">— Select Type —</option>
+                        <option value="">Select Employment Type</option>
                         @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
                             <option value="{{ $opt->label }}" @selected($editEmpType === $opt->label)>{{ $opt->label }}</option>
                         @endforeach
@@ -1113,7 +1210,7 @@ new class extends Component {
                     <label class="form-label">Experience Level <span class="text-red-500">*</span></label>
                     <select wire:model.defer="editExpLevel"
                             class="form-input {{ isset($editErrors['editExpLevel']) ? 'field-error' : '' }}">
-                        <option value="">— Select Level —</option>
+                        <option value="">Select Experience Level</option>
                         @foreach($this->jobOptions->get('experience_level', collect()) as $opt)
                             <option value="{{ $opt->label }}" @selected($editExpLevel === $opt->label)>{{ $opt->label }}</option>
                         @endforeach
@@ -1122,28 +1219,57 @@ new class extends Component {
                 </div>
             </div>
 
+            {{-- ✅ FIX: Salary + Deadline — removed icon wrappers that caused overlap --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-label">Salary <span class="text-slate-400 font-normal">(Optional)</span></label>
-                    <div class="relative">
-                        <i class="fas fa-money-bill-wave absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
-                        <input wire:model.defer="editSalary" type="text"
-                               placeholder="e.g. P25,000 - P35,000 / month"
-                               class="form-input pl-8">
-                    </div>
+                    <input wire:model.defer="editSalary" type="text"
+                           placeholder="e.g. ₱25,000 – ₱35,000 / month"
+                           class="form-input">
                     <p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Leave blank if not disclosed.</p>
                 </div>
                 <div>
                     <label class="form-label">Application Deadline <span class="text-red-500">*</span></label>
-                    <div class="relative">
-                        <i class="fas fa-calendar-days absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
-                        <input wire:model.defer="editDeadline" type="date"
-                               class="form-input pl-8 {{ isset($editErrors['editDeadline']) ? 'field-error' : '' }}">
-                    </div>
+                    <input wire:model.defer="editDeadline" type="date"
+                           class="form-input {{ isset($editErrors['editDeadline']) ? 'field-error' : '' }}">
                     @if(isset($editErrors['editDeadline']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editDeadline'] }}</p>@endif
                 </div>
             </div>
 
+            {{-- Target College --}}
+            <div>
+                <label class="form-label">
+                    Target College
+                    <span class="text-slate-400 font-normal text-xs">(Optional — blank = visible to all colleges)</span>
+                </label>
+                {{-- wire:model.live ensures value is synced to Livewire immediately on change --}}
+                <select wire:model.live="editTargetCollege" class="form-input">
+                    <option value="">All Colleges</option>
+                    @foreach($this->collegesWithDepts as $c)
+                        <option value="{{ $c['name'] }}">{{ $c['name'] }}</option>
+                    @endforeach
+                </select>
+                {{-- Show dept chips based on current Livewire value --}}
+                @php
+                    $editSelectedDepts = collect($this->collegesWithDepts)
+                        ->firstWhere('name', $this->editTargetCollege)['codes'] ?? [];
+                @endphp
+                @if(count($editSelectedDepts) > 0)
+                <div class="mt-3">
+                    <p class="text-xs text-slate-500 mb-2 font-medium">
+                        <i class="fas fa-graduation-cap mr-1 text-purple-400"></i>
+                        Departments under this college:
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        @foreach($editSelectedDepts as $dCode)
+                            <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono">{{ $dCode }}</span>
+                        @endforeach
+                    </div>
+                </div>
+                @endif
+            </div>
+
+            {{-- Job Description --}}
             <div>
                 <label class="form-label">Job Description <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="editDescription" rows="7"

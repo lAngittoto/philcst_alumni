@@ -25,6 +25,9 @@ class OrganizerJob extends Model
         'description',
         'target_college',
         'status',
+        // ✅ FIX: these were missing — Eloquent was silently discarding them
+        'updated_by',
+        'updated_by_role',
     ];
 
     protected $casts = [

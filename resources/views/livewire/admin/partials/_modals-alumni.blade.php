@@ -3,7 +3,7 @@
      register alumni · import · manage courses · delete course · view profile
      ===================================================== --}}
 
-{{-- REGISTER ALUMNI --}}
+{{-- ── REGISTER ALUMNI ────────────────────────────────────────────────────── --}}
 @if($activeModal==='registerAlumni')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
@@ -11,6 +11,7 @@
             <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-user-plus text-2xl"></i> Register Alumni</h2>
             <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
         </div>
+
         @if(count($alumniErrors)>0)
         <div class="bg-red-50 border-b border-red-200 px-8 py-5">
             <p class="font-semibold text-red-800 text-sm mb-3"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following errors:</p>
@@ -21,9 +22,8 @@
             </ul>
         </div>
         @endif
-        <form wire:submit="registerAlumni" class="p-8 space-y-6">
 
-            {{-- Reset button --}}
+        <form wire:submit="registerAlumni" class="p-8 space-y-6">
             <div class="flex justify-end">
                 <button type="button" wire:click="$set('alumniErrors',[])"
                         onclick="this.closest('form').querySelectorAll('input[type=text],input[type=email],input[type=number],select').forEach(el=>{el.value='';el.dispatchEvent(new Event('input'))})"
@@ -32,6 +32,7 @@
                 </button>
             </div>
 
+            {{-- Photo --}}
             <div>
                 <label class="block text-sm font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
                 <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
@@ -48,48 +49,45 @@
                 </div>
             </div>
 
+            {{-- Name --}}
             <div>
                 <label class="block text-sm font-bold text-slate-800 mb-3">Full Name <span class="text-red-500">*</span></label>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <input wire:model.defer="regFirstName" type="text" placeholder="First Name"
-                               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        <input wire:model.defer="regFirstName" type="text" placeholder="First Name" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <p class="text-xs text-slate-500 mt-1.5 pl-1">First Name <span class="text-red-400">*</span></p>
                     </div>
                     <div>
-                        <input wire:model.defer="regLastName" type="text" placeholder="Last Name"
-                               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        <input wire:model.defer="regLastName" type="text" placeholder="Last Name" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <p class="text-xs text-slate-500 mt-1.5 pl-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4 mt-3">
                     <div>
-                        <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
-                               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial <span class="text-slate-400">(letters only)</span></p>
                     </div>
                     <div>
-                        <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
-                               class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                         <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix <span class="text-slate-400">(optional)</span></p>
                     </div>
                 </div>
             </div>
 
+            {{-- ID / Email --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Student ID <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
-                           class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
-                    <p class="text-xs text-slate-500 mt-1.5 pl-1">Numbers only · will be padded to 8 digits</p>
+                    <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
+                    <p class="text-xs text-slate-500 mt-1.5 pl-1">Numbers only · padded to 8 digits</p>
                 </div>
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Email <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="regEmail" type="email" placeholder="student@example.com"
-                           class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <input wire:model.defer="regEmail" type="email" placeholder="student@example.com" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                 </div>
             </div>
 
+            {{-- Course / Year --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Course <span class="text-red-500">*</span></label>
@@ -100,14 +98,12 @@
                 </div>
                 <div>
                     <label class="block text-sm font-bold text-slate-800 mb-3">Batch Year <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999"
-                           class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                 </div>
             </div>
 
             <div class="flex gap-4 pt-3">
-                <button type="button" wire:click="closeModal"
-                        class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
+                <button type="button" wire:click="closeModal" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
                 <button type="submit" wire:loading.attr="disabled" wire:target="registerAlumni"
                         class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
                     <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner spin-icon"></i> Registering...</span>
@@ -119,26 +115,31 @@
 </div>
 @endif
 
-{{-- IMPORT --}}
+{{-- ── IMPORT ──────────────────────────────────────────────────────────────── --}}
 @if($activeModal==='importModal')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelImport()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl modal-animate">
-        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl modal-animate max-h-[92vh] overflow-y-auto scrollbar-custom">
+        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
             <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-file-import text-2xl"></i> Import Alumni</h2>
             <button wire:click="cancelImport" class="text-3xl leading-none hover:opacity-70 transition">×</button>
         </div>
+
         <div class="p-8 space-y-5">
-            @if(!$importingFile)
+
+            {{-- ── STEP 1: File picker (before processing) ── --}}
+            @if(!$importingFile && $importStatus === '' && count($importErrors) === 0 && count($importDuplicates) === 0)
             <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg text-sm">
                 <p class="text-blue-800 font-semibold mb-1"><i class="fas fa-circle-info mr-2"></i>Supported formats: CSV · Excel (.xlsx, .xls)</p>
                 <p class="text-blue-700 text-xs">Required columns:
-                    <code class="bg-blue-100 px-1 rounded">name</code>
-                    <code class="bg-blue-100 px-1 rounded">student_id</code>
-                    <code class="bg-blue-100 px-1 rounded">course_code</code>
-                    <code class="bg-blue-100 px-1 rounded">year</code>
-                    <code class="bg-blue-100 px-1 rounded">email</code>
+                    <code class="bg-blue-100 px-1 rounded mx-0.5">name</code>
+                    <code class="bg-blue-100 px-1 rounded mx-0.5">student_id</code>
+                    <code class="bg-blue-100 px-1 rounded mx-0.5">course_code</code>
+                    <code class="bg-blue-100 px-1 rounded mx-0.5">year</code>
+                    <code class="bg-blue-100 px-1 rounded mx-0.5">email</code>
                 </p>
+                <p class="text-blue-600 text-xs mt-2"><i class="fas fa-lightbulb mr-1"></i>All rows are validated first. If any row has an error, nothing is imported until it is fixed.</p>
             </div>
+
             <div class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-all"
                  @click="document.getElementById('importFile').click()">
                 @if($importFile)
@@ -152,68 +153,164 @@
                 @endif
                 <input type="file" id="importFile" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
             </div>
+
             <div class="flex gap-3">
                 <button type="button" wire:click="cancelImport"
                         class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
                 <button type="button" wire:click="processImportFile" @if(!$importFile) disabled @endif
                         wire:loading.attr="disabled" wire:target="processImportFile"
                         class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="processImportFile"><i class="fas fa-spinner spin-icon"></i> Processing…</span>
+                    <span wire:loading wire:target="processImportFile"><i class="fas fa-spinner spin-icon"></i> Validating & Processing…</span>
                     <span wire:loading.remove wire:target="processImportFile"><i class="fas fa-upload"></i> Import Now</span>
                 </button>
             </div>
-            @else
-            @php $isDone = $importStatus === 'Done!'; @endphp
+            @endif
+
+            {{-- ── STEP 2: Processing in progress ── --}}
+            @if($importingFile)
             <div>
                 <div class="flex items-center justify-between mb-2">
-                    @if($isDone)
-                        <p class="text-slate-800 font-semibold text-sm flex items-center gap-2"><i class="fas fa-circle-check text-emerald-500"></i> Import complete</p>
-                    @else
-                        <p class="text-slate-800 font-semibold text-sm flex items-center gap-2"><i class="fas fa-spinner spin-icon text-purple-600"></i> Importing… {{ $importProgress }}/{{ $importTotal }}</p>
-                    @endif
+                    <p class="text-slate-800 font-semibold text-sm flex items-center gap-2">
+                        <i class="fas fa-spinner spin-icon text-purple-600"></i>
+                        Validating rows… {{ $importProgress }}/{{ $importTotal }}
+                    </p>
                     <span class="text-xs text-slate-500 font-mono">{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%</span>
                 </div>
                 <div class="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                    <div class="h-full rounded-full transition-all duration-500 {{ $isDone&&$importFailCount===0 ? 'bg-emerald-500' : ($isDone ? 'bg-amber-500' : 'bg-purple-600') }}"
+                    <div class="h-full rounded-full bg-purple-600 transition-all duration-300"
                          style="width:{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%"></div>
                 </div>
+                <p class="text-xs text-slate-500 mt-2 text-center">Please wait — checking all rows before inserting anything…</p>
             </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div class="bg-emerald-50 rounded-xl p-4 border border-emerald-200 text-center">
-                    <p class="text-emerald-600 text-2xl font-bold">{{ $importSuccessCount }}</p>
-                    <p class="text-emerald-700 text-xs font-semibold mt-1 uppercase tracking-wide">Imported</p>
+            @endif
+
+            {{-- ── STEP 3: Validation FAILED (hard errors present) ── --}}
+            @if(!$importingFile && $importStatus === 'Validation Failed')
+            <div class="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
+                <div class="px-5 py-4 bg-red-100 border-b border-red-200 flex items-center gap-3">
+                    <div class="w-10 h-10 bg-red-200 rounded-full flex items-center justify-center shrink-0">
+                        <i class="fas fa-xmark text-red-700 text-lg"></i>
+                    </div>
+                    <div>
+                        <p class="font-bold text-red-800 text-base">Import Blocked — Data Errors Found</p>
+                        <p class="text-red-600 text-xs mt-0.5">Fix all {{ count($importErrors) }} error(s) in your file and re-upload.</p>
+                    </div>
                 </div>
-                <div class="bg-red-50 rounded-xl p-4 border border-red-200 text-center">
-                    <p class="text-red-600 text-2xl font-bold">{{ $importFailCount }}</p>
-                    <p class="text-red-700 text-xs font-semibold mt-1 uppercase tracking-wide">Skipped</p>
-                </div>
-            </div>
-            @if(count($importErrors)>0)
-            <div class="bg-red-50 rounded-xl border border-red-200 overflow-hidden">
-                <div class="px-4 py-3 bg-red-100 border-b border-red-200 flex items-center gap-2">
-                    <i class="fas fa-triangle-exclamation text-red-600 text-sm"></i>
-                    <p class="text-red-800 font-semibold text-sm">{{ count($importErrors) }} row(s) were skipped</p>
-                </div>
-                <ul class="divide-y divide-red-100 max-h-56 overflow-y-auto scrollbar-custom">
+                <ul class="divide-y divide-red-100 max-h-64 overflow-y-auto scrollbar-custom">
                     @foreach($importErrors as $err)
-                    <li class="px-4 py-2.5 text-xs text-red-700 flex items-start gap-2">
-                        <i class="fas fa-circle-xmark text-red-400 mt-0.5 shrink-0"></i><span>{{ $err }}</span>
+                    <li class="px-5 py-3 text-sm text-red-700 flex items-start gap-2">
+                        <i class="fas fa-circle-xmark text-red-400 mt-0.5 shrink-0"></i>
+                        <span>{{ $err }}</span>
+                    </li>
+                    @endforeach
+                </ul>
+            </div>
+
+            @if(count($importDuplicates) > 0)
+            <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+                <div class="px-5 py-3 bg-amber-100 border-b border-amber-200 flex items-center gap-2">
+                    <i class="fas fa-copy text-amber-600"></i>
+                    <p class="font-semibold text-amber-800 text-sm">{{ count($importDuplicates) }} duplicate(s) also found (would have been skipped)</p>
+                </div>
+                <ul class="divide-y divide-amber-100 max-h-40 overflow-y-auto scrollbar-custom">
+                    @foreach($importDuplicates as $dup)
+                    <li class="px-5 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+                        <i class="fas fa-copy text-amber-400 mt-0.5 shrink-0"></i><span>{{ $dup }}</span>
                     </li>
                     @endforeach
                 </ul>
             </div>
             @endif
-            <button type="button" wire:click="cancelImport"
-                    class="w-full px-6 py-2.5 {{ $isDone ? 'btn-primary' : 'border border-slate-300 text-slate-700' }} rounded-lg text-sm font-semibold transition">
-                {{ $isDone ? 'Done' : 'Close' }}
+
+            <button type="button" wire:click="resetImportState"
+                    class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
+                <i class="fas fa-arrow-left mr-2"></i>Try Again with Fixed File
             </button>
             @endif
+
+            {{-- ── STEP 4: Done ── --}}
+            @if(!$importingFile && in_array($importStatus, ['Done', 'All Duplicates']))
+            @php
+                $allDups   = $importStatus === 'All Duplicates';
+                $hasNew    = $importSuccessCount > 0;
+                $hasDups   = $importDuplicateCount > 0;
+            @endphp
+
+            {{-- Summary banner --}}
+            <div class="rounded-xl overflow-hidden border {{ $hasNew ? 'border-emerald-200' : 'border-amber-200' }}">
+                <div class="px-5 py-4 flex items-center gap-3 {{ $hasNew ? 'bg-emerald-50' : 'bg-amber-50' }}">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 {{ $hasNew ? 'bg-emerald-200' : 'bg-amber-200' }}">
+                        <i class="text-lg {{ $hasNew ? 'fas fa-circle-check text-emerald-700' : 'fas fa-copy text-amber-700' }}"></i>
+                    </div>
+                    <div>
+                        @if($hasNew && $hasDups)
+                            <p class="font-bold text-emerald-800 text-base">Import Complete</p>
+                            <p class="text-emerald-600 text-xs mt-0.5">{{ $importSuccessCount }} new record(s) added · {{ $importDuplicateCount }} duplicate(s) skipped</p>
+                        @elseif($hasNew)
+                            <p class="font-bold text-emerald-800 text-base">Import Complete</p>
+                            <p class="text-emerald-600 text-xs mt-0.5">{{ $importSuccessCount }} new record(s) successfully added</p>
+                        @else
+                            <p class="font-bold text-amber-800 text-base">Nothing New to Import</p>
+                            <p class="text-amber-600 text-xs mt-0.5">All {{ $importDuplicateCount }} record(s) already exist in the system</p>
+                        @endif
+                    </div>
+                </div>
+            </div>
+
+            {{-- Stats grid --}}
+            <div class="grid grid-cols-3 gap-3">
+                <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 text-center">
+                    <p class="text-slate-700 text-2xl font-bold">{{ $importTotal }}</p>
+                    <p class="text-slate-500 text-xs font-semibold mt-1 uppercase tracking-wide">Total Rows</p>
+                </div>
+                <div class="bg-emerald-50 rounded-xl p-4 border border-emerald-200 text-center">
+                    <p class="text-emerald-600 text-2xl font-bold">{{ $importSuccessCount }}</p>
+                    <p class="text-emerald-700 text-xs font-semibold mt-1 uppercase tracking-wide">Imported</p>
+                </div>
+                <div class="bg-amber-50 rounded-xl p-4 border border-amber-200 text-center">
+                    <p class="text-amber-600 text-2xl font-bold">{{ $importDuplicateCount }}</p>
+                    <p class="text-amber-700 text-xs font-semibold mt-1 uppercase tracking-wide">Duplicates</p>
+                </div>
+            </div>
+
+            {{-- Duplicate details --}}
+            @if(count($importDuplicates) > 0)
+            <div class="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+                <div class="px-5 py-3 bg-amber-100 border-b border-amber-200 flex items-center gap-2">
+                    <i class="fas fa-copy text-amber-600 text-sm"></i>
+                    <p class="font-semibold text-amber-800 text-sm">{{ count($importDuplicates) }} duplicate(s) skipped</p>
+                    <span class="ml-auto text-xs text-amber-600">These already exist in the system</span>
+                </div>
+                <ul class="divide-y divide-amber-100 max-h-48 overflow-y-auto scrollbar-custom">
+                    @foreach($importDuplicates as $dup)
+                    <li class="px-5 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+                        <i class="fas fa-copy text-amber-400 mt-0.5 shrink-0"></i><span>{{ $dup }}</span>
+                    </li>
+                    @endforeach
+                </ul>
+            </div>
+            @endif
+
+            <div class="flex gap-3">
+                @if(!$hasNew)
+                <button type="button" wire:click="resetImportState"
+                        class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
+                    <i class="fas fa-arrow-left mr-2"></i>Import Another File
+                </button>
+                @endif
+                <button type="button" wire:click="closeModal"
+                        class="flex-1 px-6 py-2.5 {{ $hasNew ? 'btn-primary' : 'border border-slate-300 text-slate-700 hover:bg-slate-50' }} rounded-lg text-sm font-semibold transition">
+                    {{ $hasNew ? 'Done' : 'Close' }}
+                </button>
+            </div>
+            @endif
+
         </div>
     </div>
 </div>
 @endif
 
-{{-- MANAGE ALUMNI COURSES --}}
+{{-- ── MANAGE COURSES ──────────────────────────────────────────────────────── --}}
 @if($activeModal==='manageCourses')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col modal-animate">
@@ -221,6 +318,7 @@
             <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-sliders text-2xl"></i> Manage Courses</h2>
             <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
         </div>
+
         @if($courseAlert)
         <div x-data="{s:true}" x-effect="if(s){setTimeout(()=>{s=false},4000)}" x-show="s"
              :class="'{{ $courseAlertType }}'==='success'?'bg-emerald-50 border-l-4 border-emerald-400':'bg-red-50 border-l-4 border-red-400'"
@@ -230,7 +328,9 @@
             </p>
         </div>
         @endif
+
         <div class="flex-1 overflow-y-auto scrollbar-custom px-8 py-6 space-y-6">
+            {{-- Add/Edit Form --}}
             <div class="border border-slate-200 rounded-lg p-6 bg-slate-50">
                 <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
                     <i class="fas fa-{{ $editingCourseId ? 'pencil' : 'plus-circle' }} text-purple-600"></i>
@@ -239,12 +339,12 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-2">Course Code</label>
-                        <input wire:model.defer="courseCode" type="text" placeholder="e.g. CS101" maxlength="20"
+                        <input wire:model.defer="courseCode" type="text" placeholder="e.g. BSIT" maxlength="20"
                                class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-slate-700 mb-2">Course Name</label>
-                        <input wire:model.defer="courseName" type="text" placeholder="e.g. Computer Science" maxlength="100"
+                        <input wire:model.defer="courseName" type="text" placeholder="e.g. Bachelor of Science in Information Technology" maxlength="100"
                                class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
                     </div>
                     <div class="flex gap-3 pt-2">
@@ -255,11 +355,13 @@
                         <button type="button" wire:click="saveCourse" wire:loading.attr="disabled" wire:target="saveCourse"
                                 class="flex-1 px-4 py-2 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
                             <span wire:loading wire:target="saveCourse"><i class="fas fa-spinner spin-icon"></i></span>
-                            <span wire:loading.remove wire:target="saveCourse">{{ $editingCourseId ? 'Update' : 'Add Course' }}</span>
+                            <span wire:loading.remove wire:target="saveCourse">{{ $editingCourseId ? 'Update Course' : 'Add Course' }}</span>
                         </button>
                     </div>
                 </div>
             </div>
+
+            {{-- Course List --}}
             <div>
                 <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
                     <i class="fas fa-book text-slate-500"></i> Courses ({{ count($coursesList) }})
@@ -288,14 +390,15 @@
                 </div>
             </div>
         </div>
-        <div class="px-8 py-4 border-t border-slate-200 bg-slate-50">
+
+        <div class="px-8 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
             <button wire:click="closeModal" class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-100 transition">Close</button>
         </div>
     </div>
 </div>
 @endif
 
-{{-- DELETE ALUMNI COURSE CONFIRM --}}
+{{-- ── DELETE COURSE CONFIRM ───────────────────────────────────────────────── --}}
 @if($activeModal==='deleteCourseConfirm')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
@@ -303,7 +406,7 @@
             <h2 class="text-xl font-bold text-red-800 flex items-center gap-3"><i class="fas fa-triangle-exclamation"></i> Delete Course</h2>
         </div>
         <div class="p-8">
-            <p class="text-slate-800 text-sm mb-4">Delete <strong class="text-red-600">{{ $deleteCourseName }}</strong>?</p>
+            <p class="text-slate-800 text-sm mb-2">Delete <strong class="text-red-600">{{ $deleteCourseName }}</strong>?</p>
             <p class="text-slate-600 text-xs mb-6">This action cannot be undone.</p>
             <div class="flex gap-3">
                 <button type="button" wire:click="closeModal"
@@ -319,8 +422,8 @@
 </div>
 @endif
 
-{{-- VIEW PROFILE (shared alumni + organizer) --}}
-@if($activeModal==='viewProfile'&&$viewingProfile)
+{{-- ── VIEW PROFILE (alumni + organizer) ─────────────────────────────────── --}}
+@if($activeModal==='viewProfile' && $viewingProfile)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
         <div class="flex items-center justify-between px-8 py-5 btn-primary text-white rounded-t-lg sticky top-0 z-10">
@@ -331,6 +434,7 @@
             <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
         </div>
         <div class="p-8 space-y-6">
+            {{-- Avatar + basic info --}}
             <div class="flex items-center gap-5">
                 @if($updatingProfilePhoto)
                     <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" alt="Preview" class="w-40 h-40 rounded-xl object-cover shadow-md shrink-0">
@@ -348,6 +452,8 @@
                     <span class="inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold {{ $sc }}">{{ $viewingProfile['status'] ?? 'N/A' }}</span>
                 </div>
             </div>
+
+            {{-- Details grid --}}
             <div class="grid grid-cols-2 gap-3">
                 @if($viewingProfileType==='alumni')
                 <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
@@ -378,6 +484,8 @@
                 </div>
                 @endif
             </div>
+
+            {{-- Photo update --}}
             <div>
                 <p class="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Update Profile Photo</p>
                 <div class="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
@@ -395,6 +503,7 @@
                 </button>
                 @endif
             </div>
+
             <button wire:click="closeModal" class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Close</button>
         </div>
     </div>
