@@ -1,4 +1,5 @@
 <?php
+// FILE: app/Models/JobPosting.php
 
 namespace App\Models;
 
@@ -25,9 +26,10 @@ class JobPosting extends Model
         'description',
         'target_college',
         'status',
-        // ✅ FIX: these were missing — Eloquent was silently discarding them
         'updated_by',
         'updated_by_role',
+        'deleted_by',
+        'deleted_by_role',
     ];
 
     protected $casts = [
@@ -37,5 +39,21 @@ class JobPosting extends Model
     public function organizer(): BelongsTo
     {
         return $this->belongsTo(Organizer::class, 'organizer_id');
+    }
+
+    /**
+     * Scope: only organizer-visible statuses (excludes ORGANIZER_DELETED).
+     */
+    public function scopeVisibleToOrganizer($query): mixed
+    {
+        return $query->whereIn('status', ['ACTIVE', 'INACTIVE']);
+    }
+
+    /**
+     * Scope: admin sees everything including ORGANIZER_DELETED (non-hard-deleted).
+     */
+    public function scopeForAdmin($query): mixed
+    {
+        return $query; // no extra filter — admin sees all
     }
 }
