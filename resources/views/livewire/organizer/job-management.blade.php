@@ -1,9 +1,6 @@
 <?php
 /**
  * FILE: resources/views/livewire/organizer/job-management.blade.php
- *
- * Delete = soft-delete (status → ORGANIZER_DELETED), admin can restore.
- * Edit allowed even on INACTIVE — hidden from students, not from organizer.
  */
 
 use Livewire\Volt\Component;
@@ -20,13 +17,11 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
-    // ── Filters ───────────────────────────────────────────────
     public string $search       = '';
     public string $filterStatus = '';
     public string $filterType   = '';
     public string $filterSort   = 'recent';
 
-    // ── Form ──────────────────────────────────────────────────
     public bool   $showFormModal = false;
     public bool   $isEditing     = false;
     public ?int   $editingJobId  = null;
@@ -48,7 +43,6 @@ new class extends Component {
     public string $philcstName     = '';
     public string $philcstLocation = '';
 
-    // ── View / Delete / Toggle ────────────────────────────────
     public bool   $showViewModal    = false;
     public ?int   $viewingJobId     = null;
     public bool   $showDeleteModal  = false;
@@ -59,7 +53,6 @@ new class extends Component {
     public string $confirmAction    = '';
     public array  $formErrors       = [];
 
-    // ── Mount ─────────────────────────────────────────────────
     public function mount(): void
     {
         $philcst = JobOption::where('type', 'company_type')
@@ -72,7 +65,6 @@ new class extends Component {
         }
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────
     public function updatingSearch()       { $this->resetPage(); }
     public function updatingFilterStatus() { $this->resetPage(); }
     public function updatingFilterType()   { $this->resetPage(); }
@@ -88,16 +80,12 @@ new class extends Component {
         }
     }
 
-    // ── Computed ──────────────────────────────────────────────
     #[Computed]
     public function jobPostings()
     {
         $org = auth()->user()?->organizer;
-        if (!$org) {
-            return OrganizerJob::whereRaw('0=1')->paginate(20);
-        }
+        if (!$org) return OrganizerJob::whereRaw('0=1')->paginate(20);
 
-        // Only show ACTIVE and INACTIVE to organizer; ORGANIZER_DELETED is hidden
         $q = OrganizerJob::forOrganizer($org->id)
             ->whereIn('status', ['ACTIVE', 'INACTIVE']);
 
@@ -134,7 +122,6 @@ new class extends Component {
         return app(OrganizerJobController::class)->getCollegesWithDepts();
     }
 
-    // ── Filters reset ─────────────────────────────────────────
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = $this->filterType = '';
@@ -142,7 +129,6 @@ new class extends Component {
         $this->resetPage();
     }
 
-    // ── Form actions ──────────────────────────────────────────
     public function openCreateModal(): void
     {
         $this->resetFormFields();
@@ -154,7 +140,6 @@ new class extends Component {
     {
         $job = app(OrganizerJobController::class)->getJob($id);
 
-        // Allow editing INACTIVE jobs — they're just hidden from students
         $this->isEditing       = true;
         $this->editingJobId    = $id;
         $this->jobTitle        = $job->job_title;
@@ -259,11 +244,9 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    // ── View ──────────────────────────────────────────────────
     public function viewJob(int $id): void  { $this->viewingJobId = $id; $this->showViewModal = true; }
     public function closeViewModal(): void  { $this->showViewModal = false; $this->viewingJobId = null; }
 
-    // ── Delete (soft) ─────────────────────────────────────────
     public function confirmDelete(int $id): void
     {
         $job = app(OrganizerJobController::class)->getJob($id);
@@ -275,7 +258,6 @@ new class extends Component {
     public function executeDelete(): void
     {
         if ($this->deleteJobId) {
-            // Soft-delete: set status to ORGANIZER_DELETED so admin can restore
             $job = app(OrganizerJobController::class)->getJob($this->deleteJobId);
             $job->update([
                 'status'          => 'ORGANIZER_DELETED',
@@ -287,7 +269,6 @@ new class extends Component {
         $this->showDeleteModal = false;
         $this->deleteJobId    = null;
         $this->deleteJobTitle = '';
-        // Close view modal if open
         if ($this->showViewModal) { $this->showViewModal = false; $this->viewingJobId = null; }
     }
 
@@ -298,7 +279,6 @@ new class extends Component {
         $this->deleteJobTitle = '';
     }
 
-    // ── Toggle ────────────────────────────────────────────────
     public function confirmToggle(int $id): void
     {
         $job = app(OrganizerJobController::class)->getJob($id);
@@ -320,7 +300,6 @@ new class extends Component {
 
     public function cancelConfirm(): void { $this->showConfirmModal = false; $this->confirmJobId = null; }
 
-    // ── Helpers ───────────────────────────────────────────────
     private function resetFormFields(): void
     {
         $this->jobTitle = $this->orgCategory = '';
@@ -375,8 +354,19 @@ new class extends Component {
     .org-confirm-name{font-size:.875rem;font-weight:700}
     .org-confirm-sub{font-size:.75rem;margin-top:2px}
 
-    /* ── Shared JobStreet view modal ── */
-    .js-modal{background:#fff;border-radius:12px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:760px;max-width:96vw;max-height:92vh;font-family:'Noto Sans','Segoe UI',system-ui,-apple-system,sans-serif;overflow:hidden;border-top:5px solid #7a3f91}
+    /* ── Table action buttons — OUTLINED ── */
+    .tbl-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;border:1.5px solid;background:#fff;font-family:inherit;white-space:nowrap}
+    .tbl-btn-view{color:#7a3f91;border-color:#7a3f91}
+    .tbl-btn-view:hover{background:#faf5ff}
+    .tbl-btn-activate{color:#15803d;border-color:#15803d}
+    .tbl-btn-activate:hover{background:#f0fdf4}
+    .tbl-btn-deactivate{color:#b45309;border-color:#b45309}
+    .tbl-btn-deactivate:hover{background:#fffbeb}
+    .tbl-btn-delete{color:#dc2626;border-color:#dc2626}
+    .tbl-btn-delete:hover{background:#fff5f5}
+
+    /* ── JobStreet view modal ── */
+    .js-modal{background:#fff;border-radius:12px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:760px;max-width:96vw;max-height:92vh;font-family:'Noto Sans','Segoe UI',system-ui,-apple-system,sans-serif;overflow:hidden}
     .js-header{background:#fff;padding:26px 32px 20px;border-bottom:1px solid #ebebeb;flex-shrink:0;position:relative}
     .js-job-title{font-size:23px;font-weight:700;color:#111;line-height:1.25;margin-bottom:6px;padding-right:38px}
     .js-company-line{display:flex;align-items:center;gap:6px;font-size:14px;color:#444;margin-bottom:18px;flex-wrap:wrap}
@@ -389,8 +379,7 @@ new class extends Component {
     .js-meta-icon{width:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;color:#7a3f91;font-size:13px}
     .js-meta-label{color:#222}
     .js-meta-muted{color:#999;font-style:italic}
-    .js-posted-line{margin-top:16px;font-size:12.5px;color:#777;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-    .js-dot{color:#ccc}
+    .js-posted-line{margin-top:16px;font-size:12.5px;color:#777}
     .js-body{flex:1;min-height:0;overflow-y:auto;background:#fff}
     .js-section{padding:24px 32px;border-bottom:1px solid #f0f0f0}
     .js-section:last-child{border-bottom:none}
@@ -409,21 +398,34 @@ new class extends Component {
     .js-college-name{font-size:14px;font-weight:700;color:#111;margin-bottom:8px}
     .js-dept-chips{display:flex;flex-wrap:wrap;gap:6px}
     .js-dept-chip{font-size:11px;font-weight:700;font-family:'Courier New',monospace;background:#fff;border:1px solid #d4c5f0;border-radius:3px;padding:3px 8px;color:#6d28d9}
+
+    /* ── View modal footer buttons — OUTLINED ── */
     .js-footer{padding:14px 32px;border-top:1px solid #ebebeb;display:flex;align-items:center;justify-content:flex-end;background:#fff;flex-shrink:0;gap:8px}
-    .js-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 22px;border-radius:4px;font-size:13.5px;font-weight:700;cursor:pointer;transition:background .15s,box-shadow .15s;border:none;font-family:inherit}
-    .js-btn-close{background:#fff;border:1.5px solid #ddd;color:#444}
-    .js-btn-close:hover{background:#f5f5f5}
-    .js-btn-edit{background:#2557a7;color:#fff}
-    .js-btn-edit:hover{background:#1c4487;box-shadow:0 2px 10px rgba(37,87,167,.28)}
-    .js-btn-deactivate{background:#fff;border:1.5px solid #f59e0b;color:#b45309}
+    .js-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;border:1.5px solid;background:#fff;font-family:inherit}
+    .js-btn-close{color:#374151;border-color:#cbd5e1}
+    .js-btn-close:hover{background:#f8fafc}
+    .js-btn-edit{color:#2557a7;border-color:#2557a7}
+    .js-btn-edit:hover{background:#eff6ff}
+    .js-btn-deactivate{color:#b45309;border-color:#b45309}
     .js-btn-deactivate:hover{background:#fffbeb}
-    .js-btn-activate{background:#fff;border:1.5px solid #10b981;color:#047857}
+    .js-btn-activate{color:#15803d;border-color:#15803d}
     .js-btn-activate:hover{background:#f0fdf4}
     .js-close-x{position:absolute;top:18px;right:20px;width:30px;height:30px;border-radius:50%;border:none;background:transparent;color:#999;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s;line-height:1}
     .js-close-x:hover{background:#f0f0f0;color:#333}
+
+    /* ── Confirm modal buttons — OUTLINED ── */
+    .confirm-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:10px;font-size:13.5px;font-weight:700;cursor:pointer;transition:all .15s;font-family:inherit;border:1.5px solid;background:#fff;flex:1}
+    .confirm-btn-cancel{color:#374151;border-color:#cbd5e1}
+    .confirm-btn-cancel:hover{background:#f8fafc}
+    .confirm-btn-activate{color:#15803d;border-color:#15803d}
+    .confirm-btn-activate:hover{background:#f0fdf4}
+    .confirm-btn-deactivate{color:#b45309;border-color:#b45309}
+    .confirm-btn-deactivate:hover{background:#fffbeb}
+    .confirm-btn-delete{color:#dc2626;border-color:#dc2626}
+    .confirm-btn-delete:hover{background:#fff5f5}
 </style>
 
-{{-- ── FLASH ────────────────────────────────────────────────── --}}
+{{-- ── FLASH ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,4500);}}"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show"
@@ -446,7 +448,7 @@ new class extends Component {
 
 <div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-6">
 
-    {{-- ── PAGE HEADER ──────────────────────────────────────────── --}}
+    {{-- PAGE HEADER --}}
     <div class="flex items-center justify-between mb-5 shrink-0" style="animation:slideInDown .5s ease-out;">
         <h1 class="text-3xl font-bold text-slate-800 flex items-center gap-3">
             <div class="w-11 h-11 btn-primary rounded-lg flex items-center justify-center shadow-md shrink-0">
@@ -460,7 +462,7 @@ new class extends Component {
         </button>
     </div>
 
-    {{-- ── TABLE PANEL ──────────────────────────────────────────── --}}
+    {{-- TABLE PANEL --}}
     <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden border border-slate-200">
 
         {{-- Filters --}}
@@ -500,7 +502,7 @@ new class extends Component {
              wire:loading.class="tbl-loading"
              wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage">
             <table class="w-full border-separate border-spacing-0">
-                <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
+                <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;pointer-events:none;">
                     <tr>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Job Title</th>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Organization</th>
@@ -530,25 +532,21 @@ new class extends Component {
                             <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold {{ $job->status_badge_class }}">{{ $job->status }}</span>
                         </td>
                         <td class="px-6 py-4 text-center">
-                            <div class="flex items-center justify-center gap-2">
-                                <button wire:click="viewJob({{ $job->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
-                                    <i class="fas fa-eye"></i> View
+                            <div class="flex items-center justify-center gap-1.5">
+                                <button wire:click="viewJob({{ $job->id }})" class="tbl-btn tbl-btn-view">
+                                    <i class="fas fa-eye text-[11px]"></i> View
                                 </button>
                                 @if($job->status === 'ACTIVE')
-                                    <button wire:click="confirmToggle({{ $job->id }})"
-                                            class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-600 hover:bg-amber-50 rounded-lg transition border border-amber-200">
-                                        <i class="fas fa-ban"></i> Deactivate
+                                    <button wire:click="confirmToggle({{ $job->id }})" class="tbl-btn tbl-btn-deactivate">
+                                        <i class="fas fa-ban text-[11px]"></i> Deactivate
                                     </button>
                                 @else
-                                    <button wire:click="confirmToggle({{ $job->id }})"
-                                            class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-200">
-                                        <i class="fas fa-circle-check"></i> Activate
+                                    <button wire:click="confirmToggle({{ $job->id }})" class="tbl-btn tbl-btn-activate">
+                                        <i class="fas fa-circle-check text-[11px]"></i> Activate
                                     </button>
                                 @endif
-                                <button wire:click="confirmDelete({{ $job->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200">
-                                    <i class="fas fa-trash"></i> Delete
+                                <button wire:click="confirmDelete({{ $job->id }})" class="tbl-btn tbl-btn-delete">
+                                    <i class="fas fa-trash text-[11px]"></i> Delete
                                 </button>
                             </div>
                         </td>
@@ -589,12 +587,12 @@ new class extends Component {
     </div>
 </div>
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: Create / Edit Job
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showFormModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
-    <div class="bg-white rounded-xl shadow-2xl modal-animate w-full flex flex-col" style="max-width:800px;max-height:92vh;border-top:5px solid #7a3f91;">
+    <div class="bg-white rounded-xl shadow-2xl modal-animate w-full flex flex-col" style="max-width:800px;max-height:92vh;">
 
         <div class="flex items-center justify-between px-7 py-5 bg-white border-b border-slate-100 shrink-0">
             <div class="flex items-center gap-3">
@@ -624,7 +622,6 @@ new class extends Component {
                 @if(isset($formErrors['jobTitle']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['jobTitle'] }}</p>@endif
             </div>
 
-            {{-- Organization --}}
             <div class="rounded-xl border border-slate-200 overflow-hidden">
                 <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-2">
                     <i class="fas fa-building text-purple-500 text-sm"></i>
@@ -659,11 +656,9 @@ new class extends Component {
                                 <i class="fas fa-lock text-[10px]"></i> Auto-filled
                             </span>
                         </div>
-                        <p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Organization name and location are automatically set.</p>
                         @else
-                        <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700"><i class="fas fa-triangle-exclamation mr-2"></i>No PHILCST campus found. Please contact the administrator.</div>
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700"><i class="fas fa-triangle-exclamation mr-2"></i>No PHILCST campus found.</div>
                         @endif
-
                     @elseif($orgCategory === 'partner')
                         <div class="grid grid-cols-2 gap-4">
                             <div>
@@ -692,7 +687,6 @@ new class extends Component {
                             </div>
                         </div>
                         @endif
-
                     @elseif($orgCategory === 'custom')
                         <div class="grid grid-cols-2 gap-4">
                             <div>
@@ -721,7 +715,6 @@ new class extends Component {
                             </div>
                         </div>
                         @endif
-
                     @else
                     <div class="text-center py-5 text-slate-400 text-sm">
                         <i class="fas fa-arrow-up text-slate-300 text-xl block mb-2"></i>Select a category above to continue.
@@ -763,7 +756,7 @@ new class extends Component {
             </div>
 
             <div>
-                <label class="form-label">Target College <span class="text-slate-400 font-normal text-xs">(Optional — blank = visible to all colleges)</span></label>
+                <label class="form-label">Target College <span class="text-slate-400 font-normal text-xs">(Optional)</span></label>
                 <select wire:model.live="targetCollege" class="form-input">
                     <option value="">All Colleges</option>
                     @foreach($this->collegesWithDepts as $c)<option value="{{ $c['name'] }}">{{ $c['name'] }}</option>@endforeach
@@ -795,9 +788,9 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: View Full Job
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingJob)
 @php
     $job         = $this->viewingJob;
@@ -883,7 +876,9 @@ new class extends Component {
             </div>
         </div>
         <div class="js-footer">
-            <button wire:click="closeViewModal" class="js-btn js-btn-close">Close</button>
+            <button wire:click="closeViewModal" class="js-btn js-btn-close">
+                <i class="fas fa-xmark" style="font-size:12px;"></i> Close
+            </button>
             @if($job->status === 'ACTIVE')
                 <button wire:click="confirmToggle({{ $job->id }})" class="js-btn js-btn-deactivate">
                     <i class="fas fa-ban" style="font-size:12px;"></i> Deactivate
@@ -893,7 +888,6 @@ new class extends Component {
                     <i class="fas fa-circle-check" style="font-size:12px;"></i> Activate
                 </button>
             @endif
-            {{-- Edit always available — INACTIVE just hidden from students --}}
             <button wire:click="openEditModal({{ $job->id }})" class="js-btn js-btn-edit">
                 <i class="fas fa-pen-to-square" style="font-size:12px;"></i> Edit Posting
             </button>
@@ -902,19 +896,21 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: Confirm Delete
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
-    <div class="relative bg-white rounded-2xl shadow-2xl modal-animate border-t-4 border-red-500" style="width:420px;max-width:95vw;">
-        <div class="px-7 py-6 bg-red-50 border-b border-red-200 flex items-center gap-3">
-            <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-lg"></i></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl modal-animate" style="width:420px;max-width:95vw;">
+        <div class="px-7 py-6 bg-red-50 border-b border-red-200 flex items-center gap-3 rounded-t-2xl">
+            <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
+                <i class="fas fa-triangle-exclamation text-red-500 text-lg"></i>
+            </div>
             <h2 class="text-lg font-extrabold text-red-800">Delete Job Posting</h2>
         </div>
         <div class="p-7">
             <p class="text-slate-600 text-sm mb-1">You are about to delete:</p>
-            <p class="font-extrabold text-red-700 text-base mb-2">"{{ $deleteJobTitle }}"</p>
+            <p class="font-extrabold text-red-700 text-base mb-4">"{{ $deleteJobTitle }}"</p>
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5">
                 <p class="text-amber-800 text-xs font-semibold flex items-center gap-2">
                     <i class="fas fa-info-circle text-amber-500"></i>
@@ -922,11 +918,12 @@ new class extends Component {
                 </p>
             </div>
             <div class="flex gap-3">
-                <button wire:click="cancelDelete" class="flex-1 px-5 py-2.5 border-2 border-slate-300 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition"><i class="fas fa-xmark mr-1"></i> Cancel</button>
-                <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete"
-                        class="flex-1 px-5 py-2.5 bg-red-600 text-white rounded-xl text-sm font-extrabold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-md">
+                <button wire:click="cancelDelete" class="confirm-btn confirm-btn-cancel">
+                    <i class="fas fa-xmark"></i> Cancel
+                </button>
+                <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete" class="confirm-btn confirm-btn-delete">
                     <span wire:loading wire:target="executeDelete"><i class="fas fa-spinner spin-icon"></i> Deleting...</span>
-                    <span wire:loading.remove wire:target="executeDelete"><i class="fas fa-trash mr-1"></i> Yes, Delete</span>
+                    <span wire:loading.remove wire:target="executeDelete"><i class="fas fa-trash"></i> Yes, Delete</span>
                 </button>
             </div>
         </div>
@@ -934,29 +931,44 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: Confirm Toggle Status
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showConfirmModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
-    <div class="relative bg-white rounded-2xl shadow-2xl modal-animate border-t-4 {{ $confirmAction === 'ACTIVE' ? 'border-emerald-500' : 'border-amber-500' }}" style="width:380px;max-width:95vw;">
-        <div class="px-6 py-8 text-center">
-            <div class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center {{ $confirmAction === 'ACTIVE' ? 'bg-emerald-50' : 'bg-amber-50' }}">
-                @if($confirmAction === 'ACTIVE')<i class="fas fa-circle-check text-emerald-500 text-3xl"></i>
-                @else<i class="fas fa-ban text-amber-500 text-3xl"></i>@endif
+    <div class="relative bg-white rounded-2xl shadow-2xl modal-animate" style="width:380px;max-width:95vw;">
+        <div class="px-7 py-6 {{ $confirmAction === 'ACTIVE' ? 'bg-green-50 border-b border-green-200' : 'bg-amber-50 border-b border-amber-200' }} flex items-center gap-3 rounded-t-2xl">
+            <div class="w-10 h-10 {{ $confirmAction === 'ACTIVE' ? 'bg-green-100' : 'bg-amber-100' }} rounded-xl flex items-center justify-center shrink-0">
+                @if($confirmAction === 'ACTIVE')
+                    <i class="fas fa-circle-check text-green-600 text-lg"></i>
+                @else
+                    <i class="fas fa-ban text-amber-600 text-lg"></i>
+                @endif
             </div>
-            <h3 class="text-lg font-extrabold text-slate-800 mb-2">{{ $confirmAction === 'ACTIVE' ? 'Activate Job Posting?' : 'Deactivate Job Posting?' }}</h3>
-            <p class="text-sm text-slate-500">This will mark the job as <span class="font-bold {{ $confirmAction === 'ACTIVE' ? 'text-emerald-600' : 'text-amber-600' }}">{{ $confirmAction }}</span>.</p>
-            @if($confirmAction === 'INACTIVE')
-            <p class="text-xs text-slate-400 mt-2">The job will be hidden from students but you can still edit it.</p>
-            @endif
+            <h2 class="text-lg font-extrabold {{ $confirmAction === 'ACTIVE' ? 'text-green-800' : 'text-amber-800' }}">
+                {{ $confirmAction === 'ACTIVE' ? 'Activate Job Posting?' : 'Deactivate Job Posting?' }}
+            </h2>
         </div>
-        <div class="px-6 pb-6 flex gap-3">
-            <button wire:click="cancelConfirm" class="flex-1 px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-bold"><i class="fas fa-xmark mr-1"></i> Cancel</button>
-            <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle" class="flex-1 px-4 py-2.5 btn-primary rounded-lg text-sm font-extrabold flex items-center justify-center gap-2 shadow-md">
-                <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner spin-icon"></i></span>
-                <span wire:loading.remove wire:target="executeToggle"><i class="fas fa-{{ $confirmAction === 'ACTIVE' ? 'circle-check' : 'ban' }} mr-1"></i> Confirm</span>
-            </button>
+        <div class="p-7">
+            <p class="text-sm text-slate-500 leading-relaxed mb-6">
+                This will mark the job as <span class="font-bold {{ $confirmAction === 'ACTIVE' ? 'text-green-600' : 'text-amber-600' }}">{{ $confirmAction }}</span>.
+                @if($confirmAction === 'INACTIVE')
+                <br><span class="text-xs text-slate-400 mt-1 block">The job will be hidden from students but you can still edit it.</span>
+                @endif
+            </p>
+            <div class="flex gap-3">
+                <button wire:click="cancelConfirm" class="confirm-btn confirm-btn-cancel">
+                    <i class="fas fa-xmark"></i> Cancel
+                </button>
+                <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle"
+                        class="confirm-btn {{ $confirmAction === 'ACTIVE' ? 'confirm-btn-activate' : 'confirm-btn-deactivate' }}">
+                    <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner spin-icon"></i></span>
+                    <span wire:loading.remove wire:target="executeToggle">
+                        <i class="fas fa-{{ $confirmAction === 'ACTIVE' ? 'circle-check' : 'ban' }}"></i>
+                        {{ $confirmAction === 'ACTIVE' ? 'Yes, Activate' : 'Yes, Deactivate' }}
+                    </span>
+                </button>
+            </div>
         </div>
     </div>
 </div>

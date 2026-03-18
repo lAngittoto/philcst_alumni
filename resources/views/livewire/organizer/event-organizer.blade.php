@@ -1,12 +1,6 @@
 <?php
 /**
  * FILE: resources/views/livewire/organizer/event-management.blade.php
- *
- * Organizer Event Manager — TALL Stack / Livewire Volt
- * - Create / Edit / Delete (soft) events
- * - Photo upload → storage/app/public/event/  (falls back to default-photo-event.jpg)
- * - Admin reviews (PENDING → APPROVED / REJECTED) — organizer sees read-only status
- * - RSVP summary visible to organizer: CONFIRMED / DECLINED / TENTATIVE
  */
 
 use Livewire\Volt\Component;
@@ -22,35 +16,32 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
-    // ── Filters ───────────────────────────────────────────────
     public string $search       = '';
     public string $filterStatus = '';
     public string $filterSort   = 'recent';
 
-    // ── Form ──────────────────────────────────────────────────
     public bool   $showFormModal = false;
     public bool   $isEditing     = false;
     public ?int   $editingEventId = null;
 
     public string $title              = '';
     public string $description        = '';
-    public string $event_date         = '';   // date only: Y-m-d
-    public string $start_time         = '';   // time: H:i (required)
-    public string $end_time           = '';   // time: H:i (optional)
+    public string $event_date         = '';
+    public string $start_time         = '';
+    public string $end_time           = '';
     public string $venue              = '';
     public string $venue_address      = '';
-    public string $target_participants= '';   // auto-filled from organizer college
-    public string $batch_year         = '';   // optional batch year
+    public string $target_participants= '';
+    public string $batch_year         = '';
     public string $contact_person     = '';
     public string $contact_email      = '';
     public string $contact_phone      = '';
     public string $notes              = '';
 
-    public $photo          = null;   // Livewire temp upload
+    public $photo          = null;
     public ?string $existingPhotoUrl = null;
     public bool   $removePhoto       = false;
 
-    // ── Modals ────────────────────────────────────────────────
     public bool   $showViewModal    = false;
     public ?int   $viewingEventId   = null;
     public bool   $showDeleteModal  = false;
@@ -59,12 +50,10 @@ new class extends Component {
 
     public array  $formErrors = [];
 
-    // ── Lifecycle ─────────────────────────────────────────────
     public function updatingSearch()       { $this->resetPage(); }
     public function updatingFilterStatus() { $this->resetPage(); }
     public function updatingFilterSort()   { $this->resetPage(); }
 
-    // ── Computed ──────────────────────────────────────────────
     #[Computed]
     public function events()
     {
@@ -102,7 +91,6 @@ new class extends Component {
         ])->find($this->viewingEventId);
     }
 
-    // ── Filters ───────────────────────────────────────────────
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = '';
@@ -110,35 +98,26 @@ new class extends Component {
         $this->resetPage();
     }
 
-    // ── Computed: organizer's college from their department ───
     #[Computed]
     public function organizerCollege(): ?string
     {
         $org = auth()->user()?->organizer;
         if (!$org) return null;
-
-        // Try to get college from courses table using the organizer's department
-        $college = \App\Models\Course::where('college', $org->department)
-            ->value('college');
-
-        // Fallback: just use the department field directly
+        $college = \App\Models\Course::where('college', $org->department)->value('college');
         return $college ?? $org->department ?? null;
     }
 
-    // ── Create ────────────────────────────────────────────────
     public function openCreateModal(): void
     {
         $this->resetFormFields();
         $this->event_date          = now()->addWeek()->format('Y-m-d');
         $this->contact_person      = auth()->user()?->organizer?->name ?? '';
         $this->contact_email       = auth()->user()?->organizer?->email ?? '';
-        // Auto-fill target participants from organizer's college
         $this->target_participants = $this->organizerCollege ?? '';
         $this->batch_year          = '';
         $this->showFormModal       = true;
     }
 
-    // ── Edit ──────────────────────────────────────────────────
     public function openEditModal(int $id): void
     {
         $event = app(OrganizerEventController::class)->getEvent($id);
@@ -152,7 +131,6 @@ new class extends Component {
         $this->end_time         = $event->event_end_date?->format('g:i A') ?? '';
         $this->venue            = $event->venue;
         $this->venue_address    = $event->venue_address ?? '';
-        // Parse 'BSX · Batch 2022' → college + batch_year
         $tp = $event->target_participants ?? '';
         $tparts = explode(' · Batch ', $tp, 2);
         $this->target_participants = trim($tparts[0]);
@@ -175,7 +153,6 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    // ── Save ──────────────────────────────────────────────────
     public function saveEvent(): void
     {
         $this->formErrors = [];
@@ -205,12 +182,10 @@ new class extends Component {
         ];
 
         $ctrl  = app(OrganizerEventController::class);
-        $photo = $this->photo; // Livewire UploadedFile or null
+        $photo = $this->photo;
 
         if ($this->isEditing) {
-            // If organizer wants to remove the existing photo, pass a flag
             if ($this->removePhoto && !$photo) {
-                // Set photo to null — controller will handle cleanup
                 $event = $ctrl->getEvent($this->editingEventId);
                 if ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO) {
                     Storage::disk('public')->delete($event->photo);
@@ -230,20 +205,9 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    // ── View ──────────────────────────────────────────────────
-    public function viewEvent(int $id): void
-    {
-        $this->viewingEventId = $id;
-        $this->showViewModal  = true;
-    }
+    public function viewEvent(int $id): void  { $this->viewingEventId = $id; $this->showViewModal = true; }
+    public function closeViewModal(): void    { $this->showViewModal = false; $this->viewingEventId = null; }
 
-    public function closeViewModal(): void
-    {
-        $this->showViewModal  = false;
-        $this->viewingEventId = null;
-    }
-
-    // ── Delete ────────────────────────────────────────────────
     public function confirmDelete(int $id): void
     {
         $event = app(OrganizerEventController::class)->getEvent($id);
@@ -271,7 +235,6 @@ new class extends Component {
         $this->deleteEventTitle = '';
     }
 
-    // ── Helpers ───────────────────────────────────────────────
     private function resetFormFields(): void
     {
         $this->title = $this->description = $this->event_date = $this->start_time = $this->end_time = '';
@@ -303,10 +266,8 @@ new class extends Component {
     .spin-icon{animation:spin 1s linear infinite}
     .btn-primary{background:linear-gradient(135deg,#7a3f91,#6a3580);color:white;border:none;transition:background .2s,box-shadow .2s}
     .btn-primary:hover:not(:disabled){background:linear-gradient(135deg,#8b4aa5,#7a3f91);box-shadow:0 4px 14px rgba(122,63,145,.35)}
-    thead.btn-primary:hover,thead.btn-primary th:hover{background:linear-gradient(135deg,#7a3f91,#6a3580)!important;box-shadow:none!important}
     .btn-primary:disabled{background:linear-gradient(135deg,#cbd5e1,#94a3b8);cursor:not-allowed}
     .input-focus:focus{border-color:#7a3f91!important;box-shadow:0 0 0 3px rgba(122,63,145,.1)!important;outline:none!important}
-    .tbl-row{}
     .tbl-container{transition:opacity .2s ease}
     .tbl-loading{opacity:.45;pointer-events:none}
     .form-label{display:block;font-size:.8rem;font-weight:700;color:#374151;margin-bottom:.5rem}
@@ -327,10 +288,19 @@ new class extends Component {
     .badge-approved{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;font-size:11px;font-weight:700;border-radius:4px;padding:3px 10px}
     .badge-rejected{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;font-weight:700;border-radius:4px;padding:3px 10px}
 
+    /* ── Table action buttons — OUTLINED ── */
+    .tbl-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;border:1.5px solid;background:#fff;font-family:inherit;white-space:nowrap}
+    .tbl-btn-view{color:#7a3f91;border-color:#7a3f91}
+    .tbl-btn-view:hover{background:#faf5ff}
+    .tbl-btn-edit{color:#2557a7;border-color:#2557a7}
+    .tbl-btn-edit:hover{background:#eff6ff}
+    .tbl-btn-delete{color:#dc2626;border-color:#dc2626}
+    .tbl-btn-delete:hover{background:#fff5f5}
+
     /* ── View modal ── */
-    .ev-modal{background:#fff;border-radius:12px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:780px;max-width:96vw;max-height:92vh;overflow:hidden;border-top:5px solid #7a3f91}
+    .ev-modal{background:#fff;border-radius:12px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:900px;max-width:96vw;max-height:92vh;overflow:hidden}
     .ev-header{background:#fff;padding:0;border-bottom:1px solid #ebebeb;flex-shrink:0;position:relative}
-    .ev-cover{width:100%;height:320px;object-fit:cover;display:block}
+    .ev-cover{width:100%;height:420px;object-fit:cover;display:block;background:#f8fafc}
     .ev-header-body{padding:20px 28px 18px}
     .ev-title{font-size:22px;font-weight:700;color:#111;line-height:1.25;margin-bottom:8px}
     .ev-meta-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
@@ -361,19 +331,39 @@ new class extends Component {
     .review-box-approved{background:#f0fdf4;border-color:#bbf7d0}
     .review-box-rejected{background:#fff1f2;border-color:#fecdd3}
 
+    /* ── View modal footer buttons — OUTLINED ── */
     .ev-footer{padding:14px 28px;border-top:1px solid #ebebeb;display:flex;align-items:center;justify-content:flex-end;background:#fff;flex-shrink:0;gap:8px}
-    .ev-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 20px;border-radius:4px;font-size:13.5px;font-weight:700;cursor:pointer;transition:background .15s,box-shadow .15s;border:none;font-family:inherit}
-    .ev-btn-close{background:#fff;border:1.5px solid #ddd;color:#444}
-    .ev-btn-close:hover{background:#f5f5f5}
-    .ev-btn-edit{background:#2557a7;color:#fff}
-    .ev-btn-edit:hover{background:#1c4487;box-shadow:0 2px 10px rgba(37,87,167,.28)}
-    .ev-btn-delete{background:#fff;border:1.5px solid #fca5a5;color:#be123c}
-    .ev-btn-delete:hover{background:#fff1f2}
+    .ev-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;border:1.5px solid;background:#fff;font-family:inherit}
+    .ev-btn-close{color:#374151;border-color:#cbd5e1}
+    .ev-btn-close:hover{background:#f8fafc}
+    .ev-btn-edit{color:#2557a7;border-color:#2557a7}
+    .ev-btn-edit:hover{background:#eff6ff}
+    .ev-btn-delete{color:#dc2626;border-color:#dc2626}
+    .ev-btn-delete:hover{background:#fff5f5}
     .ev-close-x{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;border:none;background:rgba(0,0,0,.35);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s;line-height:1;z-index:2}
     .ev-close-x:hover{background:rgba(0,0,0,.55)}
+
+    /* ── Confirm modal buttons — OUTLINED ── */
+    .confirm-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:10px;font-size:13.5px;font-weight:700;cursor:pointer;transition:all .15s;font-family:inherit;border:1.5px solid;background:#fff;flex:1}
+    .confirm-btn-cancel{color:#374151;border-color:#cbd5e1}
+    .confirm-btn-cancel:hover{background:#f8fafc}
+    .confirm-btn-delete{color:#dc2626;border-color:#dc2626}
+    .confirm-btn-delete:hover{background:#fff5f5}
+
+    /* ── RSVP pill tooltips (table) ── */
+    .rsvp-pill{position:relative;display:inline-flex;align-items:center;gap:4px;cursor:default}
+    .rsvp-pill .rsvp-tip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;font-size:10.5px;font-weight:600;padding:4px 9px;border-radius:5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s;z-index:20}
+    .rsvp-pill .rsvp-tip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:#1e293b}
+    .rsvp-pill:hover .rsvp-tip{opacity:1}
+
+    /* ── Updated/Deleted by tag ── */
+    .updated-by-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px}
+    .updated-by-admin{background:#f5f0ff;color:#6d28d9;border:1px solid #e5d9ff}
+    .updated-by-organizer{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
+    .deleted-by-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
 </style>
 
-{{-- ── FLASH ────────────────────────────────────────────────── --}}
+{{-- ── FLASH ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,4500);}}"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show"
@@ -396,21 +386,24 @@ new class extends Component {
 
 <div class="flex flex-col px-8 pt-7 pb-6" style="height:90vh;overflow:hidden;">
 
-    {{-- ── PAGE HEADER ──────────────────────────────────────────── --}}
+    {{-- PAGE HEADER --}}
     <div class="flex items-center justify-between mb-5 shrink-0" style="animation:slideInDown .5s ease-out;">
-        <h1 class="text-3xl font-bold text-slate-800 flex items-center gap-3">
+        <div class="flex items-center gap-3">
             <div class="w-11 h-11 btn-primary rounded-lg flex items-center justify-center shadow-md shrink-0">
                 <i class="fas fa-calendar-days text-base"></i>
             </div>
-            My Events
-        </h1>
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800 leading-tight">My Events</h1>
+                <p class="text-sm text-slate-500 mt-0.5">Create and manage your event submissions for admin approval.</p>
+            </div>
+        </div>
         <button wire:click="openCreateModal"
                 class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
             <i class="fas fa-plus"></i> Create Event
         </button>
     </div>
 
-    {{-- ── TABLE PANEL ──────────────────────────────────────────── --}}
+    {{-- TABLE PANEL --}}
     <div class="bg-white rounded-lg shadow-sm flex flex-col border border-slate-200" style="height:calc(90vh - 160px);">
 
         {{-- Filters --}}
@@ -445,7 +438,7 @@ new class extends Component {
              wire:loading.class="tbl-loading"
              wire:target="search,filterStatus,filterSort,resetFilters,previousPage,nextPage">
             <table class="w-full border-separate border-spacing-0">
-                <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
+                <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;pointer-events:none;">
                     <tr>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide w-16">Photo</th>
                         <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Event Title</th>
@@ -458,10 +451,9 @@ new class extends Component {
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @forelse($this->events as $event)
-                    <tr class="tbl-row">
+                    <tr class="hover:bg-purple-50/30 transition-colors">
                         <td class="px-6 py-3">
-                            <img src="{{ $event->photo_url }}"
-                                 alt="{{ $event->title }}"
+                            <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
                                  class="w-12 h-12 rounded-lg object-cover border border-slate-200 shadow-sm">
                         </td>
                         <td class="px-6 py-4">
@@ -474,43 +466,53 @@ new class extends Component {
                             <p class="text-sm font-semibold text-slate-700">{{ $event->event_date->format('M d, Y') }}</p>
                             <p class="text-xs text-slate-400 mt-0.5">
                                 {{ $event->event_date->format('g:i A') }}
-                                @if($event->event_end_date) <span class="text-slate-300 mx-1">—</span>{{ $event->event_end_date->format('g:i A') }}@endif
+                                @if($event->event_end_date)<span class="text-slate-300 mx-1">—</span>{{ $event->event_end_date->format('g:i A') }}@endif
                             </p>
                         </td>
                         <td class="px-6 py-4">
                             <p class="text-sm text-slate-700 font-medium">{{ $event->venue }}</p>
                         </td>
                         <td class="px-6 py-4 text-center">
-                            <div class="flex items-center justify-center gap-2 text-xs font-bold">
-                                <span class="text-green-600" title="Confirmed"><i class="fas fa-check-circle mr-0.5"></i>{{ $event->confirmed_count }}</span>
-                                <span class="text-slate-300">|</span>
-                                <span class="text-red-400" title="Declined"><i class="fas fa-times-circle mr-0.5"></i>{{ $event->declined_count }}</span>
-                                <span class="text-slate-300">|</span>
-                                <span class="text-yellow-500" title="Maybe"><i class="fas fa-question-circle mr-0.5"></i>{{ $event->tentative_count }}</span>
+                            <div class="flex items-center justify-center gap-1.5">
+                                <span class="rsvp-pill">
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-green-50 border border-green-200 text-green-700 text-xs font-bold">
+                                        <i class="fas fa-circle-check text-[10px]"></i>{{ $event->confirmed_count }}
+                                    </span>
+                                    <span class="rsvp-tip">Confirmed</span>
+                                </span>
+                                <span class="rsvp-pill">
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-600 text-xs font-bold">
+                                        <i class="fas fa-circle-xmark text-[10px]"></i>{{ $event->declined_count }}
+                                    </span>
+                                    <span class="rsvp-tip">Not Attending</span>
+                                </span>
+                                <span class="rsvp-pill">
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-amber-600 text-xs font-bold">
+                                        <i class="fas fa-circle-question text-[10px]"></i>{{ $event->tentative_count }}
+                                    </span>
+                                    <span class="rsvp-tip">Maybe</span>
+                                </span>
                             </div>
                         </td>
                         <td class="px-6 py-4 text-center">
                             @if($event->status === 'PENDING')
-                                <span class="badge-pending">⏳ Pending</span>
+                                <span class="badge-pending"><i class="fas fa-hourglass-half mr-1"></i>Pending</span>
                             @elseif($event->status === 'APPROVED')
-                                <span class="badge-approved">✓ Approved</span>
+                                <span class="badge-approved"><i class="fas fa-circle-check mr-1"></i>Approved</span>
                             @else
-                                <span class="badge-rejected">✗ Rejected</span>
+                                <span class="badge-rejected"><i class="fas fa-circle-xmark mr-1"></i>Rejected</span>
                             @endif
                         </td>
                         <td class="px-6 py-4 text-center">
-                            <div class="flex items-center justify-center gap-2">
-                                <button wire:click="viewEvent({{ $event->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
-                                    <i class="fas fa-eye"></i> View
+                            <div class="flex items-center justify-center gap-1.5">
+                                <button wire:click="viewEvent({{ $event->id }})" class="tbl-btn tbl-btn-view">
+                                    <i class="fas fa-eye text-[11px]"></i> View
                                 </button>
-                                <button wire:click="openEditModal({{ $event->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-600 hover:bg-blue-50 rounded-lg transition border border-blue-200">
-                                    <i class="fas fa-pen"></i> Edit
+                                <button wire:click="openEditModal({{ $event->id }})" class="tbl-btn tbl-btn-edit">
+                                    <i class="fas fa-pen text-[11px]"></i> Edit
                                 </button>
-                                <button wire:click="confirmDelete({{ $event->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200">
-                                    <i class="fas fa-trash"></i>
+                                <button wire:click="confirmDelete({{ $event->id }})" class="tbl-btn tbl-btn-delete">
+                                    <i class="fas fa-trash text-[11px]"></i> Delete
                                 </button>
                             </div>
                         </td>
@@ -551,14 +553,13 @@ new class extends Component {
     </div>
 </div>
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: Create / Edit Event
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showFormModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
-    <div class="bg-white rounded-xl shadow-2xl modal-animate w-full flex flex-col" style="max-width:820px;max-height:92vh;border-top:5px solid #7a3f91;">
+    <div class="bg-white rounded-xl shadow-2xl modal-animate w-full flex flex-col" style="max-width:820px;max-height:92vh;">
 
-        {{-- Header — purple like screenshot --}}
         <div class="flex items-center justify-between px-7 py-5 shrink-0 rounded-t-xl" style="background:linear-gradient(135deg,#7a3f91,#5c2d6e);">
             <div class="flex items-center gap-3">
                 <i class="fas fa-{{ $isEditing ? 'pen' : 'calendar-plus' }} text-white text-lg"></i>
@@ -574,7 +575,6 @@ new class extends Component {
             <button wire:click="closeFormModal" class="w-8 h-8 flex items-center justify-center rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition text-xl leading-none">&times;</button>
         </div>
 
-        {{-- Validation errors --}}
         @if(count($formErrors))
         <div class="bg-red-50 border-b border-red-200 px-7 py-4 shrink-0">
             <p class="font-semibold text-red-800 text-sm mb-2"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following:</p>
@@ -584,7 +584,6 @@ new class extends Component {
         </div>
         @endif
 
-        {{-- Scrollable form body --}}
         <div class="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-7 py-6 space-y-5">
 
             {{-- Photo Upload --}}
@@ -603,16 +602,13 @@ new class extends Component {
                          :class="isDragging ? 'border-purple-400 bg-purple-50' : ''">
                         <label class="cursor-pointer block">
                             <input type="file" wire:model="photo" accept="image/*" class="hidden">
-
                             @if($photo)
-                                {{-- Live preview of new upload --}}
                                 <div class="flex flex-col items-center gap-3">
                                     <img src="{{ $photo->temporaryUrl() }}" class="w-40 h-32 object-cover rounded-lg shadow border border-purple-200">
                                     <p class="text-xs font-semibold text-purple-600"><i class="fas fa-check-circle mr-1"></i>New photo selected</p>
                                     <p class="text-xs text-slate-400">Click or drag to change</p>
                                 </div>
                             @elseif($existingPhotoUrl && !$removePhoto)
-                                {{-- Show existing photo --}}
                                 <div class="flex flex-col items-center gap-3">
                                     <img src="{{ $existingPhotoUrl }}" class="w-40 h-32 object-cover rounded-lg shadow border border-slate-200">
                                     <p class="text-xs font-semibold text-slate-500">Current photo — click to change</p>
@@ -627,7 +623,6 @@ new class extends Component {
                             @endif
                         </label>
                     </div>
-
                     @if($existingPhotoUrl && !$removePhoto && !$photo)
                     <div class="mt-3 flex items-center gap-2">
                         <button type="button" wire:click="$set('removePhoto',true)"
@@ -643,14 +638,13 @@ new class extends Component {
                         <button type="button" wire:click="$set('removePhoto',false)" class="text-xs text-blue-500 underline">Undo</button>
                     </div>
                     @endif
-
                     <div wire:loading wire:target="photo" class="mt-3 text-xs text-purple-600 flex items-center gap-2">
                         <i class="fas fa-spinner spin-icon"></i> Uploading photo...
                     </div>
                 </div>
             </div>
 
-            {{-- Basic Info --}}
+            {{-- Event Details --}}
             <div class="rounded-xl border border-slate-200 overflow-hidden">
                 <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-2">
                     <i class="fas fa-circle-info text-purple-500 text-sm"></i>
@@ -668,19 +662,16 @@ new class extends Component {
                         <textarea wire:model.defer="description" rows="4" placeholder="Describe the event, agenda, highlights..."
                                   class="form-input resize-none"></textarea>
                     </div>
-                    {{-- Date row --}}
                     <div>
                         <label class="form-label">Event Date <span class="text-red-500">*</span></label>
                         <input wire:model="event_date" type="date"
                                class="form-input {{ isset($formErrors['event_date']) ? 'field-error' : '' }}">
                         @if(isset($formErrors['event_date']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['event_date'] }}</p>@endif
                     </div>
-                    {{-- Start / End time row --}}
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="form-label">Start Time <span class="text-red-500">*</span></label>
-                            <input wire:model="start_time" type="text"
-                                   placeholder="e.g. 07:00 PM or 19:00"
+                            <input wire:model="start_time" type="text" placeholder="e.g. 07:00 PM or 19:00"
                                    class="form-input {{ isset($formErrors['start_time']) ? 'field-error' : '' }}">
                             @if(isset($formErrors['start_time']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['start_time'] }}</p>@endif
                         </div>
@@ -734,14 +725,13 @@ new class extends Component {
                     <div>
                         <label class="form-label">Batch Year <span class="text-slate-400 font-normal text-xs">(Optional — leave blank for all batches)</span></label>
                         <input wire:model.defer="batch_year" type="number" min="1990" max="{{ now()->year + 5 }}"
-                               placeholder="e.g. {{ now()->year - 2 }}"
-                               class="form-input max-w-xs">
+                               placeholder="e.g. {{ now()->year - 2 }}" class="form-input max-w-xs">
                         <p class="field-hint mt-1"><i class="fas fa-circle-info text-[10px] mr-1"></i>Enter a graduation year to target a specific batch only.</p>
                     </div>
                 </div>
             </div>
 
-            {{-- Organizer Contact --}}
+            {{-- Contact --}}
             <div class="rounded-xl border border-slate-200 overflow-hidden">
                 <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-2">
                     <i class="fas fa-address-card text-purple-500 text-sm"></i>
@@ -772,7 +762,6 @@ new class extends Component {
 
         </div>
 
-        {{-- Footer --}}
         <div class="px-7 py-5 border-t border-slate-200 bg-slate-50 rounded-b-xl shrink-0 flex gap-3">
             <button wire:click="closeFormModal" class="flex-1 px-6 py-3 border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-100 transition">Cancel</button>
             <button wire:click="saveEvent" wire:loading.attr="disabled" wire:target="saveEvent"
@@ -788,9 +777,9 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: View Event
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingEvent)
 @php
     $ev = $this->viewingEvent;
@@ -798,21 +787,19 @@ new class extends Component {
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
     <div class="ev-modal modal-animate relative">
-
         <button wire:click="closeViewModal" class="ev-close-x" title="Close">&times;</button>
 
-        {{-- Cover photo --}}
         <div class="ev-header">
             <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}" class="ev-cover">
             <div class="ev-header-body">
                 <div class="flex items-start justify-between gap-4 mb-3">
                     <div class="ev-title">{{ $ev->title }}</div>
                     @if($ev->status === 'PENDING')
-                        <span class="badge-pending shrink-0">⏳ Pending Review</span>
+                        <span class="badge-pending shrink-0"><i class="fas fa-hourglass-half mr-1"></i>Pending Review</span>
                     @elseif($ev->status === 'APPROVED')
-                        <span class="badge-approved shrink-0">✓ Approved</span>
+                        <span class="badge-approved shrink-0"><i class="fas fa-circle-check mr-1"></i>Approved</span>
                     @else
-                        <span class="badge-rejected shrink-0">✗ Rejected</span>
+                        <span class="badge-rejected shrink-0"><i class="fas fa-circle-xmark mr-1"></i>Rejected</span>
                     @endif
                 </div>
                 <ul class="ev-meta-list">
@@ -821,8 +808,8 @@ new class extends Component {
                     </li>
                     <li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-clock"></i></span>
                         <span>{{ $ev->event_date->format('g:i A') }}
-                        @if($ev->event_end_date) <span style="color:#aaa;margin:0 4px;">—</span>{{ $ev->event_end_date->format('g:i A') }}
-                        @else <span style="color:#aaa;font-style:italic;margin-left:4px;">· End time not set</span>@endif
+                        @if($ev->event_end_date)<span style="color:#aaa;margin:0 4px;">—</span>{{ $ev->event_end_date->format('g:i A') }}
+                        @else<span style="color:#aaa;font-style:italic;margin-left:4px;">· End time not set</span>@endif
                         </span>
                     </li>
                     <li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-location-dot"></i></span>
@@ -848,7 +835,7 @@ new class extends Component {
             {{-- RSVP Summary --}}
             <div class="ev-section">
                 <div class="ev-section-title">Attendee Responses
-                    @if($totalRsvp > 0)<span style="font-size:12px;font-weight:400;color:#888;margin-left:6px;">{{ $totalRsvp }} total response{{ $totalRsvp !== 1 ? 's' : '' }}</span>@endif
+                    @if($totalRsvp > 0)<span style="font-size:12px;font-weight:400;color:#888;margin-left:6px;">{{ $totalRsvp }} total</span>@endif
                 </div>
                 @if($totalRsvp === 0)
                 <div class="text-center py-6 text-slate-400 text-sm">
@@ -882,7 +869,7 @@ new class extends Component {
                 @if($ev->status === 'PENDING')
                 <div class="review-box review-box-pending">
                     <p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Awaiting Admin Review</p>
-                    <p class="text-xs text-yellow-700 mt-1">Your event has been submitted and is waiting for admin approval. You'll be notified once reviewed.</p>
+                    <p class="text-xs text-yellow-700 mt-1">Your event has been submitted and is waiting for admin approval.</p>
                 </div>
                 @elseif($ev->status === 'APPROVED')
                 <div class="review-box review-box-approved">
@@ -899,7 +886,6 @@ new class extends Component {
                 @endif
             </div>
 
-            {{-- Description --}}
             @if($ev->description)
             <div class="ev-section">
                 <div class="ev-section-title">About This Event</div>
@@ -907,7 +893,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Notes --}}
             @if($ev->notes)
             <div class="ev-section">
                 <div class="ev-section-title">Additional Notes / Requirements</div>
@@ -915,7 +900,7 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Meta + Audit Trail --}}
+            {{-- Posting Details --}}
             <div class="ev-section">
                 <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:12px;">Posting Details</div>
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid #e8e8e8;border-radius:8px;overflow:hidden;">
@@ -933,7 +918,7 @@ new class extends Component {
                         <div style="font-size:13px;font-weight:600;color:#111;">{{ $ev->status }}</div>
                     </div>
 
-                    {{-- Last Updated row — full width --}}
+                    {{-- Last Updated / Updated By (full row) --}}
                     <div style="grid-column:span 3;padding:13px 16px;{{ $ev->was_edited ? 'background:#faf5ff;' : '' }}">
                         <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:6px;">Last Updated</div>
                         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -941,33 +926,58 @@ new class extends Component {
                                 <div style="font-size:13px;font-weight:600;color:#111;">{{ $ev->updated_at->format('M d, Y · g:i A') }}</div>
                                 <div style="font-size:11px;color:#888;">{{ $ev->updated_at->diffForHumans() }}</div>
                             </div>
-                            @if($ev->was_edited)
-                            <div style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px;
-                                {{ $ev->updated_by_role === 'admin'
-                                    ? 'background:#f5f0ff;color:#6d28d9;border:1px solid #e5d9ff;'
-                                    : 'background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;' }}">
-                                <i class="fas fa-{{ $ev->updated_by_role === 'admin' ? 'shield-halved' : 'user-pen' }}" style="font-size:9px;"></i>
-                                Updated by {{ $ev->updated_by }}
-                                <span style="opacity:.6;font-weight:400;">· {{ $ev->updated_by_role === 'admin' ? 'Admin' : 'Organizer' }}</span>
-                            </div>
-                            @else
+                            @if($ev->was_edited && $ev->updated_by)
+                                @if($ev->updated_by_role === 'admin')
+                                <span class="updated-by-tag updated-by-admin">
+                                    <i class="fas fa-shield-halved" style="font-size:9px;"></i>
+                                    Updated by {{ $ev->updated_by }}
+                                    <span style="opacity:.6;font-weight:400;">· Admin</span>
+                                </span>
+                                @else
+                                <span class="updated-by-tag updated-by-organizer">
+                                    <i class="fas fa-user-pen" style="font-size:9px;"></i>
+                                    Updated by {{ $ev->updated_by }}
+                                    <span style="opacity:.6;font-weight:400;">· Organizer</span>
+                                </span>
+                                @endif
+                            @elseif(!$ev->was_edited)
                             <div style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;color:#aaa;padding:3px 10px;border-radius:3px;background:#f8fafc;border:1px solid #e2e8f0;">
                                 <i class="fas fa-clock" style="font-size:9px;"></i> No edits since creation
                             </div>
                             @endif
                         </div>
                     </div>
+
+                    {{-- Deleted By row — only show if soft-deleted / deleted_by is set --}}
+                    @if($ev->deleted_by)
+                    <div style="grid-column:span 3;padding:13px 16px;background:#fff7ed;border-top:1px solid #fed7aa;">
+                        <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:6px;">Deleted By</div>
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                            <span class="deleted-by-tag">
+                                <i class="fas fa-trash" style="font-size:9px;"></i>
+                                {{ $ev->deleted_by }}
+                                @if($ev->deleted_by_role)
+                                <span style="opacity:.6;font-weight:400;">· {{ ucfirst($ev->deleted_by_role) }}</span>
+                                @endif
+                            </span>
+                        </div>
+                    </div>
+                    @endif
+
                 </div>
             </div>
+
         </div>
 
         <div class="ev-footer">
-            <button wire:click="closeViewModal" class="ev-btn ev-btn-close">Close</button>
+            <button wire:click="closeViewModal" class="ev-btn ev-btn-close">
+                <i class="fas fa-xmark" style="font-size:11px;"></i> Close
+            </button>
             <button wire:click="confirmDelete({{ $ev->id }})" class="ev-btn ev-btn-delete">
-                <i class="fas fa-trash" style="font-size:12px;"></i> Delete
+                <i class="fas fa-trash" style="font-size:11px;"></i> Delete
             </button>
             <button wire:click="openEditModal({{ $ev->id }})" class="ev-btn ev-btn-edit">
-                <i class="fas fa-pen-to-square" style="font-size:12px;"></i>
+                <i class="fas fa-pen-to-square" style="font-size:11px;"></i>
                 {{ $ev->status === 'REJECTED' ? 'Edit & Resubmit' : 'Edit Event' }}
             </button>
         </div>
@@ -975,28 +985,31 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════════════════════════════════════════════════════════════
+{{-- ════════════════════════════════════════════════
      MODAL: Confirm Delete
-════════════════════════════════════════════════════════════ --}}
+════════════════════════════════════════════════ --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
-    <div class="relative bg-white rounded-2xl shadow-2xl modal-animate border-t-4 border-red-500" style="width:420px;max-width:95vw;">
-        <div class="px-7 py-6 bg-red-50 border-b border-red-200 flex items-center gap-3">
-            <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center shrink-0"><i class="fas fa-triangle-exclamation text-red-500 text-lg"></i></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl modal-animate" style="width:420px;max-width:95vw;">
+        <div class="px-7 py-6 bg-red-50 border-b border-red-200 flex items-center gap-3 rounded-t-2xl">
+            <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
+                <i class="fas fa-triangle-exclamation text-red-500 text-lg"></i>
+            </div>
             <h2 class="text-lg font-extrabold text-red-800">Delete Event</h2>
         </div>
         <div class="p-7">
             <p class="text-slate-600 text-sm mb-1">You are about to delete:</p>
-            <p class="font-extrabold text-red-700 text-base mb-4">"{{ $deleteEventTitle }}"</p>
-            <p class="text-slate-500 text-sm mb-5">This event and its photo will be permanently removed.</p>
+            <p class="font-extrabold text-red-700 text-base mb-3">"{{ $deleteEventTitle }}"</p>
+            <p class="text-xs mb-5 bg-red-50 rounded-lg px-3 py-2 border border-red-100 text-slate-500">
+                <i class="fas fa-exclamation-circle text-red-400 mr-1.5"></i>This event and its photo will be permanently removed.
+            </p>
             <div class="flex gap-3">
-                <button wire:click="cancelDelete" class="flex-1 px-5 py-2.5 border-2 border-slate-300 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition">
-                    <i class="fas fa-xmark mr-1"></i> Cancel
+                <button wire:click="cancelDelete" class="confirm-btn confirm-btn-cancel">
+                    <i class="fas fa-xmark"></i> Cancel
                 </button>
-                <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete"
-                        class="flex-1 px-5 py-2.5 bg-red-600 text-white rounded-xl text-sm font-extrabold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-md">
+                <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete" class="confirm-btn confirm-btn-delete">
                     <span wire:loading wire:target="executeDelete"><i class="fas fa-spinner spin-icon"></i> Deleting...</span>
-                    <span wire:loading.remove wire:target="executeDelete"><i class="fas fa-trash mr-1"></i> Yes, Delete</span>
+                    <span wire:loading.remove wire:target="executeDelete"><i class="fas fa-trash"></i> Yes, Delete</span>
                 </button>
             </div>
         </div>
