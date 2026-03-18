@@ -35,7 +35,7 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 
     Route::view('/organizer/dashboard', 'organizer.dashboard-wrapper')->name('organizer.dashboard');
-    Route::view('/organizer/events',      'organizer.events')     ->name('organizer.events');
+    Route::view('/organizer/event/organizer',      'organizer.event-organizer-wrapper')     ->name('organizer.event/organizer');
     Route::view('/organizer/job/management',        'organizer.job-management-wrapper')       ->name('organizer.job/management');
     Route::view('/organizer/employment',  'organizer.employment') ->name('organizer.employment');
     Route::view('/organizer/reports',     'organizer.reports')    ->name('organizer.reports');
@@ -51,6 +51,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/user/management', fn() => view('admin.alumni-management-wrapper'))->name('user.management');
     Route::get('/yearbook', fn() => view('admin.yearbook-wrapper'))->name('admin.yearbook');
     Route::get('/job/posts', fn() => view('admin.job-posts-wrapper'))->name('job.posts');
+    Route::get('/events', fn() => view('admin.events-wrapper'))->name('events');
 
     Route::post('/alumni/import', [AlumniController::class, 'import'])->name('alumni.import');
 

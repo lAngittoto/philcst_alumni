@@ -79,10 +79,10 @@
                         'pattern' => 'organizer/dashboard*',
                     ],
                     [
-                        'route'   => 'organizer.events',
+                        'route'   => 'organizer.event/organizer',
                         'icon'    => 'calendar-check',
-                        'label'   => 'Event Manager',
-                        'pattern' => 'organizer/events*',
+                        'label'   => 'Event Organizer',
+                        'pattern' => 'organizer/event/oganizer*',
                     ],
                     [
                         'route'   => 'organizer.job/management',
