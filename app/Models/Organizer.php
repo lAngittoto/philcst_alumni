@@ -10,14 +10,17 @@ class Organizer extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected $table = 'organizer';
+    protected $table      = 'organizer';
     protected $primaryKey = 'id';
-    protected $keyType = 'int';
-    public $timestamps = true;
+    protected $keyType    = 'int';
+    public    $timestamps = true;
 
     protected $fillable = [
         'user_id',
-        'name',
+        'first_name',
+        'middle_initial',
+        'last_name',
+        'suffix',
         'email',
         'id_number',
         'department',
@@ -31,12 +34,12 @@ class Organizer extends Model
     ];
 
     protected $casts = [
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
-        'deleted_at' => 'datetime',
-        'otp_expires_at' => 'datetime',
+        'created_at'                  => 'datetime',
+        'updated_at'                  => 'datetime',
+        'deleted_at'                  => 'datetime',
+        'otp_expires_at'              => 'datetime',
         'password_reset_initiated_at' => 'datetime',
-        'password_changed_at' => 'datetime',
+        'password_changed_at'         => 'datetime',
     ];
 
     protected $appends = [
@@ -57,81 +60,48 @@ class Organizer extends Model
     // Password Change Helpers
     // ===================================
 
-    /**
-     * Check if this is organizer's first time changing password
-     * 
-     * @return bool
-     */
     public function needsPasswordChange(): bool
     {
         return $this->password_changed_at === null;
     }
 
-    /**
-     * Check if OTP is valid and not expired
-     * 
-     * @param string $otp
-     * @return bool
-     */
     public function isOtpValid(string $otp): bool
     {
         if (!$this->otp || !$this->otp_expires_at) {
             return false;
         }
-
-        // Check if OTP matches
         if ($this->otp !== $otp) {
             return false;
         }
-
-        // Check if OTP has expired (compare with current time)
         return now()->lessThanOrEqualTo($this->otp_expires_at);
     }
 
-    /**
-     * Generate and store OTP for password reset
-     * OTP expires in 10 minutes
-     * 
-     * @return string
-     */
     public function generateOtp(): string
     {
         $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        
         $this->update([
-            'otp' => $otp,
+            'otp'            => $otp,
             'otp_expires_at' => now()->addMinutes(10),
         ]);
-
         return $otp;
     }
 
-    /**
-     * Clear OTP after successful verification
-     * 
-     * @return void
-     */
     public function clearOtp(): void
     {
         $this->update([
-            'otp' => null,
+            'otp'            => null,
             'otp_expires_at' => null,
         ]);
     }
 
-    /**
-     * Mark password as successfully changed
-     * 
-     * @return void
-     */
     public function markPasswordChanged(): void
     {
         $this->update([
-            'password_changed_at' => now(),
-            'password_reset_token' => null,
+            'password_changed_at'         => now(),
+            'password_reset_token'        => null,
             'password_reset_initiated_at' => null,
-            'otp' => null,
-            'otp_expires_at' => null,
+            'otp'                         => null,
+            'otp_expires_at'              => null,
         ]);
     }
 
@@ -171,53 +141,70 @@ class Organizer extends Model
     // Accessors
     // ===================================
 
-    /**
-     * Get full profile photo URL via accessor
-     * NULL = show default
-     * Any other value = prepend storage/ and return
-     */
     public function getProfilePhotoUrlAttribute()
     {
-        // If NULL or empty, use default
         if (!$this->profile_photo) {
             return asset('storage/organizers/default.png');
         }
-
-        // If it's a path starting with organizers/, prepend storage/
         if (str_starts_with($this->profile_photo, 'organizers/')) {
             return asset('storage/' . $this->profile_photo);
         }
-
-        // Fallback to default
         return asset('storage/organizers/default.png');
     }
 
     public function getDisplayNameAttribute()
     {
-        return "{$this->name} ({$this->id_number})";
+        $name = $this->getFullName();
+        return $name . ' (' . $this->id_number . ')';
     }
 
     // ===================================
-    // Status Helpers
+    // Helpers
     // ===================================
+
+    public function getFullName(): string
+    {
+        $parts = [];
+        if ($this->first_name)     $parts[] = $this->first_name;
+        if ($this->middle_initial) $parts[] = $this->middle_initial;
+        if ($this->last_name)      $parts[] = $this->last_name;
+        if ($this->suffix)         $parts[] = $this->suffix;
+        return implode(' ', $parts);
+    }
+
+    public function getAvatarLetter(): string
+    {
+        return strtoupper(substr($this->first_name ?? '?', 0, 1));
+    }
+
+    public function getProfilePhotoUrl(): string
+    {
+        if (!$this->profile_photo) {
+            return asset('storage/organizers/default.png');
+        }
+        if (str_starts_with($this->profile_photo, 'organizers/')) {
+            return asset('storage/' . $this->profile_photo);
+        }
+        return asset('storage/organizers/default.png');
+    }
 
     public function getStatusLabel(): string
     {
         return match ($this->status) {
-            'ACTIVE' => 'Active',
-            'INACTIVE' => 'Inactive',
+            'ACTIVE'    => 'Active',
+            'INACTIVE'  => 'Inactive',
             'SUSPENDED' => 'Suspended',
-            default => 'Unknown',
+            default     => 'Unknown',
         };
     }
 
     public function getStatusColor(): string
     {
         return match ($this->status) {
-            'ACTIVE' => 'badge-ok',
-            'INACTIVE' => 'badge-warn',
+            'ACTIVE'    => 'badge-ok',
+            'INACTIVE'  => 'badge-warn',
             'SUSPENDED' => 'badge-danger',
-            default => 'badge-gray',
+            default     => 'badge-gray',
         };
     }
 
@@ -239,31 +226,5 @@ class Organizer extends Model
     public function markSuspended(): void
     {
         $this->update(['status' => 'SUSPENDED']);
-    }
-
-    public function getAvatarLetter(): string
-    {
-        return strtoupper(substr($this->name, 0, 1));
-    }
-
-    /**
-     * Get full profile photo URL via method
-     * NULL = show default
-     * Any other value = prepend storage/ and return
-     */
-    public function getProfilePhotoUrl(): string
-    {
-        // If NULL or empty, use default
-        if (!$this->profile_photo) {
-            return asset('storage/organizers/default.png');
-        }
-
-        // If it's a path starting with organizers/, prepend storage/
-        if (str_starts_with($this->profile_photo, 'organizers/')) {
-            return asset('storage/' . $this->profile_photo);
-        }
-
-        // Fallback to default
-        return asset('storage/organizers/default.png');
     }
 }

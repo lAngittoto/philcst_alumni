@@ -594,12 +594,12 @@ new class extends Component {
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm backdrop-animate">
     <div class="bg-white rounded-xl shadow-2xl modal-animate w-full flex flex-col" style="max-width:800px;max-height:92vh;">
 
-        <div class="flex items-center justify-between px-7 py-5 bg-white border-b border-slate-100 shrink-0">
+        <div class="flex items-center justify-between px-7 py-5 bg-[#7a3f91] border-b border-slate-100 shrink-0">
             <div class="flex items-center gap-3">
-                <div class="w-9 h-9 btn-primary rounded-lg flex items-center justify-center shrink-0">
-                    <i class="fas fa-{{ $isEditing ? 'pen' : 'plus' }} text-sm"></i>
+                <div class=" rounded-lg flex items-center justify-center shrink-0">
+                    <i class="fas fa-{{ $isEditing ? 'pen' : 'plus' }} text-2xl text-white"></i>
                 </div>
-                <h2 class="text-lg font-bold text-slate-800">{{ $isEditing ? 'Edit Job Posting' : 'Post a New Job' }}</h2>
+                <h2 class="text-lg font-bold text-white">{{ $isEditing ? 'Edit Job Posting' : 'Post a New Job' }}</h2>
             </div>
             <button wire:click="closeFormModal" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition text-xl leading-none">&times;</button>
         </div>

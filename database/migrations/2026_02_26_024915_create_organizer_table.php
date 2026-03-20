@@ -5,17 +5,23 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('organizer', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('user_id')->unique()->index();
-            $table->string('name');
-            $table->string('email')->unique();
+            $table->foreignId('user_id')->unique()->constrained('users')->onDelete('cascade');
             $table->string('id_number')->unique()->index();
+
+            // ── Split name fields ──────────────────────────────────────────
+            $table->string('first_name');
+            $table->string('middle_initial')->nullable();
+            $table->string('last_name');
+            $table->string('suffix')->nullable();
+
+            // ── Computed full name (virtual) ───────────────────────────────
+            $table->string('name')->virtualAs("TRIM(CONCAT_WS(' ', first_name, NULLIF(middle_initial,''), last_name, NULLIF(suffix,'')))");
+
+            $table->string('email')->unique();
             $table->string('department');
             $table->string('profile_photo')->nullable();
             $table->enum('status', ['ACTIVE', 'INACTIVE', 'SUSPENDED'])->default('ACTIVE')->index();
@@ -23,15 +29,9 @@ return new class extends Migration
             $table->timestamp('last_login')->nullable();
             $table->timestamps();
             $table->softDeletes();
-
-            // Foreign key relationship
-            $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('organizer');

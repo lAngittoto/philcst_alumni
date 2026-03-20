@@ -12,59 +12,65 @@ use Illuminate\Support\Facades\Log;
 
 class OrganizerController extends Controller
 {
-    /**
-     * Create a new organizer account with temporary password
-     * This is typically called by admin/system
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users|unique:organizer',
-            'id_number' => 'required|string|unique:organizer',
-            'department' => 'required|string|max:255',
+            'first_name'     => 'required|string|max:255',
+            'middle_initial' => 'nullable|string|max:2',
+            'last_name'      => 'required|string|max:255',
+            'suffix'         => 'nullable|string|max:20',
+            'email'          => 'required|email|unique:users|unique:organizer',
+            'id_number'      => 'required|string|unique:organizer',
+            'department'     => 'required|string|max:255',
         ]);
 
         try {
-            // Generate temporary password
             $tempPassword = $this->generateTemporaryPassword();
+
+            // Build full name for users table
+            $fullName = trim(implode(' ', array_filter([
+                $validated['first_name'],
+                $validated['middle_initial'] ?? null,
+                $validated['last_name'],
+                $validated['suffix']         ?? null,
+            ])));
 
             // Create user account
             $user = User::create([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'role' => 'organizer',
+                'name'     => $fullName,
+                'email'    => $validated['email'],
+                'role'     => 'organizer',
                 'password' => Hash::make($tempPassword),
             ]);
 
-            // Create organizer record
-            // NOTE: password_changed_at is NULL, which triggers first-time password change
+            // Create organizer — NO 'name' (it's a virtual column)
             $organizer = Organizer::create([
-                'user_id' => $user->id,
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'id_number' => $validated['id_number'],
-                'department' => $validated['department'],
-                'status' => 'ACTIVE',
-                'password_changed_at' => null, // IMPORTANT: Triggers first-time password change on login
+                'user_id'             => $user->id,
+                'first_name'          => $validated['first_name'],
+                'middle_initial'      => $validated['middle_initial'] ?? null,
+                'last_name'           => $validated['last_name'],
+                'suffix'              => $validated['suffix']         ?? null,
+                'email'               => $validated['email'],
+                'id_number'           => $validated['id_number'],
+                'department'          => $validated['department'],
+                'status'              => 'ACTIVE',
+                'password_changed_at' => null,
             ]);
 
-            // Send welcome email with temporary credentials
             try {
                 Mail::to($organizer->email)->send(new OrganizerRegistered($organizer, $tempPassword));
                 Log::info('Welcome email sent to organizer: ' . $organizer->email);
             } catch (\Exception $mailError) {
                 Log::warning('Failed to send welcome email to ' . $organizer->email . ': ' . $mailError->getMessage());
-                // Continue anyway - account is created
             }
 
             Log::info('Organizer account created: ' . $organizer->email . ' (ID: ' . $organizer->id_number . ')');
 
             return response()->json([
-                'success' => true,
-                'message' => 'Organizer account created successfully. Welcome email sent.',
-                'organizer' => $organizer,
-                'tempPassword' => $tempPassword, // For display in admin panel only
+                'success'      => true,
+                'message'      => 'Organizer account created successfully. Welcome email sent.',
+                'organizer'    => $organizer,
+                'tempPassword' => $tempPassword,
             ]);
 
         } catch (\Exception $e) {
@@ -76,53 +82,41 @@ class OrganizerController extends Controller
         }
     }
 
-    /**
-     * Generate a temporary password
-     * Format: Random combination of uppercase, lowercase, numbers, and special characters
-     * Example: 9NYgfcYFRn
-     */
     private function generateTemporaryPassword(): string
     {
         $uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
         $lowercase = 'abcdefghijklmnopqrstuvwxyz';
-        $numbers = '0123456789';
-        $special = '@$!%*?&';
+        $numbers   = '0123456789';
+        $special   = '@$!%*?&';
 
-        $password = '';
-        
-        // Ensure at least one of each required character type
+        $password  = '';
         $password .= $uppercase[random_int(0, strlen($uppercase) - 1)];
         $password .= $lowercase[random_int(0, strlen($lowercase) - 1)];
         $password .= $numbers[random_int(0, strlen($numbers) - 1)];
         $password .= $special[random_int(0, strlen($special) - 1)];
 
-        // Fill the rest with random characters from all types
         $allChars = $uppercase . $lowercase . $numbers . $special;
         for ($i = 4; $i < 10; $i++) {
             $password .= $allChars[random_int(0, strlen($allChars) - 1)];
         }
 
-        // Shuffle to avoid predictable pattern
         return str_shuffle($password);
     }
 
-    /**
-     * Get organizer profile
-     */
     public function show(Organizer $organizer)
     {
         return response()->json($organizer);
     }
 
-    /**
-     * Update organizer profile (non-password fields)
-     */
     public function update(Request $request, Organizer $organizer)
     {
         $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'department' => 'sometimes|string|max:255',
-            'profile_photo' => 'sometimes|image|max:2048',
+            'first_name'     => 'sometimes|string|max:255',
+            'middle_initial' => 'sometimes|nullable|string|max:2',
+            'last_name'      => 'sometimes|string|max:255',
+            'suffix'         => 'sometimes|nullable|string|max:20',
+            'department'     => 'sometimes|string|max:255',
+            'profile_photo'  => 'sometimes|image|max:2048',
         ]);
 
         try {
@@ -131,13 +125,27 @@ class OrganizerController extends Controller
                 $validated['profile_photo'] = $path;
             }
 
-            $organizer->update($validated);
+            // Update organizer — 'name' is virtual, never include it
+            $organizer->update(collect($validated)->except('profile_photo')->toArray()
+                + ($request->hasFile('profile_photo') ? ['profile_photo' => $validated['profile_photo']] : []));
+
+            // Sync full name to users table
+            if (isset($validated['first_name']) || isset($validated['last_name'])) {
+                $fullName = trim(implode(' ', array_filter([
+                    $validated['first_name']     ?? $organizer->first_name,
+                    $validated['middle_initial'] ?? $organizer->middle_initial,
+                    $validated['last_name']      ?? $organizer->last_name,
+                    $validated['suffix']         ?? $organizer->suffix,
+                ])));
+
+                $organizer->user?->update(['name' => $fullName]);
+            }
 
             Log::info('Organizer profile updated: ' . $organizer->email);
 
             return response()->json([
-                'success' => true,
-                'message' => 'Profile updated successfully',
+                'success'   => true,
+                'message'   => 'Profile updated successfully',
                 'organizer' => $organizer,
             ]);
 
@@ -150,9 +158,6 @@ class OrganizerController extends Controller
         }
     }
 
-    /**
-     * Change organizer status (admin only)
-     */
     public function updateStatus(Request $request, Organizer $organizer)
     {
         $validated = $request->validate([
@@ -165,8 +170,8 @@ class OrganizerController extends Controller
             Log::info('Organizer status updated: ' . $organizer->email . ' -> ' . $validated['status']);
 
             return response()->json([
-                'success' => true,
-                'message' => 'Status updated successfully',
+                'success'   => true,
+                'message'   => 'Status updated successfully',
                 'organizer' => $organizer,
             ]);
 
@@ -179,21 +184,17 @@ class OrganizerController extends Controller
         }
     }
 
-    /**
-     * Delete organizer account (admin only)
-     */
     public function destroy(Organizer $organizer)
     {
         try {
             $email = $organizer->email;
-            
-            // Delete associated user account
+
+            // Cascade via user (user delete will cascade to organizer via FK)
             if ($organizer->user) {
                 $organizer->user->delete();
+            } else {
+                $organizer->delete();
             }
-            
-            // Delete organizer record
-            $organizer->delete();
 
             Log::info('Organizer account deleted: ' . $email);
 

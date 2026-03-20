@@ -1,6 +1,4 @@
 <?php
-// FILE: database/migrations/xxxx_xx_xx_update_job_postings_table.php
-// Fixed: skips updated_by/updated_by_role since they already exist
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -15,7 +13,6 @@ return new class extends Migration
             // Make organizer_id nullable for admin-posted jobs
             $table->foreignId('organizer_id')->nullable()->change();
 
-            // Only add columns that don't exist yet
             if (!Schema::hasColumn('job_postings', 'deleted_by')) {
                 $table->string('deleted_by')->nullable()->after('updated_by_role');
             }
@@ -24,7 +21,6 @@ return new class extends Migration
             }
         });
 
-        // Add ORGANIZER_DELETED to the status enum
         DB::statement("ALTER TABLE job_postings MODIFY COLUMN status ENUM('ACTIVE','INACTIVE','EXPIRED','ORGANIZER_DELETED') NOT NULL DEFAULT 'ACTIVE'");
     }
 

@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Mail;
-
 use App\Models\Organizer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -11,8 +9,6 @@ use Illuminate\Queue\SerializesModels;
 
 class OrganizerRegistered extends Mailable
 {
-    // NOTE: ShouldQueue removed — same reason as OrganizerPasswordReset.
-    // Welcome emails must arrive immediately when admin creates the account.
     use Queueable, SerializesModels;
 
     public function __construct(
@@ -29,6 +25,14 @@ class OrganizerRegistered extends Mailable
 
     public function content(): Content
     {
+        // Build full name manually from split fields
+        $fullName = trim(implode(' ', array_filter([
+            $this->organizer->first_name,
+            $this->organizer->middle_initial ?: null,
+            $this->organizer->last_name,
+            $this->organizer->suffix         ?: null,
+        ])));
+
         return new Content(
             view: 'emails.organizer-registered',
             with: [
@@ -36,7 +40,7 @@ class OrganizerRegistered extends Mailable
                 'idNumber'     => $this->organizer->id_number,
                 'tempPassword' => $this->tempPassword,
                 'loginUrl'     => url('/login'),
-                'name'         => $this->organizer->name,
+                'name'         => $fullName,        // ← computed manually
                 'email'        => $this->organizer->email,
                 'department'   => $this->organizer->department,
             ],
