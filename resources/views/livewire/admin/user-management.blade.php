@@ -1210,7 +1210,7 @@ new class extends Component {
 
 <div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-50 overflow-hidden" style="height:90vh">
 
-<link rel="stylesheet" href="{{ asset('css/user-management.css') }}">
+
 
 {{-- ── FLASH TOAST ──────────────────────────────────────────────────────── --}}
 <div x-data="{
