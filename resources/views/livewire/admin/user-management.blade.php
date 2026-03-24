@@ -116,10 +116,6 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
-    // ─────────────────────────────────────────────────────
-    // Lifecycle
-    // ─────────────────────────────────────────────────────
-
     #[On('showFlash')]
     public function handleShowFlash(string $type, string $message): void
     {
@@ -143,9 +139,7 @@ new class extends Component {
     private function loadOrgCourses(): void
     {
         $grouped = [];
-        foreach (Course::orderByDesc('updated_at')
-            ->orderBy('code')
-            ->get() as $c) {
+        foreach (Course::orderByDesc('updated_at')->orderBy('code')->get() as $c) {
             $college = $c->college ?? null;
             if ($college) {
                 $grouped[$college][] = $c->toArray();
@@ -154,10 +148,6 @@ new class extends Component {
         $this->orgCoursesList = $grouped;
     }
 
-    // ─────────────────────────────────────────────────────
-    // Filter Watchers
-    // ─────────────────────────────────────────────────────
-
     public function updatingAlumniSearch() { $this->resetPage('alumniPage'); }
     public function updatingOrgSearch()    { $this->resetPage('orgPage'); }
     public function updatingAlumniBatch()  { $this->resetPage('alumniPage'); }
@@ -165,10 +155,6 @@ new class extends Component {
     public function updatingAlumniSort()   { $this->resetPage('alumniPage'); }
     public function updatingOrgCollege()   { $this->resetPage('orgPage'); }
     public function updatingOrgSort()      { $this->resetPage('orgPage'); }
-
-    // ─────────────────────────────────────────────────────
-    // Computed Properties
-    // ─────────────────────────────────────────────────────
 
     #[Computed]
     public function alumniRecords()
@@ -248,10 +234,6 @@ new class extends Component {
         return Course::whereNotNull('college')->where('college', '!=', '')->distinct('college')->count('college');
     }
 
-    // ─────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────
-
     public function getCollegeForCourse(string $code): string
     {
         return Course::where('college', $code)->exists()
@@ -290,29 +272,14 @@ new class extends Component {
         $this->dispatch('flash-message', type: $type, message: $msg);
     }
 
-    // ─────────────────────────────────────────────────────
-    // Modal / Tab
-    // ─────────────────────────────────────────────────────
-
     public function switchTab(string $tab): void { $this->activeTab = $tab; }
 
     public function openModal(string $modal): void
     {
-        if ($modal === 'importModal') {
-            $this->resetImportState();
-        }
-        if ($modal === 'manageOrgCourses') {
-            $this->loadOrgCourses();
-            $this->resetOrgCourseForm();
-        }
-        if ($modal === 'registerAlumni') {
-            $this->alumniSuccess = '';
-            $this->alumniErrors  = [];
-        }
-        if ($modal === 'registerOrganizer') {
-            $this->organizerSuccess = '';
-            $this->organizerErrors  = [];
-        }
+        if ($modal === 'importModal') $this->resetImportState();
+        if ($modal === 'manageOrgCourses') { $this->loadOrgCourses(); $this->resetOrgCourseForm(); }
+        if ($modal === 'registerAlumni') { $this->alumniSuccess = ''; $this->alumniErrors = []; }
+        if ($modal === 'registerOrganizer') { $this->organizerSuccess = ''; $this->organizerErrors = []; }
         $this->activeModal = $modal;
     }
 
@@ -342,10 +309,6 @@ new class extends Component {
         $this->orgSort   = 'recent';
         $this->resetPage('orgPage');
     }
-
-    // ─────────────────────────────────────────────────────
-    // Import
-    // ─────────────────────────────────────────────────────
 
     public function resetImportState(): void
     {
@@ -398,7 +361,6 @@ new class extends Component {
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            // ── Validate required columns ──────────────────────────────────
             if (!in_array('first_name', $header, true) || !in_array('last_name', $header, true)) {
                 throw new \Exception('Missing required columns: "first_name" and "last_name" must both be present.');
             }
@@ -409,19 +371,11 @@ new class extends Component {
 
             $this->importTotal = count($rows) - 1;
 
-            // ── Pre-load lookups into memory (zero per-row DB calls) ───────
-            $courseMap            = Course::pluck('name', 'code')
-                                        ->mapWithKeys(fn($n, $c) => [strtoupper($c) => $n])->toArray();
-            $existingAlumniEmails = Alumni::pluck('email')
-                                        ->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
-            $existingAlumniIds    = Alumni::pluck('student_id')
-                                        ->mapWithKeys(fn($id) => [$id => true])->toArray();
-            $existingUserEmails   = User::pluck('email')
-                                        ->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
+            $courseMap            = Course::pluck('name', 'code')->mapWithKeys(fn($n, $c) => [strtoupper($c) => $n])->toArray();
+            $existingAlumniEmails = Alumni::pluck('email')->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
+            $existingAlumniIds    = Alumni::pluck('student_id')->mapWithKeys(fn($id) => [$id => true])->toArray();
+            $existingUserEmails   = User::pluck('email')->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
 
-            // ── Generate ONE shared password placeholder per import ────────
-            // bcrypt × 500 = the reason it took 20 mins. One hash for all,
-            // each alumni gets their own $tmp plain-text sent via email.
             $sharedHash = password_hash(Str::random(32), PASSWORD_BCRYPT, ['cost' => 10]);
 
             $emailJobs          = [];
@@ -448,38 +402,29 @@ new class extends Component {
                 $fullName      = $this->buildFullName($firstName, $middleInitial, $lastName, $suffix);
 
                 $email  = strtolower(trim($row['email'] ?? ''));
-                // Handle Excel float IDs e.g. 12345.0 → "12345"
                 $rawId  = rtrim(rtrim((string)($row['student_id'] ?? ''), '0'), '.');
-                $rawId  = preg_replace('/\..*$/', '', $rawId); // strip any decimal
+                $rawId  = preg_replace('/\..*$/', '', $rawId);
                 $code   = strtoupper(trim($row['course_code'] ?? ''));
-                // Handle Excel float batch e.g. 2023.0 → "2023"
                 $year   = (string)(int)($row['batch'] ?? 0);
                 $label  = "Row " . ($i + 1) . ($fullName ? " ({$fullName})" : '');
 
-                // ── Name validation ────────────────────────────────────────
                 if (!$firstName) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: First name is empty."); continue; }
                 if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $firstName)) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: First name contains invalid characters."); continue; }
                 if (!$lastName) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Last name is empty."); continue; }
                 if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName)) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Last name contains invalid characters."); continue; }
-
-                // ── Middle initial (required) ──────────────────────────────
                 if ($middleInitial === '') { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Middle initial is required."); continue; }
                 if (!preg_match('/^[a-zA-Z]{1,2}$/', $middleInitial)) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Middle initial must be 1–2 letters."); continue; }
-
-                // ── Email ──────────────────────────────────────────────────
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Email \"{$email}\" is not valid."); continue; }
                 if (isset($existingAlumniEmails[$email]) || isset($seenEmailsInFile[$email])) {
                     $duplicates[] = "{$label}: Email \"{$email}\" already registered.";
                     $this->importDuplicateCount++;
                     continue;
                 }
-                // Track orphaned user accounts — batch delete later, not per-row
                 if (isset($existingUserEmails[$email])) {
                     $orphanEmailsToNuke[] = $email;
                     unset($existingUserEmails[$email]);
                 }
 
-                // ── Student ID ─────────────────────────────────────────────
                 $rawIdClean = ltrim($rawId, '0') ?: '0';
                 if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int)$rawIdClean === 0) {
                     $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Student ID \"{$rawId}\" is invalid (1–8 digits).");
@@ -492,14 +437,11 @@ new class extends Component {
                     continue;
                 }
 
-                // ── Course code ────────────────────────────────────────────
                 if (!isset($courseMap[$code])) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Course code \"{$code}\" does not exist."); continue; }
 
-                // ── Batch year ─────────────────────────────────────────────
                 $batchYear = (int) $year;
                 if ($batchYear < 1000 || $batchYear > 9999) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Batch \"{$year}\" must be a 4-digit year."); continue; }
 
-                // ── Valid row — generate unique tmp password per alumni ─────
                 $tmp = Str::random(10);
 
                 $emailJobs[] = [
@@ -535,34 +477,29 @@ new class extends Component {
 
             $this->importStatus = 'Importing…';
 
-            // ── Batch delete orphaned users in ONE query ───────────────────
             if (!empty($orphanEmailsToNuke)) {
                 User::whereIn('email', $orphanEmailsToNuke)->delete();
             }
 
-            // ── Build user rows — ONE shared hash, no bcrypt loop ──────────
             $userRows = array_map(fn($job) => [
                 'name'       => $job['fullName'],
                 'email'      => $job['email'],
-                'password'   => $sharedHash,   // ← single hash, massively faster
+                'password'   => $sharedHash,
                 'role'       => 'alumni',
                 'created_at' => $job['now'],
                 'updated_at' => $job['now'],
             ], $emailJobs);
 
-            // ── Bulk insert users in chunks of 200 ─────────────────────────
             foreach (array_chunk($userRows, 200) as $chunk) {
                 User::insert($chunk);
             }
 
-            // ── Fetch inserted user IDs in ONE query ───────────────────────
             $emails        = array_column($emailJobs, 'email');
             $insertedUsers = User::whereIn('email', $emails)
                                  ->pluck('id', 'email')
                                  ->mapWithKeys(fn($id, $e) => [strtolower($e) => $id])
                                  ->toArray();
 
-            // ── Build alumni rows ──────────────────────────────────────────
             $alumniRows = [];
             foreach ($emailJobs as $job) {
                 $userId = $insertedUsers[strtolower($job['email'])] ?? null;
@@ -584,18 +521,13 @@ new class extends Component {
                 ];
             }
 
-            // ── Bulk insert alumni in chunks of 200 ────────────────────────
             foreach (array_chunk($alumniRows, 200) as $chunk) {
                 Alumni::insert($chunk);
             }
 
             $this->importSuccessCount = count($alumniRows);
 
-            // ── Queue emails — fire-and-forget after response ──────────────
-            // Fetch just-inserted alumni models for email sending
-            $insertedAlumni = Alumni::whereIn('email', $emails)
-                                    ->get()
-                                    ->keyBy(fn($a) => strtolower($a->email));
+            $insertedAlumni = Alumni::whereIn('email', $emails)->get()->keyBy(fn($a) => strtolower($a->email));
 
             foreach ($emailJobs as $job) {
                 try {
@@ -658,10 +590,6 @@ new class extends Component {
         }
     }
 
-    // ─────────────────────────────────────────────────────
-    // Alumni Registration
-    // ─────────────────────────────────────────────────────
-
     public function registerAlumni(): void
     {
         $this->alumniErrors  = [];
@@ -678,9 +606,7 @@ new class extends Component {
             if (trim($this->regSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->regSuffix)))
                 throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
 
-            $fullName = $this->buildFullName(
-                $this->regFirstName, $this->regMiddleInitial, $this->regLastName, $this->regSuffix
-            );
+            $fullName = $this->buildFullName($this->regFirstName, $this->regMiddleInitial, $this->regLastName, $this->regSuffix);
 
             $this->validate([
                 'regFirstName'     => ['required', 'string', 'max:100'],
@@ -769,10 +695,6 @@ new class extends Component {
         $this->alumniErrors = [];
     }
 
-    // ─────────────────────────────────────────────────────
-    // Organizer Registration
-    // ─────────────────────────────────────────────────────
-
     public function registerOrganizer(): void
     {
         $this->organizerErrors  = [];
@@ -789,11 +711,8 @@ new class extends Component {
             if (trim($this->orgSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->orgSuffix)))
                 throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
 
-            $fullName = $this->buildFullName(
-                $this->orgFirstName, $this->orgMiddleInitial, $this->orgLastName, $this->orgSuffix
-            );
-
-            $college = trim($this->orgCollegeSelect);
+            $fullName = $this->buildFullName($this->orgFirstName, $this->orgMiddleInitial, $this->orgLastName, $this->orgSuffix);
+            $college  = trim($this->orgCollegeSelect);
             if (!$college) throw new \Exception('Please select a college.');
 
             $occupied = $this->occupiedColleges();
@@ -883,10 +802,6 @@ new class extends Component {
         $this->orgPhoto        = null;
         $this->organizerErrors = [];
     }
-
-    // ─────────────────────────────────────────────────────
-    // Course Management
-    // ─────────────────────────────────────────────────────
 
     public function openEditCourse(int $id): void
     {
@@ -984,10 +899,6 @@ new class extends Component {
             $this->deletingCourse = false;
         }
     }
-
-    // ─────────────────────────────────────────────────────
-    // College Management
-    // ─────────────────────────────────────────────────────
 
     public function resetOrgCourseForm(): void
     {
@@ -1122,10 +1033,6 @@ new class extends Component {
         }
     }
 
-    // ─────────────────────────────────────────────────────
-    // Organizer Status Toggle
-    // ─────────────────────────────────────────────────────
-
     public function confirmToggleOrganizerStatus(int $id, string $action): void
     {
         try {
@@ -1157,10 +1064,6 @@ new class extends Component {
             $this->activeModal         = '';
         }
     }
-
-    // ─────────────────────────────────────────────────────
-    // Profile Management
-    // ─────────────────────────────────────────────────────
 
     public function viewProfile(int $id, string $type): void
     {
@@ -1208,285 +1111,568 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-50 overflow-hidden" style="height:90vh">
+<div class="min-h-screen bg-gray-50">
 
+{{-- ═══════════════════════════════════════════════════════
+     GLOBAL STYLES
+     ═══════════════════════════════════════════════════════ --}}
+<style>
+    :root {
+        --brand:       #7a3f91;
+        --brand-dark:  #5e2f72;
+        --brand-light: #9b5bb0;
+        --brand-50:    #f5eef9;
+        --brand-100:   #e9d5f3;
+        --brand-200:   #d4aaeb;
+    }
 
+    /* ── Primary button ───────────────────────────────── */
+    .btn-brand {
+        background-color: var(--brand);
+        color: #fff;
+        transition: background-color .18s ease, box-shadow .18s ease, transform .1s ease;
+        box-shadow: 0 2px 6px rgba(122,63,145,.30);
+    }
+    .btn-brand:hover:not(:disabled) {
+        background-color: var(--brand-dark);
+        box-shadow: 0 4px 14px rgba(122,63,145,.40);
+        transform: translateY(-1px);
+    }
+    .btn-brand:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 2px 6px rgba(122,63,145,.30);
+    }
+    .btn-brand:disabled { opacity: .55; cursor: not-allowed; }
 
-{{-- ── FLASH TOAST ──────────────────────────────────────────────────────── --}}
+    /* ── Ghost button ─────────────────────────────────── */
+    .btn-ghost {
+        background: #fff;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+        transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .1s ease;
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .btn-ghost:hover:not(:disabled) {
+        background: #f9fafb;
+        border-color: #d1d5db;
+        box-shadow: 0 2px 8px rgba(0,0,0,.10);
+        transform: translateY(-1px);
+    }
+
+    /* ── Danger ghost ─────────────────────────────────── */
+    .btn-danger {
+        background: #fff;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+        transition: background-color .15s ease, box-shadow .15s ease, transform .1s ease;
+        box-shadow: 0 1px 3px rgba(220,38,38,.08);
+    }
+    .btn-danger:hover:not(:disabled) {
+        background: #fef2f2;
+        border-color: #f87171;
+        box-shadow: 0 2px 8px rgba(220,38,38,.18);
+        transform: translateY(-1px);
+    }
+
+    /* ── Success ghost ────────────────────────────────── */
+    .btn-success {
+        background: #fff;
+        color: #16a34a;
+        border: 1px solid #bbf7d0;
+        transition: background-color .15s ease, box-shadow .15s ease, transform .1s ease;
+        box-shadow: 0 1px 3px rgba(22,163,74,.08);
+    }
+    .btn-success:hover:not(:disabled) {
+        background: #f0fdf4;
+        border-color: #4ade80;
+        box-shadow: 0 2px 8px rgba(22,163,74,.18);
+        transform: translateY(-1px);
+    }
+
+    /* ── View button ──────────────────────────────────── */
+    .btn-view {
+        background: var(--brand-50);
+        color: var(--brand);
+        border: 1px solid var(--brand-200);
+        transition: background-color .15s ease, box-shadow .15s ease, transform .1s ease;
+        box-shadow: 0 1px 3px rgba(122,63,145,.10);
+    }
+    .btn-view:hover {
+        background: var(--brand-100);
+        border-color: var(--brand-light);
+        box-shadow: 0 2px 8px rgba(122,63,145,.22);
+        transform: translateY(-1px);
+    }
+
+    /* ── Tab active ───────────────────────────────────── */
+    .tab-active {
+        background: #fff;
+        color: var(--brand);
+        border-bottom: 2px solid var(--brand);
+        box-shadow: 0 2px 8px rgba(0,0,0,.07);
+    }
+    .tab-inactive {
+        background: transparent;
+        color: #6b7280;
+    }
+    .tab-inactive:hover {
+        background: rgba(255,255,255,.6);
+        color: var(--brand);
+    }
+
+    /* ── Input focus ──────────────────────────────────── */
+    .input-brand {
+        transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .input-brand:focus {
+        outline: none;
+        border-color: var(--brand);
+        box-shadow: 0 0 0 3px rgba(122,63,145,.12);
+    }
+
+    /* ── Table row hover ──────────────────────────────── */
+    .tbl-row {
+        transition: background-color .12s ease;
+    }
+    .tbl-row:hover { background-color: #faf5fc; }
+
+    /* ── Scroll bar ───────────────────────────────────── */
+    .scroll-custom::-webkit-scrollbar { width: 5px; height: 5px; }
+    .scroll-custom::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+    .scroll-custom::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+    .scroll-custom::-webkit-scrollbar-thumb:hover { background: var(--brand-light); }
+
+    /* ── Loading overlay ──────────────────────────────── */
+    .tbl-loading { opacity: .45; pointer-events: none; transition: opacity .2s ease; }
+
+    /* ── Spinner ──────────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin .7s linear infinite; display: inline-block; }
+
+    /* ── Modal animate ────────────────────────────────── */
+    @keyframes modalIn {
+        from { opacity: 0; transform: translateY(16px) scale(.97); }
+        to   { opacity: 1; transform: translateY(0)     scale(1);   }
+    }
+    .modal-in { animation: modalIn .22s cubic-bezier(.25,.8,.25,1) both; }
+
+    /* ── Page slide ───────────────────────────────────── */
+    @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+    .slide-down { animation: slideDown .4s ease both; }
+
+    /* ── Course check row ─────────────────────────────── */
+    .course-row-selected {
+        background: var(--brand-50) !important;
+        border-color: var(--brand-200) !important;
+    }
+
+    /* ── Responsive table helpers ─────────────────────── */
+    @media (max-width: 768px) {
+        .hide-mobile { display: none !important; }
+        .full-mobile { width: 100% !important; }
+    }
+</style>
+
+{{-- ═══════════════════════════════════════════════════════
+     FLASH TOAST
+     ═══════════════════════════════════════════════════════ --}}
 <div x-data="{
         show:false, type:'success', msg:'', timer:null,
-        display(t,m){ this.type=t; this.msg=m; this.show=true; clearTimeout(this.timer); this.timer=setTimeout(()=>this.show=false,10000); }
+        display(t,m){ this.type=t; this.msg=m; this.show=true; clearTimeout(this.timer); this.timer=setTimeout(()=>this.show=false,8000); }
      }"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show"
      x-transition:enter="transition ease-out duration-300"
-     x-transition:enter-start="opacity-0 translate-x-6"
-     x-transition:enter-end="opacity-100 translate-x-0"
+     x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+     x-transition:enter-end="opacity-100 translate-x-0 scale-100"
      x-transition:leave="transition ease-in duration-200"
-     x-transition:leave-start="opacity-100 translate-x-0"
-     x-transition:leave-end="opacity-0 translate-x-6"
-     class="fixed top-5 right-6 z-50 flex items-start gap-3 px-6 py-4 rounded-lg shadow-xl max-w-sm border backdrop-blur-sm"
+     x-transition:leave-start="opacity-100 translate-x-0 scale-100"
+     x-transition:leave-end="opacity-0 translate-x-8 scale-95"
+     class="fixed top-5 right-4 sm:right-6 z-[100] flex items-start gap-3 px-5 py-4 rounded-xl shadow-2xl max-w-xs sm:max-w-sm border backdrop-blur-sm"
      :class="{
          'bg-emerald-50 border-emerald-200 text-emerald-800': type==='success',
          'bg-blue-50 border-blue-200 text-blue-800': type==='info',
          'bg-red-50 border-red-200 text-red-800': type==='error'
      }"
      style="display:none">
-    <i class="fas mt-0.5 text-lg flex-shrink-0"
+    <i class="fas mt-0.5 text-base flex-shrink-0"
        :class="{
-           'fa-check-circle text-emerald-500': type==='success',
-           'fa-info-circle text-blue-500': type==='info',
-           'fa-exclamation-circle text-red-500': type==='error'
+           'fa-circle-check text-emerald-500': type==='success',
+           'fa-circle-info text-blue-500': type==='info',
+           'fa-circle-exclamation text-red-500': type==='error'
        }"></i>
     <div class="flex-1 min-w-0">
-        <div class="font-semibold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></div>
-        <div class="text-sm mt-0.5 leading-snug opacity-90" x-text="msg"></div>
+        <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
+        <p class="text-xs mt-0.5 leading-snug opacity-90 break-words" x-text="msg"></p>
     </div>
-    <button @click="show=false" class="opacity-40 hover:opacity-100 shrink-0 transition"><i class="fas fa-times text-sm"></i></button>
+    <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0 ml-1"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-6">
+{{-- ═══════════════════════════════════════════════════════
+     PAGE WRAPPER
+     ═══════════════════════════════════════════════════════ --}}
+<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto">
 
-    {{-- ── HEADER ────────────────────────────────────────────────────────── --}}
-    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5 shrink-0" style="animation:slideInDown .5s ease-out;">
-        <div>
-            <h1 class="text-4xl font-bold text-slate-800 flex items-center gap-3">
-                <div class="w-14 h-14 btn-primary rounded-lg flex items-center justify-center shadow-md">
-                    <i class="fas fa-users text-xl"></i>
-                </div>
-                Alumni & Organizers
-            </h1>
-            <p class="text-slate-600 text-sm mt-2 ml-0.5">Manage alumni and organizer records efficiently</p>
+    {{-- ── HEADER ─────────────────────────────────────────── --}}
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6 slide-down">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-xl btn-brand flex items-center justify-center shadow-lg shrink-0">
+                <i class="fas fa-users text-white text-lg sm:text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-800 tracking-tight">Alumni & Organizers</h1>
+                <p class="text-gray-500 text-xs sm:text-sm mt-0.5">Manage alumni and organizer records efficiently</p>
+            </div>
         </div>
+
+        {{-- Action Buttons --}}
         <div class="flex flex-wrap gap-2 shrink-0">
+            {{-- Alumni tab buttons --}}
             <div @class(['flex flex-wrap gap-2' => true, 'hidden' => $this->activeTab !== 'alumni'])>
-                <button wire:click="openModal('registerAlumni')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
-                    <i class="fas fa-user-plus"></i> Register Alumni
+                <button wire:click="openModal('registerAlumni')"
+                        class="btn-brand inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                    <i class="fas fa-user-plus text-xs"></i>
+                    <span class="hidden sm:inline">Register Alumni</span>
+                    <span class="sm:hidden">Register</span>
                 </button>
-                <button wire:click="openModal('importModal')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
-                    <i class="fas fa-file-import"></i> Import
+                <button wire:click="openModal('importModal')"
+                        class="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                    <i class="fas fa-file-import text-xs"></i>
+                    <span class="hidden sm:inline">Import</span>
+                    <span class="sm:hidden"><i class="fas fa-file-import"></i></span>
                 </button>
-                <button wire:click="openModal('manageCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
-                    <i class="fas fa-sliders"></i> Manage Courses
+                <button wire:click="openModal('manageCourses')"
+                        class="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                    <i class="fas fa-sliders text-xs"></i>
+                    <span class="hidden md:inline">Manage Courses</span>
+                    <span class="md:hidden">Courses</span>
                 </button>
             </div>
+            {{-- Organizer tab buttons --}}
             <div @class(['flex flex-wrap gap-2' => true, 'hidden' => $this->activeTab !== 'organizers'])>
-                <button wire:click="openModal('registerOrganizer')" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm hover:shadow-lg transition-all">
-                    <i class="fas fa-users-gear"></i> Register Organizer
+                <button wire:click="openModal('registerOrganizer')"
+                        class="btn-brand inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                    <i class="fas fa-users-gear text-xs"></i>
+                    <span class="hidden sm:inline">Register Organizer</span>
+                    <span class="sm:hidden">Register</span>
                 </button>
-                <button wire:click="openModal('manageOrgCourses')" class="inline-flex items-center gap-2 px-5 py-3 bg-white text-slate-700 rounded-lg font-semibold hover:shadow-md transition text-sm border border-slate-200">
-                    <i class="fas fa-building-columns"></i> Manage Colleges
+                <button wire:click="openModal('manageOrgCourses')"
+                        class="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                    <i class="fas fa-building-columns text-xs"></i>
+                    <span class="hidden md:inline">Manage Colleges</span>
+                    <span class="md:hidden">Colleges</span>
                 </button>
             </div>
         </div>
     </div>
 
-    {{-- ── TABS ───────────────────────────────────────────────────────────── --}}
-    <div class="flex gap-2 mb-4 shrink-0">
+    {{-- ── TABS ────────────────────────────────────────────── --}}
+    <div class="flex gap-1 mb-4 bg-gray-100 p-1 rounded-xl w-fit">
         <button wire:click="switchTab('alumni')"
-                class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='alumni'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}">
-            <i class="fas fa-graduation-cap"></i> Alumni
+                class="px-5 sm:px-6 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 flex items-center gap-2
+                    {{ $this->activeTab==='alumni' ? 'tab-active' : 'tab-inactive' }}">
+            <i class="fas fa-graduation-cap text-xs"></i>
+            Alumni
         </button>
         <button wire:click="switchTab('organizers')"
-                class="px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 text-sm {{ $this->activeTab==='organizers'?'bg-white text-slate-800 shadow-sm':'bg-white/50 text-slate-600 hover:bg-white/70' }}">
-            <i class="fas fa-users-gear"></i> Organizers
+                class="px-5 sm:px-6 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 flex items-center gap-2
+                    {{ $this->activeTab==='organizers' ? 'tab-active' : 'tab-inactive' }}">
+            <i class="fas fa-users-gear text-xs"></i>
+            Organizers
         </button>
     </div>
 
-    <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden">
+    {{-- ── CARD WRAPPER ────────────────────────────────────── --}}
+    <div class="bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden"
+         style="min-height: 0; height: calc(100vh - 220px);">
 
-        {{-- ═══════════════════════════════════════════════════════════════
+        {{-- ═══════════════════════════════════════════════
              ALUMNI TAB
-             ═══════════════════════════════════════════════════════════════ --}}
-        <div @class(['flex flex-col flex-1 min-h-0' => true, 'hidden' => $this->activeTab !== 'alumni'])>
-            <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
-                <div class="relative flex-1 min-w-[200px] max-w-sm"
-                     x-data="{ query: @entangle('alumniSearch').live, timer: null, onInput(e) { clearTimeout(this.timer); this.timer = setTimeout(() => { this.query = e.target.value; }, 80); } }"
+             ═══════════════════════════════════════════════ --}}
+        <div @class(['flex flex-col flex-1 min-h-0 overflow-hidden' => true, 'hidden' => $this->activeTab !== 'alumni'])>
+
+            {{-- Filter Bar --}}
+            <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
+                {{-- Search --}}
+                <div class="relative flex-1 min-w-[180px] max-w-sm"
+                     x-data="{ query: @entangle('alumniSearch').live, timer: null, onInput(e){ clearTimeout(this.timer); this.timer=setTimeout(()=>{ this.query=e.target.value; },80); } }"
                      wire:ignore>
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                     <input type="text" :value="query" @input="onInput($event)" placeholder="Search name, ID, email…"
-                           class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus" autocomplete="off" spellcheck="false">
+                           class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-800"
+                           autocomplete="off" spellcheck="false">
                 </div>
-                <select wire:model.live="alumniBatch" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                <select wire:model.live="alumniBatch"
+                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-700 min-w-[110px]">
                     <option value="">All Years</option>
                     @foreach($this->batches as $b)<option value="{{ $b }}">{{ $b }}</option>@endforeach
                 </select>
-                <select wire:model.live="alumniCourse" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                <select wire:model.live="alumniCourse"
+                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-700 min-w-[130px]">
                     <option value="">All Courses</option>
                     @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                 </select>
-                <select wire:model.live="alumniSort" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                <select wire:model.live="alumniSort"
+                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-700 min-w-[130px]">
                     <option value="recent">Recent First</option>
                     <option value="oldest">Oldest First</option>
                 </select>
-                <button wire:click="resetAlumniFilters" class="px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
-                    <i class="fas fa-rotate-left mr-2"></i>Reset
+                <button wire:click="resetAlumniFilters"
+                        class="btn-ghost px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5">
+                    <i class="fas fa-rotate-left text-xs"></i>
+                    <span class="hidden sm:inline">Reset</span>
                 </button>
             </div>
 
-            <div class="relative flex-1 min-h-0" x-data="{ showScrollTop: false }">
-                <div id="alumni-table-scroll" @scroll.passive="showScrollTop = $event.target.scrollTop > 200"
-                     class="h-full overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
-                     wire:loading.class="tbl-loading" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniSort,resetAlumniFilters">
-                    <table class="w-full border-separate border-spacing-0">
-                        <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
-                            <tr>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Name</th>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Student ID</th>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Course</th>
-                                <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Year</th>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Email</th>
-                                <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Status</th>
-                                <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Action</th>
+            {{-- Table --}}
+            <div class="relative flex-1 min-h-0" x-data="{ showTop: false }">
+                <div id="alumni-scroll"
+                     @scroll.passive="showTop = $event.target.scrollTop > 200"
+                     class="h-full overflow-y-auto overflow-x-auto scroll-custom"
+                     wire:loading.class="tbl-loading"
+                     wire:target="alumniSearch,alumniBatch,alumniCourse,alumniSort,resetAlumniFilters">
+                    <table class="w-full border-collapse min-w-[700px]">
+                        <thead>
+                            <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Student ID</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Course</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Year</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hide-mobile">Email</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-100">
+                        <tbody class="divide-y divide-gray-50">
                             @forelse($this->alumniRecords as $item)
-                            <tr class="table-row-hover">
-                                <td class="px-6 py-4">
+                            <tr class="tbl-row bg-white">
+                                <td class="px-4 sm:px-5 py-3.5">
                                     <div class="flex items-center gap-3">
-                                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->name }}" class="w-10 h-10 rounded-lg object-cover shrink-0">
-                                        <span class="font-semibold text-slate-900 text-sm block">{{ $item->name }}</span>
+                                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
+                                             alt="{{ $item->name }}"
+                                             class="w-9 h-9 rounded-lg object-cover shrink-0 shadow-sm ring-1 ring-gray-100">
+                                        <span class="font-semibold text-gray-800 text-sm leading-snug">{{ $item->name }}</span>
                                     </div>
                                 </td>
-                                <td class="px-6 py-4"><span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->student_id }}</span></td>
-                                <td class="px-6 py-4"><span class="inline-block px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full text-xs font-semibold">{{ $item->course_code ?? '—' }}</span></td>
-                                <td class="px-6 py-4 text-center"><span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->batch }}</span></td>
-                                <td class="px-6 py-4"><span class="text-slate-700 text-sm">{{ $item->email }}</span></td>
-                                <td class="px-6 py-4 text-center">
-                                    @php $sc=match($item->status){'VERIFIED'=>'bg-emerald-100 text-emerald-700','PENDING'=>'bg-amber-100 text-amber-700','REJECTED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600'}; @endphp
-                                    <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold {{ $sc }}">{{ $item->status }}</span>
+                                <td class="px-4 sm:px-5 py-3.5">
+                                    <span class="font-mono text-gray-700 text-sm font-semibold">{{ $item->student_id }}</span>
                                 </td>
-                                <td class="px-6 py-4 text-center">
+                                <td class="px-4 sm:px-5 py-3.5">
+                                    <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold"
+                                          style="background:var(--brand-50);color:var(--brand);">
+                                        {{ $item->course_code ?? '—' }}
+                                    </span>
+                                </td>
+                                <td class="px-4 sm:px-5 py-3.5 text-center">
+                                    <span class="font-mono text-gray-700 text-sm font-semibold">{{ $item->batch }}</span>
+                                </td>
+                                <td class="px-4 sm:px-5 py-3.5 hide-mobile">
+                                    <span class="text-gray-600 text-sm">{{ $item->email }}</span>
+                                </td>
+                                <td class="px-4 sm:px-5 py-3.5 text-center">
+                                    @php
+                                        $sc = match($item->status) {
+                                            'VERIFIED' => 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+                                            'PENDING'  => 'bg-amber-50 text-amber-700 border border-amber-200',
+                                            'REJECTED' => 'bg-red-50 text-red-700 border border-red-200',
+                                            default    => 'bg-gray-50 text-gray-600 border border-gray-200'
+                                        };
+                                    @endphp
+                                    <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold {{ $sc }}">
+                                        {{ $item->status }}
+                                    </span>
+                                </td>
+                                <td class="px-4 sm:px-5 py-3.5 text-center">
                                     <button wire:click="viewProfile({{ $item->id }},'alumni')"
-                                            class="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
-                                        <i class="fas fa-eye"></i> View
+                                            class="btn-view inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold">
+                                        <i class="fas fa-eye text-xs"></i>
+                                        <span class="hidden sm:inline">View</span>
                                     </button>
                                 </td>
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="7" class="py-16 text-center">
-                                    <i class="fas fa-users text-5xl text-slate-200 block mb-4"></i>
-                                    <p class="font-semibold text-slate-400">No alumni found</p>
-                                    <p class="text-sm text-slate-400 mt-1">Try adjusting filters or register new alumni</p>
+                                <td colspan="7" class="py-20 text-center">
+                                    <div class="flex flex-col items-center gap-3">
+                                        <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                                            <i class="fas fa-users text-2xl text-gray-300"></i>
+                                        </div>
+                                        <p class="font-semibold text-gray-400">No alumni found</p>
+                                        <p class="text-sm text-gray-400">Try adjusting filters or register new alumni</p>
+                                    </div>
                                 </td>
                             </tr>
                             @endforelse
                         </tbody>
                     </table>
                 </div>
-                <button x-show="showScrollTop"
-                        x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-75" x-transition:enter-end="opacity-100 scale-100"
-                        x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-75"
-                        @click="document.getElementById('alumni-table-scroll').scrollTo({ top: 0, behavior: 'smooth' })"
-                        class="absolute bottom-4 right-4 z-20 w-10 h-10 btn-primary rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow"
-                        style="display:none" title="Back to top">
-                    <i class="fas fa-arrow-up text-sm"></i>
+
+                {{-- Scroll to top --}}
+                <button x-show="showTop"
+                        x-transition:enter="transition ease-out duration-200"
+                        x-transition:enter-start="opacity-0 scale-75"
+                        x-transition:enter-end="opacity-100 scale-100"
+                        x-transition:leave="transition ease-in duration-150"
+                        x-transition:leave-start="opacity-100 scale-100"
+                        x-transition:leave-end="opacity-0 scale-75"
+                        @click="document.getElementById('alumni-scroll').scrollTo({top:0,behavior:'smooth'})"
+                        class="btn-brand absolute bottom-4 right-4 z-20 w-9 h-9 rounded-full flex items-center justify-center"
+                        style="display:none">
+                    <i class="fas fa-arrow-up text-xs"></i>
                 </button>
             </div>
 
-            <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
-                <div class="flex items-center justify-between">
-                    @php $total=$this->alumniRecords->total(); $pp=$this->alumniRecords->perPage(); $cp=$this->alumniRecords->currentPage(); $from=$total>0?($cp-1)*$pp+1:0; $to=min($cp*$pp,$total); @endphp
-                    <p class="text-slate-600 text-sm">Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span> of <span class="font-semibold text-slate-800">{{ $total }}</span></p>
-                    <div class="flex gap-2 items-center">
-                        @if($this->alumniRecords->onFirstPage()) <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
-                        @else <button wire:click="previousPage('alumniPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">← Prev</button> @endif
-                        <span class="px-4 py-2 text-slate-700 text-sm font-medium">{{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}</span>
-                        @if($this->alumniRecords->hasMorePages()) <button wire:click="nextPage('alumniPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next →</button>
-                        @else <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button> @endif
+            {{-- Pagination Footer --}}
+            <div class="px-4 sm:px-6 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
+                @php
+                    $total=$this->alumniRecords->total();
+                    $pp=$this->alumniRecords->perPage();
+                    $cp=$this->alumniRecords->currentPage();
+                    $from=$total>0?($cp-1)*$pp+1:0;
+                    $to=min($cp*$pp,$total);
+                @endphp
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <p class="text-gray-500 text-xs sm:text-sm">
+                        Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span>
+                        of <span class="font-bold text-gray-700">{{ $total }}</span> records
+                    </p>
+                    <div class="flex items-center gap-1.5">
+                        @if($this->alumniRecords->onFirstPage())
+                            <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">← Prev</button>
+                        @else
+                            <button wire:click="previousPage('alumniPage')" class="btn-brand px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold">← Prev</button>
+                        @endif
+
+                        <span class="px-3 py-2 text-gray-600 text-xs sm:text-sm font-semibold bg-white border border-gray-200 rounded-lg shadow-sm">
+                            {{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}
+                        </span>
+
+                        @if($this->alumniRecords->hasMorePages())
+                            <button wire:click="nextPage('alumniPage')" class="btn-brand px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold">Next →</button>
+                        @else
+                            <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">Next →</button>
+                        @endif
                     </div>
                 </div>
             </div>
         </div>
 
-        {{-- ═══════════════════════════════════════════════════════════════
+        {{-- ═══════════════════════════════════════════════
              ORGANIZERS TAB
-             ═══════════════════════════════════════════════════════════════ --}}
-        <div @class(['flex flex-col flex-1 min-h-0' => true, 'hidden' => $this->activeTab !== 'organizers'])>
-            <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
-                <div class="relative flex-1 min-w-[200px] max-w-sm" wire:ignore
-                     x-data="{ q: '', timer: null, init() { this.q = $wire.orgSearch ?? ''; $wire.$watch('orgSearch', val => { if (val !== this.q) this.q = val; }); } }">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
-                    <input type="text" x-model="q" @input.debounce.80ms="$wire.set('orgSearch', q)" placeholder="Search name, ID, email..."
-                           class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus" autocomplete="off" spellcheck="false">
+             ═══════════════════════════════════════════════ --}}
+        <div @class(['flex flex-col flex-1 min-h-0 overflow-hidden' => true, 'hidden' => $this->activeTab !== 'organizers'])>
+
+            {{-- Filter Bar --}}
+            <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
+                <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
+                     x-data="{ q:'', timer:null, init(){ this.q=$wire.orgSearch??''; $wire.$watch('orgSearch',val=>{ if(val!==this.q) this.q=val; }); } }">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                    <input type="text" x-model="q"
+                           @input.debounce.80ms="$wire.set('orgSearch',q)"
+                           placeholder="Search name, ID, email..."
+                           class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-800"
+                           autocomplete="off" spellcheck="false">
                 </div>
-                <select wire:model.live="orgCollege" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                <select wire:model.live="orgCollege"
+                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-700 min-w-[140px]">
                     <option value="">All Colleges</option>
                     @foreach($this->orgColleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
                 </select>
-                <select wire:model.live="orgSort" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+                <select wire:model.live="orgSort"
+                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white input-brand text-gray-700 min-w-[130px]">
                     <option value="recent">Recent First</option>
                     <option value="oldest">Oldest First</option>
                 </select>
-                <button wire:click="resetOrgFilters" class="px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
-                    <i class="fas fa-rotate-left mr-2"></i>Reset
+                <button wire:click="resetOrgFilters"
+                        class="btn-ghost px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5">
+                    <i class="fas fa-rotate-left text-xs"></i>
+                    <span class="hidden sm:inline">Reset</span>
                 </button>
             </div>
 
-            <div class="relative flex-1 min-h-0" x-data="{ showScrollTop: false }">
-                <div id="org-table-scroll" @scroll.passive="showScrollTop = $event.target.scrollTop > 200"
-                     class="h-full overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
-                     wire:loading.class="tbl-loading" wire:target="orgSearch,orgCollege,orgSort,resetOrgFilters,executeToggleOrganizerStatus">
-                    <table class="w-full border-separate border-spacing-0">
-                        <thead class="btn-primary text-white" style="position:sticky;top:0;z-index:10;">
-                            <tr>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Name</th>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Teacher ID</th>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Email</th>
-                                <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">College</th>
-                                <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Status</th>
-                                <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Action</th>
+            {{-- Table --}}
+            <div class="relative flex-1 min-h-0" x-data="{ showTop: false }">
+                <div id="org-scroll"
+                     @scroll.passive="showTop = $event.target.scrollTop > 200"
+                     class="h-full overflow-y-auto overflow-x-auto scroll-custom"
+                     wire:loading.class="tbl-loading"
+                     wire:target="orgSearch,orgCollege,orgSort,resetOrgFilters,executeToggleOrganizerStatus">
+                    <table class="w-full border-collapse min-w-[700px]">
+                        <thead>
+                            <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Teacher ID</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hide-mobile">Email</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">College</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-100">
+                        <tbody class="divide-y divide-gray-50">
                             @forelse($this->organizerRecords as $item)
-                            <tr class="table-row-hover">
-                                <td class="px-6 py-4">
+                            <tr class="tbl-row bg-white">
+                                <td class="px-4 sm:px-5 py-3.5">
                                     <div class="flex items-center gap-3">
-                                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->name }}" class="w-10 h-10 rounded-lg object-cover shrink-0">
-                                        <span class="font-semibold text-slate-900 text-sm">{{ $item->name }}</span>
+                                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
+                                             alt="{{ $item->name }}"
+                                             class="w-9 h-9 rounded-lg object-cover shrink-0 shadow-sm ring-1 ring-gray-100">
+                                        <span class="font-semibold text-gray-800 text-sm">{{ $item->name }}</span>
                                     </div>
                                 </td>
-                                <td class="px-6 py-4"><span class="font-mono text-slate-800 text-sm font-semibold">{{ $item->id_number }}</span></td>
-                                <td class="px-6 py-4"><span class="text-slate-700 text-sm">{{ $item->email }}</span></td>
-                                <td class="px-6 py-4">
+                                <td class="px-4 sm:px-5 py-3.5">
+                                    <span class="font-mono text-gray-700 text-sm font-semibold">{{ $item->id_number }}</span>
+                                </td>
+                                <td class="px-4 sm:px-5 py-3.5 hide-mobile">
+                                    <span class="text-gray-600 text-sm">{{ $item->email }}</span>
+                                </td>
+                                <td class="px-4 sm:px-5 py-3.5">
                                     @php
                                         $dept        = $item->department;
                                         $directMatch = \App\Models\Course::where('college', $dept)->exists();
                                         $collegeName = $directMatch ? $dept : (\App\Models\Course::where('code', $dept)->value('college') ?? $dept);
                                         $deptCodes   = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('code')->toArray();
                                     @endphp
-                                    <span class="block font-semibold text-slate-800 text-sm leading-snug">{{ $collegeName }}</span>
+                                    <span class="block font-semibold text-gray-800 text-sm leading-snug">{{ $collegeName }}</span>
                                     @if(count($deptCodes))
                                     <div class="flex flex-wrap gap-1 mt-1">
                                         @foreach($deptCodes as $deptCode)
-                                            <span class="text-xs font-mono font-semibold text-purple-700">{{ $deptCode }}</span>
-                                            @if(!$loop->last)<span class="text-slate-300 text-xs">·</span>@endif
+                                            <span class="text-xs font-mono font-bold" style="color:var(--brand);">{{ $deptCode }}</span>
+                                            @if(!$loop->last)<span class="text-gray-300 text-xs">·</span>@endif
                                         @endforeach
                                     </div>
                                     @endif
                                 </td>
-                                <td class="px-6 py-4 text-center">
-                                    @php $sc=match($item->status){'ACTIVE'=>'bg-emerald-100 text-emerald-700','INACTIVE'=>'bg-amber-100 text-amber-700','SUSPENDED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600'}; @endphp
-                                    <span class="inline-block px-3 py-1.5 rounded-full text-xs font-semibold {{ $sc }}">{{ $item->status }}</span>
+                                <td class="px-4 sm:px-5 py-3.5 text-center">
+                                    @php
+                                        $sc = match($item->status) {
+                                            'ACTIVE'    => 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+                                            'INACTIVE'  => 'bg-amber-50 text-amber-700 border border-amber-200',
+                                            'SUSPENDED' => 'bg-red-50 text-red-700 border border-red-200',
+                                            default     => 'bg-gray-50 text-gray-600 border border-gray-200'
+                                        };
+                                    @endphp
+                                    <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold {{ $sc }}">
+                                        {{ $item->status }}
+                                    </span>
                                 </td>
-                                <td class="px-6 py-4 text-center">
-                                    <div class="flex items-center justify-center gap-2">
-                                        <button wire:click="viewProfile({{ $item->id }}, 'organizer')"
-                                                class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200">
-                                            <i class="fas fa-eye"></i> View
+                                <td class="px-4 sm:px-5 py-3.5 text-center">
+                                    <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                                        <button wire:click="viewProfile({{ $item->id }},'organizer')"
+                                                class="btn-view inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
+                                            <i class="fas fa-eye text-xs"></i>
+                                            <span class="hidden lg:inline">View</span>
                                         </button>
                                         @if($item->status === 'ACTIVE')
-                                            <button wire:click="confirmToggleOrganizerStatus({{ $item->id }}, 'deactivate')"
-                                                    class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200">
-                                                <i class="fas fa-ban"></i> Deactivate
+                                            <button wire:click="confirmToggleOrganizerStatus({{ $item->id }},'deactivate')"
+                                                    class="btn-danger inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
+                                                <i class="fas fa-ban text-xs"></i>
+                                                <span class="hidden lg:inline">Deactivate</span>
                                             </button>
                                         @else
-                                            <button wire:click="confirmToggleOrganizerStatus({{ $item->id }}, 'activate')"
-                                                    class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-200">
-                                                <i class="fas fa-circle-check"></i> Activate
+                                            <button wire:click="confirmToggleOrganizerStatus({{ $item->id }},'activate')"
+                                                    class="btn-success inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
+                                                <i class="fas fa-circle-check text-xs"></i>
+                                                <span class="hidden lg:inline">Activate</span>
                                             </button>
                                         @endif
                                     </div>
@@ -1494,156 +1680,217 @@ new class extends Component {
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="6" class="py-16 text-center">
-                                    <i class="fas fa-users-gear text-5xl text-slate-200 block mb-4"></i>
-                                    <p class="font-semibold text-slate-400">No organizers found</p>
-                                    <p class="text-sm text-slate-400 mt-1">Register an organizer to get started</p>
+                                <td colspan="6" class="py-20 text-center">
+                                    <div class="flex flex-col items-center gap-3">
+                                        <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                                            <i class="fas fa-users-gear text-2xl text-gray-300"></i>
+                                        </div>
+                                        <p class="font-semibold text-gray-400">No organizers found</p>
+                                        <p class="text-sm text-gray-400">Register an organizer to get started</p>
+                                    </div>
                                 </td>
                             </tr>
                             @endforelse
                         </tbody>
                     </table>
                 </div>
-                <button x-show="showScrollTop"
-                        x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-75" x-transition:enter-end="opacity-100 scale-100"
-                        x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-75"
-                        @click="document.getElementById('org-table-scroll').scrollTo({ top: 0, behavior: 'smooth' })"
-                        class="absolute bottom-4 right-4 z-20 w-10 h-10 btn-primary rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow"
-                        style="display:none" title="Back to top">
-                    <i class="fas fa-arrow-up text-sm"></i>
+
+                <button x-show="showTop"
+                        x-transition:enter="transition ease-out duration-200"
+                        x-transition:enter-start="opacity-0 scale-75"
+                        x-transition:enter-end="opacity-100 scale-100"
+                        x-transition:leave="transition ease-in duration-150"
+                        x-transition:leave-start="opacity-100 scale-100"
+                        x-transition:leave-end="opacity-0 scale-75"
+                        @click="document.getElementById('org-scroll').scrollTo({top:0,behavior:'smooth'})"
+                        class="btn-brand absolute bottom-4 right-4 z-20 w-9 h-9 rounded-full flex items-center justify-center"
+                        style="display:none">
+                    <i class="fas fa-arrow-up text-xs"></i>
                 </button>
             </div>
 
-            <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
-                <div class="flex items-center justify-between">
-                    @php $total=$this->organizerRecords->total(); $pp=$this->organizerRecords->perPage(); $cp=$this->organizerRecords->currentPage(); $from=$total>0?($cp-1)*$pp+1:0; $to=min($cp*$pp,$total); @endphp
-                    <p class="text-slate-600 text-sm">Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span> of <span class="font-semibold text-slate-800">{{ $total }}</span></p>
-                    <div class="flex gap-2 items-center">
-                        @if($this->organizerRecords->onFirstPage()) <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
-                        @else <button wire:click="previousPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">← Prev</button> @endif
-                        <span class="px-4 py-2 text-slate-700 text-sm font-medium">{{ $this->organizerRecords->currentPage() }} / {{ $this->organizerRecords->lastPage() }}</span>
-                        @if($this->organizerRecords->hasMorePages()) <button wire:click="nextPage('orgPage')" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next →</button>
-                        @else <button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button> @endif
+            {{-- Pagination Footer --}}
+            <div class="px-4 sm:px-6 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
+                @php
+                    $total=$this->organizerRecords->total();
+                    $pp=$this->organizerRecords->perPage();
+                    $cp=$this->organizerRecords->currentPage();
+                    $from=$total>0?($cp-1)*$pp+1:0;
+                    $to=min($cp*$pp,$total);
+                @endphp
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <p class="text-gray-500 text-xs sm:text-sm">
+                        Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span>
+                        of <span class="font-bold text-gray-700">{{ $total }}</span> records
+                    </p>
+                    <div class="flex items-center gap-1.5">
+                        @if($this->organizerRecords->onFirstPage())
+                            <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">← Prev</button>
+                        @else
+                            <button wire:click="previousPage('orgPage')" class="btn-brand px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold">← Prev</button>
+                        @endif
+
+                        <span class="px-3 py-2 text-gray-600 text-xs sm:text-sm font-semibold bg-white border border-gray-200 rounded-lg shadow-sm">
+                            {{ $this->organizerRecords->currentPage() }} / {{ $this->organizerRecords->lastPage() }}
+                        </span>
+
+                        @if($this->organizerRecords->hasMorePages())
+                            <button wire:click="nextPage('orgPage')" class="btn-brand px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold">Next →</button>
+                        @else
+                            <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">Next →</button>
+                        @endif
                     </div>
                 </div>
             </div>
         </div>
 
-    </div>
-</div>
+    </div>{{-- end card --}}
+</div>{{-- end page wrapper --}}
 
-{{-- ═══════════════════════════════════════════════════════════════════════════
+
+{{-- ═══════════════════════════════════════════════════════════════
      MODALS
-     ═══════════════════════════════════════════════════════════════════════════ --}}
+     ═══════════════════════════════════════════════════════════════ --}}
 
-{{-- ── REGISTER ALUMNI ──────────────────────────────────────────────────── --}}
+{{-- shared modal backdrop + wrapper macro --}}
+@php
+function modalWrap(string $size = 'max-w-2xl'): string {
+    return "fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto";
+}
+@endphp
+
+{{-- ── REGISTER ALUMNI ───────────────────────────────────────── --}}
 @if($activeModal==='registerAlumni')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
-        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
-            <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-user-plus text-2xl"></i> Register Alumni</h2>
-            <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto modal-in">
+
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-6 sm:px-8 py-5 rounded-t-2xl" style="background:var(--brand);">
+            <h2 class="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-3">
+                <i class="fas fa-user-plus"></i> Register Alumni
+            </h2>
+            <button wire:click="closeModal" class="text-white/60 hover:text-white transition text-2xl leading-none">×</button>
         </div>
 
+        {{-- Success --}}
         @if($alumniSuccess)
-        <div class="mx-8 mt-6 flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-            <div class="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
-                <i class="fas fa-circle-check text-emerald-600"></i>
-            </div>
+        <div class="mx-6 sm:mx-8 mt-6 flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+            <i class="fas fa-circle-check text-emerald-500 mt-0.5 shrink-0"></i>
             <div class="flex-1">
                 <p class="font-bold text-emerald-800 text-sm">Registration Successful!</p>
                 <p class="text-emerald-700 text-sm mt-0.5">{{ $alumniSuccess }}</p>
             </div>
-            <button wire:click="closeModal" class="px-4 py-2 btn-primary rounded-lg text-xs font-semibold shrink-0">Done</button>
+            <button wire:click="closeModal" class="btn-brand px-3 py-1.5 rounded-lg text-xs font-bold shrink-0">Done</button>
         </div>
         @endif
 
+        {{-- Errors --}}
         @if(count($alumniErrors)>0)
-        <div class="bg-red-50 border-b border-red-200 px-8 py-5">
-            <p class="font-semibold text-red-800 text-sm mb-3"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following errors:</p>
-            <ul class="text-red-700 text-sm space-y-2">
+        <div class="bg-red-50 border-b border-red-200 px-6 sm:px-8 py-4">
+            <p class="font-bold text-red-800 text-sm mb-2"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following:</p>
+            <ul class="text-red-700 text-sm space-y-1">
                 @foreach($alumniErrors as $ms)@foreach($ms as $m)
-                <li class="flex items-start gap-2"><span class="text-red-500 mt-0.5">•</span><span>{{ $m }}</span></li>
+                <li class="flex items-start gap-2"><span class="text-red-400 mt-0.5">•</span>{{ $m }}</li>
                 @endforeach@endforeach
             </ul>
         </div>
         @endif
 
-        <form wire:submit="registerAlumni" class="p-8 space-y-6">
+        <form wire:submit="registerAlumni" class="p-6 sm:p-8 space-y-5">
             <div class="flex justify-end">
-                <button type="button" wire:click="$set('alumniErrors',[])"
+                <button type="button"
+                        wire:click="$set('alumniErrors',[])"
                         onclick="this.closest('form').querySelectorAll('input[type=text],input[type=email],input[type=number],select').forEach(el=>{el.value='';el.dispatchEvent(new Event('input'))})"
-                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition">
-                    <i class="fas fa-rotate-left"></i> Reset Form
+                        class="btn-ghost inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500">
+                    <i class="fas fa-rotate-left text-xs"></i> Reset Form
                 </button>
             </div>
+
+            {{-- Photo --}}
             <div>
-                <label class="block text-sm font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
-                <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
+                <label class="block text-sm font-bold text-gray-700 mb-2">Profile Photo <span class="font-normal text-gray-400">(Optional)</span></label>
+                <div class="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer transition hover:border-[#7a3f91] hover:bg-[#f5eef9]"
                      onclick="document.getElementById('regPhotoInput').click()">
                     @if($regPhoto)
-                        <img src="{{ $regPhoto->temporaryUrl() }}" alt="Preview" class="w-32 h-32 rounded-lg mx-auto mb-4 object-cover shadow-md">
+                        <img src="{{ $regPhoto->temporaryUrl() }}" class="w-28 h-28 rounded-xl mx-auto mb-3 object-cover shadow-md">
                         <p class="text-sm text-emerald-600 font-semibold"><i class="fas fa-check mr-1"></i>Photo Selected</p>
                     @else
-                        <i class="fas fa-cloud-arrow-up text-4xl text-slate-400 block mb-3"></i>
-                        <p class="text-sm text-slate-700 font-semibold">Click to Upload Photo</p>
-                        <p class="text-xs text-slate-600 mt-2">JPG, PNG, WebP · max 5 MB</p>
+                        <i class="fas fa-cloud-arrow-up text-3xl text-gray-300 block mb-2"></i>
+                        <p class="text-sm text-gray-600 font-semibold">Click to Upload</p>
+                        <p class="text-xs text-gray-400 mt-1">JPG, PNG, WebP · max 5 MB</p>
                     @endif
                     <input type="file" id="regPhotoInput" wire:model="regPhoto" accept="image/*" class="hidden">
                 </div>
             </div>
+
+            {{-- Name --}}
             <div>
-                <label class="block text-sm font-bold text-slate-800 mb-3">Full Name <span class="text-red-500">*</span></label>
-                <div class="grid grid-cols-2 gap-4">
+                <label class="block text-sm font-bold text-gray-700 mb-2">Full Name <span class="text-red-500">*</span></label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                        <input wire:model.defer="regFirstName" type="text" placeholder="First Name" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">First Name <span class="text-red-400">*</span></p>
+                        <input wire:model.defer="regFirstName" type="text" placeholder="First Name"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">First Name <span class="text-red-400">*</span></p>
                     </div>
                     <div>
-                        <input wire:model.defer="regLastName" type="text" placeholder="Last Name" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Last Name <span class="text-red-400">*</span></p>
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 gap-4 mt-3">
-                    <div>
-                        <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial <span class="text-slate-400">(1–2 letters, optional)</span></p>
-                    </div>
-                    <div>
-                        <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix <span class="text-slate-400">(optional)</span></p>
+                        <input wire:model.defer="regLastName" type="text" placeholder="Last Name"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Student ID <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
-                    <p class="text-xs text-slate-500 mt-1.5 pl-1">Numbers only · padded to 8 digits</p>
-                </div>
-                <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Email <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="regEmail" type="email" placeholder="student@example.com" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">Middle Initial <span class="text-gray-300">(1–2 letters, optional)</span></p>
+                    </div>
+                    <div>
+                        <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
+                    </div>
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-4">
+
+            {{-- ID + Email --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Course <span class="text-red-500">*</span></label>
-                    <select wire:model.defer="regCourseCode" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Student ID <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
+                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono input-brand text-gray-800">
+                    <p class="text-xs text-gray-400 mt-1 pl-1">Numbers only · padded to 8 digits</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Email <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="regEmail" type="email" placeholder="student@example.com"
+                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                </div>
+            </div>
+
+            {{-- Course + Year --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Course <span class="text-red-500">*</span></label>
+                    <select wire:model.defer="regCourseCode"
+                            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
                         <option value="">Select Course</option>
                         @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Batch Year <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Batch Year <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999"
+                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
                 </div>
             </div>
-            <div class="flex gap-4 pt-3">
-                <button type="button" wire:click="closeModal" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
+
+            {{-- Actions --}}
+            <div class="flex gap-3 pt-2">
+                <button type="button" wire:click="closeModal"
+                        class="btn-ghost flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
                 <button type="submit" wire:loading.attr="disabled" wire:target="registerAlumni"
-                        class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner spin-icon"></i> Registering...</span>
+                        class="btn-brand flex-1 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="registerAlumni"><i class="fas fa-spinner spin"></i> Registering...</span>
                     <span wire:loading.remove wire:target="registerAlumni"><i class="fas fa-user-check"></i> Register Alumni</span>
                 </button>
             </div>
@@ -1652,147 +1899,136 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── IMPORT ────────────────────────────────────────────────────────────── --}}
+{{-- ── IMPORT ─────────────────────────────────────────────────── --}}
 @if($activeModal==='importModal')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelImport()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl modal-animate max-h-[92vh] overflow-y-auto scrollbar-custom">
-        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
-            <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-file-import text-2xl"></i> Import Alumni</h2>
-            <button wire:click="cancelImport" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.cancelImport()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto modal-in">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-5 rounded-t-2xl" style="background:var(--brand);">
+            <h2 class="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-3">
+                <i class="fas fa-file-import"></i> Import Alumni
+            </h2>
+            <button wire:click="cancelImport" class="text-white/60 hover:text-white transition text-2xl leading-none">×</button>
         </div>
-        <div class="p-8 space-y-5 min-h-[200px]">
+        <div class="p-6 sm:p-8 space-y-5">
 
-            {{-- ── STEP: UPLOAD ─────────────────────────────────────── --}}
-            @if($importStep === 'upload')
-            <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg text-sm">
-                <p class="text-blue-800 font-semibold mb-2"><i class="fas fa-circle-info mr-2"></i>Supported formats: CSV · Excel (.xlsx, .xls)</p>
-                <p class="text-blue-700 text-xs mb-1.5">
-                    Required columns:
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">first_name</code>
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">last_name</code>
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">middle_initial</code>
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">student_id</code>
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">course_code</code>
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">batch</code>
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">email</code>
-                </p>
-                <p class="text-blue-600 text-xs">
-                    Optional:
-                    <code class="bg-blue-100 px-1.5 py-0.5 rounded mx-0.5 font-mono">suffix</code>
-                </p>
+            {{-- UPLOAD --}}
+            @if($importStep==='upload')
+            <div class="bg-blue-50 border border-blue-200 p-4 rounded-xl text-sm">
+                <p class="text-blue-800 font-bold mb-2"><i class="fas fa-circle-info mr-2"></i>Supported: CSV · Excel (.xlsx, .xls)</p>
+                <div class="flex flex-wrap gap-1 mb-1">
+                    @foreach(['first_name','last_name','middle_initial','student_id','course_code','batch','email'] as $col)
+                    <code class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                    @endforeach
+                </div>
+                <p class="text-blue-500 text-xs mt-1">Optional: <code class="bg-blue-100 px-1.5 py-0.5 rounded font-mono">suffix</code></p>
             </div>
-            <div class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-all"
+            <div class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer transition hover:border-[#7a3f91] hover:bg-[#f5eef9]"
                  @click="document.getElementById('importFile').click()">
                 @if($importFile)
-                    <i class="fas fa-file-circle-check text-5xl text-emerald-500 block mb-3"></i>
-                    <p class="text-sm text-emerald-700 font-semibold">{{ $importFile->getClientOriginalName() }}</p>
-                    <p class="text-xs text-slate-500 mt-1">Click to change file</p>
+                    <i class="fas fa-file-circle-check text-4xl text-emerald-500 block mb-3"></i>
+                    <p class="text-emerald-700 font-semibold text-sm">{{ $importFile->getClientOriginalName() }}</p>
+                    <p class="text-gray-400 text-xs mt-1">Click to change file</p>
                 @else
-                    <i class="fas fa-file-arrow-up text-5xl text-slate-300 block mb-3"></i>
-                    <p class="text-slate-700 font-semibold text-sm">Click to choose file</p>
-                    <p class="text-xs text-slate-400 mt-1">CSV or Excel format</p>
+                    <i class="fas fa-file-arrow-up text-4xl text-gray-300 block mb-3"></i>
+                    <p class="text-gray-600 font-semibold text-sm">Click to choose file</p>
+                    <p class="text-gray-400 text-xs mt-1">CSV or Excel format</p>
                 @endif
                 <input type="file" id="importFile" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
             </div>
             <div class="flex gap-3">
-                <button type="button" wire:click="cancelImport" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button type="button" wire:click="processImportFile" @if(!$importFile) disabled @endif
+                <button type="button" wire:click="cancelImport"
+                        class="btn-ghost flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
+                <button type="button" wire:click="processImportFile"
+                        @if(!$importFile) disabled @endif
                         wire:loading.attr="disabled" wire:target="processImportFile"
-                        class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="processImportFile"><i class="fas fa-spinner spin-icon"></i> Processing…</span>
+                        class="btn-brand flex-1 px-5 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="processImportFile"><i class="fas fa-spinner spin"></i> Processing…</span>
                     <span wire:loading.remove wire:target="processImportFile"><i class="fas fa-upload"></i> Import Now</span>
                 </button>
             </div>
             @endif
 
-            {{-- ── STEP: PROCESSING ─────────────────────────────────── --}}
-            @if($importStep === 'processing')
+            {{-- PROCESSING --}}
+            @if($importStep==='processing')
             <div>
-                <div class="flex items-center justify-between mb-2">
-                    <p class="text-slate-800 font-semibold text-sm flex items-center gap-2">
-                        <i class="fas fa-spinner spin-icon text-purple-600"></i> Validating rows… {{ $importProgress }}/{{ $importTotal }}
+                <div class="flex justify-between mb-2">
+                    <p class="text-gray-700 font-semibold text-sm flex items-center gap-2">
+                        <i class="fas fa-spinner spin" style="color:var(--brand);"></i>
+                        Validating rows… {{ $importProgress }}/{{ $importTotal }}
                     </p>
-                    <span class="text-xs text-slate-500 font-mono">{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%</span>
+                    <span class="text-xs text-gray-400 font-mono">{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%</span>
                 </div>
-                <div class="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                    <div class="h-full rounded-full bg-purple-600 transition-all duration-300" style="width:{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%"></div>
+                <div class="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-300"
+                         style="background:var(--brand);width:{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%"></div>
                 </div>
             </div>
             @endif
 
-            {{-- ── STEP: BLOCKED (fatal error before processing) ────── --}}
-            @if($importStep === 'blocked')
+            {{-- BLOCKED --}}
+            @if($importStep==='blocked')
             <div class="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
-                <div class="w-10 h-10 bg-red-200 rounded-full flex items-center justify-center shrink-0"><i class="fas fa-xmark text-red-700 text-lg"></i></div>
-                <div class="flex-1">
-                    <p class="font-bold text-red-800 text-base">Import Failed</p>
+                <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center shrink-0">
+                    <i class="fas fa-xmark text-red-600"></i>
+                </div>
+                <div>
+                    <p class="font-bold text-red-800">Import Failed</p>
                     <p class="text-red-600 text-xs mt-0.5">{{ $importStatus }}</p>
                 </div>
             </div>
-            <button type="button" wire:click="resetImportState" class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
+            <button wire:click="resetImportState"
+                    class="btn-ghost w-full px-5 py-2.5 rounded-xl text-sm font-bold">
                 <i class="fas fa-arrow-left mr-2"></i>Try Again
             </button>
             @endif
 
-            {{-- ── STEP: DONE ───────────────────────────────────────── --}}
-            @if($importStep === 'done')
-            @php
-                $hasNew    = $importSuccessCount > 0;
-                $hasErrors = $importFailCount > 0;
-                $hasDups   = $importDuplicateCount > 0;
-            @endphp
+            {{-- DONE --}}
+            @if($importStep==='done')
+            @php $hasNew=$importSuccessCount>0; $hasErrors=$importFailCount>0; $hasDups=$importDuplicateCount>0; @endphp
 
-            {{-- Result banner --}}
-            <div class="rounded-xl overflow-hidden border {{ $hasNew ? 'border-emerald-200' : 'border-amber-200' }}">
-                <div class="px-5 py-4 flex items-center gap-3 {{ $hasNew ? 'bg-emerald-50' : 'bg-amber-50' }}">
-                    <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 {{ $hasNew ? 'bg-emerald-200' : 'bg-amber-200' }}">
-                        <i class="text-lg {{ $hasNew ? 'fas fa-circle-check text-emerald-700' : 'fas fa-triangle-exclamation text-amber-700' }}"></i>
+            <div class="rounded-xl border overflow-hidden {{ $hasNew?'border-emerald-200':'border-amber-200' }}">
+                <div class="px-5 py-4 flex items-center gap-3 {{ $hasNew?'bg-emerald-50':'bg-amber-50' }}">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 {{ $hasNew?'bg-emerald-100':'bg-amber-100' }}">
+                        <i class="{{ $hasNew?'fas fa-circle-check text-emerald-600':'fas fa-triangle-exclamation text-amber-600' }}"></i>
                     </div>
                     <div>
                         @if($hasNew)
-                            <p class="font-bold text-emerald-800 text-base">Import Complete</p>
+                            <p class="font-bold text-emerald-800">Import Complete</p>
                             <p class="text-emerald-600 text-xs mt-0.5">
-                                {{ $importSuccessCount }} record(s) imported successfully
+                                {{ $importSuccessCount }} record(s) imported
                                 @if($hasDups) · {{ $importDuplicateCount }} duplicate(s) skipped @endif
-                                @if($hasErrors) · {{ $importFailCount }} row(s) had errors @endif
+                                @if($hasErrors) · {{ $importFailCount }} error(s) @endif
                             </p>
                         @else
-                            <p class="font-bold text-amber-800 text-base">Nothing Imported</p>
+                            <p class="font-bold text-amber-800">Nothing Imported</p>
                             <p class="text-amber-600 text-xs mt-0.5">All records were duplicates or had errors.</p>
                         @endif
                     </div>
                 </div>
             </div>
 
-            {{-- Stats: Total · Imported · Duplicate · Error --}}
-            <div class="grid grid-cols-4 gap-3">
-                <div class="bg-slate-50 rounded-xl p-4 border border-slate-200 text-center">
-                    <p class="text-slate-700 text-2xl font-bold">{{ $importTotal }}</p>
-                    <p class="text-slate-500 text-xs font-semibold mt-1 uppercase tracking-wide">Total</p>
+            <div class="grid grid-cols-4 gap-2 sm:gap-3">
+                @foreach([
+                    ['bg-gray-50','border-gray-200','text-gray-700',$importTotal,'Total'],
+                    ['bg-emerald-50','border-emerald-200','text-emerald-600',$importSuccessCount,'Imported'],
+                    ['bg-amber-50','border-amber-200','text-amber-600',$importDuplicateCount,'Duplicate'],
+                    ['bg-red-50','border-red-200','text-red-600',$importFailCount,'Error'],
+                ] as [$bg,$border,$clr,$num,$lbl])
+                <div class="{{ $bg }} rounded-xl p-3 sm:p-4 border {{ $border }} text-center">
+                    <p class="{{ $clr }} text-xl sm:text-2xl font-extrabold">{{ $num }}</p>
+                    <p class="text-gray-500 text-xs font-bold mt-1 uppercase tracking-wide">{{ $lbl }}</p>
                 </div>
-                <div class="bg-emerald-50 rounded-xl p-4 border border-emerald-200 text-center">
-                    <p class="text-emerald-600 text-2xl font-bold">{{ $importSuccessCount }}</p>
-                    <p class="text-emerald-700 text-xs font-semibold mt-1 uppercase tracking-wide">Imported</p>
-                </div>
-                <div class="bg-amber-50 rounded-xl p-4 border border-amber-200 text-center">
-                    <p class="text-amber-600 text-2xl font-bold">{{ $importDuplicateCount }}</p>
-                    <p class="text-amber-700 text-xs font-semibold mt-1 uppercase tracking-wide">Duplicate</p>
-                </div>
-                <div class="bg-red-50 rounded-xl p-4 border border-red-200 text-center">
-                    <p class="text-red-600 text-2xl font-bold">{{ $importFailCount }}</p>
-                    <p class="text-red-700 text-xs font-semibold mt-1 uppercase tracking-wide">Error</p>
-                </div>
+                @endforeach
             </div>
 
-            {{-- Error list — only shown when there are errors --}}
             @if($hasErrors)
             <div class="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
                 <div class="px-4 py-3 bg-red-100 border-b border-red-200 flex items-center gap-2">
                     <i class="fas fa-circle-xmark text-red-500 text-sm"></i>
-                    <p class="font-semibold text-red-800 text-sm">Validation Errors</p>
+                    <p class="font-bold text-red-800 text-sm">Validation Errors</p>
                     <span class="ml-auto text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full font-bold">{{ count($importErrors) }}</span>
                 </div>
-                <ul class="divide-y divide-red-100 overflow-y-auto scrollbar-custom" style="max-height:220px">
+                <ul class="divide-y divide-red-100 overflow-y-auto scroll-custom" style="max-height:200px">
                     @foreach($importErrors as $err)
                     <li class="px-4 py-3 text-xs text-red-700 flex items-start gap-2">
                         <i class="fas fa-circle-xmark text-red-400 mt-0.5 shrink-0"></i>
@@ -1803,12 +2039,13 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Action buttons --}}
             <div class="flex gap-3">
-                <button type="button" wire:click="resetImportState" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">
+                <button wire:click="resetImportState"
+                        class="btn-ghost flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">
                     <i class="fas fa-arrow-left mr-2"></i>Import Another
                 </button>
-                <button type="button" wire:click="closeModal" class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold transition">Done</button>
+                <button wire:click="closeModal"
+                        class="btn-brand flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">Done</button>
             </div>
             @endif
 
@@ -1817,97 +2054,124 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── MANAGE COURSES ────────────────────────────────────────────────────── --}}
+{{-- ── MANAGE COURSES ─────────────────────────────────────────── --}}
 @if($activeModal==='manageCourses')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col modal-animate">
-        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg">
-            <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-sliders text-2xl"></i> Manage Courses</h2>
-            <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto modal-in flex flex-col max-h-[92vh]">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-5 rounded-t-2xl shrink-0" style="background:var(--brand);">
+            <h2 class="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-3">
+                <i class="fas fa-sliders"></i> Manage Courses
+            </h2>
+            <button wire:click="closeModal" class="text-white/60 hover:text-white transition text-2xl leading-none">×</button>
         </div>
+
         @if($courseAlert)
-        <div class="mx-8 mt-5 shrink-0 flex items-start gap-3 p-4 rounded-xl border {{ $courseAlertType === 'success' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200' }}">
-            <i class="fas mt-0.5 {{ $courseAlertType === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-red-500' }}"></i>
-            <p class="text-sm font-semibold {{ $courseAlertType === 'success' ? 'text-emerald-800' : 'text-red-800' }}">{{ $courseAlert }}</p>
+        <div class="mx-6 sm:mx-8 mt-5 shrink-0 flex items-start gap-3 p-4 rounded-xl border
+            {{ $courseAlertType==='success'?'bg-emerald-50 border-emerald-200':'bg-red-50 border-red-200' }}">
+            <i class="fas mt-0.5 {{ $courseAlertType==='success'?'fa-circle-check text-emerald-500':'fa-circle-xmark text-red-500' }}"></i>
+            <p class="text-sm font-semibold {{ $courseAlertType==='success'?'text-emerald-800':'text-red-800' }}">{{ $courseAlert }}</p>
         </div>
         @endif
-        <div class="flex-1 overflow-y-auto scrollbar-custom px-8 py-6 space-y-6">
-            <div class="border border-slate-200 rounded-lg p-6 bg-slate-50">
-                <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-                    <i class="fas fa-{{ $editingCourseId ? 'pencil' : 'plus-circle' }} text-purple-600"></i>
-                    {{ $editingCourseId ? 'Edit Course' : 'Add New Course' }}
+
+        <div class="flex-1 overflow-y-auto scroll-custom px-6 sm:px-8 py-6 space-y-6">
+            {{-- Form --}}
+            <div class="border border-gray-100 rounded-xl p-5 bg-gray-50 shadow-sm">
+                <h3 class="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
+                    <i class="fas fa-{{ $editingCourseId?'pencil':'plus-circle' }}" style="color:var(--brand);"></i>
+                    {{ $editingCourseId?'Edit Course':'Add New Course' }}
                 </h3>
-                <div class="space-y-4">
+                <div class="space-y-3">
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-2">Course Code</label>
-                        <input wire:model.defer="courseCode" type="text" placeholder="e.g. BSIT" maxlength="20" class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        <label class="block text-xs font-bold text-gray-600 mb-1.5">Course Code</label>
+                        <input wire:model.defer="courseCode" type="text" placeholder="e.g. BSIT" maxlength="20"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 mb-2">Course Name</label>
-                        <input wire:model.defer="courseName" type="text" placeholder="e.g. Bachelor of Science in Information Technology" maxlength="100" class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                        <label class="block text-xs font-bold text-gray-600 mb-1.5">Course Name</label>
+                        <input wire:model.defer="courseName" type="text" placeholder="e.g. Bachelor of Science in Information Technology" maxlength="100"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
                     </div>
-                    <div class="flex gap-3 pt-2">
+                    <div class="flex gap-3 pt-1">
                         @if($editingCourseId)
-                        <button type="button" wire:click="resetCourseForm" class="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-100 transition">Cancel</button>
+                        <button wire:click="resetCourseForm"
+                                class="btn-ghost flex-1 px-4 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
                         @endif
-                        <button type="button" wire:click="saveCourse" wire:loading.attr="disabled" wire:target="saveCourse"
-                                class="flex-1 px-4 py-2 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                            <span wire:loading wire:target="saveCourse"><i class="fas fa-spinner spin-icon"></i></span>
-                            <span wire:loading.remove wire:target="saveCourse">{{ $editingCourseId ? 'Update Course' : 'Add Course' }}</span>
+                        <button wire:click="saveCourse" wire:loading.attr="disabled" wire:target="saveCourse"
+                                class="btn-brand flex-1 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                            <span wire:loading wire:target="saveCourse"><i class="fas fa-spinner spin"></i></span>
+                            <span wire:loading.remove wire:target="saveCourse">{{ $editingCourseId?'Update Course':'Add Course' }}</span>
                         </button>
                     </div>
                 </div>
             </div>
+
+            {{-- List --}}
             <div>
-                <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2"><i class="fas fa-book text-slate-500"></i> Courses ({{ count($coursesList) }})</h3>
-                <div class="space-y-2 max-h-64 overflow-y-auto scrollbar-custom pr-2">
+                <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <i class="fas fa-book text-gray-400"></i> Courses ({{ count($coursesList) }})
+                </h3>
+                <div class="space-y-2 max-h-64 overflow-y-auto scroll-custom pr-1">
                     @forelse($coursesList as $c)
-                    @php $belongsToCollege = $c['college'] ?? null; @endphp
-                    <div class="flex items-center justify-between p-4 border border-slate-200 rounded-lg bg-white">
+                    <div class="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:border-gray-200 transition">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
-                                <p class="font-semibold text-slate-800 text-sm">{{ $c['code'] }}</p>
-                                @if($belongsToCollege)
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold border border-purple-200"><i class="fas fa-building-columns text-xs"></i>{{ $belongsToCollege }}</span>
+                                <p class="font-bold text-gray-800 text-sm">{{ $c['code'] }}</p>
+                                @if($c['college']??null)
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border"
+                                          style="background:var(--brand-50);color:var(--brand);border-color:var(--brand-200);">
+                                        <i class="fas fa-building-columns text-xs"></i>{{ $c['college'] }}
+                                    </span>
                                 @else
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-400 rounded-full text-xs font-medium border border-slate-200"><i class="fas fa-circle-minus text-xs"></i> No College</span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 text-gray-400 border border-gray-200 rounded-full text-xs font-medium">
+                                        <i class="fas fa-circle-minus text-xs"></i> No College
+                                    </span>
                                 @endif
                             </div>
-                            <p class="text-slate-600 text-xs mt-1">{{ $c['name'] }}</p>
+                            <p class="text-gray-500 text-xs mt-0.5">{{ $c['name'] }}</p>
                         </div>
-                        <div class="flex gap-2 ml-4 shrink-0">
-                            <button wire:click="openEditCourse({{ $c['id'] }})" class="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition font-semibold text-xs border border-blue-200 flex items-center gap-1.5"><i class="fas fa-pencil"></i> Edit</button>
-                            <button wire:click="confirmDeleteCourse({{ $c['id'] }})" class="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition font-semibold text-xs border border-red-200"><i class="fas fa-trash"></i> Delete</button>
+                        <div class="flex gap-1.5 ml-3 shrink-0">
+                            <button wire:click="openEditCourse({{ $c['id'] }})"
+                                    class="btn-ghost px-2.5 py-1.5 rounded-lg text-xs font-bold text-blue-600 border-blue-100 hover:bg-blue-50 flex items-center gap-1">
+                                <i class="fas fa-pencil text-xs"></i> <span class="hidden sm:inline">Edit</span>
+                            </button>
+                            <button wire:click="confirmDeleteCourse({{ $c['id'] }})"
+                                    class="btn-danger px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                                <i class="fas fa-trash text-xs"></i> <span class="hidden sm:inline">Delete</span>
+                            </button>
                         </div>
                     </div>
                     @empty
-                    <p class="text-center text-slate-500 py-8 text-sm">No courses yet.</p>
+                    <p class="text-center text-gray-400 py-8 text-sm">No courses yet.</p>
                     @endforelse
                 </div>
             </div>
         </div>
-        <div class="px-8 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
-            <button wire:click="closeModal" class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-100 transition">Close</button>
+
+        <div class="px-6 sm:px-8 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl shrink-0">
+            <button wire:click="closeModal"
+                    class="btn-ghost w-full px-5 py-2.5 rounded-xl text-sm font-bold">Close</button>
         </div>
     </div>
 </div>
 @endif
 
-{{-- ── DELETE COURSE CONFIRM ─────────────────────────────────────────────── --}}
+{{-- ── DELETE COURSE CONFIRM ─────────────────────────────────── --}}
 @if($activeModal==='deleteCourseConfirm')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
-        <div class="px-8 py-6 bg-red-50 border-b border-red-200 rounded-t-lg">
-            <h2 class="text-xl font-bold text-red-800 flex items-center gap-3"><i class="fas fa-triangle-exclamation"></i> Delete Course</h2>
+<div class="{{ modalWrap('max-w-sm') }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-auto modal-in">
+        <div class="px-6 sm:px-8 py-5 bg-red-50 border-b border-red-100 rounded-t-2xl">
+            <h2 class="text-lg font-extrabold text-red-800 flex items-center gap-2">
+                <i class="fas fa-triangle-exclamation"></i> Delete Course
+            </h2>
         </div>
-        <div class="p-8">
-            <p class="text-slate-800 text-sm mb-2">Delete <strong class="text-red-600">{{ $deleteCourseName }}</strong>?</p>
-            <p class="text-slate-600 text-xs mb-6">This action cannot be undone.</p>
+        <div class="p-6 sm:p-8">
+            <p class="text-gray-700 text-sm mb-1">Delete <strong class="text-red-600">{{ $deleteCourseName }}</strong>?</p>
+            <p class="text-gray-400 text-xs mb-6">This action cannot be undone.</p>
             <div class="flex gap-3">
-                <button type="button" wire:click="closeModal" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button type="button" wire:click="deleteCourse" wire:loading.attr="disabled" wire:target="deleteCourse"
-                        class="flex-1 px-6 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="deleteCourse"><i class="fas fa-spinner spin-icon"></i></span>
+                <button wire:click="closeModal" class="btn-ghost flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
+                <button wire:click="deleteCourse" wire:loading.attr="disabled" wire:target="deleteCourse"
+                        class="flex-1 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="deleteCourse"><i class="fas fa-spinner spin"></i></span>
                     <span wire:loading.remove wire:target="deleteCourse">Delete</span>
                 </button>
             </div>
@@ -1916,184 +2180,219 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── VIEW PROFILE ──────────────────────────────────────────────────────── --}}
+{{-- ── VIEW PROFILE ──────────────────────────────────────────── --}}
 @if($activeModal==='viewProfile' && $viewingProfile)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
-        <div class="flex items-center justify-between px-8 py-5 btn-primary text-white rounded-t-lg sticky top-0 z-10">
-            <h2 class="text-xl font-bold flex items-center gap-2">
+<div class="{{ modalWrap('max-w-lg') }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-auto modal-in">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-5 rounded-t-2xl sticky top-0 z-10" style="background:var(--brand);">
+            <h2 class="text-lg sm:text-xl font-extrabold text-white flex items-center gap-2">
                 <i class="fas {{ $viewingProfileType==='alumni'?'fa-graduation-cap':'fa-users-gear' }}"></i>
                 {{ $viewingProfileType==='alumni'?'Alumni':'Organizer' }} Profile
             </h2>
-            <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+            <button wire:click="closeModal" class="text-white/60 hover:text-white transition text-2xl leading-none">×</button>
         </div>
-        <div class="p-8 space-y-6">
-            <div class="flex items-center gap-5">
+        <div class="p-6 sm:p-8 space-y-5 max-h-[80vh] overflow-y-auto scroll-custom">
+            {{-- Avatar row --}}
+            <div class="flex items-center gap-4">
                 @if($updatingProfilePhoto)
-                    <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" alt="Preview" class="w-40 h-40 rounded-xl object-cover shadow-md shrink-0">
+                    <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" class="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover shadow-lg ring-2 ring-[#7a3f91]/20 shrink-0">
                 @else
-                    <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo']??null) }}" alt="{{ $viewingProfile['name'] ?? '' }}" class="w-40 h-40 rounded-xl object-cover shadow-md shrink-0">
+                    <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo']??null) }}"
+                         alt="{{ $viewingProfile['name']??'' }}"
+                         class="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover shadow-lg ring-2 ring-gray-100 shrink-0">
                 @endif
                 <div>
-                    <p class="text-xl font-bold text-slate-800 leading-tight">{{ $viewingProfile['name'] ?? '' }}</p>
-                    <p class="text-slate-500 text-sm mt-1">{{ $viewingProfile['email'] }}</p>
-                    @if($viewingProfileType==='alumni')
-                        @php $sc=match($viewingProfile['status']??''){'VERIFIED'=>'bg-emerald-100 text-emerald-700','PENDING'=>'bg-amber-100 text-amber-700','REJECTED'=>'bg-red-100 text-red-700',default=>'bg-slate-100 text-slate-600'}; @endphp
-                    @else
-                        @php $sc=match($viewingProfile['status']??''){'ACTIVE'=>'bg-emerald-100 text-emerald-700','INACTIVE'=>'bg-red-100 text-red-700','SUSPENDED'=>'bg-amber-100 text-amber-700',default=>'bg-slate-100 text-slate-600'}; @endphp
-                    @endif
-                    <span class="inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold {{ $sc }}">{{ $viewingProfile['status'] ?? 'N/A' }}</span>
+                    <p class="text-lg font-extrabold text-gray-800 leading-tight">{{ $viewingProfile['name']??'' }}</p>
+                    <p class="text-gray-500 text-sm mt-0.5">{{ $viewingProfile['email'] }}</p>
+                    @php
+                        $sc = $viewingProfileType==='alumni'
+                            ? match($viewingProfile['status']??'') {
+                                'VERIFIED'=>'bg-emerald-50 text-emerald-700 border-emerald-200',
+                                'PENDING'=>'bg-amber-50 text-amber-700 border-amber-200',
+                                'REJECTED'=>'bg-red-50 text-red-700 border-red-200',
+                                default=>'bg-gray-50 text-gray-600 border-gray-200'
+                              }
+                            : match($viewingProfile['status']??'') {
+                                'ACTIVE'=>'bg-emerald-50 text-emerald-700 border-emerald-200',
+                                'INACTIVE'=>'bg-red-50 text-red-700 border-red-200',
+                                'SUSPENDED'=>'bg-amber-50 text-amber-700 border-amber-200',
+                                default=>'bg-gray-50 text-gray-600 border-gray-200'
+                              };
+                    @endphp
+                    <span class="inline-block mt-2 px-3 py-1 rounded-full text-xs font-bold border {{ $sc }}">
+                        {{ $viewingProfile['status']??'N/A' }}
+                    </span>
                 </div>
             </div>
+
+            {{-- Fields --}}
             <div class="grid grid-cols-2 gap-3">
                 @if($viewingProfileType==='alumni')
-                <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                    <p class="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Student ID</p>
-                    <p class="font-bold text-slate-800 font-mono">{{ $viewingProfile['student_id'] ?? '—' }}</p>
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                    <p class="text-xs text-gray-400 font-bold uppercase tracking-wide mb-1">Student ID</p>
+                    <p class="font-bold text-gray-800 font-mono text-sm">{{ $viewingProfile['student_id']??'—' }}</p>
                 </div>
-                <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                    <p class="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Batch Year</p>
-                    <p class="font-bold text-slate-800">{{ $viewingProfile['batch'] ?? '—' }}</p>
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                    <p class="text-xs text-gray-400 font-bold uppercase tracking-wide mb-1">Batch Year</p>
+                    <p class="font-bold text-gray-800 text-sm">{{ $viewingProfile['batch']??'—' }}</p>
                 </div>
-                <div class="bg-purple-50 rounded-lg p-4 border border-purple-200 col-span-2">
-                    <p class="text-xs text-purple-600 font-semibold uppercase tracking-wide mb-1">Course</p>
-                    <p class="font-bold text-purple-900 text-sm">{{ $viewingProfile['course_code'] ?? '—' }}</p>
-                    <p class="text-purple-700 text-xs mt-0.5">{{ $viewingProfile['course_name'] ?? '' }}</p>
+                <div class="col-span-2 rounded-xl p-4 border" style="background:var(--brand-50);border-color:var(--brand-200);">
+                    <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--brand);">Course</p>
+                    <p class="font-bold text-sm" style="color:var(--brand-dark);">{{ $viewingProfile['course_code']??'—' }}</p>
+                    <p class="text-xs mt-0.5" style="color:var(--brand-light);">{{ $viewingProfile['course_name']??'' }}</p>
                 </div>
                 @else
-                <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                    <p class="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Teacher ID</p>
-                    <p class="font-bold text-slate-800 font-mono">{{ $viewingProfile['id_number'] ?? '—' }}</p>
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                    <p class="text-xs text-gray-400 font-bold uppercase tracking-wide mb-1">Teacher ID</p>
+                    <p class="font-bold text-gray-800 font-mono text-sm">{{ $viewingProfile['id_number']??'—' }}</p>
                 </div>
-                <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                    <p class="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Department</p>
-                    <p class="font-bold text-slate-800 font-mono">{{ $viewingProfile['department'] ?? '—' }}</p>
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                    <p class="text-xs text-gray-400 font-bold uppercase tracking-wide mb-1">Department</p>
+                    <p class="font-bold text-gray-800 text-sm">{{ $viewingProfile['department']??'—' }}</p>
                 </div>
-                <div class="bg-purple-50 rounded-lg p-4 border border-purple-200 col-span-2">
-                    <p class="text-xs text-purple-600 font-semibold uppercase tracking-wide mb-1">College</p>
-                    <p class="font-bold text-purple-900 text-sm">{{ $this->getCollegeForCourse($viewingProfile['department'] ?? '') }}</p>
+                <div class="col-span-2 rounded-xl p-4 border" style="background:var(--brand-50);border-color:var(--brand-200);">
+                    <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:var(--brand);">College</p>
+                    <p class="font-bold text-sm" style="color:var(--brand-dark);">{{ $this->getCollegeForCourse($viewingProfile['department']??'') }}</p>
                 </div>
                 @endif
             </div>
+
+            {{-- Photo update --}}
             <div>
-                <p class="text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Update Profile Photo</p>
-                <div class="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
+                <p class="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Update Profile Photo</p>
+                <div class="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer transition hover:border-[#7a3f91] hover:bg-[#f5eef9]"
                      @click="document.getElementById('profilePhotoInput').click()">
-                    <i class="fas fa-camera text-2xl text-slate-400 block mb-2"></i>
-                    <p class="text-slate-700 font-semibold text-sm">{{ $updatingProfilePhoto?'Change Photo':'Click to Upload New Photo' }}</p>
-                    <p class="text-xs text-slate-500 mt-1">JPG, PNG, WebP · max 5 MB</p>
+                    <i class="fas fa-camera text-2xl text-gray-300 block mb-2"></i>
+                    <p class="text-gray-600 font-semibold text-sm">{{ $updatingProfilePhoto?'Change Photo':'Click to Upload New Photo' }}</p>
+                    <p class="text-xs text-gray-400 mt-1">JPG, PNG, WebP · max 5 MB</p>
                     <input type="file" id="profilePhotoInput" wire:model="updatingProfilePhoto" accept="image/*" class="hidden">
                 </div>
                 @if($updatingProfilePhoto)
                 <button wire:click="updateProfilePhoto" wire:loading.attr="disabled" wire:target="updateProfilePhoto"
-                        class="w-full mt-3 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="updateProfilePhoto"><i class="fas fa-spinner spin-icon"></i> Saving...</span>
+                        class="btn-brand w-full mt-3 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="updateProfilePhoto"><i class="fas fa-spinner spin"></i> Saving...</span>
                     <span wire:loading.remove wire:target="updateProfilePhoto"><i class="fas fa-floppy-disk"></i> Save Photo</span>
                 </button>
                 @endif
             </div>
-            <button wire:click="closeModal" class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Close</button>
+
+            <button wire:click="closeModal" class="btn-ghost w-full px-5 py-2.5 rounded-xl text-sm font-bold">Close</button>
         </div>
     </div>
 </div>
 @endif
 
-{{-- ── REGISTER ORGANIZER ───────────────────────────────────────────────── --}}
+{{-- ── REGISTER ORGANIZER ────────────────────────────────────── --}}
 @if($activeModal==='registerOrganizer')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto scrollbar-custom modal-animate">
-        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg sticky top-0 z-10">
-            <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-users-gear text-2xl"></i> Register Organizer</h2>
-            <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto modal-in">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-5 rounded-t-2xl" style="background:var(--brand);">
+            <h2 class="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-3">
+                <i class="fas fa-users-gear"></i> Register Organizer
+            </h2>
+            <button wire:click="closeModal" class="text-white/60 hover:text-white transition text-2xl leading-none">×</button>
         </div>
 
         @if($organizerSuccess)
-        <div class="mx-8 mt-6 flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-            <div class="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
-                <i class="fas fa-circle-check text-emerald-600"></i>
-            </div>
+        <div class="mx-6 sm:mx-8 mt-6 flex items-start gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+            <i class="fas fa-circle-check text-emerald-500 mt-0.5 shrink-0"></i>
             <div class="flex-1">
                 <p class="font-bold text-emerald-800 text-sm">Registration Successful!</p>
                 <p class="text-emerald-700 text-sm mt-0.5">{{ $organizerSuccess }}</p>
             </div>
-            <button wire:click="closeModal" class="px-4 py-2 btn-primary rounded-lg text-xs font-semibold shrink-0">Done</button>
+            <button wire:click="closeModal" class="btn-brand px-3 py-1.5 rounded-lg text-xs font-bold shrink-0">Done</button>
         </div>
         @endif
 
         @if(count($organizerErrors)>0)
-        <div class="bg-red-50 border-b border-red-200 px-8 py-5">
-            <p class="font-semibold text-red-800 text-sm mb-3"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following errors:</p>
-            <ul class="text-red-700 text-sm space-y-2">
+        <div class="bg-red-50 border-b border-red-200 px-6 sm:px-8 py-4">
+            <p class="font-bold text-red-800 text-sm mb-2"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following:</p>
+            <ul class="text-red-700 text-sm space-y-1">
                 @foreach($organizerErrors as $ms)@foreach($ms as $m)
-                <li class="flex items-start gap-2"><span class="text-red-500 mt-0.5">•</span><span>{{ $m }}</span></li>
+                <li class="flex items-start gap-2"><span class="text-red-400 mt-0.5">•</span>{{ $m }}</li>
                 @endforeach@endforeach
             </ul>
         </div>
         @endif
 
-        <form wire:submit="registerOrganizer" class="p-8 space-y-6">
+        <form wire:submit="registerOrganizer" class="p-6 sm:p-8 space-y-5 max-h-[80vh] overflow-y-auto scroll-custom">
             <div class="flex justify-end">
-                <button type="button" wire:click="$set('organizerErrors',[])"
+                <button type="button"
+                        wire:click="$set('organizerErrors',[])"
                         onclick="this.closest('form').querySelectorAll('input[type=text],input[type=email],select').forEach(el=>{el.value='';el.dispatchEvent(new Event('input'))})"
-                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition">
-                    <i class="fas fa-rotate-left"></i> Reset Form
+                        class="btn-ghost inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500">
+                    <i class="fas fa-rotate-left text-xs"></i> Reset Form
                 </button>
             </div>
+
+            {{-- Photo --}}
             <div>
-                <label class="block text-sm font-bold text-slate-800 mb-3">Profile Photo <span class="font-normal text-slate-500">(Optional)</span></label>
-                <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition"
+                <label class="block text-sm font-bold text-gray-700 mb-2">Profile Photo <span class="font-normal text-gray-400">(Optional)</span></label>
+                <div class="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer transition hover:border-[#7a3f91] hover:bg-[#f5eef9]"
                      onclick="document.getElementById('orgPhotoInput').click()">
                     @if($orgPhoto)
-                        <img src="{{ $orgPhoto->temporaryUrl() }}" alt="Preview" class="w-32 h-32 rounded-lg mx-auto mb-4 object-cover shadow-md">
+                        <img src="{{ $orgPhoto->temporaryUrl() }}" class="w-28 h-28 rounded-xl mx-auto mb-3 object-cover shadow-md">
                         <p class="text-sm text-emerald-600 font-semibold"><i class="fas fa-check mr-1"></i>Photo Selected</p>
                     @else
-                        <i class="fas fa-cloud-arrow-up text-4xl text-slate-400 block mb-3"></i>
-                        <p class="text-sm text-slate-700 font-semibold">Click to Upload Photo</p>
-                        <p class="text-xs text-slate-600 mt-2">JPG, PNG, WebP · max 5 MB</p>
+                        <i class="fas fa-cloud-arrow-up text-3xl text-gray-300 block mb-2"></i>
+                        <p class="text-sm text-gray-600 font-semibold">Click to Upload</p>
+                        <p class="text-xs text-gray-400 mt-1">JPG, PNG, WebP · max 5 MB</p>
                     @endif
                     <input type="file" id="orgPhotoInput" wire:model="orgPhoto" accept="image/*" class="hidden">
                 </div>
             </div>
+
+            {{-- Name --}}
             <div>
-                <label class="block text-sm font-bold text-slate-800 mb-3">Full Name <span class="text-red-500">*</span></label>
-                <div class="grid grid-cols-2 gap-4">
+                <label class="block text-sm font-bold text-gray-700 mb-2">Full Name <span class="text-red-500">*</span></label>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                        <input wire:model.defer="orgFirstName" type="text" placeholder="First Name" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">First Name <span class="text-red-400">*</span></p>
+                        <input wire:model.defer="orgFirstName" type="text" placeholder="First Name"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">First Name <span class="text-red-400">*</span></p>
                     </div>
                     <div>
-                        <input wire:model.defer="orgLastName" type="text" placeholder="Last Name" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Last Name <span class="text-red-400">*</span></p>
+                        <input wire:model.defer="orgLastName" type="text" placeholder="Last Name"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-4 mt-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                     <div>
-                        <input wire:model.defer="orgMiddleInitial" type="text" placeholder="e.g. A" maxlength="2" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Middle Initial <span class="text-slate-400">(letters only)</span></p>
+                        <input wire:model.defer="orgMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">Middle Initial <span class="text-gray-300">(letters only)</span></p>
                     </div>
                     <div>
-                        <input wire:model.defer="orgSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
-                        <p class="text-xs text-slate-500 mt-1.5 pl-1">Suffix <span class="text-slate-400">(optional)</span></p>
+                        <input wire:model.defer="orgSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-400 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
                     </div>
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-4">
+
+            {{-- ID + Email --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Teacher ID <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="orgTeacherId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-mono input-focus text-slate-800">
-                    <p class="text-xs text-slate-500 mt-1.5 pl-1">Numbers only · padded to 8 digits</p>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Teacher ID <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="orgTeacherId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
+                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono input-brand text-gray-800">
+                    <p class="text-xs text-gray-400 mt-1 pl-1">Numbers only · padded to 8 digits</p>
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-slate-800 mb-3">Email <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="orgEmail" type="email" placeholder="teacher@example.com" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Email <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="orgEmail" type="email" placeholder="teacher@example.com"
+                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
                 </div>
             </div>
+
+            {{-- College --}}
             <div>
-                <label class="block text-sm font-bold text-slate-800 mb-3">College <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-bold text-gray-700 mb-2">College <span class="text-red-500">*</span></label>
                 @if($this->orgDepartmentsGrouped->isEmpty())
-                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start gap-2">
+                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 flex items-start gap-2">
                         <i class="fas fa-triangle-exclamation mt-0.5 shrink-0"></i>
-                        <span>No colleges configured yet. Please set up colleges first via <strong>Manage Colleges</strong>.</span>
+                        <span>No colleges configured yet. Set up colleges via <strong>Manage Colleges</strong>.</span>
                     </div>
                 @else
                     @php
@@ -2103,44 +2402,50 @@ new class extends Component {
                             $collegeDeptsMap[$collegeName] = $depts->pluck('code')->toArray();
                         }
                     @endphp
-                    <div x-data="{ map: {{ Js::from($collegeDeptsMap) }}, get depts() { return $wire.orgCollegeSelect ? (this.map[$wire.orgCollegeSelect] ?? []) : []; } }">
-                        <select wire:model.live="orgCollegeSelect" class="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800">
+                    <div x-data="{ map: {{ Js::from($collegeDeptsMap) }}, get depts(){ return $wire.orgCollegeSelect?(this.map[$wire.orgCollegeSelect]??[]):[]; } }">
+                        <select wire:model.live="orgCollegeSelect"
+                                class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
                             <option value="">— Select College —</option>
                             @foreach($this->orgDepartmentsGrouped->keys() as $collegeName)
                                 @php $isOccupied = isset($occupiedColleges[$collegeName]); @endphp
-                                <option value="{{ $collegeName }}" {{ $isOccupied ? 'disabled' : '' }}>
-                                    {{ $collegeName }}{{ $isOccupied ? ' — occupied by ' . $occupiedColleges[$collegeName] : '' }}
+                                <option value="{{ $collegeName }}" {{ $isOccupied?'disabled':'' }}>
+                                    {{ $collegeName }}{{ $isOccupied?' — occupied by '.$occupiedColleges[$collegeName]:'' }}
                                 </option>
                             @endforeach
                         </select>
-                        @if(count($occupiedColleges) > 0)
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            @foreach($occupiedColleges as $occCollege => $occName)
+
+                        @if(count($occupiedColleges)>0)
+                        <div class="mt-2 flex flex-wrap gap-1.5">
+                            @foreach($occupiedColleges as $oC => $oN)
                             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium">
                                 <i class="fas fa-lock text-xs text-red-400"></i>
-                                <span class="font-semibold">{{ $occCollege }}</span>
-                                <span class="text-red-400">·</span>
-                                <span>{{ $occName }}</span>
+                                <strong>{{ $oC }}</strong>
+                                <span class="text-red-300">·</span>
+                                {{ $oN }}
                             </span>
                             @endforeach
                         </div>
                         @endif
-                        <div x-show="depts.length > 0" x-cloak class="mt-3">
-                            <p class="text-xs text-slate-500 mb-2 font-medium">Departments under this college:</p>
+
+                        <div x-show="depts.length>0" x-cloak class="mt-3">
+                            <p class="text-xs text-gray-400 mb-2 font-medium">Departments under this college:</p>
                             <div class="flex flex-wrap gap-2">
                                 <template x-for="code in depts" :key="code">
-                                    <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono" x-text="code"></span>
+                                    <span class="px-3 py-1.5 rounded-lg text-xs font-bold font-mono border"
+                                          style="background:var(--brand-50);color:var(--brand);border-color:var(--brand-200);" x-text="code"></span>
                                 </template>
                             </div>
                         </div>
                     </div>
                 @endif
             </div>
-            <div class="flex gap-4 pt-3">
-                <button type="button" wire:click="closeModal" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
+
+            <div class="flex gap-3 pt-2">
+                <button type="button" wire:click="closeModal"
+                        class="btn-ghost flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
                 <button type="submit" wire:loading.attr="disabled" wire:target="registerOrganizer"
-                        class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="registerOrganizer"><i class="fas fa-spinner spin-icon"></i> Registering...</span>
+                        class="btn-brand flex-1 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="registerOrganizer"><i class="fas fa-spinner spin"></i> Registering...</span>
                     <span wire:loading.remove wire:target="registerOrganizer"><i class="fas fa-users-gear"></i> Register Organizer</span>
                 </button>
             </div>
@@ -2149,151 +2454,211 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── MANAGE COLLEGES ──────────────────────────────────────────────────── --}}
+{{-- ── MANAGE COLLEGES ────────────────────────────────────────── --}}
 @if($activeModal==='manageOrgCourses')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col modal-animate">
-        <div class="flex items-center justify-between px-8 py-6 btn-primary text-white rounded-t-lg">
-            <h2 class="text-2xl font-bold flex items-center gap-3"><i class="fas fa-building-columns text-2xl"></i> Manage Colleges & Departments</h2>
-            <button wire:click="closeModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-auto modal-in flex flex-col max-h-[92vh]">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-5 rounded-t-2xl shrink-0" style="background:var(--brand);">
+            <h2 class="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-3">
+                <i class="fas fa-building-columns"></i>
+                <span class="hidden sm:inline">Manage Colleges &amp; Departments</span>
+                <span class="sm:hidden">Colleges</span>
+            </h2>
+            <button wire:click="closeModal" class="text-white/60 hover:text-white transition text-2xl leading-none">×</button>
         </div>
+
         @if($orgCourseAlert)
-        <div class="mx-8 mt-5 shrink-0 flex items-start gap-3 p-4 rounded-xl border {{ $orgCourseAlertType === 'success' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200' }}">
-            <i class="fas mt-0.5 {{ $orgCourseAlertType === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-red-500' }}"></i>
-            <p class="text-sm font-semibold {{ $orgCourseAlertType === 'success' ? 'text-emerald-800' : 'text-red-800' }}">{{ $orgCourseAlert }}</p>
+        <div class="mx-6 sm:mx-8 mt-5 shrink-0 flex items-start gap-3 p-4 rounded-xl border
+            {{ $orgCourseAlertType==='success'?'bg-emerald-50 border-emerald-200':'bg-red-50 border-red-200' }}">
+            <i class="fas mt-0.5 {{ $orgCourseAlertType==='success'?'fa-circle-check text-emerald-500':'fa-circle-xmark text-red-500' }}"></i>
+            <p class="text-sm font-semibold {{ $orgCourseAlertType==='success'?'text-emerald-800':'text-red-800' }}">{{ $orgCourseAlert }}</p>
         </div>
         @endif
-        <div class="flex-1 overflow-y-auto scrollbar-custom px-8 py-6 space-y-5">
+
+        <div class="flex-1 overflow-y-auto scroll-custom px-6 sm:px-8 py-6 space-y-5">
+
+            {{-- Add college input --}}
             @if(!$orgAddingToCollege && !$orgRenamingCollege)
-            <div class="border border-slate-200 rounded-lg p-5 bg-slate-50">
-                <h3 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fas fa-plus-circle text-purple-600"></i> Add New College</h3>
-                <div class="flex gap-3">
+            <div class="border border-gray-100 rounded-xl p-5 bg-gray-50 shadow-sm">
+                <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <i class="fas fa-plus-circle" style="color:var(--brand);"></i> Add New College
+                </h3>
+                <div class="flex gap-2">
                     <input wire:model.defer="orgNewCollegeName" type="text" placeholder="e.g. College of Computer Studies"
-                           class="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-sm input-focus text-slate-800"
+                           class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800"
                            @keydown.enter.prevent="$wire.addCollege()">
-                    <button type="button" wire:click="addCollege" class="px-5 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center gap-2 whitespace-nowrap">
-                        <i class="fas fa-plus"></i> Add College
+                    <button wire:click="addCollege"
+                            class="btn-brand px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 whitespace-nowrap">
+                        <i class="fas fa-plus text-xs"></i>
+                        <span class="hidden sm:inline">Add College</span>
+                        <span class="sm:hidden">Add</span>
                     </button>
                 </div>
-                <p class="text-xs text-slate-500 mt-2">After adding, select which courses/departments belong to it.</p>
+                <p class="text-xs text-gray-400 mt-2">After adding, assign which courses/departments belong to it.</p>
             </div>
             @endif
 
+            {{-- Rename college --}}
             @if($orgRenamingCollege)
-            <div class="border-2 border-purple-300 rounded-lg p-5 bg-purple-50">
-                <div class="flex items-center gap-2 mb-4"><i class="fas fa-pen-to-square text-purple-600"></i><h3 class="text-sm font-bold text-purple-800">Rename College</h3></div>
-                <p class="text-xs text-purple-600 mb-3">Current name: <strong>{{ $orgRenamingCollege }}</strong></p>
-                <div class="flex gap-3">
+            <div class="border-2 rounded-xl p-5" style="border-color:var(--brand-200);background:var(--brand-50);">
+                <div class="flex items-center gap-2 mb-4">
+                    <i class="fas fa-pen-to-square" style="color:var(--brand);"></i>
+                    <h3 class="text-sm font-bold" style="color:var(--brand-dark);">Rename College</h3>
+                </div>
+                <p class="text-xs mb-3" style="color:var(--brand-light);">Current: <strong>{{ $orgRenamingCollege }}</strong></p>
+                <div class="flex gap-2">
                     <input wire:model.defer="orgRenameCollegeName" type="text" placeholder="New college name"
-                           class="flex-1 px-4 py-2.5 border border-purple-300 rounded-lg text-sm input-focus text-slate-800 bg-white"
+                           class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800 bg-white"
                            @keydown.enter.prevent="$wire.renameCollege()">
-                    <button type="button" wire:click="cancelRenamingCollege" class="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                    <button type="button" wire:click="renameCollege" wire:loading.attr="disabled" wire:target="renameCollege"
-                            class="px-5 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center gap-2 whitespace-nowrap">
-                        <span wire:loading wire:target="renameCollege"><i class="fas fa-spinner spin-icon"></i></span>
-                        <span wire:loading.remove wire:target="renameCollege"><i class="fas fa-floppy-disk"></i> Save Name</span>
+                    <button wire:click="cancelRenamingCollege" class="btn-ghost px-3 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
+                    <button wire:click="renameCollege" wire:loading.attr="disabled" wire:target="renameCollege"
+                            class="btn-brand px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 whitespace-nowrap">
+                        <span wire:loading wire:target="renameCollege"><i class="fas fa-spinner spin"></i></span>
+                        <span wire:loading.remove wire:target="renameCollege"><i class="fas fa-floppy-disk"></i> Save</span>
                     </button>
                 </div>
             </div>
             @endif
 
+            {{-- Assign departments --}}
             @if($orgAddingToCollege)
-            <div class="border-2 border-purple-300 rounded-lg p-5 bg-purple-50">
+            <div class="border-2 rounded-xl p-5" style="border-color:var(--brand-200);background:var(--brand-50);">
                 <div class="flex items-start justify-between mb-4">
                     <div>
-                        <h3 class="text-sm font-bold text-purple-800 flex items-center gap-2">
-                            <i class="fas fa-{{ isset($orgCoursesList[$orgAddingToCollege]) ? 'pencil' : 'plus' }} text-purple-600"></i>
-                            {{ isset($orgCoursesList[$orgAddingToCollege]) ? 'Edit Departments' : 'Assign Departments' }}
+                        <h3 class="text-sm font-bold flex items-center gap-2" style="color:var(--brand-dark);">
+                            <i class="fas fa-{{ isset($orgCoursesList[$orgAddingToCollege])?'pencil':'plus' }}" style="color:var(--brand);"></i>
+                            {{ isset($orgCoursesList[$orgAddingToCollege])?'Edit Departments':'Assign Departments' }}
                         </h3>
-                        <p class="text-xs text-purple-600 mt-0.5">College: <strong>{{ $orgAddingToCollege }}</strong></p>
+                        <p class="text-xs mt-0.5" style="color:var(--brand-light);">College: <strong>{{ $orgAddingToCollege }}</strong></p>
                     </div>
-                    <span class="text-xs bg-purple-200 text-purple-800 px-2.5 py-1 rounded-full font-semibold">{{ count($orgSelectedCourseCodes) }} selected</span>
+                    <span class="text-xs px-2.5 py-1 rounded-full font-bold"
+                          style="background:var(--brand-200);color:var(--brand-dark);">
+                        {{ count($orgSelectedCourseCodes) }} selected
+                    </span>
                 </div>
-                @if($this->allCoursesForAssign->count() > 0)
-                <p class="text-xs text-slate-600 mb-3">Check all courses that belong to this college:</p>
-                <div class="space-y-2 max-h-56 overflow-y-auto scrollbar-custom pr-1 mb-4">
+
+                @if($this->allCoursesForAssign->count()>0)
+                <p class="text-xs text-gray-500 mb-3">Check all courses belonging to this college:</p>
+                <div class="space-y-2 max-h-56 overflow-y-auto scroll-custom pr-1 mb-4">
                     @foreach($this->allCoursesForAssign as $c)
                     @php
                         $isSelected   = in_array($c->code, $orgSelectedCourseCodes);
                         $otherCollege = ($c->college && $c->college !== $orgAddingToCollege) ? $c->college : null;
                         $isTaken      = $otherCollege !== null;
                     @endphp
-                    <label class="course-check-row flex items-center gap-3 p-3 border rounded-lg {{ $isTaken ? 'opacity-50 cursor-not-allowed bg-slate-100 border-slate-200' : ($isSelected ? 'is-selected border-purple-400 cursor-pointer' : 'border-slate-200 bg-white cursor-pointer') }}">
-                        <input type="checkbox" wire:model="orgSelectedCourseCodes" value="{{ $c->code }}" class="w-4 h-4 shrink-0" style="accent-color:#7a3f91;" {{ $isTaken ? 'disabled' : '' }}>
+                    <label class="flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition
+                        {{ $isTaken ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
+                            : ($isSelected ? 'bg-white border-[#7a3f91]/40 shadow-sm' : 'bg-white border-gray-100 hover:border-gray-300') }}">
+                        <input type="checkbox" wire:model="orgSelectedCourseCodes" value="{{ $c->code }}"
+                               class="w-4 h-4 shrink-0 rounded"
+                               style="accent-color:var(--brand);"
+                               {{ $isTaken?'disabled':'' }}>
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-bold text-slate-800 text-sm font-mono">{{ $c->code }}</span>
-                                <span class="text-slate-600 text-xs">{{ $c->name }}</span>
+                                <span class="font-bold text-gray-800 text-sm font-mono">{{ $c->code }}</span>
+                                <span class="text-gray-500 text-xs">{{ $c->name }}</span>
                             </div>
-                            @if($isTaken)<p class="text-xs text-amber-600 mt-0.5"><i class="fas fa-lock mr-1"></i>Already assigned to: <em>{{ $otherCollege }}</em></p>@endif
+                            @if($isTaken)
+                            <p class="text-xs text-amber-600 mt-0.5"><i class="fas fa-lock mr-1"></i>Assigned to: <em>{{ $otherCollege }}</em></p>
+                            @endif
                         </div>
-                        @if($isSelected && !$isTaken)<i class="fas fa-check-circle text-purple-600 shrink-0 text-lg"></i>@endif
+                        @if($isSelected && !$isTaken)
+                        <i class="fas fa-circle-check shrink-0 text-lg" style="color:var(--brand);"></i>
+                        @endif
                     </label>
                     @endforeach
                 </div>
                 @else
                 <div class="text-center py-6">
-                    <i class="fas fa-book text-3xl text-slate-300 block mb-2"></i>
-                    <p class="text-slate-500 text-sm">No courses available. Add courses first via <strong>Manage Courses</strong>.</p>
+                    <i class="fas fa-book text-3xl text-gray-200 block mb-2"></i>
+                    <p class="text-gray-400 text-sm">No courses available. Add courses via <strong>Manage Courses</strong>.</p>
                 </div>
                 @endif
+
                 <div class="flex gap-3">
-                    <button type="button" wire:click="cancelAddingCourses" class="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                    <button type="button" wire:click="saveCollegeCourses" wire:loading.attr="disabled" wire:target="saveCollegeCourses"
-                            class="flex-1 px-4 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                        <span wire:loading wire:target="saveCollegeCourses"><i class="fas fa-spinner spin-icon"></i> Saving...</span>
+                    <button wire:click="cancelAddingCourses"
+                            class="btn-ghost flex-1 px-4 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
+                    <button wire:click="saveCollegeCourses" wire:loading.attr="disabled" wire:target="saveCollegeCourses"
+                            class="btn-brand flex-1 px-4 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                        <span wire:loading wire:target="saveCollegeCourses"><i class="fas fa-spinner spin"></i> Saving...</span>
                         <span wire:loading.remove wire:target="saveCollegeCourses"><i class="fas fa-floppy-disk"></i> Save Departments</span>
                     </button>
                 </div>
             </div>
             @endif
 
+            {{-- College list --}}
             <div>
-                <h3 class="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">
-                    <i class="fas fa-list text-slate-500"></i> Colleges & Departments
-                    <span class="ml-auto text-xs font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">{{ count($orgCoursesList) }} {{ count($orgCoursesList) === 1 ? 'college' : 'colleges' }}</span>
+                <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <i class="fas fa-list text-gray-400"></i>
+                    Colleges &amp; Departments
+                    <span class="ml-auto text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full border border-gray-200">
+                        {{ count($orgCoursesList) }} {{ count($orgCoursesList)===1?'college':'colleges' }}
+                    </span>
                 </h3>
                 @if(count($orgCoursesList)===0)
-                <div class="text-center py-10 border border-dashed border-slate-300 rounded-lg">
-                    <i class="fas fa-building-columns text-5xl text-slate-200 block mb-3"></i>
-                    <p class="text-slate-500 font-semibold text-sm">No colleges yet</p>
-                    <p class="text-slate-400 text-xs mt-1">Add a college above to get started</p>
+                <div class="text-center py-10 border-2 border-dashed border-gray-100 rounded-xl">
+                    <i class="fas fa-building-columns text-4xl text-gray-200 block mb-3"></i>
+                    <p class="text-gray-400 font-semibold text-sm">No colleges yet</p>
+                    <p class="text-gray-300 text-xs mt-1">Add a college above to get started</p>
                 </div>
                 @else
                 <div class="space-y-3">
                     @foreach($orgCoursesList as $college => $departments)
-                    @php $collegeOccupied = $this->occupiedColleges(); $collegeOrganizer = $collegeOccupied[$college] ?? null; @endphp
-                    <div class="border border-slate-200 rounded-lg overflow-hidden college-card">
-                        <div class="flex items-center justify-between px-5 py-3 bg-purple-50">
+                    @php $collegeOccupied=$this->occupiedColleges(); $collegeOrg=$collegeOccupied[$college]??null; @endphp
+                    <div class="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                        <div class="flex items-center justify-between px-4 py-3" style="background:var(--brand-50);">
                             <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 bg-purple-200 rounded-lg flex items-center justify-center"><i class="fas fa-building-columns text-purple-700 text-sm"></i></div>
+                                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                                     style="background:var(--brand-100);">
+                                    <i class="fas fa-building-columns text-xs" style="color:var(--brand);"></i>
+                                </div>
                                 <div>
                                     <div class="flex items-center gap-2 flex-wrap">
-                                        <p class="font-bold text-purple-900 text-sm">{{ $college }}</p>
-                                        @if($collegeOrganizer)
-                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold"><i class="fas fa-circle-check text-xs text-emerald-500"></i>{{ $collegeOrganizer }}</span>
+                                        <p class="font-bold text-sm" style="color:var(--brand-dark);">{{ $college }}</p>
+                                        @if($collegeOrg)
+                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
+                                                <i class="fas fa-circle-check text-xs text-emerald-500"></i>{{ $collegeOrg }}
+                                            </span>
                                         @else
-                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-400 border border-slate-200 rounded-full text-xs font-medium"><i class="fas fa-circle-minus text-xs"></i> No Organizer</span>
+                                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 text-gray-400 border border-gray-200 rounded-full text-xs font-medium">
+                                                <i class="fas fa-circle-minus text-xs"></i> No Organizer
+                                            </span>
                                         @endif
                                     </div>
-                                    <p class="text-purple-600 text-xs mt-0.5">{{ count($departments) }} department{{ count($departments)!==1?'s':'' }}</p>
+                                    <p class="text-xs mt-0.5" style="color:var(--brand-light);">{{ count($departments) }} department{{ count($departments)!==1?'s':'' }}</p>
                                 </div>
                             </div>
-                            <div class="flex gap-2">
+                            <div class="flex gap-1.5">
                                 @if(!$orgAddingToCollege && !$orgRenamingCollege)
-                                <button wire:click="startRenamingCollege('{{ addslashes($college) }}')" class="px-3 py-1.5 bg-white text-purple-700 rounded-lg hover:bg-purple-50 transition font-semibold text-xs border border-purple-300 flex items-center gap-1.5"><i class="fas fa-pen-to-square"></i> Rename</button>
-                                <button wire:click="startEditingCollege('{{ addslashes($college) }}')" class="px-3 py-1.5 bg-white text-purple-700 rounded-lg hover:bg-purple-100 transition font-semibold text-xs border border-purple-300 flex items-center gap-1.5"><i class="fas fa-pencil"></i> Depts</button>
+                                <button wire:click="startRenamingCollege('{{ addslashes($college) }}')"
+                                        class="btn-view px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                                    <i class="fas fa-pen-to-square text-xs"></i>
+                                    <span class="hidden sm:inline">Rename</span>
+                                </button>
+                                <button wire:click="startEditingCollege('{{ addslashes($college) }}')"
+                                        class="btn-view px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                                    <i class="fas fa-pencil text-xs"></i>
+                                    <span class="hidden sm:inline">Depts</span>
+                                </button>
                                 @endif
-                                <button wire:click="confirmDeleteCollege('{{ addslashes($college) }}')" class="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition font-semibold text-xs border border-red-200 flex items-center gap-1.5"><i class="fas fa-trash"></i> Delete</button>
+                                <button wire:click="confirmDeleteCollege('{{ addslashes($college) }}')"
+                                        class="btn-danger px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                                    <i class="fas fa-trash text-xs"></i>
+                                    <span class="hidden sm:inline">Delete</span>
+                                </button>
                             </div>
                         </div>
-                        <div class="divide-y divide-slate-100">
+                        <div class="divide-y divide-gray-50">
                             @foreach($departments as $dept)
-                            <div class="flex items-center px-5 py-3 bg-white">
-                                <span class="w-8 h-8 bg-purple-50 text-purple-600 rounded-lg flex items-center justify-center text-xs font-bold shrink-0">{{ strtoupper(substr($dept['code'],0,2)) }}</span>
+                            <div class="flex items-center px-4 py-3 bg-white">
+                                <span class="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                                      style="background:var(--brand-50);color:var(--brand);">
+                                    {{ strtoupper(substr($dept['code'],0,2)) }}
+                                </span>
                                 <div class="ml-3">
-                                    <p class="font-semibold text-slate-800 text-sm">{{ $dept['code'] }}</p>
-                                    <p class="text-slate-500 text-xs">{{ $dept['name'] }}</p>
+                                    <p class="font-bold text-gray-800 text-sm">{{ $dept['code'] }}</p>
+                                    <p class="text-gray-400 text-xs">{{ $dept['name'] }}</p>
                                 </div>
                             </div>
                             @endforeach
@@ -2304,28 +2669,34 @@ new class extends Component {
                 @endif
             </div>
         </div>
-        <div class="px-8 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
-            <button wire:click="closeModal" class="w-full px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-100 transition">Close</button>
+
+        <div class="px-6 sm:px-8 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl shrink-0">
+            <button wire:click="closeModal" class="btn-ghost w-full px-5 py-2.5 rounded-xl text-sm font-bold">Close</button>
         </div>
     </div>
 </div>
 @endif
 
-{{-- ── DELETE COLLEGE CONFIRM ───────────────────────────────────────────── --}}
+{{-- ── DELETE COLLEGE CONFIRM ────────────────────────────────── --}}
 @if($activeModal==='deleteOrgCollegeConfirm')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
-        <div class="px-8 py-6 bg-red-50 border-b border-red-200 rounded-t-lg">
-            <h2 class="text-xl font-bold text-red-800 flex items-center gap-3"><i class="fas fa-triangle-exclamation"></i> Delete College</h2>
+<div class="{{ modalWrap('max-w-sm') }}">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-auto modal-in">
+        <div class="px-6 sm:px-8 py-5 bg-red-50 border-b border-red-100 rounded-t-2xl">
+            <h2 class="text-lg font-extrabold text-red-800 flex items-center gap-2">
+                <i class="fas fa-triangle-exclamation"></i> Delete College
+            </h2>
         </div>
-        <div class="p-8">
-            <p class="text-slate-800 text-sm mb-2">Remove college <strong class="text-red-600">{{ $deleteOrgCourseName }}</strong>?</p>
-            <p class="text-slate-600 text-xs mb-6"><i class="fas fa-circle-info mr-1 text-slate-400"></i>Courses will be unassigned but <strong>not deleted</strong>.</p>
+        <div class="p-6 sm:p-8">
+            <p class="text-gray-700 text-sm mb-1">Remove <strong class="text-red-600">{{ $deleteOrgCourseName }}</strong>?</p>
+            <p class="text-gray-400 text-xs mb-6">
+                <i class="fas fa-circle-info mr-1"></i>Courses will be unassigned but <strong>not deleted</strong>.
+            </p>
             <div class="flex gap-3">
-                <button type="button" wire:click="openModal('manageOrgCourses')" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button type="button" wire:click="deleteOrgCollege" wire:loading.attr="disabled" wire:target="deleteOrgCollege"
-                        class="flex-1 px-6 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="deleteOrgCollege"><i class="fas fa-spinner spin-icon"></i></span>
+                <button wire:click="openModal('manageOrgCourses')"
+                        class="btn-ghost flex-1 px-5 py-2.5 rounded-xl text-sm font-bold">Cancel</button>
+                <button wire:click="deleteOrgCollege" wire:loading.attr="disabled" wire:target="deleteOrgCollege"
+                        class="flex-1 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="deleteOrgCollege"><i class="fas fa-spinner spin"></i></span>
                     <span wire:loading.remove wire:target="deleteOrgCollege">Delete College</span>
                 </button>
             </div>
@@ -2334,30 +2705,41 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── TOGGLE ORGANIZER STATUS CONFIRM ─────────────────────────────────── --}}
+{{-- ── TOGGLE ORGANIZER STATUS ───────────────────────────────── --}}
 @if($activeModal==='toggleOrganizerConfirm')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm modal-animate">
-        <div class="p-6">
-            <div class="flex items-center gap-3 mb-5">
-                <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0 {{ $pendingToggleAction==='deactivate'?'bg-red-100':'bg-emerald-100' }}">
+<div class="{{ modalWrap('max-w-sm') }}" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-auto modal-in">
+        <div class="p-6 sm:p-8">
+            <div class="flex items-center gap-4 mb-5">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0
+                    {{ $pendingToggleAction==='deactivate'?'bg-red-100':'bg-emerald-100' }}">
                     <i class="text-lg {{ $pendingToggleAction==='deactivate'?'fas fa-ban text-red-600':'fas fa-circle-check text-emerald-600' }}"></i>
                 </div>
                 <div>
-                    <p class="font-bold text-slate-800 text-lg">{{ $pendingToggleAction==='deactivate'?'Deactivate Organizer?':'Activate Organizer?' }}</p>
-                    <p class="text-sm text-slate-500 mt-0.5">{{ $pendingToggleName }}</p>
+                    <p class="font-extrabold text-gray-800 text-lg">
+                        {{ $pendingToggleAction==='deactivate'?'Deactivate Organizer?':'Activate Organizer?' }}
+                    </p>
+                    <p class="text-sm text-gray-400 mt-0.5">{{ $pendingToggleName }}</p>
                 </div>
             </div>
-            <p class="text-sm text-slate-600 mb-6">
-                @if($pendingToggleAction==='deactivate') This organizer will no longer be able to log in. You can reactivate them at any time.
-                @else This organizer will be able to log in again. @endif
+            <p class="text-sm text-gray-500 mb-6">
+                @if($pendingToggleAction==='deactivate')
+                    This organizer will no longer be able to log in. You can reactivate them anytime.
+                @else
+                    This organizer will regain login access.
+                @endif
             </p>
             <div class="flex gap-3">
-                <button wire:click="closeModal" class="flex-1 px-4 py-3 border border-slate-300 text-slate-700 rounded-lg text-base font-bold hover:bg-slate-50 transition">Cancel</button>
-                <button wire:click="executeToggleOrganizerStatus" wire:loading.attr="disabled" wire:target="executeToggleOrganizerStatus"
-                        class="flex-1 px-4 py-3 rounded-lg text-base font-bold transition flex items-center justify-center gap-2 {{ $pendingToggleAction==='deactivate'?'bg-red-600 hover:bg-red-700 text-white':'bg-emerald-600 hover:bg-emerald-700 text-white' }}">
-                    <span wire:loading wire:target="executeToggleOrganizerStatus"><i class="fas fa-spinner spin-icon"></i></span>
-                    <span wire:loading.remove wire:target="executeToggleOrganizerStatus">{{ $pendingToggleAction==='deactivate'?'Yes, Deactivate':'Yes, Activate' }}</span>
+                <button wire:click="closeModal"
+                        class="btn-ghost flex-1 px-4 py-3 rounded-xl font-bold">Cancel</button>
+                <button wire:click="executeToggleOrganizerStatus"
+                        wire:loading.attr="disabled" wire:target="executeToggleOrganizerStatus"
+                        class="flex-1 px-4 py-3 rounded-xl font-bold transition flex items-center justify-center gap-2
+                            {{ $pendingToggleAction==='deactivate'?'bg-red-600 hover:bg-red-700 text-white':'bg-emerald-600 hover:bg-emerald-700 text-white' }}">
+                    <span wire:loading wire:target="executeToggleOrganizerStatus"><i class="fas fa-spinner spin"></i></span>
+                    <span wire:loading.remove wire:target="executeToggleOrganizerStatus">
+                        {{ $pendingToggleAction==='deactivate'?'Yes, Deactivate':'Yes, Activate' }}
+                    </span>
                 </button>
             </div>
         </div>

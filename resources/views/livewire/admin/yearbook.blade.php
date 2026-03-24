@@ -89,6 +89,7 @@ new class extends Component {
 };
 ?>
 
+{{-- ✅ SINGLE ROOT ELEMENT — both <style> blocks moved inside the root <div> --}}
 <div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden" style="height:93vh;">
 
     <style>
@@ -100,16 +101,13 @@ new class extends Component {
         .scrollbar-custom::-webkit-scrollbar { width: 6px; height: 6px; }
         .scrollbar-custom::-webkit-scrollbar-track { background: transparent; }
         .scrollbar-custom::-webkit-scrollbar-thumb { background: rgba(122,63,145,.3); border-radius: 10px; }
-    </style>
-
-    {{-- Keyframes and :hover pseudo-selectors must live outside scoped <style> to avoid browser CSS parser warnings --}}
-    <style>
         .scrollbar-custom::-webkit-scrollbar-thumb:hover { background: rgba(122,63,145,.6); }
 
         @keyframes slideInDown { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
         @keyframes spin        { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes fadeInUp    { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
         @keyframes pulse-bar   { 0%,100%{opacity:.6} 50%{opacity:1} }
+        @keyframes shimmer     { from{background-position:-600px 0} to{background-position:600px 0} }
 
         .spin-icon { animation: spin 1s linear infinite; }
 
@@ -159,7 +157,6 @@ new class extends Component {
         .skeleton-card {
             background: white; border-radius: 16px; overflow: hidden;
             box-shadow: 0 2px 12px rgba(0,0,0,.06);
-            /* Match exact same structure/height as alumni-card */
             display: flex; flex-direction: column; align-items: center;
             position: relative;
         }
@@ -291,13 +288,13 @@ new class extends Component {
     </script>
 
     <!-- MAIN CONTENT -->
-    <div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-4">
+    <div class="flex flex-col flex-1 min-h-0 px-4 sm:px-6 lg:px-8 pt-7 pb-4">
 
         <!-- HEADER -->
         <div class="mb-5 shrink-0" style="animation:slideInDown .4s ease-out;">
-            <h1 class="text-4xl font-bold text-slate-800 flex items-center gap-3 mb-2">
-                <div class="w-14 h-14 btn-primary rounded-lg flex items-center justify-center shadow-md">
-                    <i class="fas fa-book text-xl"></i>
+            <h1 class="text-3xl sm:text-4xl font-bold text-slate-800 flex items-center gap-3 mb-2">
+                <div class="w-12 h-12 sm:w-14 sm:h-14 btn-primary rounded-lg flex items-center justify-center shadow-md flex-shrink-0">
+                    <i class="fas fa-book text-lg sm:text-xl"></i>
                 </div>
                 Alumni Yearbook
             </h1>
@@ -305,11 +302,11 @@ new class extends Component {
         </div>
 
         <!-- FILTER BAR -->
-        <div class="bg-white rounded-lg shadow-sm px-5 py-3 mb-4 shrink-0">
-            <div class="flex flex-wrap gap-3 items-end">
+        <div class="bg-white rounded-lg shadow-sm px-4 sm:px-5 py-3 mb-4 shrink-0">
+            <div class="flex flex-wrap gap-2 sm:gap-3 items-end">
 
                 <!-- SEARCH -->
-                <div class="w-72 relative"
+                <div class="w-full sm:w-72 relative"
                      x-data="{
                          query: @entangle('search').live,
                          timer: null,
@@ -331,7 +328,7 @@ new class extends Component {
 
                 <!-- BATCH -->
                 <select wire:model.live="batch"
-                        class="filter-select px-3 py-2 rounded-lg text-sm bg-white min-w-[130px]">
+                        class="filter-select flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm bg-white min-w-[120px]">
                     <option value="">All Batches</option>
                     @forelse($this->batches as $b)
                         <option value="{{ $b }}">{{ $b }}</option>
@@ -342,7 +339,7 @@ new class extends Component {
 
                 <!-- COURSE -->
                 <select wire:model.live="course"
-                        class="filter-select px-3 py-2 rounded-lg text-sm bg-white min-w-[130px]">
+                        class="filter-select flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm bg-white min-w-[120px]">
                     <option value="">All Courses</option>
                     @forelse($this->courses as $c)
                         <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -353,8 +350,8 @@ new class extends Component {
 
                 <!-- RESET -->
                 <button wire:click="resetFilters"
-                        class="px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
-                    <i class="fas fa-rotate-left mr-1.5"></i>Reset
+                        class="px-3 py-2 text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium flex items-center gap-1.5">
+                    <i class="fas fa-rotate-left"></i><span class="hidden sm:inline">Reset</span>
                 </button>
 
                 <!-- Spinner + count -->
@@ -445,8 +442,8 @@ new class extends Component {
         </div>
 
         <!-- PAGINATION -->
-        <div class="bg-white rounded-lg shadow-sm p-4 mt-2 shrink-0">
-            <div class="flex items-center justify-between">
+        <div class="bg-white rounded-lg shadow-sm p-3 sm:p-4 mt-2 shrink-0">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 @php
                     $total = $this->alumniRecords->total();
                     $pp    = $this->alumniRecords->perPage();
@@ -454,21 +451,21 @@ new class extends Component {
                     $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
                     $to    = min($cp * $pp, $total);
                 @endphp
-                <p class="text-slate-600 text-sm">
+                <p class="text-slate-600 text-xs sm:text-sm">
                     Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span>
                     of <span class="font-semibold text-slate-800">{{ $total }}</span>
                 </p>
                 <div class="flex gap-2 items-center">
                     @if($this->alumniRecords->onFirstPage())
-                        <button disabled class="px-6 py-3 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
+                        <button disabled class="px-4 sm:px-6 py-2 sm:py-3 bg-slate-200 text-slate-500 rounded-lg text-xs sm:text-sm font-medium cursor-not-allowed">← Prev</button>
                     @else
-                        <button wire:click="previousPage" class="px-6 py-3 btn-primary rounded-lg text-sm font-medium">← Prev</button>
+                        <button wire:click="previousPage" class="px-4 sm:px-6 py-2 sm:py-3 btn-primary rounded-lg text-xs sm:text-sm font-medium">← Prev</button>
                     @endif
-                    <span class="px-6 py-3 text-slate-700 text-sm font-semibold">{{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}</span>
+                    <span class="px-4 sm:px-6 py-2 sm:py-3 text-slate-700 text-xs sm:text-sm font-semibold">{{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}</span>
                     @if($this->alumniRecords->hasMorePages())
-                        <button wire:click="nextPage" class="px-6 py-3 btn-primary rounded-lg text-sm font-medium">Next →</button>
+                        <button wire:click="nextPage" class="px-4 sm:px-6 py-2 sm:py-3 btn-primary rounded-lg text-xs sm:text-sm font-medium">Next →</button>
                     @else
-                        <button disabled class="px-6 py-3 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>
+                        <button disabled class="px-4 sm:px-6 py-2 sm:py-3 bg-slate-200 text-slate-500 rounded-lg text-xs sm:text-sm font-medium cursor-not-allowed">Next →</button>
                     @endif
                 </div>
             </div>
@@ -476,4 +473,4 @@ new class extends Component {
 
     </div>
 
-</div>
+</div>{{-- end single root --}}

@@ -130,10 +130,6 @@ new class extends Component {
         return app(AdminEventController::class)->getColleges();
     }
 
-    /**
-     * Organizers whose department matches any of the selected colleges.
-     * Shown in the form when targetMode = 'college' and colleges are selected.
-     */
     #[Computed]
     public function organizersForSelectedColleges(): array
     {
@@ -153,15 +149,6 @@ new class extends Component {
         $this->resetPage();
     }
 
-    public function openCreateModal(): void
-    {
-        $this->resetFormFields();
-        $this->event_date              = now()->addWeek()->format('Y-m-d');
-        $this->contact_person          = auth()->user()?->name ?? '';
-        $this->editingIsOrganizerEvent = false;
-        $this->showFormModal           = true;
-    }
-
     public function openEditModal(int $id): void
     {
         $event = app(AdminEventController::class)->getEvent($id);
@@ -171,9 +158,9 @@ new class extends Component {
         $this->editingIsOrganizerEvent     = $event->organizer_id !== null;
         $this->title                       = $event->title;
         $this->description                 = $event->description ?? '';
-        $this->event_date                  = $event->event_date->format('Y-m-d');
-        $this->start_time                  = $event->event_date->format('g:i A');
-        $this->end_time                    = $event->event_end_date?->format('g:i A') ?? '';
+        $this->event_date                  = $event->event_date->setTimezone('Asia/Manila')->format('Y-m-d');
+        $this->start_time                  = $event->event_date->setTimezone('Asia/Manila')->format('g:i A');
+        $this->end_time                    = $event->event_end_date?->setTimezone('Asia/Manila')->format('g:i A') ?? '';
         $this->venue                       = $event->venue;
         $this->venue_address               = $event->venue_address ?? '';
         $this->contact_person              = $event->contact_person ?? '';
@@ -216,7 +203,6 @@ new class extends Component {
         if (!trim($this->event_date)) $errors['event_date'] = 'Event date is required.';
         if (!trim($this->venue))      $errors['venue']      = 'Venue / Location is required.';
 
-        // ── Start time: required + valid format ──────────────────────────────
         if (!trim($this->start_time)) {
             $errors['start_time'] = 'Start time is required.';
         } else {
@@ -227,12 +213,11 @@ new class extends Component {
             }
         }
 
-        // ── End time: optional, but must be valid and AFTER start ────────────
         if (trim($this->end_time)) {
             try {
-                $endDt = \Carbon\Carbon::parse($this->event_date . ' ' . trim($this->end_time));
+                $endDt = \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . trim($this->end_time), 'Asia/Manila');
                 if (!isset($errors['start_time'])) {
-                    $startDt = \Carbon\Carbon::parse($this->event_date . ' ' . trim($this->start_time));
+                    $startDt = \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . trim($this->start_time), 'Asia/Manila');
                     if ($endDt->lte($startDt)) {
                         $errors['end_time'] = 'End time must be after start time.';
                     }
@@ -246,7 +231,6 @@ new class extends Component {
             $errors['target'] = 'Please select at least one college.';
         }
 
-        // ── College alumni check: if specific college(s) selected, must have alumni ──
         if ($this->targetMode === 'college' && !empty($this->selectedColleges) && !isset($errors['target'])) {
             $colleges = $this->selectedColleges;
             $hasAlumni = Alumni::where('status', 'VERIFIED')
@@ -258,7 +242,6 @@ new class extends Component {
             }
         }
 
-        // Batch year validation — scoped to selected colleges, no range restriction
         if (trim($this->batchYear) !== '' && !isset($errors['target'])) {
             $inputYear = (int) trim($this->batchYear);
 
@@ -297,12 +280,17 @@ new class extends Component {
         $yearSuffix  = trim($this->batchYear) ? ' · Batch ' . trim($this->batchYear) : '';
         $targetStr   = $collegesStr . $yearSuffix;
 
+        // Convert PH time to UTC for storage
+        $startDt = \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . $this->start_time, 'Asia/Manila')->utc();
+        $endDt   = ($this->event_date && trim($this->end_time))
+            ? \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . $this->end_time, 'Asia/Manila')->utc()
+            : null;
+
         $data = [
             'title'               => trim($this->title),
             'description'         => trim($this->description) ?: null,
-            'event_date'          => $this->event_date . ' ' . $this->start_time,
-            'event_end_date'      => ($this->event_date && trim($this->end_time))
-                                        ? $this->event_date . ' ' . $this->end_time : null,
+            'event_date'          => $startDt->format('Y-m-d H:i:s'),
+            'event_end_date'      => $endDt ? $endDt->format('Y-m-d H:i:s') : null,
             'venue'               => trim($this->venue),
             'venue_address'       => trim($this->venue_address) ?: null,
             'target_participants' => $targetStr,
@@ -330,9 +318,6 @@ new class extends Component {
                 $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
             }
             $this->dispatch('flash-message', type: 'success', message: 'Event updated successfully!');
-        } else {
-            $ctrl->createEvent($data, $photo ?: null);
-            $this->dispatch('flash-message', type: 'success', message: 'Event created and approved!');
         }
 
         $this->showFormModal = false;
@@ -464,216 +449,215 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col bg-gradient-to-br from-slate-50 to-slate-50 overflow-hidden" style="height:90vh">
+<div>
 
-<style>
-    .scrollbar-custom::-webkit-scrollbar{width:6px;height:6px}.scrollbar-custom::-webkit-scrollbar-track{background:transparent}.scrollbar-custom::-webkit-scrollbar-thumb{background:rgba(122,63,145,.3);border-radius:10px}.scrollbar-custom::-webkit-scrollbar-thumb:hover{background:rgba(122,63,145,.6)}
-    @keyframes slideInDown{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
-    @keyframes modalSlideIn{from{opacity:0;transform:scale(.96) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
-    @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-    .modal-animate{animation:modalSlideIn .26s cubic-bezier(.16,1,.3,1)}.spin-icon{animation:spin 1s linear infinite;display:inline-block}
-    .btn-primary{background:linear-gradient(135deg,#7a3f91,#5e2f72);color:#fff;border:none;transition:background .2s,box-shadow .2s}
-    .btn-primary:hover:not(:disabled){background:linear-gradient(135deg,#8b4aa5,#6a3580)}
-    .btn-primary:disabled{background:linear-gradient(135deg,#cbd5e1,#94a3b8);cursor:not-allowed;box-shadow:none}
-    .tbl-header{background:linear-gradient(135deg,#7a3f91,#5e2f72);color:#fff}
-    .input-focus:focus{border-color:#7a3f91!important;box-shadow:0 0 0 3px rgba(122,63,145,.1)!important;outline:none!important}
-    .table-row-hover{transition:background-color .1s ease}.table-row-hover:hover{background-color:rgba(122,63,145,.04)}
-    .table-row-deleted{background-color:#fff7ed!important}.table-row-deleted:hover{background-color:#ffedd5!important}
-    .tbl-container{transition:opacity .15s ease}.tbl-loading{opacity:.4;pointer-events:none}
-    .form-label{display:block;font-size:.78rem;font-weight:700;color:#374151;margin-bottom:.45rem;letter-spacing:.01em}
-    .form-input{width:100%;padding:.625rem 1rem;border:1.5px solid #e2e8f0;border-radius:.5rem;font-size:.875rem;color:#1e293b;background:#fff;transition:border-color .15s,box-shadow .15s}
-    .form-input:focus{border-color:#7a3f91!important;box-shadow:0 0 0 3px rgba(122,63,145,.12)!important;outline:none!important}
-    .form-input:disabled,.form-input[readonly]{background:#f1f5f9;color:#64748b;cursor:not-allowed}
-    .form-error{font-size:.74rem;color:#ef4444;margin-top:.35rem;display:flex;align-items:flex-start;gap:.3rem}
-    .field-error{border-color:#f87171!important;background:#fff8f8!important}
-    .field-hint{font-size:.72rem;color:#94a3b8;margin-top:.3rem}
-    .badge-pending{background:#fef9c3;color:#a16207;border:1px solid #fde68a;font-size:11px;font-weight:700;border-radius:20px;padding:3px 10px;display:inline-block}
-    .badge-approved{background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;font-size:11px;font-weight:700;border-radius:20px;padding:3px 10px;display:inline-block}
-    .badge-rejected{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;font-weight:700;border-radius:20px;padding:3px 10px;display:inline-block}
-    .badge-deleted{background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;font-size:11px;font-weight:700;border-radius:20px;padding:3px 10px;display:inline-block}
-    .rsvp-pill{position:relative;display:inline-flex;align-items:center;gap:4px;cursor:default}
-    .rsvp-pill .rsvp-tip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;font-size:10px;font-weight:600;padding:4px 9px;border-radius:5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s;z-index:20}
-    .rsvp-pill .rsvp-tip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:#1e293b}
-    .rsvp-pill:hover .rsvp-tip{opacity:1}
-    .photo-upload-area{border:2px dashed #d1d5db;border-radius:10px;padding:24px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:#fafafa}
-    .photo-upload-area:hover{border-color:#7a3f91;background:#faf5ff}.photo-upload-area.has-preview{border-style:solid;border-color:#7a3f91;background:#faf5ff}
-    .target-btn{flex:1;padding:11px 10px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;transition:all .18s;text-align:center;font-size:.8rem;font-weight:700;color:#64748b;display:flex;flex-direction:column;align-items:center;gap:6px}
-    .target-btn:hover{border-color:#7a3f91;color:#7a3f91;background:#faf5ff}
-    .target-btn.active{border-color:#7a3f91;background:linear-gradient(135deg,#7a3f91,#6a3580);color:#fff;box-shadow:0 3px 12px rgba(122,63,145,.35)}
-    .college-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:10px}
-    .college-check{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;cursor:pointer;transition:all .15s;font-size:.8rem;font-weight:600;color:#374151}
-    .college-check:hover{border-color:#7a3f91;background:#faf5ff}.college-check.checked{border-color:#7a3f91;background:#f5f0ff;color:#6d28d9}
-    .college-check input[type=checkbox]{accent-color:#7a3f91;width:15px;height:15px}
-    .ev-modal{background:#fff;border-radius:10px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:780px;max-width:96vw;max-height:92vh;overflow:hidden}
-    .ev-cover{width:100%;height:320px;object-fit:cover;display:block;flex-shrink:0}
-    .ev-header{background:#fff;border-bottom:1px solid #ebebeb;flex-shrink:0;position:relative}
-    .ev-header-body{padding:20px 32px 18px}
-    .ev-title{font-size:22px;font-weight:700;color:#111;line-height:1.25;margin-bottom:6px;padding-right:36px}
-    .ev-meta-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:9px}
-    .ev-meta-item{display:flex;align-items:flex-start;gap:11px;font-size:13.5px;color:#222;line-height:1.4}
-    .ev-meta-icon{width:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;color:#7a3f91;font-size:13px}
-    .ev-body{flex:1;min-height:0;overflow-y:auto;background:#fff}
-    .ev-section{padding:22px 32px;border-bottom:1px solid #f0f0f0}.ev-section:last-child{border-bottom:none}
-    .ev-section-title{font-size:15px;font-weight:700;color:#111;margin-bottom:12px}
-    .ev-description{font-size:13.5px;color:#222;line-height:1.85;white-space:pre-wrap}
-    .ev-footer{padding:14px 32px;border-top:1px solid #ebebeb;display:flex;align-items:center;justify-content:flex-end;background:#fff;flex-shrink:0;gap:8px}
-    .ev-close-x{position:absolute;top:10px;right:12px;width:30px;height:30px;border-radius:50%;border:none;background:rgba(0,0,0,.35);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s;line-height:1;z-index:2}
-    .ev-close-x:hover{background:rgba(0,0,0,.55)}
-    .rsvp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-    .rsvp-card{border-radius:10px;padding:16px;text-align:center;border:1px solid}
-    .rsvp-card-confirmed{background:#f0fdf4;border-color:#bbf7d0}.rsvp-card-declined{background:#fff1f2;border-color:#fecdd3}.rsvp-card-tentative{background:#fffbeb;border-color:#fde68a}
-    .rsvp-count{font-size:28px;font-weight:800;line-height:1}.rsvp-label{font-size:11px;font-weight:600;margin-top:4px;text-transform:uppercase;letter-spacing:.05em}
-    .rsvp-confirmed-color{color:#15803d}.rsvp-declined-color{color:#be123c}.rsvp-tentative-color{color:#b45309}
-    .review-box{border-radius:8px;padding:14px 16px;border:1.5px solid}
-    .review-box-pending{background:#fffbeb;border-color:#fde68a}.review-box-approved{background:#f0fdf4;border-color:#bbf7d0}
-    .review-box-rejected{background:#fff1f2;border-color:#fecdd3}.review-box-deleted{background:#fff7ed;border-color:#fed7aa}
-    .updated-by-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px}
-    .updated-by-admin{background:#f5f0ff;color:#6d28d9;border:1px solid #e5d9ff}
-    .updated-by-organizer{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
-    .deleted-by-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:3px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
-    .deleted-banner{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;margin-bottom:14px}
-    .ev-btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;border:1.5px solid;background:#fff}
-    .ev-btn-close{color:#374151;border-color:#cbd5e1}.ev-btn-close:hover{background:#f8fafc}
-    .ev-btn-edit{color:#2557a7;border-color:#2557a7}.ev-btn-edit:hover{background:#eff6ff}
-    .ev-btn-approve{color:#15803d;border-color:#15803d}.ev-btn-approve:hover{background:#f0fdf4}
-    .ev-btn-reject{color:#be123c;border-color:#be123c}.ev-btn-reject:hover{background:#fff1f2}
-    .ev-btn-restore{color:#ea580c;border-color:#ea580c}.ev-btn-restore:hover{background:#fff7ed}
-    .ev-btn-delete{color:#dc2626;border-color:#dc2626}.ev-btn-delete:hover{background:#fff5f5}
-    /* batch hint box */
-    .batch-hint-box{background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;padding:10px 14px;display:flex;align-items:flex-start;gap:9px;margin-top:10px}
-    .batch-hint-box.info{background:#eff6ff;border-color:#bfdbfe}
-</style>
-
-{{-- FLASH TOAST --}}
-<div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,10000);}}"
-     @flash-message.window="display($event.detail.type,$event.detail.message)"
-     x-show="show"
-     x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-x-6" x-transition:enter-end="opacity-100 translate-x-0"
-     x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100 translate-x-0" x-transition:leave-end="opacity-0 translate-x-6"
-     class="fixed top-5 right-6 z-50 flex items-start gap-3 px-6 py-4 rounded-lg shadow-xl max-w-sm border backdrop-blur-sm"
-     :class="{'bg-emerald-50 border-emerald-200 text-emerald-800':type==='success','bg-blue-50 border-blue-200 text-blue-800':type==='info','bg-red-50 border-red-200 text-red-800':type==='error'}"
-     style="display:none">
-    <i class="fas mt-0.5 text-lg flex-shrink-0" :class="{'fa-check-circle text-emerald-500':type==='success','fa-info-circle text-blue-500':type==='info','fa-exclamation-circle text-red-500':type==='error'}"></i>
-    <div class="flex-1 min-w-0">
-        <div class="font-semibold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></div>
-        <div class="text-sm mt-0.5 leading-snug opacity-90" x-text="msg"></div>
+{{-- ══ FLASH TOAST ══ --}}
+<div
+    x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
+    @flash-message.window="display($event.detail.type,$event.detail.message)"
+    x-show="show"
+    x-transition:enter="transition ease-out duration-300"
+    x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+    x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+    x-transition:leave="transition ease-in duration-200"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0 translate-x-8"
+    class="fixed top-5 right-4 sm:right-6 z-[100] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-xs sm:max-w-sm border w-full"
+    :class="{'bg-white border-emerald-300 text-emerald-800':type==='success','bg-white border-red-300 text-red-800':type==='error','bg-white border-blue-300 text-blue-800':type==='info'}"
+    style="display:none">
+    <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+         :class="{'bg-emerald-100':type==='success','bg-red-100':type==='error','bg-blue-100':type==='info'}">
+        <i class="fas text-sm" :class="{'fa-check text-emerald-600':type==='success','fa-exclamation text-red-600':type==='error','fa-info text-blue-600':type==='info'}"></i>
     </div>
-    <button @click="show=false" class="opacity-40 hover:opacity-100 shrink-0 transition"><i class="fas fa-times text-sm"></i></button>
+    <div class="flex-1 min-w-0">
+        <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
+        <p class="text-xs mt-0.5 opacity-80 leading-snug break-words" x-text="msg"></p>
+    </div>
+    <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<div class="flex flex-col flex-1 min-h-0 px-8 pt-7 pb-6">
+<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto min-h-screen bg-gray-50">
 
-    {{-- HEADER --}}
-    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5 shrink-0" style="animation:slideInDown .5s ease-out;">
-        <div>
-            <h1 class="text-4xl font-bold text-slate-800 flex items-center gap-3">
-                <div class="w-14 h-14 btn-primary rounded-lg flex items-center justify-center shadow-md"><i class="fas fa-calendar-days text-xl"></i></div>
-                Event Management
-            </h1>
-            <p class="text-slate-600 text-sm mt-2 ml-0.5">Review, moderate, and manage all event postings across the platform.</p>
+    {{-- ══ HEADER ══ --}}
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-[#7a3f91] flex items-center justify-center shadow-lg flex-shrink-0" style="box-shadow:0 4px 14px rgba(122,63,145,.35);">
+                <i class="fas fa-calendar-days text-white text-lg sm:text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-800 tracking-tight">Event Management</h1>
+                <p class="text-gray-500 text-xs sm:text-sm mt-0.5">Review, moderate, and manage all event postings across the platform.</p>
+            </div>
         </div>
-        <button wire:click="openCreateModal" class="inline-flex items-center gap-2 px-5 py-3 btn-primary rounded-lg font-semibold text-sm transition-all shrink-0">
-            <i class="fas fa-plus"></i> Create Event
-        </button>
     </div>
 
-    {{-- TABLE PANEL --}}
-    <div class="flex-1 min-h-0 bg-white rounded-lg shadow-sm flex flex-col overflow-hidden">
-        {{-- Filters --}}
-        <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-3 items-center shrink-0">
-            <div class="relative flex-1 min-w-[200px] max-w-sm" wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',val=>{if(val!==this.q)this.q=val;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)" placeholder="Search title, venue…"
-                       class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus" autocomplete="off">
+    {{-- ══ TABLE CARD ══ --}}
+    <div class="bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden" style="min-height:0;height:calc(100vh - 210px);">
+
+        {{-- Filter Bar --}}
+        <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
+            <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
+                 wire:ignore
+                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                <input type="text" x-model="q" @input.debounce.150ms="$wire.set('search',q)"
+                       placeholder="Search title, venue…"
+                       class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-800 transition focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                       autocomplete="off">
             </div>
-            <select wire:model.live="filterStatus" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+            <select wire:model.live="filterStatus" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                 <option value="">All Statuses</option>
-                <option value="PENDING">Pending</option><option value="APPROVED">Approved</option>
-                <option value="REJECTED">Rejected</option><option value="ORGANIZER_DELETED">Deleted by Organizer</option>
+                <option value="PENDING">Pending</option>
+                <option value="APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="ORGANIZER_DELETED">Deleted by Organizer</option>
             </select>
-            <select wire:model.live="filterCollege" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
+            <select wire:model.live="filterCollege" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition hidden sm:block">
                 <option value="">All Colleges</option>
                 @foreach($this->colleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
             </select>
-            <select wire:model.live="filterSort" class="px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-white input-focus">
-                <option value="recent">Recent First</option><option value="oldest">Oldest First</option>
+            <select wire:model.live="filterSort" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition hidden sm:block">
+                <option value="recent">Recent First</option>
+                <option value="oldest">Oldest First</option>
             </select>
-            <button wire:click="resetFilters" class="px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-200 transition text-sm font-medium">
-                <i class="fas fa-rotate-left mr-2"></i>Reset
+            <button wire:click="resetFilters" class="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition flex items-center gap-1.5">
+                <i class="fas fa-rotate-left text-xs"></i><span class="hidden sm:inline">Reset</span>
             </button>
+        </div>
+
+        {{-- Mobile row 2 --}}
+        <div class="px-4 py-2 border-b border-gray-100 bg-gray-50/80 flex gap-2 sm:hidden">
+            <select wire:model.live="filterCollege" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 transition">
+                <option value="">All Colleges</option>
+                @foreach($this->colleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
+            </select>
+            <select wire:model.live="filterSort" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 transition">
+                <option value="recent">Recent First</option>
+                <option value="oldest">Oldest First</option>
+            </select>
         </div>
 
         {{-- Table --}}
         <div class="relative flex-1 min-h-0">
-            <div class="h-full overflow-y-auto overflow-x-auto scrollbar-custom tbl-container"
-                 wire:loading.class="tbl-loading"
+            <div class="h-full overflow-y-auto overflow-x-auto"
+                 style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;"
+                 wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,filterStatus,filterCollege,filterSort,resetFilters,previousPage,nextPage,executeApprove,executeReject,executeDelete,executeRestore">
-                <table class="w-full border-separate border-spacing-0">
-                    <thead class="tbl-header" style="position:sticky;top:0;z-index:10;">
-                        <tr>
-                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Event</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Date & Time</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Organizer</th>
-                            <th class="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide">Target</th>
-                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">RSVPs</th>
-                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Status</th>
-                            <th class="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wide">Actions</th>
+                <table class="w-full border-collapse min-w-[700px]">
+                    <thead>
+                        <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Event</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Organizer</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">College</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">RSVPs</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100">
+                    <tbody class="divide-y divide-gray-50">
                         @forelse($this->events as $event)
-                        @php $isOrgDeleted = $event->status === 'ORGANIZER_DELETED'; @endphp
-                        <tr class="{{ $isOrgDeleted ? 'table-row-deleted' : 'table-row-hover' }}">
-                            <td class="px-6 py-4 max-w-[200px]">
-                                <p class="font-semibold text-sm truncate {{ $isOrgDeleted ? 'text-slate-400 line-through' : 'text-slate-900' }}">{{ $event->title }}</p>
-                                <p class="text-xs text-slate-400 mt-0.5 truncate">{{ $event->venue }}</p>
+                        @php
+                            $isOrgDeleted = $event->status === 'ORGANIZER_DELETED';
+                            // Determine the college to display
+                            if ($event->organizer_id && $event->organizer) {
+                                $displayCollege = $event->organizer->department ?? '—';
+                            } else {
+                                // Admin-created: parse from target_participants
+                                $tp = $event->target_participants ?? '';
+                                $parts = explode(' · Batch ', $tp, 2);
+                                $displayCollege = trim($parts[0]) ?: 'All Colleges';
+                            }
+                        @endphp
+                        <tr class="{{ $isOrgDeleted ? 'bg-orange-50/40 hover:bg-orange-50/70' : 'bg-white hover:bg-gray-50' }} transition-colors duration-100">
+                            <td class="px-4 sm:px-5 py-3.5 max-w-[180px] sm:max-w-[220px]">
+                                <p class="font-semibold text-sm truncate {{ $isOrgDeleted ? 'text-gray-400 line-through' : 'text-gray-800' }}">{{ $event->title }}</p>
                             </td>
-                            <td class="px-6 py-4">
-                                <span class="text-sm font-semibold text-slate-700">{{ $event->event_date->format('M d, Y') }}</span>
-                                <p class="text-xs text-slate-400 mt-0.5">{{ $event->event_date->format('g:i A') }}@if($event->event_end_date)<span class="text-slate-300 mx-1">–</span>{{ $event->event_end_date->format('g:i A') }}@endif</p>
+                            <td class="px-4 sm:px-5 py-3.5 whitespace-nowrap">
+                                <span class="text-sm font-semibold text-gray-700">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
+                                <p class="text-xs text-gray-400 mt-0.5">{{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($event->event_end_date)<span class="text-gray-300 mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif</p>
                             </td>
-                            <td class="px-6 py-4">
+                            <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 @if($event->organizer)
-                                    <p class="text-xs font-semibold text-slate-700">{{ $event->organizer->name }}</p>
-                                    <p class="text-xs text-slate-400 mt-0.5">{{ $event->organizer->department }}</p>
+                                    <p class="text-xs font-semibold text-gray-700">{{ $event->organizer->name }}</p>
+                                    
                                 @else
-                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs font-bold"><i class="fas fa-shield-halved text-[9px]"></i> Admin</span>
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs font-bold">
+                                        <i class="fas fa-shield-halved text-[9px]"></i> Admin
+                                    </span>
                                 @endif
                             </td>
-                            <td class="px-6 py-4"><p class="text-xs text-slate-600 font-medium max-w-[130px] truncate" title="{{ $event->target_participants }}">{{ $event->target_participants ?? 'All' }}</p></td>
-                            <td class="px-6 py-4 text-center">
-                                <div class="flex items-center justify-center gap-2">
-                                    <span class="rsvp-pill"><span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold"><i class="fas fa-circle-check text-[10px]"></i>{{ $event->confirmed_count }}</span><span class="rsvp-tip">Confirmed</span></span>
-                                    <span class="rsvp-pill"><span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-bold"><i class="fas fa-circle-xmark text-[10px]"></i>{{ $event->declined_count }}</span><span class="rsvp-tip">Not Attending</span></span>
-                                    <span class="rsvp-pill"><span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 text-xs font-bold"><i class="fas fa-circle-question text-[10px]"></i>{{ $event->tentative_count }}</span><span class="rsvp-tip">Maybe</span></span>
+                            <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell">
+                                <p class="text-xs text-gray-600 font-medium max-w-[130px] truncate" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
+                            </td>
+                            <td class="px-4 sm:px-5 py-3.5 text-center hidden lg:table-cell">
+                                <div class="flex items-center justify-center gap-1.5">
+                                    <span class="relative group">
+                                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
+                                            <i class="fas fa-circle-check text-[9px]"></i>{{ $event->confirmed_count }}
+                                        </span>
+                                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-gray-800 text-white text-[10px] font-semibold rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none z-20">Confirmed<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></span></span>
+                                    </span>
+                                    <span class="relative group">
+                                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs font-bold">
+                                            <i class="fas fa-circle-xmark text-[9px]"></i>{{ $event->declined_count }}
+                                        </span>
+                                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-gray-800 text-white text-[10px] font-semibold rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none z-20">Not Attending<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></span></span>
+                                    </span>
+                                    <span class="relative group">
+                                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 text-xs font-bold">
+                                            <i class="fas fa-circle-question text-[9px]"></i>{{ $event->tentative_count }}
+                                        </span>
+                                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-gray-800 text-white text-[10px] font-semibold rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none z-20">Maybe<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></span></span>
+                                    </span>
                                 </div>
                             </td>
-                            <td class="px-6 py-4 text-center">
-                                @if($isOrgDeleted)<span class="badge-deleted">Deleted</span>
-                                @elseif($event->status==='PENDING')<span class="badge-pending">Pending</span>
-                                @elseif($event->status==='APPROVED')<span class="badge-approved">Approved</span>
-                                @else<span class="badge-rejected">Rejected</span>@endif
+                            <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
+                                @if($isOrgDeleted)
+                                    <span class="inline-block px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-full text-[11px] font-bold">Deleted</span>
+                                @elseif($event->status==='PENDING')
+                                    <span class="inline-block px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
+                                @elseif($event->status==='APPROVED')
+                                    <span class="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
+                                @else
+                                    <span class="inline-block px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-full text-[11px] font-bold">Rejected</span>
+                                @endif
                             </td>
-                            <td class="px-6 py-4 text-center">
-                                <div class="flex items-center justify-center gap-2">
-                                    <button wire:click="viewEvent({{ $event->id }})" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-50 rounded-lg transition border border-purple-200"><i class="fas fa-eye"></i> View</button>
+                            <td class="px-4 sm:px-5 py-3.5 text-center">
+                                <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                                    <button wire:click="viewEvent({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
+                                        <i class="fas fa-eye text-[10px]"></i><span class="hidden sm:inline">View</span>
+                                    </button>
                                     @if($isOrgDeleted)
-                                        <button wire:click="confirmRestore({{ $event->id }})" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-orange-600 hover:bg-orange-50 rounded-lg transition border border-orange-200"><i class="fas fa-rotate-left"></i> Restore</button>
+                                        <button wire:click="confirmRestore({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-orange-600 bg-white border border-orange-200 hover:bg-orange-50 rounded-lg transition">
+                                            <i class="fas fa-rotate-left text-[10px]"></i><span class="hidden sm:inline">Restore</span>
+                                        </button>
                                     @elseif($event->status==='PENDING')
-                                        <button wire:click="confirmApprove({{ $event->id }})" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-600 hover:bg-emerald-50 rounded-lg transition border border-emerald-200"><i class="fas fa-check"></i> Approve</button>
-                                        <button wire:click="confirmReject({{ $event->id }})" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200"><i class="fas fa-xmark"></i> Reject</button>
+                                        <button wire:click="confirmApprove({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-600 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-lg transition">
+                                            <i class="fas fa-check text-[10px]"></i><span class="hidden sm:inline">Approve</span>
+                                        </button>
+                                        <button wire:click="confirmReject({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
+                                            <i class="fas fa-xmark text-[10px]"></i><span class="hidden sm:inline">Reject</span>
+                                        </button>
                                     @endif
-                                    <button wire:click="confirmDelete({{ $event->id }})" class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition border border-red-200"><i class="fas fa-trash"></i> Delete</button>
+                                    <button wire:click="confirmDelete({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
+                                        <i class="fas fa-trash text-[10px]"></i><span class="hidden lg:inline">Delete</span>
+                                    </button>
                                 </div>
                             </td>
                         </tr>
                         @empty
-                        <tr><td colspan="7" class="py-16 text-center">
-                            <i class="fas fa-calendar-days text-5xl text-slate-200 block mb-4"></i>
-                            <p class="font-semibold text-slate-400">No events found</p>
-                            <p class="text-sm text-slate-400 mt-1">@if($search||$filterStatus||$filterCollege)Try adjusting your filters.@else No events yet. Click <strong>Create Event</strong> to get started.@endif</p>
-                        </td></tr>
+                        <tr>
+                            <td colspan="7" class="py-20 text-center">
+                                <div class="flex flex-col items-center gap-3">
+                                    <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                                        <i class="fas fa-calendar-days text-2xl text-gray-300"></i>
+                                    </div>
+                                    <p class="font-semibold text-gray-400">No events found</p>
+                                    <p class="text-sm text-gray-400">@if($search||$filterStatus||$filterCollege)Try adjusting your filters.@else No events have been submitted yet.@endif</p>
+                                </div>
+                            </td>
+                        </tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -681,234 +665,281 @@ new class extends Component {
         </div>
 
         {{-- Pagination --}}
-        <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
+        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0">
             @php $total=$this->events->total();$pp=$this->events->perPage();$cp=$this->events->currentPage();$from=$total>0?($cp-1)*$pp+1:0;$to=min($cp*$pp,$total); @endphp
-            <div class="flex items-center justify-between">
-                <p class="text-slate-600 text-sm">Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span> of <span class="font-semibold text-slate-800">{{ $total }}</span></p>
-                <div class="flex gap-2 items-center">
-                    @if($this->events->onFirstPage())<button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">← Prev</button>
-                    @else<button wire:click="previousPage" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">← Prev</button>@endif
-                    <span class="px-4 py-2 text-slate-700 text-sm font-medium">{{ $cp }} / {{ $this->events->lastPage() }}</span>
-                    @if($this->events->hasMorePages())<button wire:click="nextPage" class="px-4 py-2 btn-primary rounded-lg text-sm font-medium">Next →</button>
-                    @else<button disabled class="px-4 py-2 bg-slate-200 text-slate-500 rounded-lg text-sm font-medium cursor-not-allowed">Next →</button>@endif
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <p class="text-gray-500 text-xs sm:text-sm">Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-gray-700">{{ $total }}</span> events</p>
+                <div class="flex items-center gap-1.5">
+                    @if($this->events->onFirstPage())
+                        <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">← Prev</button>
+                    @else
+                        <button wire:click="previousPage" class="px-3 sm:px-4 py-2 text-white rounded-lg text-xs sm:text-sm font-semibold transition" style="background:#7a3f91;" onmouseover="this.style.background='#5e2f72'" onmouseout="this.style.background='#7a3f91'">← Prev</button>
+                    @endif
+                    <span class="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 text-xs sm:text-sm font-semibold shadow-sm">{{ $cp }} / {{ $this->events->lastPage() }}</span>
+                    @if($this->events->hasMorePages())
+                        <button wire:click="nextPage" class="px-3 sm:px-4 py-2 text-white rounded-lg text-xs sm:text-sm font-semibold transition" style="background:#7a3f91;" onmouseover="this.style.background='#5e2f72'" onmouseout="this.style.background='#7a3f91'">Next →</button>
+                    @else
+                        <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">Next →</button>
+                    @endif
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-{{-- ════ MODAL: Create / Edit ════ --}}
+{{-- ════ MODAL: Edit ════ --}}
 @if($showFormModal)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeFormModal()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[92vh] modal-animate flex flex-col overflow-hidden"
+<div class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.closeFormModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] sm:max-h-[92vh] flex flex-col overflow-hidden"
          x-data="{}"
-         x-effect="
-             if ($wire.formErrors && Object.keys($wire.formErrors).length > 0) {
-                 $nextTick(() => {
-                     const el = $refs.formScroll;
-                     if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
-                 });
-             }
-         ">
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+         x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+         x-effect="if($wire.formErrors && Object.keys($wire.formErrors).length>0){$nextTick(()=>{const el=$refs.formScroll;if(el)el.scrollTo({top:0,behavior:'smooth'});});}">
 
-        <div class="flex items-center justify-between px-8 py-6 text-white rounded-t-lg sticky top-0 z-10 shrink-0" style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-            <h2 class="text-2xl font-bold flex items-center gap-3">
-                <i class="fas fa-{{ $isEditing ? 'pen-to-square' : 'calendar-plus' }} text-2xl"></i>
-                {{ $isEditing ? 'Edit Event' : 'Create New Event' }}
-            </h2>
-            <button wire:click="closeFormModal" class="text-3xl leading-none hover:opacity-70 transition">×</button>
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-5 sm:px-7 py-5 text-white flex-shrink-0" style="background:#7a3f91;">
+            <div>
+                <h2 class="text-xl font-extrabold flex items-center gap-3">
+                    <i class="fas fa-pen-to-square"></i>
+                    Edit Event
+                </h2>
+            </div>
+            <button wire:click="closeFormModal" class="text-white/70 hover:text-white text-2xl leading-none transition">×</button>
         </div>
 
+        {{-- Error Banner --}}
         @if(count($formErrors))
-        <div id="form-error-banner" class="bg-red-50 border-b border-red-200 px-8 py-5 shrink-0">
-            <p class="font-semibold text-red-800 text-sm mb-3"><i class="fas fa-triangle-exclamation mr-2"></i>Please fix the following:</p>
-            <ul class="text-red-700 text-sm space-y-2">
-                @foreach($formErrors as $err)<li class="flex items-start gap-2"><span class="text-red-500 mt-0.5">•</span><span>{{ $err }}</span></li>@endforeach
+        <div class="bg-red-50 border-b border-red-200 px-5 sm:px-7 py-4 flex-shrink-0">
+            <p class="font-bold text-red-800 text-sm mb-2 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Please fix the following:</p>
+            <ul class="text-red-700 text-sm space-y-1">
+                @foreach($formErrors as $err)<li class="flex items-start gap-2"><span class="text-red-400 mt-0.5">•</span><span>{{ $err }}</span></li>@endforeach
             </ul>
         </div>
         @endif
 
-        <div class="flex-1 min-h-0 overflow-y-auto scrollbar-custom px-8 py-6 space-y-6" x-ref="formScroll">
+        {{-- Scrollable body --}}
+        <div class="flex-1 min-h-0 overflow-y-auto px-5 sm:px-7 py-5 space-y-5" x-ref="formScroll" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;">
 
             {{-- Photo --}}
             <div>
-                <label class="form-label">Event Photo <span class="text-slate-400 font-normal">(Optional)</span></label>
+                <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Event Photo <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
                 <div x-data="{isDragging:false}" @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false"
-                     class="photo-upload-area {{ ($photo||($existingPhotoUrl&&!$removePhoto))?'has-preview':'' }}" :class="isDragging?'border-purple-400 bg-purple-50':''">
+                     class="border-2 rounded-xl p-5 text-center cursor-pointer transition-all"
+                     :class="isDragging?'border-purple-400 bg-purple-50':'{{ ($photo||($existingPhotoUrl&&!$removePhoto))?'border-purple-400 border-solid bg-purple-50/50':'border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/30' }}'">
                     <label class="cursor-pointer block">
                         <input type="file" wire:model="photo" accept="image/*" class="hidden">
-                        @if($photo)<div class="flex flex-col items-center gap-3"><img src="{{ $photo->temporaryUrl() }}" class="w-36 h-28 object-cover rounded-lg shadow border border-purple-200"><p class="text-xs font-semibold text-purple-600"><i class="fas fa-check-circle mr-1"></i>New photo selected</p></div>
-                        @elseif($existingPhotoUrl&&!$removePhoto)<div class="flex flex-col items-center gap-3"><img src="{{ $existingPhotoUrl }}" class="w-36 h-28 object-cover rounded-lg shadow border border-slate-200"><p class="text-xs font-semibold text-slate-500">Current photo — click to change</p></div>
-                        @else<div class="flex flex-col items-center gap-2 py-2"><i class="fas fa-cloud-arrow-up text-3xl text-slate-300"></i><p class="font-semibold text-slate-500 text-sm">Click to upload or drag & drop</p><p class="text-xs text-slate-400">JPG, PNG, WEBP — max 5MB</p><p class="text-xs text-purple-400 font-medium mt-1"><i class="fas fa-image mr-1"></i>Default photo if blank</p></div>@endif
+                        @if($photo)
+                            <div class="flex flex-col items-center gap-3"><img src="{{ $photo->temporaryUrl() }}" class="w-32 h-24 object-cover rounded-xl shadow border border-purple-200"><p class="text-xs font-semibold text-purple-600"><i class="fas fa-check-circle mr-1"></i>New photo selected</p></div>
+                        @elseif($existingPhotoUrl&&!$removePhoto)
+                            <div class="flex flex-col items-center gap-3"><img src="{{ $existingPhotoUrl }}" class="w-32 h-24 object-cover rounded-xl shadow border border-gray-200"><p class="text-xs font-semibold text-gray-500">Current photo — click to change</p></div>
+                        @else
+                            <div class="flex flex-col items-center gap-2 py-2"><i class="fas fa-cloud-arrow-up text-3xl text-gray-300"></i><p class="font-semibold text-gray-500 text-sm">Click to upload or drag & drop</p><p class="text-xs text-gray-400">JPG, PNG, WEBP — max 5MB</p><p class="text-xs text-purple-400 font-medium mt-1"><i class="fas fa-image mr-1"></i>Default photo if blank</p></div>
+                        @endif
                     </label>
                 </div>
-                @if($existingPhotoUrl&&!$removePhoto&&!$photo)<div class="mt-2 flex items-center gap-2"><button type="button" wire:click="$set('removePhoto',true)" class="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 transition"><i class="fas fa-trash text-[10px]"></i> Remove photo</button><span class="text-xs text-slate-400">(uses default)</span></div>@endif
-                @if($removePhoto)<div class="mt-2 flex items-center gap-2"><span class="text-xs text-amber-600 font-semibold"><i class="fas fa-exclamation-circle mr-1"></i>Photo will be removed on save</span><button type="button" wire:click="$set('removePhoto',false)" class="text-xs text-blue-500 underline">Undo</button></div>@endif
-                <div wire:loading wire:target="photo" class="mt-2 text-xs text-purple-600 flex items-center gap-2"><i class="fas fa-spinner spin-icon"></i> Uploading…</div>
+                @if($existingPhotoUrl&&!$removePhoto&&!$photo)
+                    <div class="mt-2 flex items-center gap-2">
+                        <button type="button" wire:click="$set('removePhoto',true)" class="text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-50 transition"><i class="fas fa-trash text-[10px]"></i> Remove photo</button>
+                        <span class="text-xs text-gray-400">(uses default)</span>
+                    </div>
+                @endif
+                @if($removePhoto)
+                    <div class="mt-2 flex items-center gap-2"><span class="text-xs text-amber-600 font-semibold"><i class="fas fa-exclamation-circle mr-1"></i>Photo will be removed on save</span><button type="button" wire:click="$set('removePhoto',false)" class="text-xs text-blue-500 underline">Undo</button></div>
+                @endif
+                <div wire:loading wire:target="photo" class="mt-2 text-xs text-purple-600 flex items-center gap-2"><i class="fas fa-spinner animate-spin"></i> Uploading…</div>
             </div>
 
             {{-- Event Details --}}
-            <div class="border border-slate-200 rounded-lg overflow-hidden">
-                <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-2">
-                    <i class="fas fa-circle-info text-purple-500 text-sm"></i><span class="text-sm font-bold text-slate-700">Event Details</span>
+            <div class="border border-gray-200 rounded-xl overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+                    <i class="fas fa-circle-info text-purple-500 text-sm"></i>
+                    <span class="text-sm font-bold text-gray-700">Event Details</span>
                 </div>
-                <div class="p-5 space-y-4">
+                <div class="p-4 sm:p-5 space-y-4">
                     <div>
-                        <label class="form-label">Event Title <span class="text-red-500">*</span></label>
-                        <input wire:model.defer="title" type="text" placeholder="e.g. PHILCST Alumni Homecoming 2026" class="form-input {{ isset($formErrors['title'])?'field-error':'' }}">
-                        @if(isset($formErrors['title']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs mt-0.5"></i>{{ $formErrors['title'] }}</p>@endif
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Event Title <span class="text-red-500">*</span></label>
+                        <input wire:model.defer="title" type="text" placeholder="e.g. PHILCST Alumni Homecoming 2026"
+                               class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['title'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
+                        @if(isset($formErrors['title']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['title'] }}</span></p>@endif
                     </div>
-                    <div><label class="form-label">Description</label><textarea wire:model.defer="description" rows="3" placeholder="Describe the event, agenda, highlights…" class="form-input resize-none"></textarea></div>
                     <div>
-                        <label class="form-label">Event Date <span class="text-red-500">*</span></label>
-                        <input wire:model="event_date" type="date" class="form-input {{ isset($formErrors['event_date'])?'field-error':'' }}">
-                        @if(isset($formErrors['event_date']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs mt-0.5"></i>{{ $formErrors['event_date'] }}</p>@endif
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Description</label>
+                        <textarea wire:model.defer="description" rows="3" placeholder="Describe the event, agenda, highlights…"
+                                  class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition resize-none"></textarea>
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Event Date <span class="text-red-500">*</span></label>
+                        <input wire:model="event_date" type="date"
+                               class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['event_date'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
+                        @if(isset($formErrors['event_date']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['event_date'] }}</span></p>@endif
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                            <label class="form-label">Start Time <span class="text-red-500">*</span></label>
-                            <input wire:model="start_time" type="text" placeholder="e.g. 8:00 AM" class="form-input {{ isset($formErrors['start_time'])?'field-error':'' }}">
-                            @if(isset($formErrors['start_time']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs mt-0.5"></i>{{ $formErrors['start_time'] }}</p>@endif
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Start Time <span class="text-red-500">*</span> <span class="text-gray-400 font-normal normal-case">(Philippine Time)</span></label>
+                            <input wire:model="start_time" type="text" placeholder="e.g. 8:00 AM"
+                                   class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['start_time'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
+                            @if(isset($formErrors['start_time']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['start_time'] }}</span></p>@endif
                         </div>
                         <div>
-                            <label class="form-label">End Time <span class="text-slate-400 font-normal">(Optional)</span></label>
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">End Time <span class="text-gray-400 font-normal normal-case">(Optional · PH Time)</span></label>
                             <input wire:model="end_time" type="text" placeholder="e.g. 5:00 PM"
-                                   class="form-input {{ isset($formErrors['end_time'])?'field-error':'' }}">
-                            @if(isset($formErrors['end_time']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs mt-0.5"></i>{{ $formErrors['end_time'] }}</p>@endif
+                                   class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['end_time'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
+                            @if(isset($formErrors['end_time']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['end_time'] }}</span></p>@endif
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                            <label class="form-label">Venue / Location <span class="text-red-500">*</span></label>
-                            <input wire:model.defer="venue" type="text" placeholder="e.g. PHILCST Main Gym" class="form-input {{ isset($formErrors['venue'])?'field-error':'' }}">
-                            @if(isset($formErrors['venue']))<p class="form-error"><i class="fas fa-circle-exclamation text-xs mt-0.5"></i>{{ $formErrors['venue'] }}</p>@endif
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Venue / Location <span class="text-red-500">*</span></label>
+                            <input wire:model.defer="venue" type="text" placeholder="e.g. PHILCST Main Gym"
+                                   class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['venue'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
+                            @if(isset($formErrors['venue']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['venue'] }}</span></p>@endif
                         </div>
-                        <div><label class="form-label">Full Address <span class="text-slate-400 font-normal">(Optional)</span></label><input wire:model.defer="venue_address" type="text" placeholder="e.g. Carig Sur, Tuguegarao City" class="form-input"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Full Address <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
+                            <input wire:model.defer="venue_address" type="text" placeholder="e.g. Carig Sur, Tuguegarao City"
+                                   class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
+                        </div>
                     </div>
                 </div>
             </div>
 
             {{-- Target Participants --}}
-            <div class="border border-slate-200 rounded-lg overflow-hidden">
-                <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-2">
-                    <i class="fas fa-users text-purple-500 text-sm"></i><span class="text-sm font-bold text-slate-700">Target Participants</span>
+            <div class="border border-gray-200 rounded-xl overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+                    <i class="fas fa-users text-purple-500 text-sm"></i>
+                    <span class="text-sm font-bold text-gray-700">Target Participants</span>
                 </div>
-                <div class="p-5 space-y-4">
+                <div class="p-4 sm:p-5 space-y-4">
                     <div class="flex gap-3">
-                        <button type="button" wire:click="$set('targetMode','all')" class="target-btn {{ $targetMode==='all'?'active':'' }}"><i class="fas fa-globe text-base"></i><span>All Colleges</span></button>
-                        <button type="button" wire:click="$set('targetMode','college')" class="target-btn {{ $targetMode==='college'?'active':'' }}"><i class="fas fa-building-columns text-base"></i><span>Specific College(s)</span></button>
+                        <button type="button" wire:click="$set('targetMode','all')"
+                                class="flex-1 py-3 px-3 border rounded-lg text-xs font-bold transition flex flex-col items-center gap-1.5 {{ $targetMode==='all'?'border-purple-500 text-white':'border-gray-200 text-gray-500 hover:border-purple-400 hover:text-purple-600 hover:bg-purple-50/50 bg-white' }}"
+                                style="{{ $targetMode==='all'?'background:#7a3f91;':'' }}">
+                            <i class="fas fa-globe text-base"></i><span>All Colleges</span>
+                        </button>
+                        <button type="button" wire:click="$set('targetMode','college')"
+                                class="flex-1 py-3 px-3 border rounded-lg text-xs font-bold transition flex flex-col items-center gap-1.5 {{ $targetMode==='college'?'border-purple-500 text-white':'border-gray-200 text-gray-500 hover:border-purple-400 hover:text-purple-600 hover:bg-purple-50/50 bg-white' }}"
+                                style="{{ $targetMode==='college'?'background:#7a3f91;':'' }}">
+                            <i class="fas fa-building-columns text-base"></i><span>Specific College(s)</span>
+                        </button>
                     </div>
 
                     @if($targetMode === 'all')
-                    <div class="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-lg px-4 py-3">
-                        <i class="fas fa-globe text-purple-500 text-lg"></i>
-                        <div><div class="text-sm font-bold text-purple-800">All Colleges</div><div class="text-xs text-purple-600 mt-0.5">Visible to all alumni regardless of college.</div></div>
-                    </div>
+                        <div class="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-3">
+                            <i class="fas fa-globe text-purple-500 text-lg"></i>
+                            <div><div class="text-sm font-bold text-purple-800">All Colleges</div><div class="text-xs text-purple-600 mt-0.5">Visible to all alumni regardless of college.</div></div>
+                        </div>
                     @elseif($targetMode === 'college')
-                    <div>
-                        @if(isset($formErrors['target']))<p class="form-error mb-2"><i class="fas fa-circle-exclamation text-xs mt-0.5"></i>{{ $formErrors['target'] }}</p>@endif
-                        @if(count($this->colleges) > 0)
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs font-bold text-slate-500 uppercase tracking-wide">Select College(s)</span>
-                            <div class="flex gap-3">
-                                <button type="button" wire:click="$set('selectedColleges', {{ json_encode($this->colleges) }})" class="text-xs text-purple-600 font-bold hover:underline"><i class="fas fa-check-double mr-1"></i>Select All</button>
-                                @if(count($selectedColleges) > 0)<button type="button" wire:click="$set('selectedColleges', [])" class="text-xs text-slate-400 hover:text-red-500 font-bold hover:underline">Clear</button>@endif
-                            </div>
-                        </div>
-                        <div class="college-grid">
-                            @foreach($this->colleges as $col)
-                            <label class="college-check {{ in_array($col, $selectedColleges) ? 'checked' : '' }}">
-                                <input type="checkbox" wire:model.live="selectedColleges" value="{{ $col }}"><span>{{ $col }}</span>
-                            </label>
-                            @endforeach
-                        </div>
-                        @if(count($selectedColleges) > 0)
-                        <div class="mt-3 flex flex-wrap gap-2">
-                            @foreach($selectedColleges as $col)
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-700 text-xs font-bold rounded-lg"><i class="fas fa-building-columns text-[9px]"></i>{{ $col }}</span>
-                            @endforeach
-                        </div>
-                        @endif
-
-                        {{-- Organizers in selected college(s) ── --}}
-                        @if(count($this->organizersForSelectedColleges) > 0)
-                        <div class="mt-4 border border-purple-100 rounded-lg overflow-hidden">
-                            <div class="bg-purple-50 px-4 py-2.5 border-b border-purple-100 flex items-center gap-2">
-                                <i class="fas fa-user-tie text-purple-500 text-xs"></i>
-                                <span class="text-xs font-bold text-purple-700 uppercase tracking-wide">Organizers in Selected College(s)</span>
-                            </div>
-                            <div class="divide-y divide-slate-100">
-                                @foreach($this->organizersForSelectedColleges as $org)
-                                <div class="flex items-center gap-3 px-4 py-2.5">
-                                    <div class="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
-                                        <i class="fas fa-user text-purple-500 text-[10px]"></i>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-xs font-bold text-slate-700 truncate">{{ $org['name'] }}</p>
-                                        <p class="text-[11px] text-slate-400 truncate">{{ $org['department'] }}@if(!empty($org['email'])) · {{ $org['email'] }}@endif</p>
+                        <div>
+                            @if(isset($formErrors['target']))<p class="text-xs text-red-600 flex items-start gap-1.5 mb-2"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['target'] }}</span></p>@endif
+                            @if(count($this->colleges) > 0)
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Select College(s)</span>
+                                    <div class="flex gap-3">
+                                        <button type="button" wire:click="$set('selectedColleges', {{ json_encode($this->colleges) }})" class="text-xs text-purple-600 font-bold hover:underline"><i class="fas fa-check-double mr-1"></i>Select All</button>
+                                        @if(count($selectedColleges) > 0)<button type="button" wire:click="$set('selectedColleges', [])" class="text-xs text-gray-400 hover:text-red-500 font-bold hover:underline">Clear</button>@endif
                                     </div>
                                 </div>
-                                @endforeach
-                            </div>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                    @foreach($this->colleges as $col)
+                                    <label class="flex items-center gap-2 px-3 py-2 border rounded-lg cursor-pointer transition text-xs font-semibold {{ in_array($col,$selectedColleges)?'border-purple-400 bg-purple-50 text-purple-700':'border-gray-200 text-gray-600 hover:border-purple-300 hover:bg-purple-50/40' }}">
+                                        <input type="checkbox" wire:model.live="selectedColleges" value="{{ $col }}" class="accent-purple-600 w-3.5 h-3.5"><span>{{ $col }}</span>
+                                    </label>
+                                    @endforeach
+                                </div>
+                                @if(count($selectedColleges) > 0)
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    @foreach($selectedColleges as $col)
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-700 text-xs font-bold rounded-lg"><i class="fas fa-building-columns text-[9px]"></i>{{ $col }}</span>
+                                    @endforeach
+                                </div>
+                                @endif
+                                @if(count($this->organizersForSelectedColleges) > 0)
+                                <div class="mt-4 border border-purple-100 rounded-xl overflow-hidden">
+                                    <div class="bg-purple-50 px-4 py-2.5 border-b border-purple-100 flex items-center gap-2">
+                                        <i class="fas fa-user-tie text-purple-500 text-xs"></i>
+                                        <span class="text-xs font-bold text-purple-700 uppercase tracking-wide">Organizers in Selected College(s)</span>
+                                    </div>
+                                    <div class="divide-y divide-gray-100">
+                                        @foreach($this->organizersForSelectedColleges as $org)
+                                        <div class="flex items-center gap-3 px-4 py-2.5">
+                                            <div class="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center shrink-0"><i class="fas fa-user text-purple-500 text-[10px]"></i></div>
+                                            <div class="flex-1 min-w-0"><p class="text-xs font-bold text-gray-700 truncate">{{ $org['name'] }}</p><p class="text-[11px] text-gray-400 truncate">{{ $org['department'] }}@if(!empty($org['email'])) · {{ $org['email'] }}@endif</p></div>
+                                        </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                                @elseif($targetMode === 'college' && count($selectedColleges) > 0)
+                                <div class="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                    <i class="fas fa-triangle-exclamation text-amber-500 shrink-0"></i>
+                                    <span>No organizers are assigned to the selected college(s).</span>
+                                </div>
+                                @endif
+                            @else
+                                <div class="text-center py-4 text-gray-400 text-sm"><i class="fas fa-triangle-exclamation text-amber-400 mr-2"></i>No colleges found.</div>
+                            @endif
                         </div>
-                        @elseif($targetMode === 'college' && count($selectedColleges) > 0)
-                        <div class="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-                            <i class="fas fa-triangle-exclamation text-amber-500 shrink-0"></i>
-                            <span>No organizers are assigned to the selected college(s).</span>
-                        </div>
-                        @endif
-                        @else<div class="text-center py-4 text-slate-400 text-sm"><i class="fas fa-triangle-exclamation text-amber-400 mr-2"></i>No colleges found.</div>@endif
-                    </div>
                     @endif
 
-                    {{-- Batch Year — college-scoped validation on save, no chips shown --}}
-                    <div class="pt-3 border-t border-slate-100">
-                        <label class="form-label">Batch Year <span class="text-slate-400 font-normal text-xs">(Optional — leave blank for all batches)</span></label>
-                        <input wire:model.defer="batchYear" type="number" min="1990" max="{{ now()->year + 5 }}"
-                               placeholder="e.g. {{ now()->year - 2 }}"
-                               class="form-input max-w-xs {{ isset($formErrors['batch_year'])?'field-error':'' }}">
-
+                    <div class="pt-3 border-t border-gray-100">
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Batch Year <span class="text-gray-400 font-normal normal-case text-xs">(Optional — leave blank for all batches)</span></label>
+                        <input wire:model.defer="batchYear" type="number" min="1990" max="{{ now()->year + 5 }}" placeholder="e.g. {{ now()->year - 2 }}"
+                               class="w-full sm:max-w-xs px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['batch_year'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
                         @if(isset($formErrors['batch_year']))
-                            <p class="form-error mt-1.5"><i class="fas fa-circle-exclamation text-xs mt-0.5 shrink-0"></i><span>{{ $formErrors['batch_year'] }}</span></p>
+                            <p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['batch_year'] }}</span></p>
                         @else
-                            @if($targetMode === 'college' && count($selectedColleges) === 0)
-                                <p class="field-hint mt-1.5"><i class="fas fa-circle-info text-[10px] mr-1"></i>Select a college above first, then enter a batch year to filter by specific batch.</p>
-                            @elseif($targetMode === 'college' && count($selectedColleges) > 0)
-                                <p class="field-hint mt-1.5"><i class="fas fa-circle-info text-[10px] mr-1"></i>Enter a batch year to target only alumni from <strong>{{ implode(', ', $selectedColleges) }}</strong> who graduated that year. Leave blank for all batches.</p>
-                            @else
-                                <p class="field-hint mt-1.5"><i class="fas fa-circle-info text-[10px] mr-1"></i>Enter a batch year to filter by graduation year across all colleges. Leave blank for all batches.</p>
-                            @endif
+                            <p class="mt-1.5 text-xs text-gray-400"><i class="fas fa-circle-info text-[10px] mr-1"></i>
+                                @if($targetMode === 'college' && count($selectedColleges) > 0)Enter a batch year to target only alumni from <strong>{{ implode(', ', $selectedColleges) }}</strong> who graduated that year.
+                                @else Enter a batch year to filter by graduation year. Leave blank for all batches.@endif
+                            </p>
                         @endif
                     </div>
                 </div>
             </div>
 
             {{-- Contact Person --}}
-            <div class="border border-slate-200 rounded-lg overflow-hidden">
-                <div class="bg-slate-50 px-5 py-3 border-b border-slate-200 flex items-center gap-2">
-                    <i class="fas fa-address-card text-purple-500 text-sm"></i><span class="text-sm font-bold text-slate-700">Contact Person</span>
+            <div class="border border-gray-200 rounded-xl overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+                    <i class="fas fa-address-card text-purple-500 text-sm"></i>
+                    <span class="text-sm font-bold text-gray-700">Contact Person</span>
                     @if($editingIsOrganizerEvent)<span class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg ml-auto shrink-0"><i class="fas fa-lock text-[10px]"></i> Organizer's contact — read only</span>@endif
                 </div>
-                <div class="p-5 grid grid-cols-3 gap-4">
-                    <div><label class="form-label">Name</label><input wire:model.defer="contact_person" type="text" placeholder="Full name" @if($editingIsOrganizerEvent) readonly @endif class="form-input {{ $editingIsOrganizerEvent ? 'cursor-not-allowed' : '' }}"></div>
-                    <div><label class="form-label">Email</label><input wire:model.defer="contact_email" type="email" placeholder="contact@example.com" @if($editingIsOrganizerEvent) readonly @endif class="form-input {{ $editingIsOrganizerEvent ? 'cursor-not-allowed' : '' }}"></div>
-                    <div><label class="form-label">Phone</label><input wire:model.defer="contact_phone" type="text" placeholder="+63 9XX XXX XXXX" @if($editingIsOrganizerEvent) readonly @endif class="form-input {{ $editingIsOrganizerEvent ? 'cursor-not-allowed' : '' }}"></div>
-                    @if($editingIsOrganizerEvent)<div class="col-span-3"><p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Contact details belong to the organizer and cannot be edited by admin.</p></div>@endif
+                <div class="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Name</label>
+                        <input wire:model.defer="contact_person" type="text" placeholder="Full name" @if($editingIsOrganizerEvent) readonly @endif
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition {{ $editingIsOrganizerEvent?'cursor-not-allowed bg-gray-50':'' }}">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Email</label>
+                        <input wire:model.defer="contact_email" type="email" placeholder="contact@example.com" @if($editingIsOrganizerEvent) readonly @endif
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition {{ $editingIsOrganizerEvent?'cursor-not-allowed bg-gray-50':'' }}">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Phone</label>
+                        <input wire:model.defer="contact_phone" type="text" placeholder="+63 9XX XXX XXXX" @if($editingIsOrganizerEvent) readonly @endif
+                               class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition {{ $editingIsOrganizerEvent?'cursor-not-allowed bg-gray-50':'' }}">
+                    </div>
+                    @if($editingIsOrganizerEvent)<div class="col-span-1 sm:col-span-3"><p class="text-xs text-gray-400"><i class="fas fa-circle-info text-[10px] mr-1"></i>Contact details belong to the organizer and cannot be edited by admin.</p></div>@endif
                 </div>
             </div>
 
             {{-- Notes --}}
             <div>
-                <label class="form-label">Additional Notes / Requirements</label>
-                <textarea wire:model.defer="notes" rows="3" placeholder="Dress code, special instructions…" class="form-input resize-none"></textarea>
+                <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Additional Notes / Requirements</label>
+                <textarea wire:model.defer="notes" rows="3" placeholder="Dress code, special instructions…"
+                          class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition resize-none"></textarea>
             </div>
         </div>
 
-        <div class="px-8 py-5 border-t border-slate-200 bg-slate-50 shrink-0 flex gap-4">
-            <button type="button" wire:click="closeFormModal" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-            <button type="button" wire:click="saveEvent" wire:loading.attr="disabled" wire:target="saveEvent" class="flex-1 px-6 py-2.5 btn-primary rounded-lg text-sm font-semibold flex items-center justify-center gap-2">
-                <span wire:loading wire:target="saveEvent"><i class="fas fa-spinner spin-icon"></i> Saving…</span>
-                <span wire:loading.remove wire:target="saveEvent"><i class="fas fa-{{ $isEditing ? 'floppy-disk' : 'circle-check' }}"></i> {{ $isEditing ? 'Save Changes' : 'Create & Approve' }}</span>
+        {{-- Footer --}}
+        <div class="px-5 sm:px-7 py-4 border-t border-gray-100 bg-gray-50/70 flex-shrink-0 flex gap-3">
+            <button type="button" wire:click="closeFormModal" class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-100 transition">Cancel</button>
+            <button type="button" wire:click="saveEvent" wire:loading.attr="disabled" wire:target="saveEvent"
+                    class="flex-1 px-4 py-2.5 text-white rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    style="background:#7a3f91;" onmouseover="this.style.background='#5e2f72'" onmouseout="this.style.background='#7a3f91'">
+                <span wire:loading wire:target="saveEvent"><i class="fas fa-spinner animate-spin"></i> Saving…</span>
+                <span wire:loading.remove wire:target="saveEvent"><i class="fas fa-floppy-disk mr-1"></i>Save Changes</span>
             </button>
         </div>
     </div>
@@ -918,78 +949,113 @@ new class extends Component {
 {{-- ════ MODAL: View Event ════ --}}
 @if($showViewModal && $this->viewingEvent)
 @php $ev=$this->viewingEvent;$totalRsvp=$ev->confirmed_count+$ev->declined_count+$ev->tentative_count;$isOrgDeleted=$ev->status==='ORGANIZER_DELETED'; @endphp
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.closeViewModal()">
-    <div class="ev-modal modal-animate relative">
-        <button wire:click="closeViewModal" class="ev-close-x">&times;</button>
-        <div class="ev-header">
-            <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}" class="ev-cover {{ $isOrgDeleted ? 'opacity-60' : '' }}">
-            <div class="ev-header-body">
-                @if($isOrgDeleted)<div class="deleted-banner"><i class="fas fa-trash text-orange-500"></i><div><p class="text-sm font-bold text-orange-800">Deleted by Organizer</p><p class="text-xs text-orange-600 mt-0.5">Deleted by <strong>{{ $ev->deleted_by ?? $ev->organizer?->name ?? 'Organizer' }}</strong> · {{ $ev->updated_at->format('M d, Y · g:i A') }}</p></div></div>@endif
-                <div class="flex items-start justify-between gap-4 mb-3">
-                    <div class="ev-title {{ $isOrgDeleted ? 'line-through text-slate-400' : '' }}">{{ $ev->title }}</div>
-                    @if($isOrgDeleted)<span class="badge-deleted shrink-0">Deleted</span>
-                    @elseif($ev->status==='PENDING')<span class="badge-pending shrink-0">Pending</span>
-                    @elseif($ev->status==='APPROVED')<span class="badge-approved shrink-0">Approved</span>
-                    @else<span class="badge-rejected shrink-0">Rejected</span>@endif
+<div class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.closeViewModal()">
+    <div class="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[95vh] sm:max-h-[92vh] overflow-hidden relative"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+         x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+        <button wire:click="closeViewModal" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-lg leading-none transition">×</button>
+
+        <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}" class="w-full h-44 sm:h-64 object-cover flex-shrink-0 {{ $isOrgDeleted?'opacity-60':'' }}">
+
+        <div class="px-5 sm:px-8 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+            @if($isOrgDeleted)
+                <div class="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5 mb-3 text-xs font-bold text-orange-700">
+                    <i class="fas fa-trash text-orange-500 shrink-0"></i>
+                    Deleted by <strong>{{ $ev->deleted_by ?? $ev->organizer?->name ?? 'Organizer' }}</strong> · {{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}
                 </div>
-                <ul class="ev-meta-list">
-                    <li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-calendar"></i></span><span>{{ $ev->event_date->format('F d, Y') }}</span></li>
-                    <li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-clock"></i></span><span>{{ $ev->event_date->format('g:i A') }}@if($ev->event_end_date)<span style="color:#aaa;margin:0 4px">–</span>{{ $ev->event_end_date->format('g:i A') }}@else<span style="color:#aaa;font-style:italic;margin-left:4px">· End time not set</span>@endif</span></li>
-                    <li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-location-dot"></i></span><span>{{ $ev->venue }}@if($ev->venue_address) · <span style="color:#888">{{ $ev->venue_address }}</span>@endif</span></li>
-                    @if($ev->target_participants)<li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-users"></i></span><span>{{ $ev->target_participants }}</span></li>@endif
-                    <li class="ev-meta-item"><span class="ev-meta-icon"><i class="fas fa-{{ $ev->organizer ? 'user-tie' : 'shield-halved' }}"></i></span><span>{{ $ev->organizer ? $ev->organizer->name.' · '.$ev->organizer->department : 'Posted by Admin' }}</span></li>
-                </ul>
-                <div style="margin-top:14px;font-size:12px;color:#777;">Posted {{ $ev->created_at->diffForHumans() }}</div>
+            @endif
+            <div class="flex items-start justify-between gap-3 mb-4">
+                <h2 class="text-lg sm:text-xl font-bold text-gray-900 leading-snug {{ $isOrgDeleted?'line-through text-gray-400':'' }}">{{ $ev->title }}</h2>
+                @if($isOrgDeleted)<span class="flex-shrink-0 px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-full text-[11px] font-bold">Deleted</span>
+                @elseif($ev->status==='PENDING')<span class="flex-shrink-0 px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
+                @elseif($ev->status==='APPROVED')<span class="flex-shrink-0 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
+                @else<span class="flex-shrink-0 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-full text-[11px] font-bold">Rejected</span>@endif
             </div>
+            <ul class="space-y-2">
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-calendar text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}</span></li>
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-clock text-purple-500 mt-0.5 w-4 flex-shrink-0"></i>
+                    <span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($ev->event_end_date)<span class="text-gray-400 mx-1">–</span>{{ $ev->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@else<span class="text-gray-400 italic ml-1">· End time not set</span>@endif <span class="text-xs text-gray-400 ml-1"></span></span>
+                </li>
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-location-dot text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->venue }}@if($ev->venue_address) · <span class="text-gray-500">{{ $ev->venue_address }}</span>@endif</span></li>
+                @if($ev->target_participants)<li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-users text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->target_participants }}</span></li>@endif
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-{{ $ev->organizer ? 'user-tie' : 'shield-halved' }} text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->organizer ? $ev->organizer->name.' · '.$ev->organizer->department : 'Posted by Admin' }}</span></li>
+            </ul>
+            <p class="text-xs text-gray-400 mt-3">Posted {{ $ev->created_at->diffForHumans() }}</p>
         </div>
-        <div class="ev-body scrollbar-custom">
-            <div class="ev-section">
-                <div class="ev-section-title">Attendee Responses @if($totalRsvp > 0)<span style="font-size:12px;font-weight:400;color:#888;margin-left:6px;">{{ $totalRsvp }} total</span>@endif</div>
-                @if($totalRsvp===0)<div class="text-center py-5 text-slate-400 text-sm"><i class="fas fa-inbox text-2xl block mb-2 text-slate-200"></i>No responses yet.</div>
-                @else<div class="rsvp-grid">
-                    <div class="rsvp-card rsvp-card-confirmed"><div style="font-size:20px;margin-bottom:6px;" class="rsvp-confirmed-color"><i class="fas fa-circle-check"></i></div><div class="rsvp-count rsvp-confirmed-color">{{ $ev->confirmed_count }}</div><div class="rsvp-label rsvp-confirmed-color">Confirmed</div></div>
-                    <div class="rsvp-card rsvp-card-declined"><div style="font-size:20px;margin-bottom:6px;" class="rsvp-declined-color"><i class="fas fa-circle-xmark"></i></div><div class="rsvp-count rsvp-declined-color">{{ $ev->declined_count }}</div><div class="rsvp-label rsvp-declined-color">Not Attending</div></div>
-                    <div class="rsvp-card rsvp-card-tentative"><div style="font-size:20px;margin-bottom:6px;" class="rsvp-tentative-color"><i class="fas fa-circle-question"></i></div><div class="rsvp-count rsvp-tentative-color">{{ $ev->tentative_count }}</div><div class="rsvp-label rsvp-tentative-color">Maybe</div></div>
-                </div>@endif
+
+        <div class="flex-1 min-h-0 overflow-y-auto" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;">
+
+            {{-- RSVPs --}}
+            <div class="px-5 sm:px-8 py-5 border-b border-gray-100">
+                <h3 class="text-sm font-bold text-gray-800 mb-3">Attendee Responses @if($totalRsvp>0)<span class="text-gray-400 font-normal text-xs ml-1">{{ $totalRsvp }} total</span>@endif</h3>
+                @if($totalRsvp===0)
+                    <div class="text-center py-6 text-gray-400 text-sm"><i class="fas fa-inbox text-2xl block mb-2 text-gray-200"></i>No responses yet.</div>
+                @else
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center"><i class="fas fa-circle-check text-emerald-500 text-lg mb-1"></i><div class="text-2xl font-black text-emerald-700">{{ $ev->confirmed_count }}</div><div class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide mt-1">Confirmed</div></div>
+                        <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center"><i class="fas fa-circle-xmark text-red-500 text-lg mb-1"></i><div class="text-2xl font-black text-red-700">{{ $ev->declined_count }}</div><div class="text-[11px] font-bold text-red-600 uppercase tracking-wide mt-1">Not Attending</div></div>
+                        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center"><i class="fas fa-circle-question text-amber-500 text-lg mb-1"></i><div class="text-2xl font-black text-amber-700">{{ $ev->tentative_count }}</div><div class="text-[11px] font-bold text-amber-600 uppercase tracking-wide mt-1">Maybe</div></div>
+                    </div>
+                @endif
             </div>
-            <div class="ev-section">
-                <div class="ev-section-title">Status</div>
-                @if($isOrgDeleted)<div class="review-box review-box-deleted"><p class="text-sm font-bold text-orange-800"><i class="fas fa-trash mr-2 text-orange-500"></i>Deleted by Organizer</p><p class="text-xs text-orange-700 mt-1">This event was deleted by the organizer. You can restore it to put it back to Pending review.</p></div>
-                @elseif($ev->status==='PENDING')<div class="review-box review-box-pending"><p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Pending Admin Review</p><p class="text-xs text-yellow-700 mt-1">This event is waiting for your approval.</p></div>
-                @elseif($ev->status==='APPROVED')<div class="review-box review-box-approved"><p class="text-sm font-bold text-green-800"><i class="fas fa-circle-check mr-2 text-green-500"></i>Approved</p>@if($ev->reviewed_at)<p class="text-xs text-green-700 mt-1">{{ $ev->reviewed_at->format('M d, Y · g:i A') }}</p>@endif@if($ev->review_remarks)<p class="text-xs text-green-600 mt-1 italic">"{{ $ev->review_remarks }}"</p>@endif</div>
-                @else<div class="review-box review-box-rejected"><p class="text-sm font-bold text-red-800"><i class="fas fa-circle-xmark mr-2 text-red-500"></i>Rejected</p>@if($ev->review_remarks)<p class="text-xs text-red-600 mt-2 font-semibold">Reason: <span class="font-normal">{{ $ev->review_remarks }}</span></p>@endif</div>@endif
+
+            {{-- Status --}}
+            <div class="px-5 sm:px-8 py-5 border-b border-gray-100">
+                <h3 class="text-sm font-bold text-gray-800 mb-3">Status</h3>
+                @if($isOrgDeleted)
+                    <div class="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-orange-800"><i class="fas fa-trash mr-2 text-orange-500"></i>Deleted by Organizer</p><p class="text-xs text-orange-700 mt-1">This event was deleted by the organizer. You can restore it to put it back to Pending review.</p></div>
+                @elseif($ev->status==='PENDING')
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Pending Admin Review</p><p class="text-xs text-yellow-700 mt-1">This event is waiting for your approval.</p></div>
+                @elseif($ev->status==='APPROVED')
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-emerald-800"><i class="fas fa-circle-check mr-2 text-emerald-500"></i>Approved</p>@if($ev->reviewed_at)<p class="text-xs text-emerald-700 mt-1">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }} </p>@endif@if($ev->review_remarks)<p class="text-xs text-emerald-600 mt-1 italic">"{{ $ev->review_remarks }}"</p>@endif</div>
+                @else
+                    <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-red-800"><i class="fas fa-circle-xmark mr-2 text-red-500"></i>Rejected</p>@if($ev->review_remarks)<p class="text-xs text-red-600 mt-2"><span class="font-semibold">Reason:</span> {{ $ev->review_remarks }}</p>@endif</div>
+                @endif
             </div>
-            @if($ev->description)<div class="ev-section"><div class="ev-section-title">About This Event</div><div class="ev-description">{{ $ev->description }}</div></div>@endif
-            @if($ev->notes)<div class="ev-section"><div class="ev-section-title">Additional Notes</div><div class="ev-description">{{ $ev->notes }}</div></div>@endif
-            <div class="ev-section">
-                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:12px;">Posting Details</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid #e8e8e8;border-radius:8px;overflow:hidden;">
-                    <div style="padding:13px 16px;border-right:1px solid #e8e8e8;border-bottom:1px solid #e8e8e8;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:3px;">Submitted</div><div style="font-size:13px;font-weight:600;color:#111;">{{ $ev->created_at->format('M d, Y') }}</div><div style="font-size:11px;color:#888;">{{ $ev->created_at->format('g:i A') }}</div></div>
-                    <div style="padding:13px 16px;border-right:1px solid #e8e8e8;border-bottom:1px solid #e8e8e8;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:3px;">Target</div><div style="font-size:13px;font-weight:600;color:#111;">{{ $ev->target_participants ?? 'All Colleges' }}</div></div>
-                    <div style="padding:13px 16px;border-bottom:1px solid #e8e8e8;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:3px;">Status</div><div style="font-size:13px;font-weight:600;color:#111;">{{ $ev->status }}</div></div>
-                    <div style="grid-column:span 3;padding:13px 16px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#aaa;margin-bottom:6px;">Last Updated</div>
-                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                            <div><div style="font-size:13px;font-weight:600;color:#111;">{{ $ev->updated_at->format('M d, Y · g:i A') }}</div><div style="font-size:11px;color:#888;">{{ $ev->updated_at->diffForHumans() }}</div></div>
-                            @if($ev->deleted_by)<span class="deleted-by-tag"><i class="fas fa-trash" style="font-size:9px"></i> {{ $ev->deleted_by }}@if($ev->deleted_by_role) <span style="opacity:.6;font-weight:400">· {{ ucfirst($ev->deleted_by_role) }}</span>@endif</span>
+
+            @if($ev->description)<div class="px-5 sm:px-8 py-5 border-b border-gray-100"><h3 class="text-sm font-bold text-gray-800 mb-3">About This Event</h3><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $ev->description }}</p></div>@endif
+            @if($ev->notes)<div class="px-5 sm:px-8 py-5 border-b border-gray-100"><h3 class="text-sm font-bold text-gray-800 mb-3">Additional Notes</h3><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $ev->notes }}</p></div>@endif
+
+            {{-- Posting Details --}}
+            <div class="px-5 sm:px-8 py-5">
+                <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Posting Details</p>
+                <div class="grid grid-cols-2 sm:grid-cols-3 border border-gray-100 rounded-xl overflow-hidden divide-x divide-y divide-gray-100">
+                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted</p><p class="text-sm font-semibold text-gray-800">{{ $ev->created_at->setTimezone('Asia/Manila')->format('M d, Y') }}</p><p class="text-xs text-gray-400">{{ $ev->created_at->setTimezone('Asia/Manila')->format('g:i A') }}</p></div>
+                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Target</p><p class="text-sm font-semibold text-gray-800">{{ $ev->target_participants ?? 'All Colleges' }}</p></div>
+                    <div class="px-4 py-3 col-span-2 sm:col-span-1"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p><p class="text-sm font-semibold text-gray-800">{{ $ev->status }}</p></div>
+                    <div class="px-4 py-3 col-span-2 sm:col-span-3">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2">Last Updated</p>
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <div><p class="text-sm font-semibold text-gray-800">{{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }} </p><p class="text-xs text-gray-400">{{ $ev->updated_at->diffForHumans() }}</p></div>
+                            @if($ev->deleted_by)
+                                <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg"><i class="fas fa-trash text-[9px]"></i> {{ $ev->deleted_by }}@if($ev->deleted_by_role) <span class="opacity-60 font-normal">· {{ ucfirst($ev->deleted_by_role) }}</span>@endif</span>
                             @elseif(isset($ev->was_edited)&&$ev->was_edited&&$ev->updated_by)
-                                @if($ev->updated_by_role==='admin')<span class="updated-by-tag updated-by-admin"><i class="fas fa-shield-halved" style="font-size:9px"></i> {{ $ev->updated_by }} <span style="opacity:.6;font-weight:400">· Admin</span></span>
-                                @else<span class="updated-by-tag updated-by-organizer"><i class="fas fa-user-pen" style="font-size:9px"></i> {{ $ev->updated_by }} <span style="opacity:.6;font-weight:400">· Organizer</span></span>@endif
+                                @if($ev->updated_by_role==='admin')<span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg"><i class="fas fa-shield-halved text-[9px]"></i> {{ $ev->updated_by }} <span class="opacity-60 font-normal">· Admin</span></span>
+                                @else<span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg"><i class="fas fa-user-pen text-[9px]"></i> {{ $ev->updated_by }} <span class="opacity-60 font-normal">· Organizer</span></span>@endif
                             @endif
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="ev-footer">
-            <button wire:click="closeViewModal" class="ev-btn ev-btn-close"><i class="fas fa-xmark" style="font-size:11px"></i> Close</button>
-            <button wire:click="confirmDelete({{ $ev->id }})" class="ev-btn ev-btn-delete"><i class="fas fa-trash" style="font-size:11px"></i> Delete</button>
+
+        {{-- Footer --}}
+        <div class="px-5 sm:px-8 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
+            <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
+            <button wire:click="confirmDelete({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-trash text-xs"></i> Delete</button>
             @if($isOrgDeleted)
-                <button wire:click="confirmRestore({{ $ev->id }})" class="ev-btn ev-btn-restore"><i class="fas fa-rotate-left" style="font-size:11px"></i> Restore</button>
+                <button wire:click="confirmRestore({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-orange-600 border border-orange-200 bg-white hover:bg-orange-50 rounded-xl transition"><i class="fas fa-rotate-left text-xs"></i> Restore</button>
             @else
-                @if($ev->status==='PENDING')<button wire:click="confirmReject({{ $ev->id }})" class="ev-btn ev-btn-reject"><i class="fas fa-xmark" style="font-size:11px"></i> Reject</button><button wire:click="confirmApprove({{ $ev->id }})" class="ev-btn ev-btn-approve"><i class="fas fa-check" style="font-size:11px"></i> Approve</button>
-                @elseif($ev->status==='APPROVED')<button wire:click="confirmReject({{ $ev->id }})" class="ev-btn ev-btn-reject"><i class="fas fa-ban" style="font-size:11px"></i> Revoke</button>
-                @elseif($ev->status==='REJECTED')<button wire:click="confirmApprove({{ $ev->id }})" class="ev-btn ev-btn-approve"><i class="fas fa-rotate-left" style="font-size:11px"></i> Re-Approve</button>@endif
-                <button wire:click="openEditModal({{ $ev->id }})" class="ev-btn ev-btn-edit"><i class="fas fa-pen-to-square" style="font-size:11px"></i> Edit</button>
+                @if($ev->status==='PENDING')
+                    <button wire:click="confirmReject({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Reject</button>
+                    <button wire:click="confirmApprove({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-emerald-600 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-xl transition"><i class="fas fa-check text-xs"></i> Approve</button>
+                @elseif($ev->status==='APPROVED')
+                    <button wire:click="confirmReject({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-ban text-xs"></i> Revoke</button>
+                @elseif($ev->status==='REJECTED')
+                    <button wire:click="confirmApprove({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-emerald-600 border border-emerald-200 bg-white hover:bg-emerald-50 rounded-xl transition"><i class="fas fa-rotate-left text-xs"></i> Re-Approve</button>
+                @endif
+                <button wire:click="openEditModal({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 rounded-xl transition"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
             @endif
         </div>
     </div>
@@ -998,18 +1064,22 @@ new class extends Component {
 
 {{-- ════ MODAL: Approve ════ --}}
 @if($showApproveModal)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelApprove()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
-        <div class="px-8 py-6 bg-emerald-50 border-b border-emerald-200 rounded-t-lg"><h2 class="text-xl font-bold text-emerald-800 flex items-center gap-3"><i class="fas fa-circle-check"></i> Approve Event</h2></div>
-        <div class="p-8">
-            <p class="text-slate-800 text-sm mb-1">You are about to approve:</p>
-            <p class="font-bold text-emerald-700 text-base mb-4">"{{ $approveEventTitle }}"</p>
-            <div class="mb-5"><label class="form-label">Remarks <span class="text-slate-400 font-normal">(Optional)</span></label><textarea wire:model.defer="approveRemarks" rows="2" placeholder="e.g. Approved. Great event proposal!" class="form-input resize-none text-sm"></textarea></div>
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.cancelApprove()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 translate-y-2" x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+        <div class="px-6 py-5 bg-emerald-50 border-b border-emerald-100"><h2 class="text-lg font-extrabold text-emerald-800 flex items-center gap-2.5"><div class="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center"><i class="fas fa-circle-check text-emerald-600 text-sm"></i></div>Approve Event</h2></div>
+        <div class="p-6">
+            <p class="text-gray-500 text-sm mb-1">You are about to approve:</p>
+            <p class="font-extrabold text-emerald-700 text-base mb-4">"{{ $approveEventTitle }}"</p>
+            <div class="mb-5">
+                <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Remarks <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
+                <textarea wire:model.defer="approveRemarks" rows="2" placeholder="e.g. Approved. Great event proposal!" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800 bg-white focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition resize-none"></textarea>
+            </div>
             <div class="flex gap-3">
-                <button wire:click="cancelApprove" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button wire:click="executeApprove" wire:loading.attr="disabled" wire:target="executeApprove" class="flex-1 px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="executeApprove"><i class="fas fa-spinner spin-icon"></i></span>
-                    <span wire:loading.remove wire:target="executeApprove"><i class="fas fa-circle-check"></i> Yes, Approve</span>
+                <button wire:click="cancelApprove" class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 transition">Cancel</button>
+                <button wire:click="executeApprove" wire:loading.attr="disabled" wire:target="executeApprove" class="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 transition">
+                    <span wire:loading wire:target="executeApprove"><i class="fas fa-spinner animate-spin"></i></span>
+                    <span wire:loading.remove wire:target="executeApprove"><i class="fas fa-circle-check mr-1"></i> Yes, Approve</span>
                 </button>
             </div>
         </div>
@@ -1019,18 +1089,23 @@ new class extends Component {
 
 {{-- ════ MODAL: Reject ════ --}}
 @if($showRejectModal)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelReject()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
-        <div class="px-8 py-6 bg-red-50 border-b border-red-200 rounded-t-lg"><h2 class="text-xl font-bold text-red-800 flex items-center gap-3"><i class="fas fa-circle-xmark"></i> Reject Event</h2></div>
-        <div class="p-8">
-            <p class="text-slate-800 text-sm mb-1">You are about to reject:</p>
-            <p class="font-bold text-red-700 text-base mb-4">"{{ $rejectEventTitle }}"</p>
-            <div class="mb-5"><label class="form-label">Reason for Rejection <span class="text-red-500">*</span></label><textarea wire:model.defer="rejectRemarks" rows="3" placeholder="e.g. Missing required details." class="form-input resize-none text-sm"></textarea><p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Required — organizer will see this reason.</p></div>
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.cancelReject()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 translate-y-2" x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+        <div class="px-6 py-5 bg-red-50 border-b border-red-100"><h2 class="text-lg font-extrabold text-red-800 flex items-center gap-2.5"><div class="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center"><i class="fas fa-circle-xmark text-red-500 text-sm"></i></div>Reject Event</h2></div>
+        <div class="p-6">
+            <p class="text-gray-500 text-sm mb-1">You are about to reject:</p>
+            <p class="font-extrabold text-red-700 text-base mb-4">"{{ $rejectEventTitle }}"</p>
+            <div class="mb-5">
+                <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Reason for Rejection <span class="text-red-500">*</span></label>
+                <textarea wire:model.defer="rejectRemarks" rows="3" placeholder="e.g. Missing required details." class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800 bg-white focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 transition resize-none"></textarea>
+                <p class="mt-1.5 text-xs text-gray-400"><i class="fas fa-circle-info text-[10px] mr-1"></i>Required — organizer will see this reason.</p>
+            </div>
             <div class="flex gap-3">
-                <button wire:click="cancelReject" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button wire:click="executeReject" wire:loading.attr="disabled" wire:target="executeReject" class="flex-1 px-6 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="executeReject"><i class="fas fa-spinner spin-icon"></i></span>
-                    <span wire:loading.remove wire:target="executeReject"><i class="fas fa-circle-xmark"></i> Yes, Reject</span>
+                <button wire:click="cancelReject" class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 transition">Cancel</button>
+                <button wire:click="executeReject" wire:loading.attr="disabled" wire:target="executeReject" class="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 transition">
+                    <span wire:loading wire:target="executeReject"><i class="fas fa-spinner animate-spin"></i></span>
+                    <span wire:loading.remove wire:target="executeReject"><i class="fas fa-circle-xmark mr-1"></i> Yes, Reject</span>
                 </button>
             </div>
         </div>
@@ -1040,18 +1115,19 @@ new class extends Component {
 
 {{-- ════ MODAL: Restore ════ --}}
 @if($showRestoreModal)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelRestore()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
-        <div class="px-8 py-6 bg-orange-50 border-b border-orange-200 rounded-t-lg"><h2 class="text-xl font-bold text-orange-800 flex items-center gap-3"><i class="fas fa-rotate-left"></i> Restore Event</h2></div>
-        <div class="p-8">
-            <p class="text-slate-800 text-sm mb-1">You are about to restore:</p>
-            <p class="font-bold text-orange-700 text-base mb-4">"{{ $restoreEventTitle }}"</p>
-            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-6 text-xs text-blue-800 font-semibold flex items-start gap-2"><i class="fas fa-info-circle text-blue-500 mt-0.5 shrink-0"></i><span>The event will be set back to <strong>PENDING</strong> for review. The organizer will see it in their list again.</span></div>
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.cancelRestore()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 translate-y-2" x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+        <div class="px-6 py-5 bg-orange-50 border-b border-orange-100"><h2 class="text-lg font-extrabold text-orange-800 flex items-center gap-2.5"><div class="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center"><i class="fas fa-rotate-left text-orange-500 text-sm"></i></div>Restore Event</h2></div>
+        <div class="p-6">
+            <p class="text-gray-500 text-sm mb-1">You are about to restore:</p>
+            <p class="font-extrabold text-orange-700 text-base mb-4">"{{ $restoreEventTitle }}"</p>
+            <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-5 text-xs text-blue-800 font-semibold flex items-start gap-2"><i class="fas fa-info-circle text-blue-500 mt-0.5 shrink-0"></i><span>The event will be set back to <strong>PENDING</strong> for review. The organizer will see it in their list again.</span></div>
             <div class="flex gap-3">
-                <button wire:click="cancelRestore" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button wire:click="executeRestore" wire:loading.attr="disabled" wire:target="executeRestore" class="flex-1 px-6 py-2.5 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="executeRestore"><i class="fas fa-spinner spin-icon"></i></span>
-                    <span wire:loading.remove wire:target="executeRestore"><i class="fas fa-rotate-left"></i> Yes, Restore</span>
+                <button wire:click="cancelRestore" class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 transition">Cancel</button>
+                <button wire:click="executeRestore" wire:loading.attr="disabled" wire:target="executeRestore" class="flex-1 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 transition">
+                    <span wire:loading wire:target="executeRestore"><i class="fas fa-spinner animate-spin"></i></span>
+                    <span wire:loading.remove wire:target="executeRestore"><i class="fas fa-rotate-left mr-1"></i> Yes, Restore</span>
                 </button>
             </div>
         </div>
@@ -1061,18 +1137,19 @@ new class extends Component {
 
 {{-- ════ MODAL: Delete ════ --}}
 @if($showDeleteModal)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @keydown.escape.window="$wire.cancelDelete()">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm modal-animate">
-        <div class="px-8 py-6 bg-red-50 border-b border-red-200 rounded-t-lg"><h2 class="text-xl font-bold text-red-800 flex items-center gap-3"><i class="fas fa-triangle-exclamation"></i> Permanently Delete</h2></div>
-        <div class="p-8">
-            <p class="text-slate-800 text-sm mb-1">You are about to permanently delete:</p>
-            <p class="font-bold text-red-700 text-base mb-3">"{{ $deleteEventTitle }}"</p>
-            <p class="text-xs mb-6 bg-red-50 rounded-lg px-3 py-2 border border-red-100 text-slate-500"><i class="fas fa-exclamation-circle text-red-400 mr-1.5"></i>This action <strong>cannot be undone</strong>. The event and its photo will be permanently removed.</p>
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.cancelDelete()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95 translate-y-2" x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+        <div class="px-6 py-5 bg-red-50 border-b border-red-100"><h2 class="text-lg font-extrabold text-red-800 flex items-center gap-2.5"><div class="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center"><i class="fas fa-triangle-exclamation text-red-500 text-sm"></i></div>Permanently Delete</h2></div>
+        <div class="p-6">
+            <p class="text-gray-500 text-sm mb-1">You are about to permanently delete:</p>
+            <p class="font-extrabold text-red-700 text-base mb-3">"{{ $deleteEventTitle }}"</p>
+            <div class="bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-5 text-xs text-gray-600 flex items-start gap-2"><i class="fas fa-exclamation-circle text-red-400 mt-0.5 shrink-0"></i><span>This action <strong>cannot be undone</strong>. The event and its photo will be permanently removed.</span></div>
             <div class="flex gap-3">
-                <button wire:click="cancelDelete" class="flex-1 px-6 py-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 transition">Cancel</button>
-                <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete" class="flex-1 px-6 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="executeDelete"><i class="fas fa-spinner spin-icon"></i></span>
-                    <span wire:loading.remove wire:target="executeDelete"><i class="fas fa-trash"></i> Yes, Delete</span>
+                <button wire:click="cancelDelete" class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 transition">Cancel</button>
+                <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete" class="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 transition shadow-md">
+                    <span wire:loading wire:target="executeDelete"><i class="fas fa-spinner animate-spin"></i></span>
+                    <span wire:loading.remove wire:target="executeDelete"><i class="fas fa-trash mr-1"></i> Yes, Delete</span>
                 </button>
             </div>
         </div>
