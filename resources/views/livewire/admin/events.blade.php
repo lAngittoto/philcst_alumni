@@ -71,10 +71,10 @@ new class extends Component {
 
     public array  $formErrors = [];
 
-    public function updatingSearch()        { $this->resetPage(); }
-    public function updatingFilterStatus()  { $this->resetPage(); }
-    public function updatingFilterSort()    { $this->resetPage(); }
-    public function updatingFilterCollege() { $this->resetPage(); }
+    public function updatingSearch(): void        { $this->resetPage(); }
+    public function updatingFilterStatus(): void  { $this->resetPage(); }
+    public function updatingFilterSort(): void    { $this->resetPage(); }
+    public function updatingFilterCollege(): void { $this->resetPage(); }
 
     public function updatedTargetMode(): void
     {
@@ -105,8 +105,21 @@ new class extends Component {
                     ->orWhere('target_participants', 'like', "%{$s}%")
             );
         }
-        if ($this->filterStatus  !== '') $q->where('status', $this->filterStatus);
-        if ($this->filterCollege !== '') $q->where('target_participants', 'like', "%{$this->filterCollege}%");
+
+        // When filtering by ORGANIZER_DELETED → show only deleted events.
+        // Default "All Statuses" → hide ORGANIZER_DELETED from the main list.
+        if ($this->filterStatus === 'ORGANIZER_DELETED') {
+            $q->where('status', 'ORGANIZER_DELETED');
+        } elseif ($this->filterStatus !== '') {
+            $q->where('status', $this->filterStatus);
+        } else {
+            // Default: never show organizer-deleted events in the main list
+            $q->where('status', '!=', 'ORGANIZER_DELETED');
+        }
+
+        if ($this->filterCollege !== '') {
+            $q->where('target_participants', 'like', "%{$this->filterCollege}%");
+        }
 
         $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
         return $q->paginate(20);
@@ -244,13 +257,11 @@ new class extends Component {
 
         if (trim($this->batchYear) !== '' && !isset($errors['target'])) {
             $inputYear = (int) trim($this->batchYear);
-
             $q = Alumni::where('status', 'VERIFIED')->where('batch', $inputYear);
             if ($this->targetMode === 'college' && !empty($this->selectedColleges)) {
                 $colleges = $this->selectedColleges;
                 $q->whereHas('course', fn($c) => $c->whereIn('college', $colleges));
             }
-
             if (!$q->exists()) {
                 $suggQ = Alumni::where('status', 'VERIFIED');
                 if ($this->targetMode === 'college' && !empty($this->selectedColleges)) {
@@ -260,7 +271,6 @@ new class extends Component {
                 $available   = $suggQ->distinct()->orderBy('batch', 'desc')->pluck('batch')->map(fn($b) => (int)$b)->toArray();
                 $scopeLabel  = $this->targetMode === 'college' && !empty($this->selectedColleges)
                     ? implode(', ', $this->selectedColleges) : 'all colleges';
-
                 if (empty($available)) {
                     $errors['batch_year'] = "No verified alumni found for {$scopeLabel}. Leave batch blank to target all alumni.";
                 } else {
@@ -280,7 +290,6 @@ new class extends Component {
         $yearSuffix  = trim($this->batchYear) ? ' · Batch ' . trim($this->batchYear) : '';
         $targetStr   = $collegesStr . $yearSuffix;
 
-        // Convert PH time to UTC for storage
         $startDt = \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . $this->start_time, 'Asia/Manila')->utc();
         $endDt   = ($this->event_date && trim($this->end_time))
             ? \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . $this->end_time, 'Asia/Manila')->utc()
@@ -500,7 +509,7 @@ new class extends Component {
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.150ms="$wire.set('search',q)"
+                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
                        placeholder="Search title, venue…"
                        class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-800 transition focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                        autocomplete="off">
@@ -559,11 +568,9 @@ new class extends Component {
                         @forelse($this->events as $event)
                         @php
                             $isOrgDeleted = $event->status === 'ORGANIZER_DELETED';
-                            // Determine the college to display
                             if ($event->organizer_id && $event->organizer) {
                                 $displayCollege = $event->organizer->department ?? '—';
                             } else {
-                                // Admin-created: parse from target_participants
                                 $tp = $event->target_participants ?? '';
                                 $parts = explode(' · Batch ', $tp, 2);
                                 $displayCollege = trim($parts[0]) ?: 'All Colleges';
@@ -580,7 +587,6 @@ new class extends Component {
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 @if($event->organizer)
                                     <p class="text-xs font-semibold text-gray-700">{{ $event->organizer->name }}</p>
-                                    
                                 @else
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs font-bold">
                                         <i class="fas fa-shield-halved text-[9px]"></i> Admin
@@ -776,13 +782,13 @@ new class extends Component {
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Start Time <span class="text-red-500">*</span> <span class="text-gray-400 font-normal normal-case">(Philippine Time)</span></label>
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Start Time <span class="text-red-500">*</span></label>
                             <input wire:model="start_time" type="text" placeholder="e.g. 8:00 AM"
                                    class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['start_time'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
                             @if(isset($formErrors['start_time']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['start_time'] }}</span></p>@endif
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">End Time <span class="text-gray-400 font-normal normal-case">(Optional · PH Time)</span></label>
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">End Time <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
                             <input wire:model="end_time" type="text" placeholder="e.g. 5:00 PM"
                                    class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['end_time'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
                             @if(isset($formErrors['end_time']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['end_time'] }}</span></p>@endif
@@ -797,7 +803,7 @@ new class extends Component {
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Full Address <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
-                            <input wire:model.defer="venue_address" type="text" placeholder="e.g. Carig Sur, Tuguegarao City"
+                            <input wire:model.defer="venue_address" type="text" placeholder="e.g. Old Nalsian Road, Nalasian Calasiao Pangasinan"
                                    class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                         </div>
                     </div>
@@ -966,7 +972,7 @@ new class extends Component {
                 </div>
             @endif
             <div class="flex items-start justify-between gap-3 mb-4">
-                <h2 class="text-lg sm:text-xl font-bold text-gray-900 leading-snug {{ $isOrgDeleted?'line-through text-gray-400':'' }}">{{ $ev->title }}</h2>
+                <h2 class="text-lg sm:text-xl font-bold leading-snug {{ $isOrgDeleted?'line-through text-gray-400':'text-gray-900' }}">{{ $ev->title }}</h2>
                 @if($isOrgDeleted)<span class="flex-shrink-0 px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-full text-[11px] font-bold">Deleted</span>
                 @elseif($ev->status==='PENDING')<span class="flex-shrink-0 px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
                 @elseif($ev->status==='APPROVED')<span class="flex-shrink-0 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
@@ -975,7 +981,7 @@ new class extends Component {
             <ul class="space-y-2">
                 <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-calendar text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}</span></li>
                 <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-clock text-purple-500 mt-0.5 w-4 flex-shrink-0"></i>
-                    <span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($ev->event_end_date)<span class="text-gray-400 mx-1">–</span>{{ $ev->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@else<span class="text-gray-400 italic ml-1">· End time not set</span>@endif <span class="text-xs text-gray-400 ml-1"></span></span>
+                    <span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($ev->event_end_date)<span class="text-gray-400 mx-1">–</span>{{ $ev->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@else<span class="text-gray-400 italic ml-1">· End time not set</span>@endif</span>
                 </li>
                 <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-location-dot text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->venue }}@if($ev->venue_address) · <span class="text-gray-500">{{ $ev->venue_address }}</span>@endif</span></li>
                 @if($ev->target_participants)<li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-users text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->target_participants }}</span></li>@endif
@@ -1008,7 +1014,7 @@ new class extends Component {
                 @elseif($ev->status==='PENDING')
                     <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Pending Admin Review</p><p class="text-xs text-yellow-700 mt-1">This event is waiting for your approval.</p></div>
                 @elseif($ev->status==='APPROVED')
-                    <div class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-emerald-800"><i class="fas fa-circle-check mr-2 text-emerald-500"></i>Approved</p>@if($ev->reviewed_at)<p class="text-xs text-emerald-700 mt-1">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }} </p>@endif@if($ev->review_remarks)<p class="text-xs text-emerald-600 mt-1 italic">"{{ $ev->review_remarks }}"</p>@endif</div>
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-emerald-800"><i class="fas fa-circle-check mr-2 text-emerald-500"></i>Approved</p>@if($ev->reviewed_at)<p class="text-xs text-emerald-700 mt-1">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>@endif@if($ev->review_remarks)<p class="text-xs text-emerald-600 mt-1 italic">"{{ $ev->review_remarks }}"</p>@endif</div>
                 @else
                     <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-red-800"><i class="fas fa-circle-xmark mr-2 text-red-500"></i>Rejected</p>@if($ev->review_remarks)<p class="text-xs text-red-600 mt-2"><span class="font-semibold">Reason:</span> {{ $ev->review_remarks }}</p>@endif</div>
                 @endif
@@ -1022,12 +1028,17 @@ new class extends Component {
                 <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Posting Details</p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 border border-gray-100 rounded-xl overflow-hidden divide-x divide-y divide-gray-100">
                     <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted</p><p class="text-sm font-semibold text-gray-800">{{ $ev->created_at->setTimezone('Asia/Manila')->format('M d, Y') }}</p><p class="text-xs text-gray-400">{{ $ev->created_at->setTimezone('Asia/Manila')->format('g:i A') }}</p></div>
-                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Target</p><p class="text-sm font-semibold text-gray-800">{{ $ev->target_participants ?? 'All Colleges' }}</p></div>
-                    <div class="px-4 py-3 col-span-2 sm:col-span-1"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p><p class="text-sm font-semibold text-gray-800">{{ $ev->status }}</p></div>
+                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">College</p><p class="text-sm font-semibold text-gray-800">{{ $ev->target_participants ?? 'All Colleges' }}</p></div>
+                    <div class="px-4 py-3 col-span-2 sm:col-span-1"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p>
+                        @if($isOrgDeleted)<p class="text-sm font-semibold text-orange-600">Deleted</p>
+                        @elseif($ev->status==='PENDING')<p class="text-sm font-semibold text-yellow-600">Pending</p>
+                        @elseif($ev->status==='APPROVED')<p class="text-sm font-semibold text-emerald-600">Approved</p>
+                        @else<p class="text-sm font-semibold text-red-600">Rejected</p>@endif
+                    </div>
                     <div class="px-4 py-3 col-span-2 sm:col-span-3">
                         <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2">Last Updated</p>
                         <div class="flex items-center gap-3 flex-wrap">
-                            <div><p class="text-sm font-semibold text-gray-800">{{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }} </p><p class="text-xs text-gray-400">{{ $ev->updated_at->diffForHumans() }}</p></div>
+                            <div><p class="text-sm font-semibold text-gray-800">{{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p><p class="text-xs text-gray-400">{{ $ev->updated_at->diffForHumans() }}</p></div>
                             @if($ev->deleted_by)
                                 <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg"><i class="fas fa-trash text-[9px]"></i> {{ $ev->deleted_by }}@if($ev->deleted_by_role) <span class="opacity-60 font-normal">· {{ ucfirst($ev->deleted_by_role) }}</span>@endif</span>
                             @elseif(isset($ev->was_edited)&&$ev->was_edited&&$ev->updated_by)
