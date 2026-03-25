@@ -12,7 +12,7 @@ use Livewire\Volt\Volt;
 // ===================================
 Route::get('/', fn() => view('home'));
 Route::get('/about', fn() => view('about'));
-Route::get('/events', fn() => view('events'));
+Route::get('/showevents', fn() => view('showevents'));
 
 // ===================================
 // Auth Routes

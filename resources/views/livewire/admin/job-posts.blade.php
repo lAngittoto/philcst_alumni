@@ -544,7 +544,7 @@ new class extends Component {
 .jv-close-x:hover{background:#f0f0f0;color:#333;}
 </style>
 
-<div class="min-h-screen bg-gray-50">
+<div>
 
 {{-- FLASH TOAST --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
@@ -570,7 +570,7 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto">
+<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto bg-white">
 
     {{-- HEADER --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -649,15 +649,15 @@ new class extends Component {
                 <table class="w-full border-collapse min-w-[640px]">
                     <thead>
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Job Title</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Organization</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Employment Type</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Deadline</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Job Title</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Organization</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden md:table-cell">Employment Type</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Deadline</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-50">
+                    <tbody class="divide-y divide-gray-400">
                         @forelse($this->jobPostings as $job)
                         @php
                             $isOrgDel = $job->status === 'ORGANIZER_DELETED';
@@ -732,10 +732,10 @@ new class extends Component {
         </div>
 
         {{-- PAGINATION --}}
-        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0">
+        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-[#2b0d3e] shrink-0">
             @php $total=$this->jobPostings->total();$pp=$this->jobPostings->perPage();$cp=$this->jobPostings->currentPage();$from=$total>0?($cp-1)*$pp+1:0;$to=min($cp*$pp,$total); @endphp
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <p class="text-gray-500 text-xs sm:text-sm">Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-gray-700">{{ $total }}</span> jobs</p>
+                <p class="text-white text-xs sm:text-sm">Showing <span class="font-bold text-white">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-white">{{ $total }}</span> jobs</p>
                 <div class="flex items-center gap-1.5">
                     @if($this->jobPostings->onFirstPage())
                         <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">← Prev</button>
@@ -776,11 +776,11 @@ new class extends Component {
             <div>
                 <label class="form-lbl">Job Title <span class="text-red-500">*</span></label>
                 <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer"
-                       class="form-inp {{ isset($postErrors['postJobTitle']) ? 'field-err' : '' }}">
+                       class=" form-inp {{ isset($postErrors['postJobTitle']) ? 'field-err' : '' }}">
                 @if(isset($postErrors['postJobTitle']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
             </div>
 
-            <div class="rounded-xl border border-gray-200 overflow-hidden">
+            <div class="rounded-xl border border-gray-400 overflow-hidden">
                 <div class="bg-gray-50 px-5 py-3 border-b border-gray-200 flex items-center gap-2">
                     <i class="fas fa-building text-[#7a3f91] text-sm"></i>
                     <span class="text-sm font-bold text-gray-700">Organization Details</span>

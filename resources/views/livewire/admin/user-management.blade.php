@@ -1111,7 +1111,7 @@ new class extends Component {
 };
 ?>
 
-<div class="min-h-screen bg-gray-50">
+<div>
 
 {{-- ═══════════════════════════════════════════════════════
      GLOBAL STYLES
@@ -1311,14 +1311,14 @@ new class extends Component {
 {{-- ═══════════════════════════════════════════════════════
      PAGE WRAPPER
      ═══════════════════════════════════════════════════════ --}}
-<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto">
+<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 max-w-screen-2xl mx-auto bg-white">
 
     {{-- ── HEADER ─────────────────────────────────────────── --}}
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6 slide-down">
         <div class="flex items-center gap-4">
-            <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-xl btn-brand flex items-center justify-center shadow-lg shrink-0">
-                <i class="fas fa-users text-white text-lg sm:text-xl"></i>
-            </div>
+<div class="w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shadow-lg shrink-0 bg-[#7a3f91] text-white">
+    <i class="fas fa-users"></i>
+</div>
             <div>
                 <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-800 tracking-tight">Alumni & Organizers</h1>
                 <p class="text-gray-500 text-xs sm:text-sm mt-0.5">Manage alumni and organizer records efficiently</p>
@@ -1434,16 +1434,16 @@ new class extends Component {
                     <table class="w-full border-collapse min-w-[700px]">
                         <thead>
                             <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Student ID</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Course</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Year</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hide-mobile">Email</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Name</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Student ID</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Course</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">Year</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider hide-mobile">Email</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">Status</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">View</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-50">
+                        <tbody class="divide-y divide-gray-400">
                             @forelse($this->alumniRecords as $item)
                             <tr class="tbl-row bg-white">
                                 <td class="px-4 sm:px-5 py-3.5">
@@ -1467,7 +1467,7 @@ new class extends Component {
                                     <span class="font-mono text-gray-700 text-sm font-semibold">{{ $item->batch }}</span>
                                 </td>
                                 <td class="px-4 sm:px-5 py-3.5 hide-mobile">
-                                    <span class="text-gray-600 text-sm">{{ $item->email }}</span>
+                                    <span class="text-gray-700 font-semibold text-sm">{{ $item->email }}</span>
                                 </td>
                                 <td class="px-4 sm:px-5 py-3.5 text-center">
                                     @php
@@ -1523,7 +1523,7 @@ new class extends Component {
             </div>
 
             {{-- Pagination Footer --}}
-            <div class="px-4 sm:px-6 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
+            <div class="px-4 sm:px-6 py-3.5 border-t border-gray-100 bg-[#2b0d3e] shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
                 @php
                     $total=$this->alumniRecords->total();
                     $pp=$this->alumniRecords->perPage();
@@ -1532,9 +1532,9 @@ new class extends Component {
                     $to=min($cp*$pp,$total);
                 @endphp
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <p class="text-gray-500 text-xs sm:text-sm">
-                        Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span>
-                        of <span class="font-bold text-gray-700">{{ $total }}</span> records
+                    <p class="text-white text-xs sm:text-sm">
+                        Showing <span class="font-bold text-white">{{ $from }}–{{ $to }}</span>
+                        of <span class="font-bold text-white">{{ $total }}</span> records
                     </p>
                     <div class="flex items-center gap-1.5">
                         @if($this->alumniRecords->onFirstPage())
@@ -1600,15 +1600,15 @@ new class extends Component {
                     <table class="w-full border-collapse min-w-[700px]">
                         <thead>
                             <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Teacher ID</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hide-mobile">Email</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">College</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Name</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Teacher ID</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider hide-mobile">Email</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">College</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">Status</th>
+                                <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">Action</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-50">
+                        <tbody class="divide-y divide-gray-400">
                             @forelse($this->organizerRecords as $item)
                             <tr class="tbl-row bg-white">
                                 <td class="px-4 sm:px-5 py-3.5">
@@ -1623,7 +1623,7 @@ new class extends Component {
                                     <span class="font-mono text-gray-700 text-sm font-semibold">{{ $item->id_number }}</span>
                                 </td>
                                 <td class="px-4 sm:px-5 py-3.5 hide-mobile">
-                                    <span class="text-gray-600 text-sm">{{ $item->email }}</span>
+                                    <span class="text-gray-700 text-sm font-semibold">{{ $item->email }}</span>
                                 </td>
                                 <td class="px-4 sm:px-5 py-3.5">
                                     @php
@@ -1829,25 +1829,25 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <input wire:model.defer="regFirstName" type="text" placeholder="First Name"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">First Name <span class="text-red-400">*</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">First Name <span class="text-red-400">*</span></p>
                     </div>
                     <div>
                         <input wire:model.defer="regLastName" type="text" placeholder="Last Name"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">Last Name <span class="text-red-400">*</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                     <div>
                         <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">Middle Initial <span class="text-gray-300">(1–2 letters, optional)</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Middle Initial <span class="text-gray-300">(1–2 letters, optional)</span></p>
                     </div>
                     <div>
                         <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
                     </div>
                 </div>
             </div>
@@ -1857,13 +1857,13 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div>
                     <label class="block text-sm font-bold text-gray-700 mb-2">Student ID <span class="text-red-500">*</span></label>
                     <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
-                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono input-brand text-gray-800">
-                    <p class="text-xs text-gray-400 mt-1 pl-1">Numbers only · padded to 8 digits</p>
+                           class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm font-mono input-brand text-gray-800">
+                    <p class="text-xs text-gray-700 mt-1 pl-1">Numbers only · padded to 8 digits</p>
                 </div>
                 <div>
                     <label class="block text-sm font-bold text-gray-700 mb-2">Email <span class="text-red-500">*</span></label>
                     <input wire:model.defer="regEmail" type="email" placeholder="student@example.com"
-                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                           class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
                 </div>
             </div>
 
@@ -1872,7 +1872,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div>
                     <label class="block text-sm font-bold text-gray-700 mb-2">Course <span class="text-red-500">*</span></label>
                     <select wire:model.defer="regCourseCode"
-                            class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                            class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
                         <option value="">Select Course</option>
                         @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                     </select>
@@ -1880,7 +1880,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div>
                     <label class="block text-sm font-bold text-gray-700 mb-2">Batch Year <span class="text-red-500">*</span></label>
                     <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}" min="1000" max="9999"
-                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                           class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
                 </div>
             </div>
 
@@ -2084,12 +2084,12 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                     <div>
                         <label class="block text-xs font-bold text-gray-600 mb-1.5">Course Code</label>
                         <input wire:model.defer="courseCode" type="text" placeholder="e.g. BSIT" maxlength="20"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-gray-600 mb-1.5">Course Name</label>
                         <input wire:model.defer="courseName" type="text" placeholder="e.g. Bachelor of Science in Information Technology" maxlength="100"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
                     </div>
                     <div class="flex gap-3 pt-1">
                         @if($editingCourseId)
@@ -2112,7 +2112,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 </h3>
                 <div class="space-y-2 max-h-64 overflow-y-auto scroll-custom pr-1">
                     @forelse($coursesList as $c)
-                    <div class="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-white shadow-sm hover:border-gray-200 transition">
+                    <div class="flex items-center justify-between p-4 border border-gray-400 rounded-xl bg-white shadow-sm hover:border-gray-200 transition">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
                                 <p class="font-bold text-gray-800 text-sm">{{ $c['code'] }}</p>
@@ -2348,25 +2348,25 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <input wire:model.defer="orgFirstName" type="text" placeholder="First Name"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">First Name <span class="text-red-400">*</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">First Name <span class="text-red-400">*</span></p>
                     </div>
                     <div>
                         <input wire:model.defer="orgLastName" type="text" placeholder="Last Name"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">Last Name <span class="text-red-400">*</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                     <div>
                         <input wire:model.defer="orgMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">Middle Initial <span class="text-gray-300">(letters only)</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Middle Initial <span class="text-gray-300">(letters only)</span></p>
                     </div>
                     <div>
                         <input wire:model.defer="orgSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
-                               class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-400 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
+                               class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
                     </div>
                 </div>
             </div>
@@ -2376,13 +2376,13 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div>
                     <label class="block text-sm font-bold text-gray-700 mb-2">Teacher ID <span class="text-red-500">*</span></label>
                     <input wire:model.defer="orgTeacherId" type="text" placeholder="e.g. 12345" maxlength="8" inputmode="numeric"
-                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono input-brand text-gray-800">
-                    <p class="text-xs text-gray-400 mt-1 pl-1">Numbers only · padded to 8 digits</p>
+                           class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm font-mono input-brand text-gray-800">
+                    <p class="text-xs text-gray-700 mt-1 pl-1">Numbers only · padded to 8 digits</p>
                 </div>
                 <div>
                     <label class="block text-sm font-bold text-gray-700 mb-2">Email <span class="text-red-500">*</span></label>
                     <input wire:model.defer="orgEmail" type="email" placeholder="teacher@example.com"
-                           class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
+                           class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
                 </div>
             </div>
 
@@ -2404,8 +2404,8 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                     @endphp
                     <div x-data="{ map: {{ Js::from($collegeDeptsMap) }}, get depts(){ return $wire.orgCollegeSelect?(this.map[$wire.orgCollegeSelect]??[]):[]; } }">
                         <select wire:model.live="orgCollegeSelect"
-                                class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800">
-                            <option value="">— Select College —</option>
+                                class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
+                            <option value=""> Select College </option>
                             @foreach($this->orgDepartmentsGrouped->keys() as $collegeName)
                                 @php $isOccupied = isset($occupiedColleges[$collegeName]); @endphp
                                 <option value="{{ $collegeName }}" {{ $isOccupied?'disabled':'' }}>
@@ -2485,7 +2485,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 </h3>
                 <div class="flex gap-2">
                     <input wire:model.defer="orgNewCollegeName" type="text" placeholder="e.g. College of Computer Studies"
-                           class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm input-brand text-gray-800"
+                           class="flex-1 px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800"
                            @keydown.enter.prevent="$wire.addCollege()">
                     <button wire:click="addCollege"
                             class="btn-brand px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 whitespace-nowrap">
@@ -2494,7 +2494,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                         <span class="sm:hidden">Add</span>
                     </button>
                 </div>
-                <p class="text-xs text-gray-400 mt-2">After adding, assign which courses/departments belong to it.</p>
+                <p class="text-xs text-gray-700 mt-2">After adding, assign which courses/departments belong to it.</p>
             </div>
             @endif
 
@@ -2592,7 +2592,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <h3 class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
                     <i class="fas fa-list text-gray-400"></i>
                     Colleges &amp; Departments
-                    <span class="ml-auto text-xs font-bold text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full border border-gray-200">
+                    <span class="ml-auto text-xs font-bold text-gray-700 bg-gray-100 px-2.5 py-1 rounded-full border border-gray-200">
                         {{ count($orgCoursesList) }} {{ count($orgCoursesList)===1?'college':'colleges' }}
                     </span>
                 </h3>
@@ -2606,7 +2606,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                 <div class="space-y-3">
                     @foreach($orgCoursesList as $college => $departments)
                     @php $collegeOccupied=$this->occupiedColleges(); $collegeOrg=$collegeOccupied[$college]??null; @endphp
-                    <div class="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                    <div class="border border-gray-400 rounded-xl overflow-hidden shadow-sm">
                         <div class="flex items-center justify-between px-4 py-3" style="background:var(--brand-50);">
                             <div class="flex items-center gap-3">
                                 <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
@@ -2658,7 +2658,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                                 </span>
                                 <div class="ml-3">
                                     <p class="font-bold text-gray-800 text-sm">{{ $dept['code'] }}</p>
-                                    <p class="text-gray-400 text-xs">{{ $dept['name'] }}</p>
+                                    <p class="text-gray-700 text-xs">{{ $dept['name'] }}</p>
                                 </div>
                             </div>
                             @endforeach

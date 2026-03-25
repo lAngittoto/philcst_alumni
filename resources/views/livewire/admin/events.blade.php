@@ -485,7 +485,7 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto min-h-screen bg-gray-50">
+<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6  max-w-screen-2xl mx-auto  bg-white">
 
     {{-- ══ HEADER ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -555,16 +555,16 @@ new class extends Component {
                 <table class="w-full border-collapse min-w-[700px]">
                     <thead>
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Event</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Organizer</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">College</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">RSVPs</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Event</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider">Date & Time</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider hidden md:table-cell">Organizer</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-800 uppercase tracking-wider hidden lg:table-cell">College</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider hidden lg:table-cell">RSVPs</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-800 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-50">
+                    <tbody class="divide-y divide-gray-400">
                         @forelse($this->events as $event)
                         @php
                             $isOrgDeleted = $event->status === 'ORGANIZER_DELETED';
@@ -581,12 +581,12 @@ new class extends Component {
                                 <p class="font-semibold text-sm truncate {{ $isOrgDeleted ? 'text-gray-400 line-through' : 'text-gray-800' }}">{{ $event->title }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 whitespace-nowrap">
-                                <span class="text-sm font-semibold text-gray-700">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
-                                <p class="text-xs text-gray-400 mt-0.5">{{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($event->event_end_date)<span class="text-gray-300 mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif</p>
+                                <span class="text-sm font-bold text-gray-700">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
+                                <p class="text-xs text-gray-700 text-bold mt-0.5">{{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($event->event_end_date)<span class="text-gray-300 mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 @if($event->organizer)
-                                    <p class="text-xs font-semibold text-gray-700">{{ $event->organizer->name }}</p>
+                                    <p class="text-xs font-bold text-gray-700">{{ $event->organizer->name }}</p>
                                 @else
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs font-bold">
                                         <i class="fas fa-shield-halved text-[9px]"></i> Admin
@@ -594,7 +594,7 @@ new class extends Component {
                                 @endif
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell">
-                                <p class="text-xs text-gray-600 font-medium max-w-[130px] truncate" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
+                                <p class="text-xs text-gray-700 font-bold max-w-[130px] truncate" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center hidden lg:table-cell">
                                 <div class="flex items-center justify-center gap-1.5">
@@ -671,10 +671,10 @@ new class extends Component {
         </div>
 
         {{-- Pagination --}}
-        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0">
+        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-[#2b0d3e]  shrink-0">
             @php $total=$this->events->total();$pp=$this->events->perPage();$cp=$this->events->currentPage();$from=$total>0?($cp-1)*$pp+1:0;$to=min($cp*$pp,$total); @endphp
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <p class="text-gray-500 text-xs sm:text-sm">Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-gray-700">{{ $total }}</span> events</p>
+                <p class="text-white text-xs sm:text-sm">Showing <span class="font-bold text-white">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-white">{{ $total }}</span> events</p>
                 <div class="flex items-center gap-1.5">
                     @if($this->events->onFirstPage())
                         <button disabled class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">← Prev</button>

@@ -26,7 +26,7 @@
                     $navs = [
                         '/' => 'Home', 
                         'about' => 'About', 
-                        'events' => 'Events'
+                        'showevents' => 'Events'
                     ]; 
                 @endphp
                 

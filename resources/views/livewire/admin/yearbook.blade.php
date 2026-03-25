@@ -288,7 +288,7 @@ new class extends Component {
     </script>
 
     <!-- MAIN CONTENT -->
-    <div class="flex flex-col flex-1 min-h-0 px-4 sm:px-6 lg:px-8 pt-7 pb-4">
+    <div class="flex flex-col flex-1 min-h-0 px-4 sm:px-6 lg:px-8 pt-7 pb-4 bg-white">
 
         <!-- HEADER -->
         <div class="mb-5 shrink-0" style="animation:slideInDown .4s ease-out;">
@@ -442,7 +442,7 @@ new class extends Component {
         </div>
 
         <!-- PAGINATION -->
-        <div class="bg-white rounded-lg shadow-sm p-3 sm:p-4 mt-2 shrink-0">
+        <div class="bg-[#2b0d3e] rounded-lg shadow-sm p-3 sm:p-4 mt-2 shrink-0">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 @php
                     $total = $this->alumniRecords->total();
@@ -451,9 +451,9 @@ new class extends Component {
                     $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
                     $to    = min($cp * $pp, $total);
                 @endphp
-                <p class="text-slate-600 text-xs sm:text-sm">
-                    Showing <span class="font-semibold text-slate-800">{{ $from }}–{{ $to }}</span>
-                    of <span class="font-semibold text-slate-800">{{ $total }}</span>
+                <p class="text-white text-xs sm:text-sm">
+                    Showing <span class="font-semibold text-white">{{ $from }}–{{ $to }}</span>
+                    of <span class="font-semibold text-white">{{ $total }}</span>
                 </p>
                 <div class="flex gap-2 items-center">
                     @if($this->alumniRecords->onFirstPage())
@@ -461,7 +461,7 @@ new class extends Component {
                     @else
                         <button wire:click="previousPage" class="px-4 sm:px-6 py-2 sm:py-3 btn-primary rounded-lg text-xs sm:text-sm font-medium">← Prev</button>
                     @endif
-                    <span class="px-4 sm:px-6 py-2 sm:py-3 text-slate-700 text-xs sm:text-sm font-semibold">{{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}</span>
+                    <span class="px-4 sm:px-6 py-2 sm:py-3 text-white text-xs sm:text-sm font-semibold">{{ $this->alumniRecords->currentPage() }} / {{ $this->alumniRecords->lastPage() }}</span>
                     @if($this->alumniRecords->hasMorePages())
                         <button wire:click="nextPage" class="px-4 sm:px-6 py-2 sm:py-3 btn-primary rounded-lg text-xs sm:text-sm font-medium">Next →</button>
                     @else
