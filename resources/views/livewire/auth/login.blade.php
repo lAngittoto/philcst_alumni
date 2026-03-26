@@ -156,7 +156,7 @@ new #[Layout('app')] class extends Component {
             <div class="inline-flex items-center justify-center w-20 h-20 bg-[#f2eaf7] rounded-[2rem] mb-6 text-[#7a3f91] shadow-inner transform transition-transform duration-500 hover:rotate-12">
                 <i class="fa-solid fa-user-shield text-4xl"></i>
             </div>
-            <p class="text-gray-400 font-bold text-xs uppercase tracking-widest">PhilCST Alumni Portal</p>
+            <p class="text-gray-400 font-bold text-xs uppercase tracking-widest">PhilCST Alumni Connect</p>
         </div>
 
         <form wire:submit.prevent="login" @submit="loading = true" class="space-y-6">
@@ -176,12 +176,12 @@ new #[Layout('app')] class extends Component {
             <div class="space-y-2">
                 <label class="text-xs font-bold uppercase tracking-widest text-[#2b0d3e] ml-1 flex items-center gap-2">
                     <i class="fa-solid fa-user text-[#7a3f91]"></i>
-                    Username or Teacher ID
+                    Username
                 </label>
                 <input
                     wire:model="name"
                     type="text"
-                    placeholder="Enter username or teacher ID"
+                    placeholder="Enter username"
                     autocomplete="username"
                     required
                     class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10"
@@ -219,12 +219,7 @@ new #[Layout('app')] class extends Component {
                 </div>
             </div>
 
-            {{-- Hint --}}
-            <p class="text-xs text-gray-400 text-center -mt-2">
-                <i class="fa-solid fa-circle-info mr-1 text-[#7a3f91]"></i>
-                Admins use their <strong class="text-gray-500">username</strong> &nbsp;·&nbsp;
-                Organizers use their <strong class="text-gray-500">Teacher ID</strong>
-            </p>
+
 
             {{-- Submit --}}
             <div class="pt-2">

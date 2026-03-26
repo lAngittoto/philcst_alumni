@@ -1710,7 +1710,7 @@ new class extends Component {
             </div>
 
             {{-- Pagination Footer --}}
-            <div class="px-4 sm:px-6 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
+            <div class="px-4 sm:px-6 py-3.5 border-t border-gray-100 bg-[#2b0d3e] shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,0.04)]">
                 @php
                     $total=$this->organizerRecords->total();
                     $pp=$this->organizerRecords->perPage();
@@ -1719,9 +1719,9 @@ new class extends Component {
                     $to=min($cp*$pp,$total);
                 @endphp
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <p class="text-gray-500 text-xs sm:text-sm">
-                        Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span>
-                        of <span class="font-bold text-gray-700">{{ $total }}</span> records
+                    <p class="text-white text-xs sm:text-sm">
+                        Showing <span class="font-bold text-white">{{ $from }}–{{ $to }}</span>
+                        of <span class="font-bold text-white">{{ $total }}</span> records
                     </p>
                     <div class="flex items-center gap-1.5">
                         @if($this->organizerRecords->onFirstPage())
@@ -1842,12 +1842,12 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                     <div>
                         <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
                                class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-700 mt-1 pl-1">Middle Initial <span class="text-gray-300">(1–2 letters, optional)</span></p>
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Middle Initial <span class="text-gray-300"></span></p>
                     </div>
                     <div>
                         <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
                                class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-700 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Suffix <span class="text-gray-300"></span></p>
                     </div>
                 </div>
             </div>
@@ -2361,12 +2361,12 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                     <div>
                         <input wire:model.defer="orgMiddleInitial" type="text" placeholder="e.g. A" maxlength="2"
                                class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-700 mt-1 pl-1">Middle Initial <span class="text-gray-300">(letters only)</span></p>
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Middle Initial <span class="text-gray-300"></span></p>
                     </div>
                     <div>
                         <input wire:model.defer="orgSuffix" type="text" placeholder="e.g. Jr. Sr. III" maxlength="10"
                                class="w-full px-4 py-2.5 border border-gray-400 rounded-xl text-sm input-brand text-gray-800">
-                        <p class="text-xs text-gray-700 mt-1 pl-1">Suffix <span class="text-gray-300">(optional)</span></p>
+                        <p class="text-xs text-gray-700 mt-1 pl-1">Suffix <span class="text-gray-300"></span></p>
                     </div>
                 </div>
             </div>

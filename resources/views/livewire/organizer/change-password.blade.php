@@ -487,15 +487,35 @@ new #[Layout('app')] class extends Component {
                             </span>
                         </button>
 
-                        <button wire:click="resendOtp" wire:loading.attr="disabled" wire:target="resendOtp" type="button"
-                                class="w-full bg-white text-[#7a3f91] py-3 rounded-xl font-semibold text-base border border-[#7a3f91]/30 hover:border-[#7a3f91] hover:bg-[#7a3f91]/5 active:scale-[0.98] disabled:opacity-60 transition-all flex items-center justify-center gap-2">
-                            <span wire:loading.remove wire:target="resendOtp">
-                                <i class="fa-solid fa-rotate-right mr-1"></i> Resend Code
-                            </span>
-                            <span wire:loading wire:target="resendOtp">
-                                <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Sending…
-                            </span>
-                        </button>
+                        {{-- ✅ FIXED: Resend button — disabled for 10 min, only enabled after countdown expires --}}
+                        <div x-data>
+                            <button
+                                wire:click="resendOtp"
+                                wire:loading.attr="disabled"
+                                wire:target="resendOtp"
+                                :disabled="!$store.otpState.canResend"
+                                :class="!$store.otpState.canResend
+                                    ? 'opacity-50 cursor-not-allowed bg-gray-50 text-gray-400 border-gray-200'
+                                    : 'bg-white text-[#7a3f91] border-[#7a3f91]/30 hover:border-[#7a3f91] hover:bg-[#7a3f91]/5 active:scale-[0.98]'"
+                                type="button"
+                                class="w-full py-3 rounded-xl font-semibold text-base border disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                                <span wire:loading.remove wire:target="resendOtp">
+                                    <i class="fa-solid fa-rotate-right mr-1"></i>
+                                    <span x-show="!$store.otpState.canResend">
+                                        Resend available in <span class="font-bold font-mono" x-text="$store.otpState.formattedTime"></span>
+                                    </span>
+                                    <span x-show="$store.otpState.canResend">Resend Code</span>
+                                </span>
+                                <span wire:loading wire:target="resendOtp">
+                                    <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Sending…
+                                </span>
+                            </button>
+                            {{-- Hint text below resend button --}}
+                            <p x-show="!$store.otpState.canResend" x-cloak
+                               class="text-xs text-gray-400 text-center mt-1.5">
+                                Wait until the 10-minute timer expires to request a new code.
+                            </p>
+                        </div>
                     </div>
 
                     <button wire:click="previousStep" type="button"
@@ -546,30 +566,48 @@ new #[Layout('app')] class extends Component {
     </div>
 
     <script>
-        function otpTimer() {
-            return {
+        // ✅ FIXED: Use Alpine store so the resend button and countdown share the same state.
+        // The countdown (shown in the timer box) and the resend button both read from the same store.
+        document.addEventListener('alpine:init', () => {
+            Alpine.store('otpState', {
                 seconds: 600,
                 expired: false,
+                canResend: false,
                 _interval: null,
+
                 get formattedTime() {
                     const m = String(Math.floor(this.seconds / 60)).padStart(2, '0');
                     const s = String(this.seconds % 60).padStart(2, '0');
                     return `${m}:${s}`;
                 },
+
                 startCountdown() {
                     if (this._interval) clearInterval(this._interval);
-                    this.seconds = 600;
-                    this.expired = false;
+                    this.seconds   = 600;
+                    this.expired   = false;
+                    this.canResend = false; // ← disable resend immediately on new OTP send
+
                     this._interval = setInterval(() => {
                         if (this.seconds > 0) {
                             this.seconds--;
                         } else {
-                            this.expired = true;
+                            this.expired   = true;
+                            this.canResend = true; // ← unlock resend only when timer hits zero
                             clearInterval(this._interval);
                         }
                     }, 1000);
                 }
-            }
+            });
+        });
+
+        // Legacy component for backward-compat (the timer display box reads from store too)
+        function otpTimer() {
+            return {
+                get seconds()      { return Alpine.store('otpState').seconds; },
+                get expired()      { return Alpine.store('otpState').expired; },
+                get formattedTime(){ return Alpine.store('otpState').formattedTime; },
+                startCountdown()   { Alpine.store('otpState').startCountdown(); },
+            };
         }
     </script>
 </div>

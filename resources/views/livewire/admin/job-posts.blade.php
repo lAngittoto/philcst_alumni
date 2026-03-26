@@ -124,13 +124,14 @@ new class extends Component {
                 'deleted_by','deleted_by_role',
             ]);
 
+        // ✅ UPDATED: "All Statuses" (empty filter) now includes ORGANIZER_DELETED too
         if ($this->filterStatus === 'ORGANIZER_DELETED') {
             $q->where('status', 'ORGANIZER_DELETED');
+        } elseif ($this->filterStatus !== '') {
+            $q->where('status', $this->filterStatus);
         } else {
-            $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
-            if ($this->filterStatus !== '') {
-                $q->where('status', $this->filterStatus);
-            }
+            // All statuses — show ACTIVE, INACTIVE, and ORGANIZER_DELETED
+            $q->whereIn('status', ['ACTIVE', 'INACTIVE', 'ORGANIZER_DELETED']);
         }
 
         if ($this->search !== '') {
@@ -542,6 +543,10 @@ new class extends Component {
 .jv-footer{padding:14px 32px;border-top:1px solid #ebebeb;display:flex;align-items:center;justify-content:flex-end;background:#fff;flex-shrink:0;gap:8px;}
 .jv-close-x{position:absolute;top:16px;right:18px;width:28px;height:28px;border-radius:50%;border:none;background:transparent;color:#999;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s;line-height:1;}
 .jv-close-x:hover{background:#f0f0f0;color:#333;}
+/* Organizer info badge in table */
+.org-info-name{font-size:.78rem;font-weight:700;color:#1e293b;line-height:1.3;}
+.org-info-college{font-size:.7rem;color:#7a3f91;font-weight:600;margin-top:1px;display:flex;align-items:center;gap:3px;}
+.org-info-admin{font-size:.72rem;color:#6b7280;font-style:italic;}
 </style>
 
 <div>
@@ -604,12 +609,13 @@ new class extends Component {
                        autocomplete="off">
             </div>
 
+            {{-- ✅ UPDATED: Added Deleted by Organizer option; All Statuses includes deleted --}}
             <select wire:model.live="filterStatus"
-                    class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[140px]">
+                    class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[180px]">
                 <option value="">All Statuses</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
-                <option value="ORGANIZER_DELETED">Deleted</option>
+                <option value="ORGANIZER_DELETED">Deleted by Organizer</option>
             </select>
 
             <select wire:model.live="filterType" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[150px] hidden sm:block">
@@ -646,22 +652,33 @@ new class extends Component {
             <div class="h-full overflow-y-auto overflow-x-auto scroll-c"
                  wire:loading.class="tbl-load"
                  wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage,executeToggle,executeDelete,executeRestore">
-                <table class="w-full border-collapse min-w-[640px]">
+                {{-- ✅ UPDATED: Added Organizer & College columns --}}
+                <table class="w-full border-collapse min-w-[900px]">
                     <thead>
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Job Title</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Organization</th>
+                            {{-- ✅ NEW: Organizer column --}}
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Organizer</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden md:table-cell">Employment Type</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Deadline</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Deadline</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-400">
+                    <tbody class="divide-y divide-gray-100">
                         @forelse($this->jobPostings as $job)
                         @php
                             $isOrgDel = $job->status === 'ORGANIZER_DELETED';
                             $dl = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                            // Resolve organizer info
+                            $organizerName    = $job->organizer?->name ?? null;
+                            $organizerCollege = null;
+                            if ($job->organizer) {
+                                $organizerCollege = \App\Models\Course::where('college', $job->organizer->department)->value('college')
+                                    ?? $job->organizer->department
+                                    ?? null;
+                            }
                         @endphp
                         <tr class="{{ $isOrgDel ? 'tbl-row-del' : 'tbl-row bg-white' }}">
                             <td class="px-4 sm:px-5 py-3.5 max-w-[160px] sm:max-w-[200px]">
@@ -670,10 +687,26 @@ new class extends Component {
                             <td class="px-4 sm:px-5 py-3.5 max-w-[150px]">
                                 <p class="font-semibold text-sm text-gray-700 truncate">{{ $job->company_name }}</p>
                             </td>
+                            {{-- ✅ NEW: Organizer name + college --}}
+                            <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell min-w-[160px]">
+                                @if($organizerName)
+                                    <div class="org-info-name">{{ $organizerName }}</div>
+                                    @if($organizerCollege)
+                                        <div class="org-info-college">
+                                            <i class="fas fa-building-columns" style="font-size:9px;"></i>
+                                            {{ $organizerCollege }}
+                                        </div>
+                                    @endif
+                                @else
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-600 border border-purple-100 rounded-full text-xs font-bold">
+                                        <i class="fas fa-shield-halved text-[9px]"></i> Admin
+                                    </span>
+                                @endif
+                            </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 <span class="inline-block px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded-full text-xs font-semibold">{{ $job->employment_type }}</span>
                             </td>
-                            <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell whitespace-nowrap">
+                            <td class="px-4 sm:px-5 py-3.5 hidden xl:table-cell whitespace-nowrap">
                                 <span class="text-sm font-semibold text-gray-700">{{ $dl->format('M d, Y') }}</span>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
@@ -711,7 +744,7 @@ new class extends Component {
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="6" class="py-20 text-center">
+                            <td colspan="7" class="py-20 text-center">
                                 <div class="flex flex-col items-center gap-3">
                                     <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
                                         <i class="fas fa-briefcase text-2xl text-gray-300"></i>
@@ -964,10 +997,16 @@ new class extends Component {
     $viewDepts = $job->target_college
         ? \App\Models\Course::where('college', $job->target_college)->orderBy('code')->pluck('code')->toArray()
         : [];
-    // Fix PHILCST duplicate: show "PHILCST" instead of repeating company_name
     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
-    // Determine if updated by organizer role
     $isUpdatedByOrganizer = ($job->updated_by_role === 'organizer');
+    // Organizer info for view modal
+    $viewOrganizerName    = $job->organizer?->name ?? null;
+    $viewOrganizerCollege = null;
+    if ($job->organizer) {
+        $viewOrganizerCollege = \App\Models\Course::where('college', $job->organizer->department)->value('college')
+            ?? $job->organizer->department
+            ?? null;
+    }
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeViewModal">
     <div class="jv-modal m-in relative">
@@ -1034,7 +1073,17 @@ new class extends Component {
                     </div>
                     <div class="jv-cell">
                         <div class="jv-cell-lbl">Posted By</div>
-                        <div class="jv-cell-val">{{ $job->organizer?->name ?? 'Admin' }}</div>
+                        @if($viewOrganizerName)
+                            <div class="jv-cell-val">{{ $viewOrganizerName }}</div>
+                            @if($viewOrganizerCollege)
+                                <div class="jv-cell-sub" style="color:#7a3f91;display:flex;align-items:center;gap:3px;">
+                                    <i class="fas fa-building-columns" style="font-size:9px;"></i> {{ $viewOrganizerCollege }}
+                                </div>
+                            @endif
+                        @else
+                            <div class="jv-cell-val">Admin</div>
+                            <div class="jv-cell-sub">System administrator</div>
+                        @endif
                     </div>
                     <div class="jv-cell">
                         <div class="jv-cell-lbl">Deadline</div>

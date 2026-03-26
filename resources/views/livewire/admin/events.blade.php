@@ -23,30 +23,30 @@ new class extends Component {
     public string $filterSort    = 'recent';
     public string $filterCollege = '';
 
-    public bool   $showFormModal  = false;
-    public bool   $isEditing      = false;
-    public ?int   $editingEventId = null;
+    public bool   $showFormModal           = false;
+    public bool   $isEditing               = false;
+    public ?int   $editingEventId          = null;
     public bool   $editingIsOrganizerEvent = false;
 
-    public string $title         = '';
-    public string $description   = '';
-    public string $event_date    = '';
-    public string $start_time    = '';
-    public string $end_time      = '';
-    public string $venue         = '';
-    public string $venue_address = '';
-    public string $contact_person= '';
-    public string $contact_email = '';
-    public string $contact_phone = '';
-    public string $notes         = '';
+    public string $title          = '';
+    public string $description    = '';
+    public string $event_date     = '';
+    public string $start_time     = '';
+    public string $end_time       = '';
+    public string $venue          = '';
+    public string $venue_address  = '';
+    public string $contact_person = '';
+    public string $contact_email  = '';
+    public string $contact_phone  = '';
+    public string $notes          = '';
 
     public string $targetMode       = 'all';
     public array  $selectedColleges = [];
     public string $batchYear        = '';
 
-    public $photo           = null;
+    public $photo                    = null;
     public ?string $existingPhotoUrl = null;
-    public bool   $removePhoto  = false;
+    public bool   $removePhoto       = false;
 
     public bool   $showViewModal  = false;
     public ?int   $viewingEventId = null;
@@ -87,10 +87,12 @@ new class extends Component {
         $this->batchYear = '';
     }
 
+    // ── KEY FIX: withTrashed() so ORGANIZER_DELETED events are visible ──
     #[Computed]
     public function events()
     {
-        $q = AdminEvent::with('organizer')
+        $q = AdminEvent::withTrashed()  // <-- THE FIX
+            ->with('organizer')
             ->withCount([
                 'rsvps as confirmed_count' => fn($r) => $r->where('response', 'CONFIRMED'),
                 'rsvps as declined_count'  => fn($r) => $r->where('response', 'DECLINED'),
@@ -106,15 +108,8 @@ new class extends Component {
             );
         }
 
-        // When filtering by ORGANIZER_DELETED → show only deleted events.
-        // Default "All Statuses" → hide ORGANIZER_DELETED from the main list.
-        if ($this->filterStatus === 'ORGANIZER_DELETED') {
-            $q->where('status', 'ORGANIZER_DELETED');
-        } elseif ($this->filterStatus !== '') {
+        if ($this->filterStatus !== '') {
             $q->where('status', $this->filterStatus);
-        } else {
-            // Default: never show organizer-deleted events in the main list
-            $q->where('status', '!=', 'ORGANIZER_DELETED');
         }
 
         if ($this->filterCollege !== '') {
@@ -129,7 +124,8 @@ new class extends Component {
     public function viewingEvent(): ?AdminEvent
     {
         if (!$this->viewingEventId) return null;
-        return AdminEvent::with('organizer')
+        return AdminEvent::withTrashed()  // <-- also here
+            ->with('organizer')
             ->withCount([
                 'rsvps as confirmed_count' => fn($r) => $r->where('response', 'CONFIRMED'),
                 'rsvps as declined_count'  => fn($r) => $r->where('response', 'DECLINED'),
@@ -157,8 +153,10 @@ new class extends Component {
 
     public function resetFilters(): void
     {
-        $this->search = $this->filterStatus = $this->filterCollege = '';
-        $this->filterSort = 'recent';
+        $this->search        = '';
+        $this->filterStatus  = '';
+        $this->filterCollege = '';
+        $this->filterSort    = 'recent';
         $this->resetPage();
     }
 
@@ -166,24 +164,24 @@ new class extends Component {
     {
         $event = app(AdminEventController::class)->getEvent($id);
 
-        $this->isEditing                   = true;
-        $this->editingEventId              = $id;
-        $this->editingIsOrganizerEvent     = $event->organizer_id !== null;
-        $this->title                       = $event->title;
-        $this->description                 = $event->description ?? '';
-        $this->event_date                  = $event->event_date->setTimezone('Asia/Manila')->format('Y-m-d');
-        $this->start_time                  = $event->event_date->setTimezone('Asia/Manila')->format('g:i A');
-        $this->end_time                    = $event->event_end_date?->setTimezone('Asia/Manila')->format('g:i A') ?? '';
-        $this->venue                       = $event->venue;
-        $this->venue_address               = $event->venue_address ?? '';
-        $this->contact_person              = $event->contact_person ?? '';
-        $this->contact_email               = $event->contact_email ?? '';
-        $this->contact_phone               = $event->contact_phone ?? '';
-        $this->notes                       = $event->notes ?? '';
-        $this->existingPhotoUrl            = $event->photo_url;
-        $this->removePhoto                 = false;
-        $this->photo                       = null;
-        $this->formErrors                  = [];
+        $this->isEditing               = true;
+        $this->editingEventId          = $id;
+        $this->editingIsOrganizerEvent = $event->organizer_id !== null;
+        $this->title                   = $event->title;
+        $this->description             = $event->description ?? '';
+        $this->event_date              = $event->event_date->setTimezone('Asia/Manila')->format('Y-m-d');
+        $this->start_time              = $event->event_date->setTimezone('Asia/Manila')->format('g:i A');
+        $this->end_time                = $event->event_end_date?->setTimezone('Asia/Manila')->format('g:i A') ?? '';
+        $this->venue                   = $event->venue;
+        $this->venue_address           = $event->venue_address ?? '';
+        $this->contact_person          = $event->contact_person ?? '';
+        $this->contact_email           = $event->contact_email ?? '';
+        $this->contact_phone           = $event->contact_phone ?? '';
+        $this->notes                   = $event->notes ?? '';
+        $this->existingPhotoUrl        = $event->photo_url;
+        $this->removePhoto             = false;
+        $this->photo                   = null;
+        $this->formErrors              = [];
 
         $tp           = $event->target_participants ?? '';
         $parts        = explode(' · Batch ', $tp, 2);
@@ -219,9 +217,8 @@ new class extends Component {
         if (!trim($this->start_time)) {
             $errors['start_time'] = 'Start time is required.';
         } else {
-            try {
-                \Carbon\Carbon::parse(trim($this->start_time));
-            } catch (\Exception $e) {
+            try { \Carbon\Carbon::parse(trim($this->start_time)); }
+            catch (\Exception $e) {
                 $errors['start_time'] = 'Invalid start time. Use a format like "8:00 AM" or "13:00".';
             }
         }
@@ -245,13 +242,12 @@ new class extends Component {
         }
 
         if ($this->targetMode === 'college' && !empty($this->selectedColleges) && !isset($errors['target'])) {
-            $colleges = $this->selectedColleges;
+            $colleges  = $this->selectedColleges;
             $hasAlumni = Alumni::where('status', 'VERIFIED')
                 ->whereHas('course', fn($c) => $c->whereIn('college', $colleges))
                 ->exists();
             if (!$hasAlumni) {
-                $collegeList = implode(', ', $colleges);
-                $errors['target'] = "Cannot create event — no verified alumni are registered under {$collegeList}. Contact admin to add alumni records first.";
+                $errors['target'] = "Cannot create event — no verified alumni under " . implode(', ', $colleges) . ".";
             }
         }
 
@@ -268,11 +264,11 @@ new class extends Component {
                     $colleges = $this->selectedColleges;
                     $suggQ->whereHas('course', fn($c) => $c->whereIn('college', $colleges));
                 }
-                $available   = $suggQ->distinct()->orderBy('batch', 'desc')->pluck('batch')->map(fn($b) => (int)$b)->toArray();
-                $scopeLabel  = $this->targetMode === 'college' && !empty($this->selectedColleges)
+                $available  = $suggQ->distinct()->orderBy('batch', 'desc')->pluck('batch')->map(fn($b) => (int)$b)->toArray();
+                $scopeLabel = $this->targetMode === 'college' && !empty($this->selectedColleges)
                     ? implode(', ', $this->selectedColleges) : 'all colleges';
                 if (empty($available)) {
-                    $errors['batch_year'] = "No verified alumni found for {$scopeLabel}. Leave batch blank to target all alumni.";
+                    $errors['batch_year'] = "No verified alumni found for {$scopeLabel}.";
                 } else {
                     $nearest   = collect($available)->sortBy(fn($y) => abs($y - $inputYear))->first();
                     $batchList = implode(', ', array_slice($available, 0, 8));
@@ -308,8 +304,8 @@ new class extends Component {
 
         if (!$this->editingIsOrganizerEvent) {
             $data['contact_person'] = trim($this->contact_person) ?: null;
-            $data['contact_email']  = trim($this->contact_email) ?: null;
-            $data['contact_phone']  = trim($this->contact_phone) ?: null;
+            $data['contact_email']  = trim($this->contact_email)  ?: null;
+            $data['contact_phone']  = trim($this->contact_phone)  ?: null;
         }
 
         $ctrl  = app(AdminEventController::class);
@@ -322,7 +318,10 @@ new class extends Component {
                     Storage::disk('public')->delete($event->photo);
                 }
                 $data['photo'] = null;
-                $event->update(array_merge($data, ['updated_by' => auth()->user()?->name, 'updated_by_role' => 'admin']));
+                $event->update(array_merge($data, [
+                    'updated_by'      => auth()->user()?->name,
+                    'updated_by_role' => 'admin',
+                ]));
             } else {
                 $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
             }
@@ -333,8 +332,8 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    public function viewEvent(int $id): void  { $this->viewingEventId = $id; $this->showViewModal = true; }
-    public function closeViewModal(): void    { $this->showViewModal = false; $this->viewingEventId = null; }
+    public function viewEvent(int $id): void { $this->viewingEventId = $id; $this->showViewModal = true; }
+    public function closeViewModal(): void   { $this->showViewModal = false; $this->viewingEventId = null; }
 
     public function confirmApprove(int $id): void
     {
@@ -358,7 +357,12 @@ new class extends Component {
         if ($this->showViewModal) { $this->showViewModal = false; $this->viewingEventId = null; }
     }
 
-    public function cancelApprove(): void { $this->showApproveModal = false; $this->approveEventId = null; $this->approveRemarks = ''; }
+    public function cancelApprove(): void
+    {
+        $this->showApproveModal = false;
+        $this->approveEventId   = null;
+        $this->approveRemarks   = '';
+    }
 
     public function confirmReject(int $id): void
     {
@@ -386,7 +390,12 @@ new class extends Component {
         if ($this->showViewModal) { $this->showViewModal = false; $this->viewingEventId = null; }
     }
 
-    public function cancelReject(): void { $this->showRejectModal = false; $this->rejectEventId = null; $this->rejectRemarks = ''; }
+    public function cancelReject(): void
+    {
+        $this->showRejectModal = false;
+        $this->rejectEventId   = null;
+        $this->rejectRemarks   = '';
+    }
 
     public function confirmDelete(int $id): void
     {
@@ -408,7 +417,12 @@ new class extends Component {
         if ($this->showViewModal) { $this->showViewModal = false; $this->viewingEventId = null; }
     }
 
-    public function cancelDelete(): void { $this->showDeleteModal = false; $this->deleteEventId = null; $this->deleteEventTitle = ''; }
+    public function cancelDelete(): void
+    {
+        $this->showDeleteModal  = false;
+        $this->deleteEventId    = null;
+        $this->deleteEventTitle = '';
+    }
 
     public function confirmRestore(int $id): void
     {
@@ -422,6 +436,10 @@ new class extends Component {
     {
         if ($this->restoreEventId) {
             $event = app(AdminEventController::class)->getEvent($this->restoreEventId);
+            // Restore soft-delete AND reset status back to PENDING
+            if ($event->trashed()) {
+                $event->restore();
+            }
             $event->update([
                 'status'          => 'PENDING',
                 'deleted_by'      => null,
@@ -437,22 +455,27 @@ new class extends Component {
         if ($this->showViewModal) { $this->showViewModal = false; $this->viewingEventId = null; }
     }
 
-    public function cancelRestore(): void { $this->showRestoreModal = false; $this->restoreEventId = null; $this->restoreEventTitle = ''; }
+    public function cancelRestore(): void
+    {
+        $this->showRestoreModal = false;
+        $this->restoreEventId   = null;
+        $this->restoreEventTitle = '';
+    }
 
     private function resetFormFields(): void
     {
         $this->title = $this->description = $this->event_date = $this->start_time = $this->end_time = '';
         $this->venue = $this->venue_address = $this->contact_person = $this->contact_email = '';
         $this->contact_phone = $this->notes = '';
-        $this->targetMode = 'all';
+        $this->targetMode       = 'all';
         $this->selectedColleges = [];
-        $this->batchYear = '';
-        $this->photo = null;
+        $this->batchYear        = '';
+        $this->photo            = null;
         $this->existingPhotoUrl = null;
-        $this->removePhoto = false;
-        $this->formErrors = [];
-        $this->editingEventId = null;
-        $this->isEditing = false;
+        $this->removePhoto      = false;
+        $this->formErrors       = [];
+        $this->editingEventId   = null;
+        $this->isEditing        = false;
         $this->editingIsOrganizerEvent = false;
     }
 };
@@ -485,7 +508,7 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6  max-w-screen-2xl mx-auto  bg-white">
+<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 max-w-screen-2xl mx-auto bg-white">
 
     {{-- ══ HEADER ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -509,7 +532,7 @@ new class extends Component {
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
+                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
                        placeholder="Search title, venue…"
                        class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-800 transition focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                        autocomplete="off">
@@ -576,17 +599,17 @@ new class extends Component {
                                 $displayCollege = trim($parts[0]) ?: 'All Colleges';
                             }
                         @endphp
-                        <tr class="{{ $isOrgDeleted ? 'bg-orange-50/40 hover:bg-orange-50/70' : 'bg-white hover:bg-gray-50' }} transition-colors duration-100">
+                        <tr class="{{ $isOrgDeleted ? 'bg-red-50/60 hover:bg-red-50' : 'bg-white hover:bg-gray-50' }} transition-colors duration-100">
                             <td class="px-4 sm:px-5 py-3.5 max-w-[180px] sm:max-w-[220px]">
-                                <p class="font-semibold text-sm truncate {{ $isOrgDeleted ? 'text-gray-400 line-through' : 'text-gray-800' }}">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm truncate {{ $isOrgDeleted ? 'text-red-400 line-through' : 'text-gray-800' }}">{{ $event->title }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 whitespace-nowrap">
-                                <span class="text-sm font-bold text-gray-700">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
-                                <p class="text-xs text-gray-700 text-bold mt-0.5">{{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($event->event_end_date)<span class="text-gray-300 mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif</p>
+                                <span class="text-sm font-bold {{ $isOrgDeleted ? 'text-red-400' : 'text-gray-700' }}">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
+                                <p class="text-xs {{ $isOrgDeleted ? 'text-red-300' : 'text-gray-700' }} mt-0.5">{{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($event->event_end_date)<span class="{{ $isOrgDeleted ? 'text-red-200' : 'text-gray-700' }} mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 @if($event->organizer)
-                                    <p class="text-xs font-bold text-gray-700">{{ $event->organizer->name }}</p>
+                                    <p class="text-xs font-bold {{ $isOrgDeleted ? 'text-red-400' : 'text-gray-700' }}">{{ $event->organizer->name }}</p>
                                 @else
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs font-bold">
                                         <i class="fas fa-shield-halved text-[9px]"></i> Admin
@@ -594,7 +617,7 @@ new class extends Component {
                                 @endif
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell">
-                                <p class="text-xs text-gray-700 font-bold max-w-[130px] truncate" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
+                                <p class="text-xs {{ $isOrgDeleted ? 'text-red-400' : 'text-gray-700' }} font-bold max-w-[130px] truncate" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center hidden lg:table-cell">
                                 <div class="flex items-center justify-center gap-1.5">
@@ -620,7 +643,7 @@ new class extends Component {
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
                                 @if($isOrgDeleted)
-                                    <span class="inline-block px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-full text-[11px] font-bold">Deleted</span>
+                                    <span class="inline-block px-2.5 py-1 bg-red-100 text-red-700 border border-red-300 rounded-full text-[11px] font-bold">Deleted by Organizer</span>
                                 @elseif($event->status==='PENDING')
                                     <span class="inline-block px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
                                 @elseif($event->status==='APPROVED')
@@ -644,6 +667,14 @@ new class extends Component {
                                         </button>
                                         <button wire:click="confirmReject({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
                                             <i class="fas fa-xmark text-[10px]"></i><span class="hidden sm:inline">Reject</span>
+                                        </button>
+                                    @elseif($event->status==='APPROVED')
+                                        <button wire:click="openEditModal({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition">
+                                            <i class="fas fa-pen-to-square text-[10px]"></i><span class="hidden sm:inline">Edit</span>
+                                        </button>
+                                    @elseif($event->status==='REJECTED')
+                                        <button wire:click="confirmApprove({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-600 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-lg transition">
+                                            <i class="fas fa-rotate-left text-[10px]"></i><span class="hidden sm:inline">Re-Approve</span>
                                         </button>
                                     @endif
                                     <button wire:click="confirmDelete({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
@@ -671,8 +702,14 @@ new class extends Component {
         </div>
 
         {{-- Pagination --}}
-        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-[#2b0d3e]  shrink-0">
-            @php $total=$this->events->total();$pp=$this->events->perPage();$cp=$this->events->currentPage();$from=$total>0?($cp-1)*$pp+1:0;$to=min($cp*$pp,$total); @endphp
+        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-[#2b0d3e] shrink-0">
+            @php
+                $total = $this->events->total();
+                $pp    = $this->events->perPage();
+                $cp    = $this->events->currentPage();
+                $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+                $to    = min($cp * $pp, $total);
+            @endphp
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <p class="text-white text-xs sm:text-sm">Showing <span class="font-bold text-white">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-white">{{ $total }}</span> events</p>
                 <div class="flex items-center gap-1.5">
@@ -703,18 +740,13 @@ new class extends Component {
          x-transition:enter-end="opacity-100 scale-100 translate-y-0"
          x-effect="if($wire.formErrors && Object.keys($wire.formErrors).length>0){$nextTick(()=>{const el=$refs.formScroll;if(el)el.scrollTo({top:0,behavior:'smooth'});});}">
 
-        {{-- Header --}}
         <div class="flex items-center justify-between px-5 sm:px-7 py-5 text-white flex-shrink-0" style="background:#7a3f91;">
             <div>
-                <h2 class="text-xl font-extrabold flex items-center gap-3">
-                    <i class="fas fa-pen-to-square"></i>
-                    Edit Event
-                </h2>
+                <h2 class="text-xl font-extrabold flex items-center gap-3"><i class="fas fa-pen-to-square"></i> Edit Event</h2>
             </div>
             <button wire:click="closeFormModal" class="text-white/70 hover:text-white text-2xl leading-none transition">×</button>
         </div>
 
-        {{-- Error Banner --}}
         @if(count($formErrors))
         <div class="bg-red-50 border-b border-red-200 px-5 sm:px-7 py-4 flex-shrink-0">
             <p class="font-bold text-red-800 text-sm mb-2 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Please fix the following:</p>
@@ -724,10 +756,8 @@ new class extends Component {
         </div>
         @endif
 
-        {{-- Scrollable body --}}
         <div class="flex-1 min-h-0 overflow-y-auto px-5 sm:px-7 py-5 space-y-5" x-ref="formScroll" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;">
 
-            {{-- Photo --}}
             <div>
                 <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Event Photo <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
                 <div x-data="{isDragging:false}" @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false"
@@ -740,7 +770,7 @@ new class extends Component {
                         @elseif($existingPhotoUrl&&!$removePhoto)
                             <div class="flex flex-col items-center gap-3"><img src="{{ $existingPhotoUrl }}" class="w-32 h-24 object-cover rounded-xl shadow border border-gray-200"><p class="text-xs font-semibold text-gray-500">Current photo — click to change</p></div>
                         @else
-                            <div class="flex flex-col items-center gap-2 py-2"><i class="fas fa-cloud-arrow-up text-3xl text-gray-300"></i><p class="font-semibold text-gray-500 text-sm">Click to upload or drag & drop</p><p class="text-xs text-gray-400">JPG, PNG, WEBP — max 5MB</p><p class="text-xs text-purple-400 font-medium mt-1"><i class="fas fa-image mr-1"></i>Default photo if blank</p></div>
+                            <div class="flex flex-col items-center gap-2 py-2"><i class="fas fa-cloud-arrow-up text-3xl text-gray-300"></i><p class="font-semibold text-gray-500 text-sm">Click to upload or drag & drop</p><p class="text-xs text-gray-400">JPG, PNG, WEBP — max 5MB</p></div>
                         @endif
                     </label>
                 </div>
@@ -756,7 +786,6 @@ new class extends Component {
                 <div wire:loading wire:target="photo" class="mt-2 text-xs text-purple-600 flex items-center gap-2"><i class="fas fa-spinner animate-spin"></i> Uploading…</div>
             </div>
 
-            {{-- Event Details --}}
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
                     <i class="fas fa-circle-info text-purple-500 text-sm"></i>
@@ -803,14 +832,14 @@ new class extends Component {
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Full Address <span class="text-gray-400 font-normal normal-case">(Optional)</span></label>
-                            <input wire:model.defer="venue_address" type="text" placeholder="e.g. Old Nalsian Road, Nalasian Calasiao Pangasinan"
+                            <input wire:model.defer="venue_address" type="text"
+                                   placeholder="e.g. Old Nalsian Road, Nalsian, Calasiao, Pangasinan"
                                    class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                         </div>
                     </div>
                 </div>
             </div>
 
-            {{-- Target Participants --}}
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
                     <i class="fas fa-users text-purple-500 text-sm"></i>
@@ -829,7 +858,6 @@ new class extends Component {
                             <i class="fas fa-building-columns text-base"></i><span>Specific College(s)</span>
                         </button>
                     </div>
-
                     @if($targetMode === 'all')
                         <div class="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-3">
                             <i class="fas fa-globe text-purple-500 text-lg"></i>
@@ -886,24 +914,15 @@ new class extends Component {
                             @endif
                         </div>
                     @endif
-
                     <div class="pt-3 border-t border-gray-100">
-                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Batch Year <span class="text-gray-400 font-normal normal-case text-xs">(Optional — leave blank for all batches)</span></label>
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Batch Year <span class="text-gray-400 font-normal normal-case text-xs">(Optional)</span></label>
                         <input wire:model.defer="batchYear" type="number" min="1990" max="{{ now()->year + 5 }}" placeholder="e.g. {{ now()->year - 2 }}"
                                class="w-full sm:max-w-xs px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['batch_year'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
-                        @if(isset($formErrors['batch_year']))
-                            <p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['batch_year'] }}</span></p>
-                        @else
-                            <p class="mt-1.5 text-xs text-gray-400"><i class="fas fa-circle-info text-[10px] mr-1"></i>
-                                @if($targetMode === 'college' && count($selectedColleges) > 0)Enter a batch year to target only alumni from <strong>{{ implode(', ', $selectedColleges) }}</strong> who graduated that year.
-                                @else Enter a batch year to filter by graduation year. Leave blank for all batches.@endif
-                            </p>
-                        @endif
+                        @if(isset($formErrors['batch_year']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['batch_year'] }}</span></p>@endif
                     </div>
                 </div>
             </div>
 
-            {{-- Contact Person --}}
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
                     <i class="fas fa-address-card text-purple-500 text-sm"></i>
@@ -930,7 +949,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Notes --}}
             <div>
                 <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Additional Notes / Requirements</label>
                 <textarea wire:model.defer="notes" rows="3" placeholder="Dress code, special instructions…"
@@ -938,7 +956,6 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Footer --}}
         <div class="px-5 sm:px-7 py-4 border-t border-gray-100 bg-gray-50/70 flex-shrink-0 flex gap-3">
             <button type="button" wire:click="closeFormModal" class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 rounded-xl text-sm font-bold hover:bg-gray-100 transition">Cancel</button>
             <button type="button" wire:click="saveEvent" wire:loading.attr="disabled" wire:target="saveEvent"
@@ -961,19 +978,17 @@ new class extends Component {
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
          x-transition:enter-end="opacity-100 scale-100 translate-y-0">
         <button wire:click="closeViewModal" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-lg leading-none transition">×</button>
-
         <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}" class="w-full h-44 sm:h-64 object-cover flex-shrink-0 {{ $isOrgDeleted?'opacity-60':'' }}">
-
         <div class="px-5 sm:px-8 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
             @if($isOrgDeleted)
-                <div class="flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5 mb-3 text-xs font-bold text-orange-700">
-                    <i class="fas fa-trash text-orange-500 shrink-0"></i>
+                <div class="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 mb-3 text-xs font-bold text-red-700">
+                    <i class="fas fa-trash text-red-500 shrink-0"></i>
                     Deleted by <strong>{{ $ev->deleted_by ?? $ev->organizer?->name ?? 'Organizer' }}</strong> · {{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}
                 </div>
             @endif
             <div class="flex items-start justify-between gap-3 mb-4">
-                <h2 class="text-lg sm:text-xl font-bold leading-snug {{ $isOrgDeleted?'line-through text-gray-400':'text-gray-900' }}">{{ $ev->title }}</h2>
-                @if($isOrgDeleted)<span class="flex-shrink-0 px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-full text-[11px] font-bold">Deleted</span>
+                <h2 class="text-lg sm:text-xl font-bold leading-snug {{ $isOrgDeleted?'line-through text-red-400':'text-gray-900' }}">{{ $ev->title }}</h2>
+                @if($isOrgDeleted)<span class="flex-shrink-0 px-2.5 py-1 bg-red-100 text-red-700 border border-red-300 rounded-full text-[11px] font-bold">Deleted by Organizer</span>
                 @elseif($ev->status==='PENDING')<span class="flex-shrink-0 px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
                 @elseif($ev->status==='APPROVED')<span class="flex-shrink-0 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
                 @else<span class="flex-shrink-0 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-full text-[11px] font-bold">Rejected</span>@endif
@@ -989,10 +1004,7 @@ new class extends Component {
             </ul>
             <p class="text-xs text-gray-400 mt-3">Posted {{ $ev->created_at->diffForHumans() }}</p>
         </div>
-
         <div class="flex-1 min-h-0 overflow-y-auto" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;">
-
-            {{-- RSVPs --}}
             <div class="px-5 sm:px-8 py-5 border-b border-gray-100">
                 <h3 class="text-sm font-bold text-gray-800 mb-3">Attendee Responses @if($totalRsvp>0)<span class="text-gray-400 font-normal text-xs ml-1">{{ $totalRsvp }} total</span>@endif</h3>
                 @if($totalRsvp===0)
@@ -1005,12 +1017,10 @@ new class extends Component {
                     </div>
                 @endif
             </div>
-
-            {{-- Status --}}
             <div class="px-5 sm:px-8 py-5 border-b border-gray-100">
                 <h3 class="text-sm font-bold text-gray-800 mb-3">Status</h3>
                 @if($isOrgDeleted)
-                    <div class="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-orange-800"><i class="fas fa-trash mr-2 text-orange-500"></i>Deleted by Organizer</p><p class="text-xs text-orange-700 mt-1">This event was deleted by the organizer. You can restore it to put it back to Pending review.</p></div>
+                    <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-red-800"><i class="fas fa-trash mr-2 text-red-500"></i>Deleted by Organizer</p><p class="text-xs text-red-700 mt-1">You can restore this event to put it back to Pending review.</p></div>
                 @elseif($ev->status==='PENDING')
                     <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Pending Admin Review</p><p class="text-xs text-yellow-700 mt-1">This event is waiting for your approval.</p></div>
                 @elseif($ev->status==='APPROVED')
@@ -1019,18 +1029,15 @@ new class extends Component {
                     <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-red-800"><i class="fas fa-circle-xmark mr-2 text-red-500"></i>Rejected</p>@if($ev->review_remarks)<p class="text-xs text-red-600 mt-2"><span class="font-semibold">Reason:</span> {{ $ev->review_remarks }}</p>@endif</div>
                 @endif
             </div>
-
             @if($ev->description)<div class="px-5 sm:px-8 py-5 border-b border-gray-100"><h3 class="text-sm font-bold text-gray-800 mb-3">About This Event</h3><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $ev->description }}</p></div>@endif
             @if($ev->notes)<div class="px-5 sm:px-8 py-5 border-b border-gray-100"><h3 class="text-sm font-bold text-gray-800 mb-3">Additional Notes</h3><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $ev->notes }}</p></div>@endif
-
-            {{-- Posting Details --}}
             <div class="px-5 sm:px-8 py-5">
                 <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Posting Details</p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 border border-gray-100 rounded-xl overflow-hidden divide-x divide-y divide-gray-100">
                     <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted</p><p class="text-sm font-semibold text-gray-800">{{ $ev->created_at->setTimezone('Asia/Manila')->format('M d, Y') }}</p><p class="text-xs text-gray-400">{{ $ev->created_at->setTimezone('Asia/Manila')->format('g:i A') }}</p></div>
                     <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">College</p><p class="text-sm font-semibold text-gray-800">{{ $ev->target_participants ?? 'All Colleges' }}</p></div>
                     <div class="px-4 py-3 col-span-2 sm:col-span-1"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p>
-                        @if($isOrgDeleted)<p class="text-sm font-semibold text-orange-600">Deleted</p>
+                        @if($isOrgDeleted)<p class="text-sm font-semibold text-red-600">Deleted by Organizer</p>
                         @elseif($ev->status==='PENDING')<p class="text-sm font-semibold text-yellow-600">Pending</p>
                         @elseif($ev->status==='APPROVED')<p class="text-sm font-semibold text-emerald-600">Approved</p>
                         @else<p class="text-sm font-semibold text-red-600">Rejected</p>@endif
@@ -1040,7 +1047,7 @@ new class extends Component {
                         <div class="flex items-center gap-3 flex-wrap">
                             <div><p class="text-sm font-semibold text-gray-800">{{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p><p class="text-xs text-gray-400">{{ $ev->updated_at->diffForHumans() }}</p></div>
                             @if($ev->deleted_by)
-                                <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg"><i class="fas fa-trash text-[9px]"></i> {{ $ev->deleted_by }}@if($ev->deleted_by_role) <span class="opacity-60 font-normal">· {{ ucfirst($ev->deleted_by_role) }}</span>@endif</span>
+                                <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-lg"><i class="fas fa-trash text-[9px]"></i> {{ $ev->deleted_by }}@if($ev->deleted_by_role) <span class="opacity-60 font-normal">· {{ ucfirst($ev->deleted_by_role) }}</span>@endif</span>
                             @elseif(isset($ev->was_edited)&&$ev->was_edited&&$ev->updated_by)
                                 @if($ev->updated_by_role==='admin')<span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg"><i class="fas fa-shield-halved text-[9px]"></i> {{ $ev->updated_by }} <span class="opacity-60 font-normal">· Admin</span></span>
                                 @else<span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg"><i class="fas fa-user-pen text-[9px]"></i> {{ $ev->updated_by }} <span class="opacity-60 font-normal">· Organizer</span></span>@endif
@@ -1050,8 +1057,6 @@ new class extends Component {
                 </div>
             </div>
         </div>
-
-        {{-- Footer --}}
         <div class="px-5 sm:px-8 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
             <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
             <button wire:click="confirmDelete({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-trash text-xs"></i> Delete</button>

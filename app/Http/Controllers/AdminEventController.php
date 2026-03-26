@@ -10,13 +10,14 @@ use Illuminate\Http\UploadedFile;
 
 class AdminEventController extends Controller
 {
-    // ── Get any event (admin sees all) ───────────────────────
+    /**
+     * Admin can see ALL events including soft-deleted (ORGANIZER_DELETED).
+     */
     public function getEvent(int $id): AdminEvent
     {
-        return AdminEvent::findOrFail($id);
+        return AdminEvent::withTrashed()->findOrFail($id);
     }
 
-    // ── Get all colleges for targeting ──────────────────────
     public function getColleges(): array
     {
         return Course::whereNotNull('college')
@@ -27,23 +28,20 @@ class AdminEventController extends Controller
             ->toArray();
     }
 
-    // ── Get all distinct years from existing events ──────────
     public function getEventYears(): array
     {
-        return AdminEvent::selectRaw('YEAR(event_date) as year')
+        return AdminEvent::withTrashed()
+            ->selectRaw('YEAR(event_date) as year')
             ->distinct()
             ->orderByDesc('year')
             ->pluck('year')
             ->toArray();
     }
 
-    // ── Create event (admin-posted, auto-approved) ───────────
     public function createEvent(array $data, ?UploadedFile $photo = null): AdminEvent
     {
-        $user = Auth::user();
-
         return AdminEvent::create([
-            'organizer_id'        => null,           // admin-posted, no organizer
+            'organizer_id'        => null,
             'title'               => $data['title'],
             'description'         => $data['description'] ?? null,
             'photo'               => $this->storePhoto($photo),
@@ -58,7 +56,7 @@ class AdminEventController extends Controller
             'contact_email'       => $data['contact_email'] ?? null,
             'contact_phone'       => $data['contact_phone'] ?? null,
             'notes'               => $data['notes'] ?? null,
-            'status'              => 'APPROVED',     // admin posts = auto-approved
+            'status'              => 'APPROVED',
             'reviewed_by'         => Auth::id(),
             'reviewed_at'         => now(),
             'review_remarks'      => 'Posted directly by admin.',
@@ -67,7 +65,6 @@ class AdminEventController extends Controller
         ]);
     }
 
-    // ── Update event ─────────────────────────────────────────
     public function updateEvent(int $id, array $data, ?UploadedFile $photo = null): AdminEvent
     {
         $event = $this->getEvent($id);
@@ -102,10 +99,15 @@ class AdminEventController extends Controller
         return $event->fresh();
     }
 
-    // ── Approve ──────────────────────────────────────────────
     public function approveEvent(int $id, ?string $remarks = null): AdminEvent
     {
         $event = $this->getEvent($id);
+
+        // If restoring a soft-deleted organizer event, un-delete it
+        if ($event->trashed()) {
+            $event->restore();
+        }
+
         $event->update([
             'status'          => 'APPROVED',
             'reviewed_by'     => Auth::id(),
@@ -113,14 +115,17 @@ class AdminEventController extends Controller
             'review_remarks'  => $remarks,
             'updated_by'      => Auth::user()?->name,
             'updated_by_role' => 'admin',
+            'deleted_by'      => null,
+            'deleted_by_role' => null,
         ]);
+
         return $event->fresh();
     }
 
-    // ── Reject ───────────────────────────────────────────────
     public function rejectEvent(int $id, ?string $remarks = null): AdminEvent
     {
         $event = $this->getEvent($id);
+
         $event->update([
             'status'          => 'REJECTED',
             'reviewed_by'     => Auth::id(),
@@ -129,10 +134,13 @@ class AdminEventController extends Controller
             'updated_by'      => Auth::user()?->name,
             'updated_by_role' => 'admin',
         ]);
+
         return $event->fresh();
     }
 
-    // ── Soft-delete ──────────────────────────────────────────
+    /**
+     * Admin hard-delete: permanently removes the record.
+     */
     public function deleteEvent(int $id): void
     {
         $event = $this->getEvent($id);
@@ -147,10 +155,10 @@ class AdminEventController extends Controller
             Storage::disk('public')->delete($event->photo);
         }
 
-        $event->delete();
+        // forceDelete so it's gone permanently (admin action)
+        $event->forceDelete();
     }
 
-    // ── Helpers ──────────────────────────────────────────────
     private function storePhoto(?UploadedFile $photo): ?string
     {
         if (!$photo) return null;

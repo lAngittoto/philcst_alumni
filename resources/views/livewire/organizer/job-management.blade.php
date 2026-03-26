@@ -60,8 +60,6 @@ new class extends Component {
     public ?int   $deleteJobId     = null;
     public string $deleteJobTitle  = '';
 
-    public int $deletedCount = 0;
-
     private array $expLevelOrder = [
         'No Experience Required',
         'Entry Level (At Least 1 Year)',
@@ -80,16 +78,6 @@ new class extends Component {
             $this->philcstName     = $philcst->label;
             $this->philcstLocation = $philcst->default_location ?? '';
         }
-        $this->refreshDeletedCount();
-    }
-
-    private function refreshDeletedCount(): void
-    {
-        $org = auth()->user()?->organizer;
-        if (!$org) { $this->deletedCount = 0; return; }
-        $this->deletedCount = JobPosting::where('status', 'ORGANIZER_DELETED')
-            ->where('organizer_id', $org->id)
-            ->count();
     }
 
     public function updatingSearch()       { $this->resetPage(); }
@@ -140,13 +128,11 @@ new class extends Component {
                 'deleted_by','deleted_by_role',
             ]);
 
-        if ($this->filterStatus === 'ORGANIZER_DELETED') {
-            $q->where('status', 'ORGANIZER_DELETED');
-        } else {
-            $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
-            if ($this->filterStatus !== '') {
-                $q->where('status', $this->filterStatus);
-            }
+        // ✅ FIX: Always exclude ORGANIZER_DELETED — organizer never sees deleted jobs
+        $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
+
+        if ($this->filterStatus !== '') {
+            $q->where('status', $this->filterStatus);
         }
 
         if ($this->search !== '') {
@@ -303,7 +289,6 @@ new class extends Component {
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
         $this->resetPostFields();
-        $this->refreshDeletedCount();
     }
 
     private function resetPostFields(): void
@@ -430,7 +415,6 @@ new class extends Component {
                 'deleted_by_role' => 'organizer',
             ]);
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteJobTitle}' has been deleted.");
-            $this->refreshDeletedCount();
         }
         $this->showDeleteModal = false;
         $this->deleteJobId    = null;
@@ -462,14 +446,10 @@ new class extends Component {
 .btn-edit:hover:not(:disabled){background:#eff6ff;border-color:#93c5fd;box-shadow:0 3px 10px rgba(37,99,235,.16);transform:translateY(-1px);}
 .btn-view{background:#f5eef9;color:#7a3f91;border:1px solid #d4aaeb;box-shadow:0 1px 3px rgba(122,63,145,.09);transition:all .15s;}
 .btn-view:hover{background:#e9d5f3;border-color:#9b5bb0;box-shadow:0 3px 10px rgba(122,63,145,.20);transform:translateY(-1px);}
-.btn-warn{background:#fff;color:#d97706;border:1px solid #fde68a;box-shadow:0 1px 3px rgba(217,119,6,.07);transition:all .15s;}
-.btn-warn:hover:not(:disabled){background:#fffbeb;border-color:#fcd34d;box-shadow:0 3px 10px rgba(217,119,6,.16);transform:translateY(-1px);}
 .inp{transition:border-color .15s,box-shadow .15s;}
 .inp:focus{outline:none;border-color:#7a3f91;box-shadow:0 0 0 3px rgba(122,63,145,.11);}
 .tbl-row{transition:background-color .12s;}
 .tbl-row:hover{background-color:#faf5fc;}
-.tbl-row-del{background-color:#f9fafb!important;opacity:.65;}
-.tbl-row-del:hover{background-color:#f3f4f6!important;}
 .tbl-load{opacity:.45;pointer-events:none;transition:opacity .2s;}
 .scroll-c::-webkit-scrollbar{width:5px;height:5px;}
 .scroll-c::-webkit-scrollbar-track{background:#f3f4f6;border-radius:99px;}
@@ -504,7 +484,6 @@ new class extends Component {
 .jv-pill-type{background:#f0ebff;color:#6d28d9;}
 .jv-pill-active{background:#dcfce7;color:#15803d;}
 .jv-pill-inactive{background:#fef9c3;color:#a16207;}
-.jv-pill-deleted{background:#ffedd5;color:#c2410c;}
 .jv-meta{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:9px;}
 .jv-meta-item{display:flex;align-items:flex-start;gap:11px;font-size:13.5px;color:#222;line-height:1.4;}
 .jv-meta-icon{width:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;color:#7a3f91;font-size:13px;}
@@ -522,16 +501,12 @@ new class extends Component {
 .jv-cell-sub{font-size:11px;color:#888;margin-top:1px;}
 .jv-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:4px;margin-top:6px;background:#f5f5f5;color:#555;border:1px solid #e5e5e5;}
 .jv-badge.organizer{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;}
-.jv-badge.deleted{background:#fff7ed;color:#c2410c;border-color:#fed7aa;}
 .jv-college-box{background:#faf5ff;border:1px solid #e0d7f5;border-radius:6px;padding:14px 18px;}
 .jv-dept-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
 .jv-dept-chip{font-size:11px;font-weight:700;font-family:'Courier New',monospace;background:#fff;border:1px solid #d4c5f0;border-radius:3px;padding:3px 8px;color:#6d28d9;}
 .jv-footer{padding:14px 32px;border-top:1px solid #ebebeb;display:flex;align-items:center;justify-content:flex-end;background:#fff;flex-shrink:0;gap:8px;}
 .jv-close-x{position:absolute;top:16px;right:18px;width:28px;height:28px;border-radius:50%;border:none;background:transparent;color:#999;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s;line-height:1;}
 .jv-close-x:hover{background:#f0f0f0;color:#333;}
-.del-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:999px;font-size:10px;font-weight:800;line-height:1;transition:background .3s,color .3s;}
-.del-badge-new{background:#dc2626;color:#fff;}
-.del-badge-seen{background:#fecaca;color:#dc2626;}
 </style>
 
 <div class="min-h-screen bg-gray-50">
@@ -590,9 +565,8 @@ new class extends Component {
     <div class="bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden" style="min-height:0;height:calc(100vh - 210px);">
 
         {{-- FILTER BAR --}}
-        <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center"
-             x-data="{ deletedSeen: false }"
-             x-init="$watch('$wire.filterStatus', v => { if(v === 'ORGANIZER_DELETED') deletedSeen = true; })">
+        {{-- ✅ FIX: Removed x-data deletedSeen, removed badge dot entirely --}}
+        <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
 
             <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
                  wire:ignore
@@ -604,22 +578,13 @@ new class extends Component {
                        autocomplete="off">
             </div>
 
-            <div class="relative inline-flex items-center gap-1.5">
-                <select wire:model.live="filterStatus"
-                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[140px]">
-                    <option value="">All Statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="INACTIVE">Inactive</option>
-                    <option value="ORGANIZER_DELETED">Deleted</option>
-                </select>
-                @if($deletedCount > 0)
-                <span class="del-badge flex-shrink-0"
-                      :class="deletedSeen ? 'del-badge-seen' : 'del-badge-new'"
-                      title="You have {{ $deletedCount }} deleted job{{ $deletedCount > 1 ? 's' : '' }}">
-                    {{ $deletedCount > 9 ? '9+' : $deletedCount }}
-                </span>
-                @endif
-            </div>
+            {{-- ✅ FIX: Only Active / Inactive — removed "Deleted" option and badge dot --}}
+            <select wire:model.live="filterStatus"
+                    class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[140px]">
+                <option value="">All Statuses</option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+            </select>
 
             <select wire:model.live="filterType" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[150px] hidden sm:block">
                 <option value="">All Employment Types</option>
@@ -669,12 +634,12 @@ new class extends Component {
                     <tbody class="divide-y divide-gray-50">
                         @forelse($this->jobPostings as $job)
                         @php
-                            $isOrgDel = $job->status === 'ORGANIZER_DELETED';
                             $dl = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
                         @endphp
-                        <tr class="{{ $isOrgDel ? 'tbl-row-del' : 'tbl-row bg-white' }}">
+                        {{-- ✅ FIX: No deleted rows shown — always ACTIVE or INACTIVE only --}}
+                        <tr class="tbl-row bg-white">
                             <td class="px-4 sm:px-5 py-3.5 max-w-[160px] sm:max-w-[200px]">
-                                <p class="font-semibold text-sm truncate {{ $isOrgDel ? 'text-gray-400 line-through' : 'text-gray-800' }}">{{ $job->job_title }}</p>
+                                <p class="font-semibold text-sm truncate text-gray-800">{{ $job->job_title }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 max-w-[150px]">
                                 <p class="font-semibold text-sm text-gray-700 truncate">{{ $job->company_name }}</p>
@@ -686,9 +651,7 @@ new class extends Component {
                                 <span class="text-sm font-semibold text-gray-700">{{ $dl->format('M d, Y') }}</span>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
-                                @if($isOrgDel)
-                                    <span class="inline-block px-2.5 py-1 bg-gray-100 text-gray-500 border border-gray-200 rounded-full text-xs font-bold">Deleted</span>
-                                @elseif($job->status === 'ACTIVE')
+                                @if($job->status === 'ACTIVE')
                                     <span class="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold">Active</span>
                                 @else
                                     <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">Inactive</span>
@@ -699,14 +662,12 @@ new class extends Component {
                                     <button wire:click="viewJob({{ $job->id }})" class="btn-view inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold">
                                         <i class="fas fa-eye text-xs"></i><span class="hidden sm:inline">View</span>
                                     </button>
-                                    @if(!$isOrgDel)
-                                        <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
-                                            <i class="fas fa-pen-to-square text-xs"></i><span class="hidden sm:inline">Edit</span>
-                                        </button>
-                                        <button wire:click="confirmDelete({{ $job->id }})" class="btn-danger inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
-                                            <i class="fas fa-trash text-xs"></i><span class="hidden lg:inline">Delete</span>
-                                        </button>
-                                    @endif
+                                    <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
+                                        <i class="fas fa-pen-to-square text-xs"></i><span class="hidden sm:inline">Edit</span>
+                                    </button>
+                                    <button wire:click="confirmDelete({{ $job->id }})" class="btn-danger inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
+                                        <i class="fas fa-trash text-xs"></i><span class="hidden lg:inline">Delete</span>
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -717,12 +678,9 @@ new class extends Component {
                                     <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
                                         <i class="fas fa-briefcase text-2xl text-gray-300"></i>
                                     </div>
-                                    <p class="font-semibold text-gray-400">
-                                        {{ $filterStatus === 'ORGANIZER_DELETED' ? 'No deleted job postings' : 'No job postings found' }}
-                                    </p>
+                                    <p class="font-semibold text-gray-400">No job postings found</p>
                                     <p class="text-sm text-gray-400">
-                                        @if($filterStatus === 'ORGANIZER_DELETED') Your deleted jobs will appear here.
-                                        @elseif($search||$filterStatus||$filterType) Try adjusting your filters.
+                                        @if($search || $filterStatus || $filterType) Try adjusting your filters.
                                         @else No postings yet. Click <strong>Post a Job</strong> to create one.@endif
                                     </p>
                                 </div>
@@ -946,7 +904,7 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Target College: locked to organizer's assigned college --}}
+            {{-- Target College --}}
             <div>
                 <label class="form-lbl">Target College <span class="text-gray-400 font-normal text-xs">(Auto-filled from your college)</span></label>
                 @if($this->organizerCollege)
@@ -1003,7 +961,6 @@ new class extends Component {
 @if($showViewModal && $this->viewingJob)
 @php
     $job      = $this->viewingJob;
-    $isOrgDel = $job->status === 'ORGANIZER_DELETED';
     $dl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
     $isExp    = now('Asia/Manila')->gt($dl);
     $createdPH  = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
@@ -1011,26 +968,18 @@ new class extends Component {
     $viewDepts = $job->target_college
         ? \App\Models\Course::where('college', $job->target_college)->orderBy('code')->pluck('code')->toArray()
         : [];
-    // Fix PHILCST duplicate display
     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeViewModal">
     <div class="jv-modal m-in relative">
         <button wire:click="closeViewModal" class="jv-close-x" type="button">&times;</button>
-        <div class="jv-header {{ $isOrgDel ? 'bg-red-50/30' : '' }}">
-            @if($isOrgDel)
-            <div class="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 mb-4">
-                <div class="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center shrink-0"><i class="fas fa-trash text-orange-500 text-sm"></i></div>
-                <div><p class="text-sm font-bold text-orange-800">This job has been deleted</p><p class="text-xs text-orange-600 mt-0.5">Deleted by {{ $job->deleted_by ?? 'You' }} · {{ $updatedPH->format('M d, Y') }}</p></div>
-            </div>
-            @endif
-            <div class="jv-title {{ $isOrgDel ? 'line-through text-gray-400' : '' }}">{{ $job->job_title }}</div>
+        <div class="jv-header">
+            <div class="jv-title">{{ $job->job_title }}</div>
             <div class="jv-company">
                 <strong>{{ $job->company_name }}</strong>
                 <span class="jv-pill jv-pill-type">{{ $displayType }}</span>
-                @if($isOrgDel)<span class="jv-pill jv-pill-deleted">● Deleted</span>
-                @elseif($job->status==='ACTIVE')<span class="jv-pill jv-pill-active">● Active</span>
-                @else<span class="jv-pill jv-pill-inactive">● Inactive</span>@endif
+                @if($job->status==='ACTIVE')<span class="jv-pill jv-pill-active">Active</span>
+                @else<span class="jv-pill jv-pill-inactive">Inactive</span>@endif
             </div>
             <ul class="jv-meta">
                 <li class="jv-meta-item"><span class="jv-meta-icon"><i class="fas fa-location-dot"></i></span><span>{{ $job->location ?? 'Not specified' }}</span></li>
@@ -1086,9 +1035,7 @@ new class extends Component {
                                 <div class="jv-cell-val">{{ $updatedPH->format('M d, Y') }}</div>
                                 <div class="jv-cell-sub">{{ $updatedPH->diffForHumans() }}</div>
                             </div>
-                            @if($isOrgDel && $job->deleted_by)
-                                <span class="jv-badge deleted"><i class="fas fa-trash" style="font-size:9px"></i> Deleted by {{ $job->deleted_by }}</span>
-                            @elseif($job->updated_by)
+                            @if($job->updated_by)
                                 <span class="jv-badge organizer">
                                     <i class="fas fa-user" style="font-size:9px"></i>
                                     {{ $job->updated_by }}
@@ -1101,10 +1048,8 @@ new class extends Component {
         </div>
         <div class="jv-footer">
             <button wire:click="closeViewModal" class="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-xmark text-xs"></i> Close</button>
-            @if(!$isOrgDel)
-                <button wire:click="confirmDelete({{ $job->id }})" class="btn-danger inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-trash text-xs"></i> Delete</button>
-                <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
-            @endif
+            <button wire:click="confirmDelete({{ $job->id }})" class="btn-danger inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-trash text-xs"></i> Delete</button>
+            <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
         </div>
     </div>
 </div>
@@ -1194,7 +1139,7 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Target College: locked in edit too --}}
+            {{-- Target College --}}
             <div>
                 <label class="form-lbl">Target College <span class="text-gray-400 font-normal text-xs">(Auto-filled from your college)</span></label>
                 @if($this->organizerCollege)
@@ -1261,7 +1206,7 @@ new class extends Component {
             <p class="font-extrabold text-red-700 text-base mb-4">"{{ $deleteJobTitle }}"</p>
             <div class="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5 text-xs text-gray-600 flex items-start gap-2">
                 <i class="fas fa-info-circle text-amber-500 mt-0.5 shrink-0"></i>
-                <span>The job will be hidden from your list. <strong>Admin can still see and restore it</strong> if needed.</span>
+                <span>The job will be removed from your list. <strong>Admin can still see and restore it</strong> if needed.</span>
             </div>
             <div class="flex gap-3">
                 <button wire:click="cancelDelete" class="btn-ghost flex-1 px-4 py-3 rounded-xl text-sm font-bold">Cancel</button>

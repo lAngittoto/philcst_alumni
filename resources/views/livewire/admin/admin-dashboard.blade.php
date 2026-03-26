@@ -1,5 +1,5 @@
 @extends('layouts.sidebar-admin')
 
 @section('content')
-    <h1>Dashboard</h1>
+    <h1>In Progress</h1>
 @endsection

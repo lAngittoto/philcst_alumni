@@ -9,33 +9,31 @@ use Illuminate\Http\UploadedFile;
 
 class OrganizerEventController extends Controller
 {
-    // ── Get a single event (owned by current organizer) ─────
     public function getEvent(int $id): OrganizerEvent
     {
         $org = Auth::user()?->organizer;
-        return OrganizerEvent::where('id', $id)
+        // Use withTrashed so organizer can still load their soft-deleted events
+        return OrganizerEvent::withTrashed()
+            ->where('id', $id)
             ->where('organizer_id', $org?->id)
             ->firstOrFail();
     }
 
-    // ── Get any event by ID (admin or owner) ─────────────────
     public function getEventAny(int $id): OrganizerEvent
     {
-        return OrganizerEvent::findOrFail($id);
+        return OrganizerEvent::withTrashed()->findOrFail($id);
     }
 
-    // ── Create a new event ───────────────────────────────────
     public function createEvent(array $data, ?UploadedFile $photo = null): OrganizerEvent
     {
-        $org  = Auth::user()?->organizer;
-        $user = Auth::user();
+        $org = Auth::user()?->organizer;
 
         return OrganizerEvent::create([
             'organizer_id'        => $org->id,
             'title'               => $data['title'],
             'description'         => $data['description'] ?? null,
             'photo'               => $this->storePhoto($photo),
-            'event_date'          => $this->parseDateTime($data['event_date'], ''),
+            'event_date'          => $this->parseDateTime($data['event_date']),
             'event_end_date'      => $data['event_end_date'] ?? null,
             'venue'               => $data['venue'],
             'venue_address'       => $data['venue_address'] ?? null,
@@ -45,25 +43,22 @@ class OrganizerEventController extends Controller
             'contact_phone'       => $data['contact_phone'] ?? null,
             'notes'               => $data['notes'] ?? null,
             'status'              => 'PENDING',
-            // No updated_by on fresh create
             'updated_by'          => null,
             'updated_by_role'     => null,
         ]);
     }
 
-    // ── Update an existing event ─────────────────────────────
     public function updateEvent(int $id, array $data, ?UploadedFile $photo = null): OrganizerEvent
     {
         $event = $this->getEvent($id);
         $user  = Auth::user();
 
-        // APPROVED → back to PENDING for re-review when edited
         $newStatus = $event->status === 'APPROVED' ? 'PENDING' : $event->status;
 
         $updateData = [
             'title'               => $data['title'],
             'description'         => $data['description'] ?? null,
-            'event_date'          => $this->parseDateTime($data['event_date'], ''),
+            'event_date'          => $this->parseDateTime($data['event_date']),
             'event_end_date'      => $data['event_end_date'] ?? null,
             'venue'               => $data['venue'],
             'venue_address'       => $data['venue_address'] ?? null,
@@ -73,16 +68,13 @@ class OrganizerEventController extends Controller
             'contact_phone'       => $data['contact_phone'] ?? null,
             'notes'               => $data['notes'] ?? null,
             'status'              => $newStatus,
-            // Reset review fields — needs re-review
             'reviewed_by'         => null,
             'reviewed_at'         => null,
             'review_remarks'      => null,
-            // ── Audit trail ──
             'updated_by'          => $user?->name,
             'updated_by_role'     => $user?->role ?? 'organizer',
         ];
 
-        // Handle photo upload — delete old one if replaced
         if ($photo) {
             if ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO) {
                 Storage::disk('public')->delete($event->photo);
@@ -94,14 +86,18 @@ class OrganizerEventController extends Controller
         return $event->fresh();
     }
 
-    // ── Soft-delete an event (organizer side) ────────────────
+    /**
+     * Organizer soft-delete: sets status = ORGANIZER_DELETED first,
+     * then soft-deletes so admin can see it via withTrashed().
+     */
     public function deleteEvent(int $id): void
     {
         $event = $this->getEvent($id);
         $user  = Auth::user();
 
-        // Stamp who deleted before soft-deleting
+        // Mark status BEFORE soft-deleting so admin query can filter by status
         $event->update([
+            'status'          => 'ORGANIZER_DELETED',
             'deleted_by'      => $user?->name,
             'deleted_by_role' => $user?->role ?? 'organizer',
         ]);
@@ -109,12 +105,12 @@ class OrganizerEventController extends Controller
         // Delete uploaded photo if not the default
         if ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO) {
             Storage::disk('public')->delete($event->photo);
+            $event->update(['photo' => null]);
         }
 
         $event->delete(); // SoftDeletes — sets deleted_at
     }
 
-    // ── Admin: approve an event ──────────────────────────────
     public function approveEvent(int $id, ?string $remarks = null): OrganizerEvent
     {
         $event = $this->getEventAny($id);
@@ -125,7 +121,6 @@ class OrganizerEventController extends Controller
             'reviewed_by'     => Auth::id(),
             'reviewed_at'     => now(),
             'review_remarks'  => $remarks,
-            // Admin updating counts as updated_by too
             'updated_by'      => $user?->name,
             'updated_by_role' => 'admin',
         ]);
@@ -133,7 +128,6 @@ class OrganizerEventController extends Controller
         return $event->fresh();
     }
 
-    // ── Admin: reject an event ───────────────────────────────
     public function rejectEvent(int $id, ?string $remarks = null): OrganizerEvent
     {
         $event = $this->getEventAny($id);
@@ -151,17 +145,13 @@ class OrganizerEventController extends Controller
         return $event->fresh();
     }
 
-    // ── Store photo to public/storage/event/ ─────────────────
     private function storePhoto(?UploadedFile $photo): ?string
     {
         if (!$photo) return null;
-
         return $photo->store('event', 'public');
     }
 
-    // ── Parse free-text datetime string safely ───────────────
-    // Accepts already-combined: "2026-03-25 7:00 PM" or "2026-03-25 19:00"
-    private function parseDateTime(string $datetime, string $unused = ''): string
+    private function parseDateTime(string $datetime): string
     {
         try {
             return \Carbon\Carbon::parse($datetime)->format('Y-m-d H:i:s');
