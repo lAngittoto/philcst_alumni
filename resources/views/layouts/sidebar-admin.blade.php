@@ -109,7 +109,7 @@
             <div class="w-10"></div>
         </header>
 
-        <div class="flex-1 overflow-y-auto min-h-0 bg-white p-4 lg:p-8 no-scrollbar">
+        <div class="flex-1 overflow-y-auto min-h-0 bg-gray-100 p-4 lg:p-8 no-scrollbar">
             <div class="container mx-auto">
                 @yield('content')
             </div>
