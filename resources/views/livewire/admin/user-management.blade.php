@@ -1906,18 +1906,12 @@ new class extends Component {
 
 
 {{-- ═══════════════════════════════════════════════════════════════
-     MODALS
+     MODALS  — all use items-center for vertical centering
      ═══════════════════════════════════════════════════════════════ --}}
-
-@php
-function modalWrap(string $size = 'max-w-2xl'): string {
-    return "fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto";
-}
-@endphp
 
 {{-- ── REGISTER ALUMNI ───────────────────────────────────────── --}}
 @if($activeModal==='registerAlumni')
-<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 modal-in">
         <div class="modal-header">
             <h2><i class="fas fa-user-plus"></i> Register Alumni</h2>
@@ -1987,7 +1981,6 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                         <p class="form-hint">Suffix <span class="text-gray-400">(optional)</span></p>
                     </div>
                 </div>
-               
             </div>
 
             {{-- ID + Email --}}
@@ -2033,7 +2026,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── IMPORT ─────────────────────────────────────────────────── --}}
 @if($activeModal==='importModal')
-<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.cancelImport()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.cancelImport()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 modal-in">
         <div class="modal-header">
             <h2><i class="fas fa-file-import"></i> Import Alumni</h2>
@@ -2175,7 +2168,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── MANAGE COURSES ─────────────────────────────────────────── --}}
 @if($activeModal==='manageCourses')
-<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 modal-in flex flex-col" style="max-height:92vh;">
         <div class="modal-header">
             <h2><i class="fas fa-sliders"></i> Manage Courses</h2>
@@ -2262,7 +2255,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── DELETE COURSE CONFIRM ─────────────────────────────────── --}}
 @if($activeModal==='deleteCourseConfirm')
-<div class="{{ modalWrap('max-w-sm') }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-4 sm:my-8 modal-in">
         <div class="px-6 py-4 bg-red-50 border-b border-red-100 rounded-t-2xl">
             <h2 class="text-base font-extrabold text-red-900 flex items-center gap-2">
@@ -2287,7 +2280,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── VIEW PROFILE ──────────────────────────────────────────── --}}
 @if($activeModal==='viewProfile' && $viewingProfile)
-<div class="{{ modalWrap('max-w-lg') }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-4 sm:my-8 modal-in">
         <div class="modal-header sticky top-0 z-10">
             <h2><i class="fas {{ $viewingProfileType==='alumni'?'fa-graduation-cap':'fa-users-gear' }}"></i>
@@ -2375,7 +2368,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── REGISTER ORGANIZER ────────────────────────────────────── --}}
 @if($activeModal==='registerOrganizer')
-<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 modal-in">
         <div class="modal-header">
             <h2><i class="fas fa-users-gear"></i> Register Organizer</h2>
@@ -2445,7 +2438,6 @@ function modalWrap(string $size = 'max-w-2xl'): string {
                         <p class="form-hint">Suffix <span class="text-gray-400">(optional)</span></p>
                     </div>
                 </div>
-                
             </div>
 
             {{-- ID + Email --}}
@@ -2528,7 +2520,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── MANAGE COLLEGES ────────────────────────────────────────── --}}
 @if($activeModal==='manageOrgCourses')
-<div class="{{ modalWrap() }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 modal-in flex flex-col" style="max-height:92vh;">
         <div class="modal-header">
             <h2><i class="fas fa-building-columns"></i>
@@ -2735,7 +2727,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── DELETE COLLEGE CONFIRM ────────────────────────────────── --}}
 @if($activeModal==='deleteOrgCollegeConfirm')
-<div class="{{ modalWrap('max-w-sm') }}">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-4 sm:my-8 modal-in">
         <div class="px-6 py-4 bg-red-50 border-b border-red-100 rounded-t-2xl">
             <h2 class="text-base font-extrabold text-red-900 flex items-center gap-2">
@@ -2762,7 +2754,7 @@ function modalWrap(string $size = 'max-w-2xl'): string {
 
 {{-- ── TOGGLE ORGANIZER STATUS ───────────────────────────────── --}}
 @if($activeModal==='toggleOrganizerConfirm')
-<div class="{{ modalWrap('max-w-sm') }}" @keydown.escape.window="$wire.closeModal()">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-4 sm:my-8 modal-in">
         <div class="p-6">
             <div class="flex items-center gap-4 mb-4">

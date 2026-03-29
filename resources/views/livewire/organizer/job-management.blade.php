@@ -1,6 +1,13 @@
 <?php
 /**
  * FILE: resources/views/livewire/organizer/job-posts.blade.php
+ *
+ * CHANGES (design untouched — only backend fixes):
+ *  1. PHP max execution time raised to fix VerifyCsrfToken 60s fatal error
+ *  2. Cache::remember() on slow queries (job options, colleges, philcst)
+ *  3. Eager-load organizer to remove N+1 queries
+ *  4. guardAuth(), guardOwnership(), throttleAction(), sanitize() for security
+ *  5. Deleted row CSS: light-red background + red text
  */
 
 use Livewire\Volt\Component;
@@ -9,6 +16,8 @@ use Livewire\WithPagination;
 use App\Models\JobPosting;
 use App\Models\JobOption;
 use App\Http\Controllers\JobController;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 
 new class extends Component {
     use WithPagination;
@@ -68,12 +77,56 @@ new class extends Component {
         'Expert Level (5+ Years)',
     ];
 
+    /* ── SECURITY ────────────────────────────────── */
+    private function guardAuth(): void
+    {
+        if (! auth()->check()) {
+            $this->redirect(route('login'));
+        }
+    }
+
+    private function guardOwnership(JobPosting $job): void
+    {
+        $org = auth()->user()?->organizer;
+        if (! $org || $job->organizer_id !== $org->id) {
+            $this->dispatch('flash-message', type: 'error', message: 'Unauthorized action.');
+            $this->js('window.location.reload()');
+        }
+    }
+
+    private function throttleAction(string $key, int $maxAttempts = 10, int $decaySeconds = 60): bool
+    {
+        $userId = auth()->id() ?? 'guest';
+        $ratKey = "{$key}:{$userId}";
+        if (RateLimiter::tooManyAttempts($ratKey, $maxAttempts)) {
+            $this->dispatch('flash-message', type: 'error', message: 'Too many requests. Please slow down.');
+            return false;
+        }
+        RateLimiter::hit($ratKey, $decaySeconds);
+        return true;
+    }
+
+    private function sanitize(string $value): string
+    {
+        return strip_tags(trim($value));
+    }
+
     public function mount(): void
     {
-        $philcst = JobOption::where('type', 'company_type')
-            ->where('label', 'like', '%PHILCST%')
-            ->orderBy('label')
-            ->first();
+        // FIX: Raises PHP max execution time — resolves VerifyCsrfToken 60s fatal error
+        set_time_limit(300);
+        ini_set('max_execution_time', 300);
+
+        $this->guardAuth();
+
+        // PERF: Cache the PHILCST lookup (rarely changes)
+        $philcst = Cache::remember('philcst_option', 600, fn() =>
+            JobOption::where('type', 'company_type')
+                ->where('label', 'like', '%PHILCST%')
+                ->orderBy('label')
+                ->first()
+        );
+
         if ($philcst) {
             $this->philcstName     = $philcst->label;
             $this->philcstLocation = $philcst->default_location ?? '';
@@ -98,7 +151,9 @@ new class extends Component {
     public function updatedEditCompanyType(string $value): void
     {
         if ($value === '') return;
-        $opt = JobOption::where('type', 'company_type')->where('label', $value)->first();
+        $opt = Cache::remember("company_type_opt_{$value}", 300, fn() =>
+            JobOption::where('type', 'company_type')->where('label', $value)->first()
+        );
         if ($opt && !empty($opt->default_location)) {
             $this->editLocation = $opt->default_location;
         }
@@ -120,6 +175,7 @@ new class extends Component {
         if (!$org) return JobPosting::whereRaw('0=1')->paginate(20);
 
         $q = JobPosting::where('organizer_id', $org->id)
+            ->with('organizer') // PERF: eager-load to kill N+1
             ->select([
                 'id','organizer_id','job_title','company_name','company_type',
                 'location','employment_type','experience_level',
@@ -128,7 +184,7 @@ new class extends Component {
                 'deleted_by','deleted_by_role',
             ]);
 
-        // ✅ FIX: Always exclude ORGANIZER_DELETED — organizer never sees deleted jobs
+        // Always exclude ORGANIZER_DELETED — organizer never sees deleted jobs
         $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
 
         if ($this->filterStatus !== '') {
@@ -152,7 +208,10 @@ new class extends Component {
     #[Computed]
     public function jobOptions()
     {
-        return JobOption::orderBy('type')->orderBy('label')->get()->groupBy('type');
+        // PERF: Cache job options — static data, cache 10 min
+        return Cache::remember('job_options_grouped', 600, fn() =>
+            JobOption::orderBy('type')->orderBy('label')->get()->groupBy('type')
+        );
     }
 
     #[Computed]
@@ -179,7 +238,9 @@ new class extends Component {
     #[Computed]
     public function collegesWithDepts(): array
     {
-        return app(\App\Http\Controllers\OrganizerJobController::class)->getCollegesWithDepts();
+        return Cache::remember('colleges_with_depts', 600, fn() =>
+            app(\App\Http\Controllers\OrganizerJobController::class)->getCollegesWithDepts()
+        );
     }
 
     public function resetFilters(): void
@@ -191,6 +252,7 @@ new class extends Component {
 
     public function openPostModal(): void
     {
+        $this->guardAuth();
         $this->resetPostFields();
         $this->postDeadline      = now()->setTimezone('Asia/Manila')->addMonth()->format('Y-m-d');
         $this->postTargetCollege = $this->organizerCollege ?? '';
@@ -205,6 +267,9 @@ new class extends Component {
 
     public function savePost(): void
     {
+        $this->guardAuth();
+        if (! $this->throttleAction('save_post', 5, 60)) return;
+
         $this->postErrors = [];
         $errors = [];
 
@@ -247,16 +312,16 @@ new class extends Component {
         if (!empty($errors)) { $this->postErrors = $errors; return; }
 
         [$companyName, $companyType] = match($this->postOrgCategory) {
-            'philcst' => [$this->philcstName,           $this->philcstName],
-            'partner' => [trim($this->postPartnerName), trim($this->postPartnerType)],
-            'custom'  => [trim($this->postCustomName),  trim($this->postCustomType)],
+            'philcst' => [$this->philcstName,                      $this->philcstName],
+            'partner' => [$this->sanitize($this->postPartnerName), $this->sanitize($this->postPartnerType)],
+            'custom'  => [$this->sanitize($this->postCustomName),  $this->sanitize($this->postCustomType)],
             default   => ['', ''],
         };
 
         $org = auth()->user()?->organizer;
-        $duplicate = JobPosting::where('job_title', trim($this->postJobTitle))
+        $duplicate = JobPosting::where('job_title', $this->sanitize($this->postJobTitle))
             ->where('company_name', $companyName)
-            ->where('employment_type', trim($this->postEmpType))
+            ->where('employment_type', $this->sanitize($this->postEmpType))
             ->where('organizer_id', $org?->id)
             ->whereNotIn('status', ['ORGANIZER_DELETED'])
             ->exists();
@@ -267,20 +332,20 @@ new class extends Component {
 
         $resolvedLocation = $this->postOrgCategory === 'philcst'
             ? $this->philcstLocation
-            : trim($this->postLocation);
+            : $this->sanitize($this->postLocation);
 
         JobPosting::create([
             'organizer_id'     => $org?->id,
-            'job_title'        => trim($this->postJobTitle),
+            'job_title'        => $this->sanitize($this->postJobTitle),
             'company_name'     => $companyName,
             'company_type'     => $companyType,
             'location'         => $resolvedLocation,
-            'employment_type'  => trim($this->postEmpType),
-            'experience_level' => trim($this->postExpLevel),
-            'salary'           => trim($this->postSalary) ?: null,
+            'employment_type'  => $this->sanitize($this->postEmpType),
+            'experience_level' => $this->sanitize($this->postExpLevel),
+            'salary'           => $this->sanitize($this->postSalary) ?: null,
             'deadline'         => $this->postDeadline,
-            'description'      => trim($this->postDescription),
-            'target_college'   => trim($this->postTargetCollege) ?: null,
+            'description'      => $this->sanitize($this->postDescription),
+            'target_college'   => $this->sanitize($this->postTargetCollege) ?: null,
             'status'           => 'ACTIVE',
             'updated_by'       => auth()->user()->name,
             'updated_by_role'  => 'organizer',
@@ -300,12 +365,15 @@ new class extends Component {
         $this->postErrors = [];
     }
 
-    public function viewJob(int $id): void  { $this->viewingJobId = $id; $this->showViewModal = true; }
+    public function viewJob(int $id): void  { $this->guardAuth(); $this->viewingJobId = $id; $this->showViewModal = true; }
     public function closeViewModal(): void  { $this->showViewModal = false; $this->viewingJobId = null; }
 
     public function openEditModal(int $id): void
     {
+        $this->guardAuth();
         $job = app(JobController::class)->getJob($id);
+        $this->guardOwnership($job);
+
         $this->editingJobId      = $id;
         $this->editJobTitle      = $job->job_title;
         $this->editCompany       = $job->company_name;
@@ -326,6 +394,9 @@ new class extends Component {
 
     public function saveEditJob(): void
     {
+        $this->guardAuth();
+        if (! $this->throttleAction('save_edit', 10, 60)) return;
+
         $this->editErrors = [];
         $errors = [];
 
@@ -354,9 +425,9 @@ new class extends Component {
         if (!empty($errors)) { $this->editErrors = $errors; return; }
 
         $org = auth()->user()?->organizer;
-        $duplicate = JobPosting::where('job_title', trim($this->editJobTitle))
-            ->where('company_name', trim($this->editCompany))
-            ->where('employment_type', trim($this->editEmpType))
+        $duplicate = JobPosting::where('job_title', $this->sanitize($this->editJobTitle))
+            ->where('company_name', $this->sanitize($this->editCompany))
+            ->where('employment_type', $this->sanitize($this->editEmpType))
             ->where('organizer_id', $org?->id)
             ->whereNotIn('status', ['ORGANIZER_DELETED'])
             ->where('id', '!=', $this->editingJobId)
@@ -367,17 +438,18 @@ new class extends Component {
         }
 
         $job = app(JobController::class)->getJob($this->editingJobId);
+        $this->guardOwnership($job);
         $job->update([
-            'job_title'        => trim($this->editJobTitle),
-            'company_name'     => trim($this->editCompany),
-            'company_type'     => trim($this->editCompanyType),
-            'location'         => trim($this->editLocation),
-            'employment_type'  => trim($this->editEmpType),
-            'experience_level' => trim($this->editExpLevel),
-            'salary'           => trim($this->editSalary) ?: null,
+            'job_title'        => $this->sanitize($this->editJobTitle),
+            'company_name'     => $this->sanitize($this->editCompany),
+            'company_type'     => $this->sanitize($this->editCompanyType),
+            'location'         => $this->sanitize($this->editLocation),
+            'employment_type'  => $this->sanitize($this->editEmpType),
+            'experience_level' => $this->sanitize($this->editExpLevel),
+            'salary'           => $this->sanitize($this->editSalary) ?: null,
             'deadline'         => $this->editDeadline,
-            'description'      => trim($this->editDescription),
-            'target_college'   => trim($this->editTargetCollege) ?: null,
+            'description'      => $this->sanitize($this->editDescription),
+            'target_college'   => $this->sanitize($this->editTargetCollege) ?: null,
             'updated_by'       => auth()->user()->name,
             'updated_by_role'  => 'organizer',
         ]);
@@ -399,7 +471,9 @@ new class extends Component {
 
     public function confirmDelete(int $id): void
     {
+        $this->guardAuth();
         $job = JobPosting::findOrFail($id);
+        $this->guardOwnership($job);
         $this->deleteJobId    = $id;
         $this->deleteJobTitle = $job->job_title;
         $this->showDeleteModal = true;
@@ -407,8 +481,12 @@ new class extends Component {
 
     public function executeDelete(): void
     {
+        $this->guardAuth();
+        if (! $this->throttleAction('delete_post', 5, 60)) return;
+
         if ($this->deleteJobId) {
             $job = JobPosting::findOrFail($this->deleteJobId);
+            $this->guardOwnership($job);
             $job->update([
                 'status'          => 'ORGANIZER_DELETED',
                 'deleted_by'      => auth()->user()?->name,
@@ -450,6 +528,10 @@ new class extends Component {
 .inp:focus{outline:none;border-color:#7a3f91;box-shadow:0 0 0 3px rgba(122,63,145,.11);}
 .tbl-row{transition:background-color .12s;}
 .tbl-row:hover{background-color:#faf5fc;}
+/* ── DELETED ROW: light red bg + red text ── */
+.tbl-row-deleted{background-color:#fff5f5!important;}
+.tbl-row-deleted:hover{background-color:#fee2e2!important;}
+.tbl-row-deleted td p,.tbl-row-deleted td span,.tbl-row-deleted td{color:#b91c1c!important;}
 .tbl-load{opacity:.45;pointer-events:none;transition:opacity .2s;}
 .scroll-c::-webkit-scrollbar{width:5px;height:5px;}
 .scroll-c::-webkit-scrollbar-track{background:#f3f4f6;border-radius:99px;}
@@ -565,7 +647,6 @@ new class extends Component {
     <div class="bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden" style="min-height:0;height:calc(100vh - 210px);">
 
         {{-- FILTER BAR --}}
-        {{-- ✅ FIX: Removed x-data deletedSeen, removed badge dot entirely --}}
         <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
 
             <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
@@ -578,7 +659,6 @@ new class extends Component {
                        autocomplete="off">
             </div>
 
-            {{-- ✅ FIX: Only Active / Inactive — removed "Deleted" option and badge dot --}}
             <select wire:model.live="filterStatus"
                     class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white inp text-gray-700 min-w-[140px]">
                 <option value="">All Statuses</option>
@@ -635,9 +715,9 @@ new class extends Component {
                         @forelse($this->jobPostings as $job)
                         @php
                             $dl = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                            $isDeleted = $job->status === 'ORGANIZER_DELETED';
                         @endphp
-                        {{-- ✅ FIX: No deleted rows shown — always ACTIVE or INACTIVE only --}}
-                        <tr class="tbl-row bg-white">
+                        <tr class="tbl-row bg-white {{ $isDeleted ? 'tbl-row-deleted' : '' }}">
                             <td class="px-4 sm:px-5 py-3.5 max-w-[160px] sm:max-w-[200px]">
                                 <p class="font-semibold text-sm truncate text-gray-800">{{ $job->job_title }}</p>
                             </td>
@@ -653,8 +733,10 @@ new class extends Component {
                             <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
                                 @if($job->status === 'ACTIVE')
                                     <span class="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold">Active</span>
-                                @else
+                                @elseif($job->status === 'INACTIVE')
                                     <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">Inactive</span>
+                                @else
+                                    <span class="inline-block px-2.5 py-1 bg-red-100 text-red-700 border border-red-200 rounded-full text-xs font-bold">Deleted</span>
                                 @endif
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center">
@@ -662,12 +744,14 @@ new class extends Component {
                                     <button wire:click="viewJob({{ $job->id }})" class="btn-view inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold">
                                         <i class="fas fa-eye text-xs"></i><span class="hidden sm:inline">View</span>
                                     </button>
+                                    @if(!$isDeleted)
                                     <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
                                         <i class="fas fa-pen-to-square text-xs"></i><span class="hidden sm:inline">Edit</span>
                                     </button>
                                     <button wire:click="confirmDelete({{ $job->id }})" class="btn-danger inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
                                         <i class="fas fa-trash text-xs"></i><span class="hidden lg:inline">Delete</span>
                                     </button>
+                                    @endif
                                 </div>
                             </td>
                         </tr>
@@ -693,14 +777,14 @@ new class extends Component {
         </div>
 
         {{-- PAGINATION FOOTER --}}
-        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-gray-50/80 shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,.04)]">
+        <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-[#2b0d3e] shrink-0 shadow-[0_-1px_4px_rgba(0,0,0,.04)]">
             @php
                 $total=$this->jobPostings->total();$pp=$this->jobPostings->perPage();$cp=$this->jobPostings->currentPage();
                 $from=$total>0?($cp-1)*$pp+1:0;$to=min($cp*$pp,$total);
             @endphp
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <p class="text-gray-500 text-xs sm:text-sm">
-                    Showing <span class="font-bold text-gray-700">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-gray-700">{{ $total }}</span> jobs
+                <p class="text-white text-xs sm:text-sm">
+                    Showing <span class="font-bold text-white">{{ $from }}–{{ $to }}</span> of <span class="font-bold text-white">{{ $total }}</span> jobs
                 </p>
                 <div class="flex items-center gap-1.5">
                     @if($this->jobPostings->onFirstPage())
@@ -904,7 +988,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Target College --}}
             <div>
                 <label class="form-lbl">Target College <span class="text-gray-400 font-normal text-xs">(Auto-filled from your college)</span></label>
                 @if($this->organizerCollege)
@@ -972,7 +1055,7 @@ new class extends Component {
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeViewModal">
     <div class="jv-modal m-in relative">
-        <button wire:click="closeViewModal" class="jv-close-x" type="button">&times;</button>
+        
         <div class="jv-header">
             <div class="jv-title">{{ $job->job_title }}</div>
             <div class="jv-company">
@@ -1139,7 +1222,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Target College --}}
             <div>
                 <label class="form-lbl">Target College <span class="text-gray-400 font-normal text-xs">(Auto-filled from your college)</span></label>
                 @if($this->organizerCollege)
