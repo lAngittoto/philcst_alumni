@@ -46,7 +46,7 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 // ===================================
 Route::middleware(['auth', 'admin'])->group(function () {
 
-    Route::view('/admin/dashboard', 'admin.admin-dashboard')->name('admin.dashboard');
+    Route::view('/admin/dashboard', 'admin.admin-dashboard-wrapper')->name('admin.dashboard');
 
     Route::get('/user/management', fn() => view('admin.alumni-management-wrapper'))->name('user.management');
     Route::get('/yearbook', fn() => view('admin.yearbook-wrapper'))->name('admin.yearbook');
