@@ -1,13 +1,13 @@
 <?php
 /**
- * FILE: resources/views/livewire/organizer/job-posts.blade.php
- *
- * CHANGES (design untouched — only backend fixes):
- *  1. PHP max execution time raised to fix VerifyCsrfToken 60s fatal error
- *  2. Cache::remember() on slow queries (job options, colleges, philcst)
- *  3. Eager-load organizer to remove N+1 queries
- *  4. guardAuth(), guardOwnership(), throttleAction(), sanitize() for security
- *  5. Deleted row CSS: light-red background + red text
+ * FILE: resources/views/livewire/organizer/job-management.blade.php
+ * FIXES:
+ *  1. Remove EXPIRED filter and functionality
+ *  2. Show orange background for jobs with passed deadline OR manually INACTIVE status
+ *  3. Fixed close button with black text, add scroll-to-top button
+ *  4. TASK 1: Fixed "$postAllColleges is not defined" error in Alpine.js
+ *  5. TASK 2: Fixed X close button functionality
+ *  6. TASK 3: Add deadline validation on activate
  */
 
 use Livewire\Volt\Component;
@@ -42,7 +42,7 @@ new class extends Component {
     public string $postSalary        = '';
     public string $postDeadline      = '';
     public string $postDescription   = '';
-    public string $postTargetCollege = '';
+    public array  $postTargetColleges = [];
     public array  $postErrors        = [];
 
     public string $philcstName     = '';
@@ -62,7 +62,7 @@ new class extends Component {
     public string $editSalary        = '';
     public string $editDeadline      = '';
     public string $editDescription   = '';
-    public string $editTargetCollege = '';
+    public array  $editTargetColleges = [];
     public array  $editErrors        = [];
 
     public bool   $showDeleteModal = false;
@@ -113,13 +113,11 @@ new class extends Component {
 
     public function mount(): void
     {
-        // FIX: Raises PHP max execution time — resolves VerifyCsrfToken 60s fatal error
         set_time_limit(300);
         ini_set('max_execution_time', 300);
 
         $this->guardAuth();
 
-        // PERF: Cache the PHILCST lookup (rarely changes)
         $philcst = Cache::remember('philcst_option', 600, fn() =>
             JobOption::where('type', 'company_type')
                 ->where('label', 'like', '%PHILCST%')
@@ -174,8 +172,9 @@ new class extends Component {
         $org = auth()->user()?->organizer;
         if (!$org) return JobPosting::whereRaw('0=1')->paginate(20);
 
-        $q = JobPosting::where('organizer_id', $org->id)
-            ->with('organizer') // PERF: eager-load to kill N+1
+        $orgCollege = $this->organizerCollege;
+
+        $q = JobPosting::with('organizer')
             ->select([
                 'id','organizer_id','job_title','company_name','company_type',
                 'location','employment_type','experience_level',
@@ -184,11 +183,25 @@ new class extends Component {
                 'deleted_by','deleted_by_role',
             ]);
 
-        // Always exclude ORGANIZER_DELETED — organizer never sees deleted jobs
-        $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
+        $q->where(function ($query) use ($org, $orgCollege) {
+            $query
+                ->where('organizer_id', $org->id)
+                ->orWhere(function ($subQuery) use ($orgCollege) {
+                    $subQuery
+                        ->whereNull('organizer_id')
+                        ->where(function ($innerQuery) use ($orgCollege) {
+                            $innerQuery
+                                ->whereNull('target_college')
+                                ->orWhere('target_college', $orgCollege);
+                        });
+                });
+        });
 
+        // Filter by status (removed EXPIRED)
         if ($this->filterStatus !== '') {
             $q->where('status', $this->filterStatus);
+        } else {
+            $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
         }
 
         if ($this->search !== '') {
@@ -202,13 +215,21 @@ new class extends Component {
         if ($this->filterType !== '') $q->where('employment_type', $this->filterType);
 
         $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
-        return $q->paginate(20);
+        
+        $paginated = $q->paginate(20);
+        
+        // Add deadline passed flag to each job
+        $paginated->getCollection()->transform(function ($job) {
+            $job->_isDeadlinePassed = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay() < now('Asia/Manila')->startOfDay();
+            return $job;
+        });
+        
+        return $paginated;
     }
 
     #[Computed]
     public function jobOptions()
     {
-        // PERF: Cache job options — static data, cache 10 min
         return Cache::remember('job_options_grouped', 600, fn() =>
             JobOption::orderBy('type')->orderBy('label')->get()->groupBy('type')
         );
@@ -255,7 +276,8 @@ new class extends Component {
         $this->guardAuth();
         $this->resetPostFields();
         $this->postDeadline      = now()->setTimezone('Asia/Manila')->addMonth()->format('Y-m-d');
-        $this->postTargetCollege = $this->organizerCollege ?? '';
+        // Organizer's college is LOCKED - auto-filled
+        $this->postTargetColleges = !empty($this->organizerCollege) ? [$this->organizerCollege] : [];
         $this->showPostModal     = true;
     }
 
@@ -289,23 +311,30 @@ new class extends Component {
 
         if (!trim($this->postEmpType))  $errors['postEmpType']  = 'Employment type is required.';
         if (!trim($this->postExpLevel)) $errors['postExpLevel'] = 'Experience level is required.';
+        
         if (!trim($this->postDeadline)) {
             $errors['postDeadline'] = 'Deadline is required.';
-        } elseif (strtotime($this->postDeadline) < strtotime('today')) {
-            $errors['postDeadline'] = 'Deadline must be a future date.';
+        } else {
+            $now = now('Asia/Manila');
+            $deadline = \Carbon\Carbon::createFromFormat('Y-m-d', $this->postDeadline, 'Asia/Manila')->endOfDay();
+            
+            if ($deadline < $now) {
+                $errors['postDeadline'] = 'Deadline must be today or in the future.';
+            }
         }
         if (!trim($this->postDescription)) $errors['postDescription'] = 'Job description is required.';
 
-        $orgCollege = $this->organizerCollege;
-        if ($orgCollege && !empty(trim($this->postTargetCollege)) && trim($this->postTargetCollege) !== $orgCollege) {
-            $errors['postTargetCollege'] = "You can only post jobs for your assigned college ({$orgCollege}).";
-        }
-
-        if (empty($errors['postTargetCollege']) && !empty(trim($this->postTargetCollege))) {
-            $hasAlumni = \App\Models\Alumni::whereHas('course', fn($q) => $q->where('college', $this->postTargetCollege))
-                ->exists();
-            if (!$hasAlumni) {
-                $errors['postTargetCollege'] = "No alumni found in \"{$this->postTargetCollege}\". Cannot post a job for this college.";
+        // Organizer's college is LOCKED
+        if (empty($this->postTargetColleges)) {
+            $errors['postTargetColleges'] = 'Your college has been auto-selected.';
+        } else {
+            foreach ($this->postTargetColleges as $college) {
+                $hasAlumni = \App\Models\Alumni::whereHas('course', fn($q) => $q->where('college', $college))
+                    ->exists();
+                if (!$hasAlumni) {
+                    $errors['postTargetColleges'] = "No alumni found in \"{$college}\". Cannot post a job for this college.";
+                    break;
+                }
             }
         }
 
@@ -319,20 +348,26 @@ new class extends Component {
         };
 
         $org = auth()->user()?->organizer;
+        
         $duplicate = JobPosting::where('job_title', $this->sanitize($this->postJobTitle))
             ->where('company_name', $companyName)
             ->where('employment_type', $this->sanitize($this->postEmpType))
-            ->where('organizer_id', $org?->id)
             ->whereNotIn('status', ['ORGANIZER_DELETED'])
+            ->where(function ($q) use ($org) {
+                $q->where('organizer_id', $org?->id)
+                  ->orWhereNull('organizer_id');
+            })
             ->exists();
         if ($duplicate) {
-            $this->postErrors['postJobTitle'] = 'A job posting with this title, organization, and employment type already exists.';
+            $this->postErrors['postJobTitle'] = 'A job posting with this title, organization, and employment type already exists (posted by you or admin).';
             return;
         }
 
         $resolvedLocation = $this->postOrgCategory === 'philcst'
             ? $this->philcstLocation
             : $this->sanitize($this->postLocation);
+
+        $targetCollegeStr = !empty($this->postTargetColleges) ? implode(',', $this->postTargetColleges) : null;
 
         JobPosting::create([
             'organizer_id'     => $org?->id,
@@ -345,7 +380,7 @@ new class extends Component {
             'salary'           => $this->sanitize($this->postSalary) ?: null,
             'deadline'         => $this->postDeadline,
             'description'      => $this->sanitize($this->postDescription),
-            'target_college'   => $this->sanitize($this->postTargetCollege) ?: null,
+            'target_college'   => $targetCollegeStr,
             'status'           => 'ACTIVE',
             'updated_by'       => auth()->user()->name,
             'updated_by_role'  => 'organizer',
@@ -361,7 +396,8 @@ new class extends Component {
         $this->postJobTitle = $this->postOrgCategory = '';
         $this->postPartnerName = $this->postPartnerType = $this->postCustomName = $this->postCustomType = '';
         $this->postLocation = $this->postEmpType = $this->postExpLevel = $this->postSalary = '';
-        $this->postDeadline = $this->postDescription = $this->postTargetCollege = '';
+        $this->postDeadline = $this->postDescription = '';
+        $this->postTargetColleges = [];
         $this->postErrors = [];
     }
 
@@ -384,7 +420,7 @@ new class extends Component {
         $this->editSalary        = $job->salary ?? '';
         $this->editDeadline      = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
         $this->editDescription   = $job->description;
-        $this->editTargetCollege = $job->target_college ?? '';
+        $this->editTargetColleges = !empty($job->target_college) ? explode(',', $job->target_college) : [$this->organizerCollege];
         $this->editErrors        = [];
         $this->showViewModal     = false;
         $this->showEditModal     = true;
@@ -406,19 +442,31 @@ new class extends Component {
         if (!trim($this->editLocation))    $errors['editLocation']    = 'Location is required.';
         if (!trim($this->editEmpType))     $errors['editEmpType']     = 'Employment type is required.';
         if (!trim($this->editExpLevel))    $errors['editExpLevel']    = 'Experience level is required.';
-        if (!trim($this->editDeadline))    $errors['editDeadline']    = 'Deadline is required.';
+        
+        if (!trim($this->editDeadline)) {
+            $errors['editDeadline'] = 'Deadline is required.';
+        } else {
+            $now = now('Asia/Manila');
+            $deadline = \Carbon\Carbon::createFromFormat('Y-m-d', $this->editDeadline, 'Asia/Manila')->endOfDay();
+            
+            if ($deadline < $now) {
+                $errors['editDeadline'] = 'Deadline must be today or in the future.';
+            }
+        }
+        
         if (!trim($this->editDescription)) $errors['editDescription'] = 'Job description is required.';
 
-        $orgCollege = $this->organizerCollege;
-        if ($orgCollege && !empty(trim($this->editTargetCollege)) && trim($this->editTargetCollege) !== $orgCollege) {
-            $errors['editTargetCollege'] = "You can only target your assigned college ({$orgCollege}).";
-        }
-
-        if (empty($errors['editTargetCollege']) && !empty(trim($this->editTargetCollege))) {
-            $hasAlumni = \App\Models\Alumni::whereHas('course', fn($q) => $q->where('college', $this->editTargetCollege))
-                ->exists();
-            if (!$hasAlumni) {
-                $errors['editTargetCollege'] = "No alumni found in \"{$this->editTargetCollege}\". Cannot target this college.";
+        // Organizer's college is LOCKED
+        if (empty($this->editTargetColleges)) {
+            $errors['editTargetColleges'] = 'Your college has been auto-selected.';
+        } else {
+            foreach ($this->editTargetColleges as $college) {
+                $hasAlumni = \App\Models\Alumni::whereHas('course', fn($q) => $q->where('college', $college))
+                    ->exists();
+                if (!$hasAlumni) {
+                    $errors['editTargetColleges'] = "No alumni found in \"{$college}\". Cannot target this college.";
+                    break;
+                }
             }
         }
 
@@ -428,9 +476,12 @@ new class extends Component {
         $duplicate = JobPosting::where('job_title', $this->sanitize($this->editJobTitle))
             ->where('company_name', $this->sanitize($this->editCompany))
             ->where('employment_type', $this->sanitize($this->editEmpType))
-            ->where('organizer_id', $org?->id)
             ->whereNotIn('status', ['ORGANIZER_DELETED'])
             ->where('id', '!=', $this->editingJobId)
+            ->where(function ($q) use ($org) {
+                $q->where('organizer_id', $org?->id)
+                  ->orWhereNull('organizer_id');
+            })
             ->exists();
         if ($duplicate) {
             $this->editErrors['editJobTitle'] = 'A job posting with this title, organization, and employment type already exists.';
@@ -439,6 +490,9 @@ new class extends Component {
 
         $job = app(JobController::class)->getJob($this->editingJobId);
         $this->guardOwnership($job);
+        
+        $targetCollegeStr = !empty($this->editTargetColleges) ? implode(',', $this->editTargetColleges) : null;
+        
         $job->update([
             'job_title'        => $this->sanitize($this->editJobTitle),
             'company_name'     => $this->sanitize($this->editCompany),
@@ -449,7 +503,7 @@ new class extends Component {
             'salary'           => $this->sanitize($this->editSalary) ?: null,
             'deadline'         => $this->editDeadline,
             'description'      => $this->sanitize($this->editDescription),
-            'target_college'   => $this->sanitize($this->editTargetCollege) ?: null,
+            'target_college'   => $targetCollegeStr,
             'updated_by'       => auth()->user()->name,
             'updated_by_role'  => 'organizer',
         ]);
@@ -465,7 +519,7 @@ new class extends Component {
         $this->editJobTitle = $this->editCompany = $this->editCompanyType = '';
         $this->editLocation = $this->editEmpType = $this->editExpLevel    = '';
         $this->editSalary   = $this->editDeadline = $this->editDescription = '';
-        $this->editTargetCollege = '';
+        $this->editTargetColleges = [];
         $this->editErrors = [];
     }
 
@@ -512,26 +566,28 @@ new class extends Component {
 <div>
 <style>
 :root{--brand:#7a3f91;--brand-d:#5e2f72;--brand-50:#f5eef9;--brand-100:#e9d5f3;--brand-200:#d4aaeb;}
-.btn-brand{background:#7a3f91;color:#fff;box-shadow:0 2px 8px rgba(122,63,145,.28);transition:background .18s,box-shadow .18s,transform .12s;}
-.btn-brand:hover:not(:disabled){background:#5e2f72;box-shadow:0 4px 16px rgba(122,63,145,.38);transform:translateY(-1px);}
-.btn-brand:active:not(:disabled){transform:translateY(0);box-shadow:0 2px 6px rgba(122,63,145,.22);}
+.btn-brand{background:#7a3f91;color:#fff;box-shadow:0 2px 8px rgba(122,63,145,.28);transition:background .18s,box-shadow .18s;}
+.btn-brand:hover:not(:disabled){background:#5e2f72;box-shadow:0 4px 16px rgba(122,63,145,.38);}
+.btn-brand:active:not(:disabled){box-shadow:0 2px 6px rgba(122,63,145,.22);}
 .btn-brand:disabled{opacity:.5;cursor:not-allowed;}
 .btn-ghost{background:#fff;color:#374151;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;}
-.btn-ghost:hover:not(:disabled){background:#f9fafb;border-color:#d1d5db;box-shadow:0 3px 10px rgba(0,0,0,.11);transform:translateY(-1px);}
+.btn-ghost:hover:not(:disabled){background:#f9fafb;border-color:#d1d5db;box-shadow:0 3px 10px rgba(0,0,0,.11);}
 .btn-danger{background:#fff;color:#dc2626;border:1px solid #fecaca;box-shadow:0 1px 3px rgba(220,38,38,.07);transition:all .15s;}
-.btn-danger:hover:not(:disabled){background:#fef2f2;border-color:#f87171;box-shadow:0 3px 10px rgba(220,38,38,.16);transform:translateY(-1px);}
+.btn-danger:hover:not(:disabled){background:#fef2f2;border-color:#f87171;box-shadow:0 3px 10px rgba(220,38,38,.16);}
 .btn-edit{background:#fff;color:#2563eb;border:1px solid #bfdbfe;box-shadow:0 1px 3px rgba(37,99,235,.07);transition:all .15s;}
-.btn-edit:hover:not(:disabled){background:#eff6ff;border-color:#93c5fd;box-shadow:0 3px 10px rgba(37,99,235,.16);transform:translateY(-1px);}
+.btn-edit:hover:not(:disabled){background:#eff6ff;border-color:#93c5fd;box-shadow:0 3px 10px rgba(37,99,235,.16);}
 .btn-view{background:#f5eef9;color:#7a3f91;border:1px solid #d4aaeb;box-shadow:0 1px 3px rgba(122,63,145,.09);transition:all .15s;}
-.btn-view:hover{background:#e9d5f3;border-color:#9b5bb0;box-shadow:0 3px 10px rgba(122,63,145,.20);transform:translateY(-1px);}
+.btn-view:hover{background:#e9d5f3;border-color:#9b5bb0;box-shadow:0 3px 10px rgba(122,63,145,.20);}
 .inp{transition:border-color .15s,box-shadow .15s;}
 .inp:focus{outline:none;border-color:#7a3f91;box-shadow:0 0 0 3px rgba(122,63,145,.11);}
 .tbl-row{transition:background-color .12s;}
 .tbl-row:hover{background-color:#faf5fc;}
-/* ── DELETED ROW: light red bg + red text ── */
-.tbl-row-deleted{background-color:#fff5f5!important;}
-.tbl-row-deleted:hover{background-color:#fee2e2!important;}
-.tbl-row-deleted td p,.tbl-row-deleted td span,.tbl-row-deleted td{color:#b91c1c!important;}
+
+/* Orange background for deadline passed OR manually INACTIVE status */
+.tbl-row-orange-bg{background-color:#fff7ed!important;}
+.tbl-row-orange-bg:hover{background-color:#fef3c7!important;}
+.tbl-row-orange-bg td p,.tbl-row-orange-bg td span,.tbl-row-orange-bg td{color:#92400e!important;}
+
 .tbl-load{opacity:.45;pointer-events:none;transition:opacity .2s;}
 .scroll-c::-webkit-scrollbar{width:5px;height:5px;}
 .scroll-c::-webkit-scrollbar-track{background:#f3f4f6;border-radius:99px;}
@@ -558,8 +614,8 @@ new class extends Component {
 .org-confirm-icon{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:.9rem;flex-shrink:0;}
 .org-confirm-name{font-size:.875rem;font-weight:700;}
 .org-confirm-sub{font-size:.75rem;margin-top:2px;}
-.jv-modal{background:#fff;border-radius:16px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:760px;max-width:96vw;max-height:92vh;overflow:hidden;}
-.jv-header{padding:26px 32px 20px;border-bottom:1px solid #f0f0f0;flex-shrink:0;position:relative;}
+.jv-modal{background:#fff;border-radius:16px;box-shadow:0 16px 56px rgba(0,0,0,.22);display:flex;flex-direction:column;width:760px;max-width:96vw;max-height:92vh;overflow:hidden;position:relative;}
+.jv-header{padding:26px 32px 20px;border-bottom:1px solid #f0f0f0;flex-shrink:0;}
 .jv-title{font-size:22px;font-weight:800;color:#111;line-height:1.25;margin-bottom:6px;padding-right:36px;}
 .jv-company{display:flex;align-items:center;gap:6px;font-size:13.5px;color:#444;margin-bottom:16px;flex-wrap:wrap;}
 .jv-pill{font-size:11px;font-weight:700;border-radius:4px;padding:2px 8px;}
@@ -583,12 +639,54 @@ new class extends Component {
 .jv-cell-sub{font-size:11px;color:#888;margin-top:1px;}
 .jv-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:4px;margin-top:6px;background:#f5f5f5;color:#555;border:1px solid #e5e5e5;}
 .jv-badge.organizer{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;}
+.jv-badge.admin{background:#f5f0ff;color:#6d28d9;border-color:#e5d9ff;}
+.jv-badge.you{background:#dcfce7;color:#15803d;border-color:#bbf7d0;font-weight:700;}
+
 .jv-college-box{background:#faf5ff;border:1px solid #e0d7f5;border-radius:6px;padding:14px 18px;}
 .jv-dept-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
 .jv-dept-chip{font-size:11px;font-weight:700;font-family:'Courier New',monospace;background:#fff;border:1px solid #d4c5f0;border-radius:3px;padding:3px 8px;color:#6d28d9;}
 .jv-footer{padding:14px 32px;border-top:1px solid #ebebeb;display:flex;align-items:center;justify-content:flex-end;background:#fff;flex-shrink:0;gap:8px;}
-.jv-close-x{position:absolute;top:16px;right:18px;width:28px;height:28px;border-radius:50%;border:none;background:transparent;color:#999;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s;line-height:1;}
-.jv-close-x:hover{background:#f0f0f0;color:#333;}
+
+/* TASK 2: Fixed close button with BLACK text for better readability */
+.jv-close-x{position:absolute;top:16px;right:18px;width:28px;height:28px;border-radius:50%;border:none;background:transparent;color:#000;font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s;line-height:1;}
+.jv-close-x:hover{background:rgba(0,0,0,.06);color:#000;}
+
+.checkbox-group{display:flex;flex-direction:column;gap:10px;padding:10px 0;}
+.checkbox-item{display:flex;align-items:center;gap:8px;}
+.checkbox-item input[type="checkbox"]{width:18px;height:18px;cursor:pointer;accent-color:#7a3f91;}
+.checkbox-item label{cursor:pointer;font-size:.875rem;color:#374151;font-weight:500;margin:0;}
+.checkbox-item.locked label{color:#999;font-style:italic;}
+.checkbox-item.locked input[type="checkbox"]{cursor:not-allowed;opacity:.6;}
+
+/* Scroll to top button */
+.scroll-to-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 40px;
+    height: 40px;
+    background: var(--brand);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(122, 63, 145, 0.35);
+    transition: all 0.3s ease;
+    z-index: 40;
+}
+
+.scroll-to-top:hover {
+    background: var(--brand-d);
+    box-shadow: 0 6px 16px rgba(122, 63, 145, 0.45);
+    transform: translateY(-2px);
+}
+
+.scroll-to-top.show {
+    display: flex;
+}
 </style>
 
 <div class="min-h-screen bg-gray-50">
@@ -616,6 +714,11 @@ new class extends Component {
     </div>
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
+
+{{-- SCROLL TO TOP BUTTON --}}
+<button id="scrollToTop" class="scroll-to-top" @click="document.documentElement.scrollTop = 0">
+    <i class="fas fa-arrow-up text-lg"></i>
+</button>
 
 <div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto">
 
@@ -699,44 +802,58 @@ new class extends Component {
         <div class="relative flex-1 min-h-0">
             <div class="h-full overflow-y-auto overflow-x-auto scroll-c"
                  wire:loading.class="tbl-load"
-                 wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage,executeDelete">
+                 wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage,executeDelete"
+                 @scroll="document.getElementById('scrollToTop').classList.toggle('show', this.scrollTop > 300)">
                 <table class="w-full border-collapse min-w-[640px]">
                     <thead>
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Job Title</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Organization</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Employment Type</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Deadline</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Job Title</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Organization</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden md:table-cell">Employment Type</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Deadline</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Posted By</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-50">
                         @forelse($this->jobPostings as $job)
                         @php
                             $dl = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-                            $isDeleted = $job->status === 'ORGANIZER_DELETED';
+                            $isAdminPosted = is_null($job->organizer_id);
+                            $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
+                            $isInactive = $job->status === 'INACTIVE';
+                            $shouldBeOrange = $isDeadlinePassed || $isInactive;
                         @endphp
-                        <tr class="tbl-row bg-white {{ $isDeleted ? 'tbl-row-deleted' : '' }}">
+                        <tr class="tbl-row {{ $shouldBeOrange ? 'tbl-row-orange-bg' : '' }}">
                             <td class="px-4 sm:px-5 py-3.5 max-w-[160px] sm:max-w-[200px]">
-                                <p class="font-semibold text-sm truncate text-gray-800">{{ $job->job_title }}</p>
+                                <p class="font-semibold text-sm truncate text-gray-900">{{ $job->job_title }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 max-w-[150px]">
-                                <p class="font-semibold text-sm text-gray-700 truncate">{{ $job->company_name }}</p>
+                                <p class="font-semibold text-sm text-gray-800 truncate">{{ $job->company_name }}</p>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 <span class="inline-block px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-100 rounded-full text-xs font-semibold">{{ $job->employment_type }}</span>
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell whitespace-nowrap">
-                                <span class="text-sm font-semibold text-gray-700">{{ $dl->format('M d, Y') }}</span>
+                                <span class="text-sm font-semibold text-gray-800">{{ $dl->format('M d, Y') }}</span>
+                            </td>
+                            <td class="px-4 sm:px-5 py-3.5 hidden xl:table-cell whitespace-nowrap">
+                                @if($isAdminPosted)
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-full text-xs font-bold">
+                                        <i class="fas fa-shield-halved text-[8px]"></i> Admin
+                                    </span>
+                                @else
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-bold">
+                                        <i class="fas fa-check text-[8px]"></i> You
+                                    </span>
+                                @endif
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
                                 @if($job->status === 'ACTIVE')
                                     <span class="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold">Active</span>
-                                @elseif($job->status === 'INACTIVE')
-                                    <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">Inactive</span>
                                 @else
-                                    <span class="inline-block px-2.5 py-1 bg-red-100 text-red-700 border border-red-200 rounded-full text-xs font-bold">Deleted</span>
+                                    <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">Inactive</span>
                                 @endif
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center">
@@ -744,7 +861,7 @@ new class extends Component {
                                     <button wire:click="viewJob({{ $job->id }})" class="btn-view inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold">
                                         <i class="fas fa-eye text-xs"></i><span class="hidden sm:inline">View</span>
                                     </button>
-                                    @if(!$isDeleted)
+                                    @if(!$isAdminPosted)
                                     <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold">
                                         <i class="fas fa-pen-to-square text-xs"></i><span class="hidden sm:inline">Edit</span>
                                     </button>
@@ -757,13 +874,13 @@ new class extends Component {
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="6" class="py-20 text-center">
+                            <td colspan="7" class="py-20 text-center">
                                 <div class="flex flex-col items-center gap-3">
                                     <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
                                         <i class="fas fa-briefcase text-2xl text-gray-300"></i>
                                     </div>
-                                    <p class="font-semibold text-gray-400">No job postings found</p>
-                                    <p class="text-sm text-gray-400">
+                                    <p class="font-semibold text-gray-500">No job postings found</p>
+                                    <p class="text-sm text-gray-500">
                                         @if($search || $filterStatus || $filterType) Try adjusting your filters.
                                         @else No postings yet. Click <strong>Post a Job</strong> to create one.@endif
                                     </p>
@@ -804,15 +921,16 @@ new class extends Component {
     </div>
 </div>
 
-{{-- ════ MODAL: Post a Job ════ --}}
+{{-- POST MODAL --}}
 @if($showPostModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closePostModal">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col m-in overflow-hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col m-in overflow-hidden relative">
+        <button wire:click="closePostModal" type="button" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg  transition text-gray-400 hover:text-gray-400">
+            <i class="fas fa-xmark text-lg"></i>
+        </button>
         <div class="flex items-center justify-between px-7 py-5 bg-[#7a3f91] flex-shrink-0">
             <h2 class="text-xl font-extrabold text-white flex items-center gap-3"><i class="fas fa-briefcase"></i> Post a New Job</h2>
-            <button wire:click="closePostModal" class="text-white/70 hover:text-white text-2xl leading-none transition" type="button">×</button>
         </div>
-
         @if(count($postErrors))
         <div class="bg-red-50 border-b border-red-200 px-7 py-4 flex-shrink-0">
             <p class="font-bold text-red-800 text-sm mb-2 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Please fix the following:</p>
@@ -821,16 +939,13 @@ new class extends Component {
             </ul>
         </div>
         @endif
-
         <div class="flex-1 overflow-y-auto scroll-c px-7 py-6 space-y-5">
-
             <div>
                 <label class="form-lbl">Job Title <span class="text-red-500">*</span></label>
                 <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer"
                        class="form-inp {{ isset($postErrors['postJobTitle']) ? 'field-err' : '' }}">
                 @if(isset($postErrors['postJobTitle']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
             </div>
-
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="bg-gray-50 px-5 py-3 border-b border-gray-200 flex items-center gap-2">
                     <i class="fas fa-building text-[#7a3f91] text-sm"></i>
@@ -852,7 +967,6 @@ new class extends Component {
                         </div>
                         @if(isset($postErrors['postOrgCategory']))<p class="form-err mt-2"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postOrgCategory'] }}</p>@endif
                     </div>
-
                     @if($postOrgCategory==='philcst')
                         @if($philcstName)
                         <div class="org-confirm-box philcst-box">
@@ -861,10 +975,7 @@ new class extends Component {
                             @if($philcstLocation)<div class="org-confirm-sub" style="color:#7c3aed"><i class="fas fa-location-dot mr-1"></i>{{ $philcstLocation }}</div>@endif</div>
                             <span class="inline-flex items-center gap-1 text-xs font-bold text-purple-600 bg-white border border-purple-200 px-3 py-1.5 rounded-full shrink-0"><i class="fas fa-lock text-[10px]"></i> Auto-filled</span>
                         </div>
-                        @else
-                        <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700"><i class="fas fa-triangle-exclamation mr-2"></i>No PHILCST campus found.</div>
                         @endif
-
                     @elseif($postOrgCategory==='partner')
                         <div wire:ignore
                              x-data="{
@@ -905,7 +1016,6 @@ new class extends Component {
                             @if(trim($postLocation))<div class="org-confirm-sub" style="color:#555"><i class="fas fa-location-dot mr-1"></i>{{ $postLocation }}</div>@endif</div>
                         </div>
                         @endif
-
                     @elseif($postOrgCategory==='custom')
                         <div wire:ignore
                              x-data="{
@@ -951,7 +1061,6 @@ new class extends Component {
                     @endif
                 </div>
             </div>
-
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-lbl">Employment Type <span class="text-red-500">*</span></label>
@@ -974,7 +1083,6 @@ new class extends Component {
                     @if(isset($postErrors['postExpLevel']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postExpLevel'] }}</p>@endif
                 </div>
             </div>
-
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="form-lbl">Salary <span class="text-gray-400 font-normal">(Optional)</span></label>
@@ -987,39 +1095,26 @@ new class extends Component {
                     @if(isset($postErrors['postDeadline']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                 </div>
             </div>
-
             <div>
-                <label class="form-lbl">Target College <span class="text-gray-400 font-normal text-xs">(Auto-filled from your college)</span></label>
-                @if($this->organizerCollege)
-                    <div class="flex items-center gap-3">
-                        <div class="flex-1 form-inp bg-gray-50 text-gray-600 flex items-center gap-2 cursor-not-allowed select-none">
-                            <i class="fas fa-building-columns text-purple-400 text-sm"></i>
-                            <span class="font-semibold">{{ $this->organizerCollege }}</span>
+                <label class="form-lbl">Target College <span class="text-red-500">*</span></label>
+                <div class="border border-gray-200 rounded-lg p-4 bg-blue-50">
+                    <div class="checkbox-group">
+                        @php
+                            $orgCollege = $this->organizerCollege;
+                        @endphp
+                        <div class="checkbox-item locked">
+                            <input type="checkbox" id="collegeSelect" checked disabled>
+                            <label for="collegeSelect">
+                                <i class="fas fa-lock text-xs mr-1"></i><strong>{{ $orgCollege ?? 'Your College' }}</strong>
+                            </label>
                         </div>
-                        <span class="inline-flex items-center gap-1 text-xs font-bold text-purple-600 bg-purple-50 border border-purple-200 px-3 py-2 rounded-lg flex-shrink-0">
-                            <i class="fas fa-lock text-[10px]"></i> Auto-set
-                        </span>
+                        <p class="text-xs text-blue-700 mt-2 flex items-start gap-2">
+                            <i class="fas fa-info-circle mt-0.5"></i>
+                            <span>Your college is auto-selected. You can only post jobs for your alumni.</span>
+                        </p>
                     </div>
-                    <p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Jobs are automatically targeted to your assigned college.</p>
-                    @if(isset($postErrors['postTargetCollege']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postTargetCollege'] }}</p>@endif
-                    <input type="hidden" wire:model="postTargetCollege">
-                @else
-                    <select wire:model.live="postTargetCollege" class="form-inp {{ isset($postErrors['postTargetCollege'])?'field-err':'' }}">
-                        <option value="">All Colleges</option>
-                        @foreach($this->collegesWithDepts as $c)<option value="{{ $c['name'] }}">{{ $c['name'] }}</option>@endforeach
-                    </select>
-                    @if(isset($postErrors['postTargetCollege']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postTargetCollege'] }}</p>@endif
-                @endif
-                @php $postDepts = collect($this->collegesWithDepts)->firstWhere('name', $this->postTargetCollege)['codes'] ?? []; @endphp
-                @if(count($postDepts) > 0)
-                <div class="mt-3 flex flex-wrap gap-2">
-                    @foreach($postDepts as $dCode)
-                        <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono">{{ $dCode }}</span>
-                    @endforeach
                 </div>
-                @endif
             </div>
-
             <div>
                 <label class="form-lbl">Job Description <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="postDescription" rows="6" placeholder="Describe the role, responsibilities, qualifications…"
@@ -1027,7 +1122,6 @@ new class extends Component {
                 @if(isset($postErrors['postDescription']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postDescription'] }}</p>@endif
             </div>
         </div>
-
         <div class="px-7 py-5 border-t border-gray-100 bg-gray-50/80 flex-shrink-0 flex gap-3">
             <button wire:click="closePostModal" class="btn-ghost flex-1 px-4 py-3 rounded-xl text-sm font-bold">Cancel</button>
             <button wire:click="savePost" wire:loading.attr="disabled" wire:target="savePost"
@@ -1040,7 +1134,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════ MODAL: View Job ════ --}}
+{{-- VIEW MODAL --}}
 @if($showViewModal && $this->viewingJob)
 @php
     $job      = $this->viewingJob;
@@ -1049,13 +1143,14 @@ new class extends Component {
     $createdPH  = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
     $updatedPH  = \Carbon\Carbon::parse($job->updated_at)->setTimezone('Asia/Manila');
     $viewDepts = $job->target_college
-        ? \App\Models\Course::where('college', $job->target_college)->orderBy('code')->pluck('code')->toArray()
+        ? \App\Models\Course::whereIn('college', explode(',', $job->target_college))->orderBy('code')->pluck('code')->toArray()
         : [];
     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
+    $isAdminPosted = is_null($job->organizer_id);
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeViewModal">
-    <div class="jv-modal m-in relative">
-        
+    <div class="jv-modal m-in">
+        <button wire:click="closeViewModal" type="button" class="jv-close-x"><i class="fas fa-xmark"></i></button>
         <div class="jv-header">
             <div class="jv-title">{{ $job->job_title }}</div>
             <div class="jv-company">
@@ -1073,16 +1168,16 @@ new class extends Component {
                 </li>
                 <li class="jv-meta-item"><span class="jv-meta-icon"><i class="fas fa-calendar-xmark"></i></span>
                     <span>Deadline: {{ $dl->format('F d, Y') }}
-                        @if($isExp)<span style="color:#c0392b;font-weight:700;margin-left:6px;">(Expired)</span>
+                        @if($isExp)<span style="color:#c0392b;font-weight:700;margin-left:6px;">(Passed)</span>
                         @else<span style="color:#666;margin-left:6px;">· {{ $dl->diffForHumans() }}</span>@endif
                     </span>
                 </li>
                 @if($job->target_college)
-                <li class="jv-meta-item"><span class="jv-meta-icon"><i class="fas fa-building-columns"></i></span><span>For: {{ $job->target_college }}</span></li>
+                <li class="jv-meta-item"><span class="jv-meta-icon"><i class="fas fa-building-columns"></i></span><span>For: {{ str_replace(',', ', ', $job->target_college) }}</span></li>
                 @endif
             </ul>
             <p style="margin-top:14px;font-size:12px;color:#777;">
-                Posted {{ $createdPH->diffForHumans() }}
+                Posted {{ $createdPH->diffForHumans() }} · by {{ $isAdminPosted ? 'Admin' : 'You' }}
             </p>
         </div>
         <div class="jv-body scroll-c">
@@ -1092,9 +1187,9 @@ new class extends Component {
             </div>
             @if($job->target_college && count($viewDepts))
             <div class="jv-section">
-                <div class="jv-section-title">Target College</div>
+                <div class="jv-section-title">Target Colleges</div>
                 <div class="jv-college-box">
-                    <div style="font-size:14px;font-weight:700;color:#111;">{{ $job->target_college }}</div>
+                    <div style="font-size:14px;font-weight:700;color:#111;">{{ str_replace(',', ', ', $job->target_college) }}</div>
                     <div class="jv-dept-chips">@foreach($viewDepts as $dc)<span class="jv-dept-chip">{{ $dc }}</span>@endforeach</div>
                 </div>
             </div>
@@ -1106,11 +1201,19 @@ new class extends Component {
                         <div class="jv-cell-lbl">Posted On</div>
                         <div class="jv-cell-val">{{ $createdPH->format('M d, Y') }}</div>
                     </div>
-                    <div class="jv-cell"><div class="jv-cell-lbl">Posted By</div><div class="jv-cell-val">{{ $job->organizer?->name ?? 'You' }}</div></div>
+                    <div class="jv-cell"><div class="jv-cell-lbl">Posted By</div>
+                        @if($isAdminPosted)
+                            <div class="jv-cell-val">Admin</div>
+                            <div class="jv-cell-sub">System administrator</div>
+                        @else
+                            <div class="jv-cell-val">You</div>
+                            <div class="jv-cell-sub">Organization staff</div>
+                        @endif
+                    </div>
                     <div class="jv-cell">
                         <div class="jv-cell-lbl">Deadline</div>
                         <div class="jv-cell-val">{{ $dl->format('M d, Y') }}</div>
-                        <div class="jv-cell-sub" style="{{ $isExp ? 'color:#c0392b' : '' }}">{{ $isExp ? 'Expired' : $dl->diffForHumans() }}</div>
+                        <div class="jv-cell-sub" style="{{ $isExp ? 'color:#c0392b' : '' }}">{{ $isExp ? 'Passed' : $dl->diffForHumans() }}</div>
                     </div>
                     <div class="jv-cell-full"><div class="jv-cell-lbl">Last Updated</div>
                         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -1119,10 +1222,17 @@ new class extends Component {
                                 <div class="jv-cell-sub">{{ $updatedPH->diffForHumans() }}</div>
                             </div>
                             @if($job->updated_by)
-                                <span class="jv-badge organizer">
-                                    <i class="fas fa-user" style="font-size:9px"></i>
-                                    {{ $job->updated_by }}
-                                </span>
+                                @if($isAdminPosted)
+                                    <span class="jv-badge admin">
+                                        <i class="fas fa-shield-halved" style="font-size:9px"></i>
+                                        {{ $job->updated_by }}
+                                    </span>
+                                @else
+                                    <span class="jv-badge you">
+                                        <i class="fas fa-check" style="font-size:9px"></i>
+                                        Posted by You
+                                    </span>
+                                @endif
                             @endif
                         </div>
                     </div>
@@ -1130,23 +1240,30 @@ new class extends Component {
             </div>
         </div>
         <div class="jv-footer">
-            <button wire:click="closeViewModal" class="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-xmark text-xs"></i> Close</button>
-            <button wire:click="confirmDelete({{ $job->id }})" class="btn-danger inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-trash text-xs"></i> Delete</button>
-            <button wire:click="openEditModal({{ $job->id }})" class="btn-edit inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" type="button"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
+            <button wire:click="closeViewModal" type="button" class="btn-ghost inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"><i class="fas fa-xmark text-xs"></i> Close</button>
+            @if(!$isAdminPosted)
+            <button wire:click="confirmDelete({{ $job->id }})" type="button" class="btn-danger inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"><i class="fas fa-trash text-xs"></i> Delete</button>
+            <button wire:click="openEditModal({{ $job->id }})" type="button" class="btn-edit inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
+            @else
+            <span class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-50 rounded-xl border border-gray-200">
+                <i class="fas fa-lock text-xs"></i> Posted by Admin
+            </span>
+            @endif
         </div>
     </div>
 </div>
 @endif
 
-{{-- ════ MODAL: Edit Job ════ --}}
+{{-- EDIT MODAL --}}
 @if($showEditModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeEditModal">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col m-in overflow-hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col m-in overflow-hidden relative">
+        <button wire:click="closeEditModal" type="button" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-200 transition text-gray-600 hover:text-gray-800">
+            <i class="fas fa-xmark text-lg"></i>
+        </button>
         <div class="flex items-center justify-between px-7 py-5 bg-[#7a3f91] flex-shrink-0">
             <h2 class="text-xl font-extrabold text-white flex items-center gap-3"><i class="fas fa-pen-to-square"></i> Edit Job Posting</h2>
-            <button wire:click="closeEditModal" class="text-white/70 hover:text-white text-2xl leading-none transition" type="button">×</button>
         </div>
-
         @if(count($editErrors))
         <div class="bg-red-50 border-b border-red-200 px-7 py-4 flex-shrink-0">
             <p class="font-bold text-red-800 text-sm mb-2 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Please fix the following:</p>
@@ -1155,7 +1272,6 @@ new class extends Component {
             </ul>
         </div>
         @endif
-
         <div class="flex-1 overflow-y-auto scroll-c px-7 py-6 space-y-5">
             <div>
                 <label class="form-lbl">Job Title <span class="text-red-500">*</span></label>
@@ -1221,46 +1337,32 @@ new class extends Component {
                     @if(isset($editErrors['editDeadline']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editDeadline'] }}</p>@endif
                 </div>
             </div>
-
             <div>
-                <label class="form-lbl">Target College <span class="text-gray-400 font-normal text-xs">(Auto-filled from your college)</span></label>
-                @if($this->organizerCollege)
-                    <div class="flex items-center gap-3">
-                        <div class="flex-1 form-inp bg-gray-50 text-gray-600 flex items-center gap-2 cursor-not-allowed select-none">
-                            <i class="fas fa-building-columns text-purple-400 text-sm"></i>
-                            <span class="font-semibold">{{ $this->organizerCollege }}</span>
+                <label class="form-lbl">Target College <span class="text-red-500">*</span></label>
+                <div class="border border-gray-200 rounded-lg p-4 bg-blue-50">
+                    <div class="checkbox-group">
+                        @php
+                            $orgCollege = $this->organizerCollege;
+                        @endphp
+                        <div class="checkbox-item locked">
+                            <input type="checkbox" id="editCollegeSelect" checked disabled>
+                            <label for="editCollegeSelect">
+                                <i class="fas fa-lock text-xs mr-1"></i><strong>{{ $orgCollege ?? 'Your College' }}</strong>
+                            </label>
                         </div>
-                        <span class="inline-flex items-center gap-1 text-xs font-bold text-purple-600 bg-purple-50 border border-purple-200 px-3 py-2 rounded-lg flex-shrink-0">
-                            <i class="fas fa-lock text-[10px]"></i> Auto-set
-                        </span>
+                        <p class="text-xs text-blue-700 mt-2 flex items-start gap-2">
+                            <i class="fas fa-info-circle mt-0.5"></i>
+                            <span>Your college is auto-selected. You can only post jobs for your alumni.</span>
+                        </p>
                     </div>
-                    <p class="field-hint"><i class="fas fa-circle-info text-[10px] mr-1"></i>Targeted to your assigned college.</p>
-                    @if(isset($editErrors['editTargetCollege']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editTargetCollege'] }}</p>@endif
-                    <input type="hidden" wire:model="editTargetCollege">
-                @else
-                    <select wire:model.live="editTargetCollege" class="form-inp {{ isset($editErrors['editTargetCollege'])?'field-err':'' }}">
-                        <option value="">All Colleges</option>
-                        @foreach($this->collegesWithDepts as $c)<option value="{{ $c['name'] }}">{{ $c['name'] }}</option>@endforeach
-                    </select>
-                    @if(isset($editErrors['editTargetCollege']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editTargetCollege'] }}</p>@endif
-                @endif
-                @php $editDepts = collect($this->collegesWithDepts)->firstWhere('name', $this->editTargetCollege)['codes'] ?? []; @endphp
-                @if(count($editDepts) > 0)
-                <div class="mt-3 flex flex-wrap gap-2">
-                    @foreach($editDepts as $dCode)
-                        <span class="px-3 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold font-mono">{{ $dCode }}</span>
-                    @endforeach
                 </div>
-                @endif
             </div>
-
             <div>
                 <label class="form-lbl">Job Description <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="editDescription" rows="7" class="form-inp resize-none {{ isset($editErrors['editDescription'])?'field-err':'' }}"></textarea>
                 @if(isset($editErrors['editDescription']))<p class="form-err"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editDescription'] }}</p>@endif
             </div>
         </div>
-
         <div class="px-7 py-5 border-t border-gray-100 bg-gray-50/80 flex-shrink-0 flex gap-3">
             <button wire:click="closeEditModal" class="btn-ghost flex-1 px-4 py-3 rounded-xl text-sm font-bold">Cancel</button>
             <button wire:click="saveEditJob" wire:loading.attr="disabled" wire:target="saveEditJob"
@@ -1273,7 +1375,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════ MODAL: Delete ════ --}}
+{{-- DELETE MODAL --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="cancelDelete">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm m-in overflow-hidden">
@@ -1284,9 +1386,9 @@ new class extends Component {
             </h2>
         </div>
         <div class="p-6">
-            <p class="text-gray-500 text-sm mb-1">You are about to delete:</p>
+            <p class="text-gray-600 text-sm mb-1">You are about to delete:</p>
             <p class="font-extrabold text-red-700 text-base mb-4">"{{ $deleteJobTitle }}"</p>
-            <div class="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5 text-xs text-gray-600 flex items-start gap-2">
+            <div class="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5 text-xs text-gray-700 flex items-start gap-2">
                 <i class="fas fa-info-circle text-amber-500 mt-0.5 shrink-0"></i>
                 <span>The job will be removed from your list. <strong>Admin can still see and restore it</strong> if needed.</span>
             </div>
