@@ -19,10 +19,23 @@ new #[Layout('app')] class extends Component {
     {
         if (Auth::check()) {
             $user = Auth::user();
+            
+            // If organizer hasn't changed password yet, logout and show login form
+            if ($user->role === 'organizer') {
+                $organizer = $user->organizer;
+                if ($organizer && $organizer->password_changed_at === null) {
+                    Auth::logout();
+                    session()->invalidate();
+                    session()->regenerateToken();
+                    return;
+                }
+                // Password already changed → go to dashboard
+                $this->redirect(route('organizer.dashboard'));
+                return;
+            }
+            
             if ($user->role === 'admin') {
                 $this->redirect(route('admin.dashboard'));
-            } elseif ($user->role === 'organizer') {
-                $this->redirect(route('organizer.dashboard'));
             } else {
                 Auth::logout();
             }
@@ -72,9 +85,9 @@ new #[Layout('app')] class extends Component {
 
             // ── First login: password not yet changed ──
             if ($organizer->password_changed_at === null) {
-                // Clean up any stale data from previous incomplete attempts
+                // Clean up any stale data
                 session()->forget(['pending_password_plain', 'password_reset_step']);
-                // Set flag so middleware knows this is a fresh authenticated redirect
+                // Set flag indicating fresh authenticated login
                 session()->put('organizer_requires_password_change', true);
                 $this->redirectRoute('organizer.change-password', navigate: true);
                 return;
@@ -218,8 +231,6 @@ new #[Layout('app')] class extends Component {
                     </button>
                 </div>
             </div>
-
-
 
             {{-- Submit --}}
             <div class="pt-2">

@@ -1,13 +1,6 @@
+{{-- resources/views/livewire/organizer/event-organizer.blade.php --}}
+
 <?php
-/**
- * FILE: resources/views/livewire/organizer/event-management.blade.php
- *
- * CHANGES (design NOT touched — original preserved exactly):
- * - CSRF Timeout Fix: ini_set max_execution_time 120 in mount()
- * - PERFORMANCE: hasAlumni cached 5 min, queries scoped/optimized
- * - SECURITY: ownership checks on all actions, rate limiting, input sanitization, email validation
- * - UI ADDITION ONLY: ORGANIZER_DELETED rows → light red bg + red text (as requested)
- */
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
@@ -47,6 +40,8 @@ new class extends Component {
     public string $notes          = '';
     public string $batchYear      = '';
 
+    public array  $selectedCourses = [];
+
     public $photo                    = null;
     public ?string $existingPhotoUrl = null;
     public bool   $removePhoto       = false;
@@ -62,14 +57,69 @@ new class extends Component {
 
     public bool $showNoAlumniModal = false;
 
-    // ── CSRF TIMEOUT FIX + SECURITY ──
+    // ─────────────────────────────────────────────────────────────────────────
+    // MOUNT
+    // ─────────────────────────────────────────────────────────────────────────
     public function mount(): void
     {
-        ini_set('max_execution_time', 120);
+        ini_set('max_execution_time', 600);
+
         $user = Auth::user();
         if (!$user || !$user->organizer) {
             abort(403, 'Access denied.');
         }
+
+        // AUTO-REJECT: mark PENDING events whose event date has already passed
+        $this->autoRejectExpiredPendingEvents();
+
+        // AUTO-COMPLETE: mark APPROVED events whose end time (or start time) has passed
+        $this->autoCompleteExpiredEvents();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AUTO-REJECT LOGIC — PENDING events whose event date has passed
+    // ─────────────────────────────────────────────────────────────────────────
+    private function autoRejectExpiredPendingEvents(): void
+    {
+        $orgId = Auth::user()?->organizer?->id;
+        if (!$orgId) return;
+
+        $now = \Carbon\Carbon::now('UTC');
+
+        OrganizerEvent::where('organizer_id', $orgId)
+            ->where('status', 'PENDING')
+            ->where('event_date', '<=', $now)
+            ->update([
+                'status'         => 'REJECTED',
+                'review_remarks' => 'Auto-rejected: event date has already passed without admin approval.',
+            ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AUTO-COMPLETE LOGIC
+    // ─────────────────────────────────────────────────────────────────────────
+    private function autoCompleteExpiredEvents(): void
+    {
+        $orgId = Auth::user()?->organizer?->id;
+        if (!$orgId) return;
+
+        $now = \Carbon\Carbon::now('UTC');
+
+        OrganizerEvent::where('organizer_id', $orgId)
+            ->where('status', 'APPROVED')
+            ->where(function ($q) use ($now) {
+                // Has end date and it has passed
+                $q->where(function ($sub) use ($now) {
+                    $sub->whereNotNull('event_end_date')
+                        ->where('event_end_date', '<=', $now);
+                })
+                // No end date: use start date
+                ->orWhere(function ($sub) use ($now) {
+                    $sub->whereNull('event_end_date')
+                        ->where('event_date', '<=', $now);
+                });
+            })
+            ->update(['status' => 'COMPLETED']);
     }
 
     public function updatingSearch(): void       { $this->resetPage(); }
@@ -100,7 +150,25 @@ new class extends Component {
         return Auth::user()?->organizer?->id;
     }
 
-    // PERFORMANCE: 5-minute cache prevents hammering alumni table on every render
+    #[Computed]
+    public function availableCourses(): array
+    {
+        $dept = $this->organizerDepartment;
+        if (!$dept) return [];
+        
+        $cacheKey = 'organizer_courses_' . $dept;
+        return Cache::remember($cacheKey, 300, function () use ($dept) {
+            return Alumni::where('alumni.status', 'VERIFIED')
+                ->join('courses', 'alumni.course_code', '=', 'courses.code')
+                ->where('courses.college', $dept)
+                ->select('courses.code')
+                ->distinct()
+                ->orderBy('courses.code')
+                ->pluck('courses.code')
+                ->toArray();
+        });
+    }
+
     #[Computed]
     public function hasAlumni(): bool
     {
@@ -109,13 +177,13 @@ new class extends Component {
         return Cache::remember($cacheKey, 300, function () use ($dept) {
             $q = Alumni::where('status', 'VERIFIED');
             if ($dept) {
-                $q->whereHas('course', fn($c) => $c->where('college', $dept));
+                $q->join('courses', 'alumni.course_code', '=', 'courses.code')
+                  ->where('courses.college', $dept);
             }
             return $q->exists();
         });
     }
 
-    // SECURITY: scoped strictly to current organizer ID
     #[Computed]
     public function events()
     {
@@ -123,7 +191,7 @@ new class extends Component {
         if (!$orgId) abort(403);
 
         $q = OrganizerEvent::where('organizer_id', $orgId)
-            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED'])
+            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'])
             ->withCount([
                 'rsvps as confirmed_count' => fn($r) => $r->where('response', 'CONFIRMED'),
                 'rsvps as declined_count'  => fn($r) => $r->where('response', 'DECLINED'),
@@ -138,7 +206,7 @@ new class extends Component {
             );
         }
 
-        if ($this->filterStatus !== '' && in_array($this->filterStatus, ['PENDING','APPROVED','REJECTED'], true)) {
+        if ($this->filterStatus !== '' && in_array($this->filterStatus, ['PENDING','APPROVED','REJECTED','COMPLETED'], true)) {
             $q->where('status', $this->filterStatus);
         }
 
@@ -150,7 +218,6 @@ new class extends Component {
     public function viewingEvent(): ?OrganizerEvent
     {
         if (!$this->viewingEventId) return null;
-        // SECURITY: scoped to organizer
         return OrganizerEvent::where('id', $this->viewingEventId)
             ->where('organizer_id', $this->organizerId)
             ->withCount([
@@ -184,7 +251,6 @@ new class extends Component {
 
     public function openEditModal(int $id): void
     {
-        // SECURITY: ownership check
         $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
 
         $this->isEditing        = true;
@@ -207,7 +273,13 @@ new class extends Component {
 
         $tp    = $event->target_participants ?? '';
         $parts = explode(' · Batch ', $tp, 2);
+        $coursesPart = trim($parts[0] ?? '');
         $this->batchYear = trim($parts[1] ?? '');
+
+        // Parse selected courses
+        $this->selectedCourses = !empty($coursesPart) && $coursesPart !== 'All Courses'
+            ? array_map('trim', explode(',', $coursesPart))
+            : [];
 
         $this->showFormModal = true;
         $this->showViewModal = false;
@@ -219,7 +291,6 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    // SECURITY: rate-limited + sanitized
     public function saveEvent(): void
     {
         $key = 'save_event_' . Auth::id();
@@ -252,11 +323,30 @@ new class extends Component {
         if (!trim($this->start_time)) {
             $errors['start_time'] = 'Start time is required.';
         } else {
-            try { \Carbon\Carbon::parse(trim($this->start_time)); }
-            catch (\Exception $e) {
+            try {
+                \Carbon\Carbon::parse(trim($this->start_time));
+            } catch (\Exception $e) {
                 $errors['start_time'] = 'Invalid start time. Use format like "8:00 AM" or "13:00".';
             }
         }
+
+        // ── PAST DATE VALIDATION ────────────────────────────────────────────
+        if (!isset($errors['event_date']) && !isset($errors['start_time'])
+            && trim($this->event_date) && trim($this->start_time)) {
+            try {
+                $proposedStart = \Carbon\Carbon::createFromFormat(
+                    'Y-m-d g:i A',
+                    trim($this->event_date) . ' ' . trim($this->start_time),
+                    'Asia/Manila'
+                );
+                if ($proposedStart->isPast()) {
+                    $errors['event_date'] = 'Event date and start time cannot be in the past. Please choose a future date and time.';
+                }
+            } catch (\Exception $e) {
+                // already caught by start_time validation above
+            }
+        }
+        // ───────────────────────────────────────────────────────────────────
 
         if (trim($this->end_time)) {
             try {
@@ -319,8 +409,9 @@ new class extends Component {
         if (!empty($errors)) { $this->formErrors = $errors; return; }
 
         $dept       = $this->organizerDepartment ?: 'All Colleges';
+        $courseStr  = !empty($this->selectedCourses) ? implode(', ', $this->selectedCourses) : 'All Courses';
         $yearSuffix = trim($this->batchYear) ? ' · Batch ' . trim($this->batchYear) : '';
-        $targetStr  = $dept . $yearSuffix;
+        $targetStr  = $courseStr . $yearSuffix;
 
         $startDt = \Carbon\Carbon::createFromFormat('Y-m-d g:i A', $this->event_date . ' ' . $this->start_time, 'Asia/Manila')->utc();
         $endDt   = ($this->event_date && trim($this->end_time))
@@ -345,7 +436,6 @@ new class extends Component {
         $photo = $this->photo;
 
         if ($this->isEditing) {
-            // SECURITY: re-verify ownership
             $event = OrganizerEvent::where('id', $this->editingEventId)
                 ->where('organizer_id', $this->organizerId)->firstOrFail();
 
@@ -374,7 +464,6 @@ new class extends Component {
 
     public function viewEvent(int $id): void
     {
-        // SECURITY: ownership check
         if (!OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->exists()) abort(403);
         $this->viewingEventId = $id;
         $this->showViewModal  = true;
@@ -384,7 +473,6 @@ new class extends Component {
 
     public function confirmDelete(int $id): void
     {
-        // SECURITY: ownership check
         $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
         $this->deleteEventId    = $id;
         $this->deleteEventTitle = $event->title;
@@ -394,7 +482,6 @@ new class extends Component {
     public function executeDelete(): void
     {
         if ($this->deleteEventId) {
-            // SECURITY: re-check before delete
             OrganizerEvent::where('id', $this->deleteEventId)->where('organizer_id', $this->organizerId)->firstOrFail();
             app(OrganizerEventController::class)->deleteEvent($this->deleteEventId);
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteEventTitle}' deleted.");
@@ -419,6 +506,7 @@ new class extends Component {
         $this->contact_person = '';
         $this->contact_email  = '';
         $this->batchYear      = '';
+        $this->selectedCourses = [];
         $this->photo          = null;
         $this->existingPhotoUrl = null;
         $this->removePhoto    = false;
@@ -513,6 +601,7 @@ new class extends Component {
                 <option value="PENDING">Pending</option>
                 <option value="APPROVED">Approved</option>
                 <option value="REJECTED">Rejected</option>
+                <option value="COMPLETED">Completed</option>
             </select>
             <select wire:model.live="filterSort" class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition hidden sm:block">
                 <option value="recent">Recent First</option>
@@ -542,7 +631,7 @@ new class extends Component {
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Event</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">College</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Courses</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">RSVPs</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -553,24 +642,57 @@ new class extends Component {
                         @php
                             $tp             = $event->target_participants ?? '';
                             $parts          = explode(' · Batch ', $tp, 2);
-                            $displayCollege = trim($parts[0]) ?: ($this->organizerDepartment ?: 'All Colleges');
+                            $displayCourses = trim($parts[0]) ?: ($this->organizerDepartment ?: 'All Courses');
                             $isDeleted      = $event->status === 'ORGANIZER_DELETED';
+                            $isCompleted    = $event->status === 'COMPLETED';
+                            $isApproved     = $event->status === 'APPROVED';
                         @endphp
-                        {{-- DELETED rows: light red bg + red text --}}
-                        <tr class="{{ $isDeleted ? 'bg-red-50 hover:bg-red-100' : 'bg-white hover:bg-gray-50' }} transition-colors duration-100">
+
+                        <tr class="
+                            @if($isCompleted) bg-green-50 hover:bg-green-100
+                            @elseif($isDeleted) bg-red-50 hover:bg-red-100
+                            @else bg-white hover:bg-gray-50
+                            @endif transition-colors duration-100">
+
                             <td class="px-4 sm:px-5 py-3.5 max-w-[180px] sm:max-w-[220px]">
-                                <p class="font-semibold text-sm truncate {{ $isDeleted ? 'text-red-700' : 'text-gray-800' }}">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm truncate
+                                    @if($isCompleted) text-green-800
+                                    @elseif($isDeleted) text-red-700
+                                    @else text-gray-800
+                                    @endif">{{ $event->title }}</p>
                                 @if(!empty($parts[1]))
-                                    <p class="text-xs mt-0.5 {{ $isDeleted ? 'text-red-400' : 'text-gray-400' }}">Batch {{ trim($parts[1]) }}</p>
+                                    <p class="text-xs mt-0.5
+                                        @if($isCompleted) text-green-600
+                                        @elseif($isDeleted) text-red-400
+                                        @else text-gray-400
+                                        @endif">Batch {{ trim($parts[1]) }}</p>
                                 @endif
                             </td>
+
                             <td class="px-4 sm:px-5 py-3.5 whitespace-nowrap">
-                                <span class="text-sm font-semibold {{ $isDeleted ? 'text-red-700' : 'text-gray-700' }}">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
-                                <p class="text-xs mt-0.5 {{ $isDeleted ? 'text-red-400' : 'text-gray-400' }}">{{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($event->event_end_date)<span class="mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif</p>
+                                <span class="text-sm font-semibold
+                                    @if($isCompleted) text-green-800
+                                    @elseif($isDeleted) text-red-700
+                                    @else text-gray-700
+                                    @endif">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
+                                <p class="text-xs mt-0.5
+                                    @if($isCompleted) text-green-600
+                                    @elseif($isDeleted) text-red-400
+                                    @else text-gray-400
+                                    @endif">
+                                    {{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}
+                                    @if($event->event_end_date)<span class="mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif
+                                </p>
                             </td>
+
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
-                                <p class="text-xs font-medium max-w-[150px] truncate {{ $isDeleted ? 'text-red-500' : 'text-gray-600' }}" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
+                                <p class="text-xs font-medium max-w-[150px] truncate
+                                    @if($isCompleted) text-green-700
+                                    @elseif($isDeleted) text-red-500
+                                    @else text-gray-600
+                                    @endif" title="{{ $displayCourses }}">{{ $displayCourses }}</p>
                             </td>
+
                             <td class="px-4 sm:px-5 py-3.5 text-center hidden lg:table-cell">
                                 <div class="flex items-center justify-center gap-1.5">
                                     <span class="relative group">
@@ -593,23 +715,30 @@ new class extends Component {
                                     </span>
                                 </div>
                             </td>
+
                             <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
-                                @if($event->status==='PENDING')
-                                    <span class="inline-block px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
-                                @elseif($event->status==='APPROVED')
+                                @if($isCompleted)
+                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 border border-green-300 rounded-full text-[11px] font-bold">
+                                        <i class="fas fa-circle-check text-[9px]"></i> Completed
+                                    </span>
+                                @elseif($isApproved)
                                     <span class="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
-                                @elseif($event->status==='ORGANIZER_DELETED')
+                                @elseif($event->status === 'PENDING')
+                                    <span class="inline-block px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
+                                @elseif($event->status === 'ORGANIZER_DELETED')
                                     <span class="inline-block px-2.5 py-1 bg-red-100 text-red-700 border border-red-300 rounded-full text-[11px] font-bold">Deleted</span>
                                 @else
                                     <span class="inline-block px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-full text-[11px] font-bold">Rejected</span>
                                 @endif
                             </td>
+
                             <td class="px-4 sm:px-5 py-3.5 text-center">
                                 <div class="flex items-center justify-center gap-1.5 flex-wrap">
                                     <button wire:click="viewEvent({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
                                         <i class="fas fa-eye text-[10px]"></i><span class="hidden sm:inline">View</span>
                                     </button>
-                                    @if(!$isDeleted)
+                                    {{-- Approved & Completed: view only. Pending & Rejected: edit + delete --}}
+                                    @if(!$isDeleted && !$isCompleted && !$isApproved)
                                     <button wire:click="openEditModal({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition">
                                         <i class="fas fa-pen-to-square text-[10px]"></i><span class="hidden sm:inline">Edit</span>
                                     </button>
@@ -641,7 +770,7 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Pagination — original dark purple bar --}}
+        {{-- Pagination --}}
         <div class="px-4 sm:px-5 py-3.5 border-t border-gray-100 bg-[#2b0d3e] shrink-0">
             @php
                 $total = $this->events->total();
@@ -777,7 +906,7 @@ new class extends Component {
                     </div>
                     <div>
                         <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Event Date <span class="text-red-500">*</span></label>
-                        <input wire:model="event_date" type="date"
+                        <input wire:model="event_date" type="date" min="{{ now('Asia/Manila')->format('Y-m-d') }}"
                                class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['event_date'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
                         @if(isset($formErrors['event_date']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['event_date'] }}</span></p>@endif
                     </div>
@@ -789,7 +918,7 @@ new class extends Component {
                             @if(isset($formErrors['start_time']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['start_time'] }}</span></p>@endif
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">End Time <span class="text-gray-400 font-normal normal-case"></span></label>
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">End Time</label>
                             <input wire:model="end_time" type="text" placeholder="e.g. 5:00 PM"
                                    class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['end_time'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
                             @if(isset($formErrors['end_time']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['end_time'] }}</span></p>@endif
@@ -803,7 +932,7 @@ new class extends Component {
                             @if(isset($formErrors['venue']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['venue'] }}</span></p>@endif
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Full Address <span class="text-gray-400 font-normal normal-case"></span></label>
+                            <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Full Address</label>
                             <input wire:model.defer="venue_address" type="text"
                                    placeholder="e.g. Old Nalsian Road, Nalsian, Calasiao, Pangasinan"
                                    class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
@@ -814,24 +943,51 @@ new class extends Component {
 
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
-                    <i class="fas fa-users text-purple-500 text-sm"></i>
-                    <span class="text-sm font-bold text-gray-700">Target Participants</span>
+                    <i class="fas fa-book text-purple-500 text-sm"></i>
+                    <span class="text-sm font-bold text-gray-700">Courses / Programs</span>
                 </div>
                 <div class="p-4 sm:p-5 space-y-4">
                     <div class="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-3">
                         <i class="fas fa-building-columns text-purple-500 text-lg flex-shrink-0"></i>
                         <div class="flex-1 min-w-0">
                             <div class="text-sm font-bold text-purple-800">{{ $this->organizerDepartment ?: 'Your College' }}</div>
-                            <div class="text-xs text-purple-600 mt-0.5">Auto-filled from your assigned college. Events target alumni from your college only.</div>
+                            <div class="text-xs text-purple-600 mt-0.5">Select specific courses or leave unchecked for all courses in your college.</div>
                         </div>
-                        <span class="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 bg-purple-100 border border-purple-200 px-2 py-1 rounded-lg flex-shrink-0">
-                            <i class="fas fa-lock text-[9px]"></i> Auto-set
-                        </span>
                     </div>
-                    @if(isset($formErrors['target']))
-                        <p class="text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['target'] }}</span></p>
+
+                    @if(count($this->availableCourses) > 0)
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">Available Courses</span>
+                                <div class="flex gap-3">
+                                    <button type="button" wire:click="$set('selectedCourses', {{ json_encode($this->availableCourses) }})" class="text-xs text-purple-600 font-bold hover:underline"><i class="fas fa-check-double mr-1"></i>Select All</button>
+                                    @if(count($selectedCourses) > 0)<button type="button" wire:click="$set('selectedCourses', [])" class="text-xs text-gray-400 hover:text-red-500 font-bold hover:underline">Clear</button>@endif
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                @foreach($this->availableCourses as $course)
+                                    <label class="flex items-center gap-2 px-3 py-2 border rounded-lg cursor-pointer transition text-xs font-semibold {{ in_array($course, $selectedCourses) ? 'border-purple-400 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-600 hover:border-purple-300 hover:bg-purple-50/40' }}">
+                                        <input type="checkbox" wire:model.live="selectedCourses" value="{{ $course }}" class="accent-purple-600 w-3.5 h-3.5">
+                                        <span>{{ $course }}</span>
+                                    </label>
+                                @endforeach
+                            </div>
+                            @if(count($selectedCourses) > 0)
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    @foreach($selectedCourses as $course)
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-700 text-xs font-bold rounded-lg"><i class="fas fa-book text-[9px]"></i>{{ $course }}</span>
+                                    @endforeach
+                                </div>
+                            @endif
+                        </div>
+                    @else
+                        <div class="text-center py-4 text-gray-400 text-sm">
+                            <i class="fas fa-inbox text-2xl block mb-2 text-gray-200"></i>
+                            No courses available for your college yet.
+                        </div>
                     @endif
-                    <div>
+
+                    <div class="pt-3 border-t border-gray-100">
                         <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">
                             Batch Year <span class="text-gray-400 font-normal normal-case">(Optional — leave blank for all batches)</span>
                         </label>
@@ -873,7 +1029,7 @@ new class extends Component {
                                class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                     </div>
                     <div class="col-span-1 sm:col-span-3">
-                        <p class="text-xs text-gray-400"><i class="fas fa-circle-info text-[10px] mr-1"></i>Name and email are pre-filled from your account. You may update them if needed. Phone number is optional.</p>
+                        <p class="text-xs text-gray-400"><i class="fas fa-circle-info text-[10px] mr-1"></i>Name and email are pre-filled from your account. You may update them if needed.</p>
                     </div>
                 </div>
             </div>
@@ -911,8 +1067,10 @@ new class extends Component {
 {{-- ════ MODAL: View Event ════ --}}
 @if($showViewModal && $this->viewingEvent)
 @php
-    $ev        = $this->viewingEvent;
-    $totalRsvp = $ev->confirmed_count + $ev->declined_count + $ev->tentative_count;
+    $ev          = $this->viewingEvent;
+    $totalRsvp   = $ev->confirmed_count + $ev->declined_count + $ev->tentative_count;
+    $isCompleted = $ev->status === 'COMPLETED';
+    $isApproved  = $ev->status === 'APPROVED';
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.closeViewModal()">
     <div class="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[95vh] sm:max-h-[92vh] overflow-hidden relative"
@@ -921,23 +1079,30 @@ new class extends Component {
          x-transition:enter-end="opacity-100 scale-100 translate-y-0">
         <button wire:click="closeViewModal" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-lg leading-none transition">×</button>
 
-        <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}" class="w-full h-44 sm:h-64 object-cover flex-shrink-0">
+        <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}" class="w-full h-44 sm:h-64 object-cover flex-shrink-0 {{ $isCompleted ? 'brightness-90' : '' }}">
 
         <div class="px-5 sm:px-8 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
             <div class="flex items-start justify-between gap-3 mb-4">
                 <h2 class="text-lg sm:text-xl font-bold leading-snug text-gray-900">{{ $ev->title }}</h2>
-                @if($ev->status==='PENDING')<span class="flex-shrink-0 px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
-                @elseif($ev->status==='APPROVED')<span class="flex-shrink-0 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
-                @elseif($ev->status==='ORGANIZER_DELETED')<span class="flex-shrink-0 px-2.5 py-1 bg-red-100 text-red-700 border border-red-300 rounded-full text-[11px] font-bold">Deleted</span>
-                @else<span class="flex-shrink-0 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-full text-[11px] font-bold">Rejected</span>@endif
+                @if($isCompleted)
+                    <span class="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 border border-green-300 rounded-full text-[11px] font-bold">
+                        <i class="fas fa-circle-check text-[9px]"></i> Completed
+                    </span>
+                @elseif($isApproved)
+                    <span class="flex-shrink-0 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-[11px] font-bold">Approved</span>
+                @elseif($ev->status==='PENDING')
+                    <span class="flex-shrink-0 px-2.5 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-full text-[11px] font-bold">Pending</span>
+                @else
+                    <span class="flex-shrink-0 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-full text-[11px] font-bold">Rejected</span>
+                @endif
             </div>
             <ul class="space-y-2">
-                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-calendar text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}</span></li>
-                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-clock text-purple-500 mt-0.5 w-4 flex-shrink-0"></i>
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-calendar" style="color:#7a3f91" class="mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}</span></li>
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-clock" style="color:#7a3f91" class="mt-0.5 w-4 flex-shrink-0"></i>
                     <span>{{ $ev->event_date->setTimezone('Asia/Manila')->format('g:i A') }}@if($ev->event_end_date)<span class="text-gray-400 mx-1">–</span>{{ $ev->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@else<span class="text-gray-400 italic ml-1">· End time not set</span>@endif</span>
                 </li>
-                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-location-dot text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->venue }}@if($ev->venue_address) · <span class="text-gray-500">{{ $ev->venue_address }}</span>@endif</span></li>
-                @if($ev->target_participants)<li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-users text-purple-500 mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->target_participants }}</span></li>@endif
+                <li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-location-dot" style="color:#7a3f91" class="mt-0.5 w-4 flex-shrink-0"></i><span>{{ $ev->venue }}@if($ev->venue_address) · <span class="text-gray-500">{{ $ev->venue_address }}</span>@endif</span></li>
+                @if($ev->target_participants)<li class="flex items-start gap-3 text-sm text-gray-700"><i class="fas fa-book" style="color:#7a3f91" class="mt-0.5 w-4 flex-shrink-0"></i><span class="font-semibold text-purple-600">{{ $ev->target_participants }}</span></li>@endif
             </ul>
             <p class="text-xs text-gray-400 mt-3">Posted {{ $ev->created_at->diffForHumans() }}</p>
         </div>
@@ -957,13 +1122,16 @@ new class extends Component {
             </div>
 
             <div class="px-5 sm:px-8 py-5 border-b border-gray-100">
-                <h3 class="text-sm font-bold text-gray-800 mb-3">Review Status</h3>
-                @if($ev->status==='PENDING')
-                    <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Awaiting Admin Review</p><p class="text-xs text-yellow-700 mt-1">Your event is pending approval. You'll be notified once reviewed.</p></div>
-                @elseif($ev->status==='APPROVED')
+                <h3 class="text-sm font-bold text-gray-800 mb-3">Event Status</h3>
+                @if($isCompleted)
+                    <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                        <p class="text-sm font-bold text-green-800"><i class="fas fa-circle-check mr-2 text-green-500"></i>Event Completed</p>
+                        <p class="text-xs text-green-700 mt-1">This event has already taken place. Thank you for a successful event!</p>
+                    </div>
+                @elseif($isApproved)
                     <div class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-emerald-800"><i class="fas fa-circle-check mr-2 text-emerald-500"></i>Approved — Now Live</p>@if($ev->reviewed_at)<p class="text-xs text-emerald-700 mt-1">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>@endif@if($ev->review_remarks)<p class="text-xs text-emerald-600 mt-1 italic">"{{ $ev->review_remarks }}"</p>@endif</div>
-                @elseif($ev->status==='ORGANIZER_DELETED')
-                    <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-red-800"><i class="fas fa-trash mr-2 text-red-500"></i>Deleted by You</p><p class="text-xs text-red-600 mt-1">This event was removed from your list. Admin may still restore it if needed.</p></div>
+                @elseif($ev->status==='PENDING')
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-yellow-800"><i class="fas fa-hourglass-half mr-2 text-yellow-500"></i>Awaiting Admin Review</p><p class="text-xs text-yellow-700 mt-1">Your event is pending approval. You'll be notified once reviewed.</p></div>
                 @else
                     <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3"><p class="text-sm font-bold text-red-800"><i class="fas fa-circle-xmark mr-2 text-red-500"></i>Rejected by Admin</p>@if($ev->review_remarks)<p class="text-xs text-red-600 mt-2"><span class="font-semibold">Reason:</span> {{ $ev->review_remarks }}</p>@endif<p class="text-xs text-red-500 mt-2 font-medium">You may edit and resubmit this event for re-review.</p></div>
                 @endif
@@ -976,9 +1144,9 @@ new class extends Component {
             <div class="px-5 sm:px-8 py-5 border-b border-gray-100">
                 <h3 class="text-sm font-bold text-gray-800 mb-3">Contact Person</h3>
                 <div class="space-y-1.5 text-sm text-gray-700">
-                    @if($ev->contact_person)<p><i class="fas fa-user text-purple-400 w-4 mr-2"></i>{{ $ev->contact_person }}</p>@endif
-                    @if($ev->contact_email)<p><i class="fas fa-envelope text-purple-400 w-4 mr-2"></i>{{ $ev->contact_email }}</p>@endif
-                    @if($ev->contact_phone)<p><i class="fas fa-phone text-purple-400 w-4 mr-2"></i>{{ $ev->contact_phone }}</p>@endif
+                    @if($ev->contact_person)<p><i class="fas fa-user" style="color:#7a3f91" class="w-4 mr-2"></i>{{ $ev->contact_person }}</p>@endif
+                    @if($ev->contact_email)<p><i class="fas fa-envelope" style="color:#7a3f91" class="w-4 mr-2"></i>{{ $ev->contact_email }}</p>@endif
+                    @if($ev->contact_phone)<p><i class="fas fa-phone" style="color:#7a3f91" class="w-4 mr-2"></i>{{ $ev->contact_phone }}</p>@endif
                 </div>
             </div>
             @endif
@@ -987,20 +1155,21 @@ new class extends Component {
                 <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Posting Details</p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 border border-gray-100 rounded-xl overflow-hidden divide-x divide-y divide-gray-100">
                     <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted</p><p class="text-sm font-semibold text-gray-800">{{ $ev->created_at->setTimezone('Asia/Manila')->format('M d, Y') }}</p><p class="text-xs text-gray-400">{{ $ev->created_at->setTimezone('Asia/Manila')->format('g:i A') }}</p></div>
-                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">College</p><p class="text-sm font-semibold text-gray-800">{{ $ev->target_participants ?? 'All Colleges' }}</p></div>
+                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Last Updated By</p><p class="text-sm font-semibold text-gray-800">{{ $ev->updated_by ?? 'System' }}</p><p class="text-xs text-gray-400">{{ $ev->updated_by_role ? ucfirst($ev->updated_by_role) : '—' }}</p></div>
                     <div class="px-4 py-3 col-span-2 sm:col-span-1"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p>
-                        @if($ev->status==='PENDING')<p class="text-sm font-semibold text-yellow-600">Pending</p>
-                        @elseif($ev->status==='APPROVED')<p class="text-sm font-semibold text-emerald-600">Approved</p>
-                        @elseif($ev->status==='ORGANIZER_DELETED')<p class="text-sm font-semibold text-red-600">Deleted</p>
+                        @if($isCompleted)<p class="text-sm font-semibold text-green-700">Completed</p>
+                        @elseif($isApproved)<p class="text-sm font-semibold text-emerald-600">Approved</p>
+                        @elseif($ev->status==='PENDING')<p class="text-sm font-semibold text-yellow-600">Pending</p>
                         @else<p class="text-sm font-semibold text-red-600">Rejected</p>@endif
                     </div>
                 </div>
             </div>
         </div>
 
+        {{-- Footer: Approved & Completed = Close only. Pending & Rejected = Edit + Delete --}}
         <div class="px-5 sm:px-8 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
             <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
-            @if($ev->status !== 'ORGANIZER_DELETED')
+            @if(!$isCompleted && !$isApproved && $ev->status !== 'ORGANIZER_DELETED')
             <button wire:click="confirmDelete({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-trash text-xs"></i> Delete</button>
             <button wire:click="openEditModal({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 rounded-xl transition"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
             @endif
