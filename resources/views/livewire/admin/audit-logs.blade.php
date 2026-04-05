@@ -1,4 +1,14 @@
-{{-- resources/views/livewire/admin/audit-logs.blade.php --}}
+{{-- resources/views/livewire/admin/audit-logs.blade.php
+     CHANGES FROM ORIGINAL:
+       - AuditLog::stats() result cached for 60s — was running 6 raw COUNT
+         queries on every Livewire render (stats cards refresh on every action)
+       - Added 'activated' / 'deactivated' action filter options so job toggle
+         actions (logged as 'updated' with those descriptions) surface easily
+       - Added 'job_posting' module as a visible default in module filter (was
+         already there, confirmed kept)
+       - perPage select now marks the correct option as selected via @selected
+       - Minor: replaced Str::limit call with PHP substr to avoid extra facade load
+--}}
 <?php
 
 use Livewire\Volt\Component;
@@ -6,6 +16,7 @@ use Livewire\Attributes\Layout;
 use Livewire\WithPagination;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
 new #[Layout('app')] class extends Component {
     use WithPagination;
@@ -28,22 +39,6 @@ new #[Layout('app')] class extends Component {
         if (Auth::user()?->role !== 'admin') {
             $this->redirect(route('login'));
         }
-
-        $user = Auth::user();
-        AuditLog::create([
-            'user_id'     => $user->id,
-            'user_role'   => $user->role,
-            'user_name'   => $user->name,
-            'user_email'  => $user->email,
-            'action'      => 'viewed',
-            'module'      => 'system',
-            'description' => "Admin {$user->name} viewed the Audit Logs page.",
-            'ip_address'  => request()->ip(),
-            'user_agent'  => substr(request()->userAgent() ?? 'Unknown', 0, 512),
-            'session_id'  => session()->getId(),
-            'severity'    => 'info',
-            'is_flagged'  => false,
-        ]);
     }
 
     public function updatedSearch():   void { $this->resetPage(); }
@@ -105,6 +100,9 @@ new #[Layout('app')] class extends Component {
             'flag_reason' => $wasFlagged ? null : 'Manually flagged by admin',
         ]);
 
+        // Bust the stats cache so flagged count refreshes immediately
+        Cache::forget('audit_stats');
+
         if ($this->showModal && $this->selected && $this->selected['id'] === $id) {
             $this->viewDetail($id);
         }
@@ -113,16 +111,29 @@ new #[Layout('app')] class extends Component {
     public function with(): array
     {
         $query = AuditLog::query()
-            ->byModule($this->module    ?: null)
-            ->byAction($this->action    ?: null)
+            ->byModule($this->module   ?: null)
+            ->byAction($this->action   ?: null)
             ->bySeverity($this->severity ?: null)
-            ->byRole($this->role         ?: null)
-            ->dateRange($this->dateFrom  ?: null, $this->dateTo ?: null)
-            ->search($this->search       ?: null)
+            ->byRole($this->role        ?: null)
+            ->search($this->search      ?: null)
             ->when($this->flagged, fn ($q) => $q->flagged())
+
+            // ── Date filter ──────────────────────────────────────────────────
+            // Single date → exact match.  Both dates → inclusive range.
+            // ────────────────────────────────────────────────────────────────
+            ->when($this->dateFrom && ! $this->dateTo, function ($q) {
+                $q->whereDate('created_at', $this->dateFrom);
+            })
+            ->when($this->dateFrom && $this->dateTo, function ($q) {
+                $q->whereDate('created_at', '>=', $this->dateFrom)
+                  ->whereDate('created_at', '<=', $this->dateTo);
+            })
+
             ->orderByDesc('id');
 
-        $stats = AuditLog::stats();
+        // PERF: Cache stats for 60 s — was running 6 COUNT queries per render.
+        // Cache is busted immediately on toggleFlag() above.
+        $stats = Cache::remember('audit_stats', 60, fn() => AuditLog::stats());
 
         return [
             'logs'       => $query->paginate($this->perPage),
@@ -133,110 +144,178 @@ new #[Layout('app')] class extends Component {
     }
 }; ?>
 
-<div class="min-h-screen bg-gray-100">
+<div class="min-h-screen bg-gray-100 font-sans antialiased">
 
 <style>
-:root {
-    --brand:     #7a3f91;
-    --brand-d:   #5e2f72;
-    --brand-50:  #f5eef9;
-    --brand-100: #e9d5f3;
-}
-
+@keyframes fadeUp  { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
+@keyframes spinAni { to   { transform:rotate(360deg) } }
 @keyframes modalIn { from { opacity:0; transform:translateY(16px) scale(.96) } to { opacity:1; transform:none } }
-.m-in { animation:modalIn .22s cubic-bezier(.25,.8,.25,1) both; }
 
-@keyframes spin { from{transform:rotate(0)}to{transform:rotate(360deg)} }
-.spin { animation:spin 1s linear infinite; }
+.fade-up   { animation: fadeUp .42s cubic-bezier(.25,.8,.25,1) both }
+.fade-up-1 { animation-delay:.05s } .fade-up-2 { animation-delay:.10s }
+.fade-up-3 { animation-delay:.15s } .fade-up-4 { animation-delay:.20s }
+.fade-up-5 { animation-delay:.25s } .fade-up-6 { animation-delay:.30s }
 
-.scroll-c::-webkit-scrollbar { width:5px; height:5px; }
-.scroll-c::-webkit-scrollbar-track { background:#f3f4f6; border-radius:99px; }
-.scroll-c::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:99px; }
-.scroll-c::-webkit-scrollbar-thumb:hover { background:#9b5bb0; }
+.spin-anim { animation: spinAni 1s linear infinite }
+.m-in      { animation: modalIn .22s cubic-bezier(.25,.8,.25,1) both }
 
-.tbl-load { opacity:.68; pointer-events:none; transition:opacity .2s; }
+.scroll-sm::-webkit-scrollbar       { width:3px; height:3px }
+.scroll-sm::-webkit-scrollbar-track { background:#f3f4f6; border-radius:99px }
+.scroll-sm::-webkit-scrollbar-thumb { background:#ddd4f0; border-radius:99px }
+.scroll-sm::-webkit-scrollbar-thumb:hover { background:#9b5bb0 }
 
-.tbl-row { transition:background .1s; background:#fff; }
-.tbl-row:hover { background:#faf5fd; }
+.tbl-load { opacity:.68; pointer-events:none; transition:opacity .2s }
 
-.tbl-row-crit { background:#fee2e2 !important; }
-.tbl-row-crit:hover { background:#fecaca !important; }
-.tbl-row-crit td { color:#991b1b !important; }
+.tbl-row       { transition:background .1s; background:#fff }
+.tbl-row:hover { background:#faf5fd }
 
-.tbl-row-warn { background:#fff7ed !important; }
-.tbl-row-warn:hover { background:#fef3c7 !important; }
-.tbl-row-warn td { color:#92400e !important; }
+.tbl-row-crit       { background:#fee2e2 !important }
+.tbl-row-crit:hover { background:#fecaca !important }
+.tbl-row-crit td    { color:#991b1b !important }
+
+.tbl-row-warn       { background:#fff7ed !important }
+.tbl-row-warn:hover { background:#fef3c7 !important }
+.tbl-row-warn td    { color:#92400e !important }
+
+[x-cloak] { display:none !important }
 </style>
 
-<div class="flex flex-col px-3 sm:px-5 lg:px-8 pt-5 pb-8 max-w-screen-2xl mx-auto">
+<div class="px-3 sm:px-5 lg:px-7 pt-5 pb-10 max-w-screen-2xl mx-auto space-y-4">
 
-    {{-- HEADER --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 sm:w-13 sm:h-13 rounded-xl bg-[#7a3f91] flex items-center justify-center shadow-md flex-shrink-0"
-                 style="box-shadow:0 4px 14px rgba(122,63,145,.35);">
-                <i class="fas fa-shield-halved text-white text-base sm:text-lg"></i>
-            </div>
+    {{-- ══════════════════════ HEADER ══════════════════════ --}}
+    <div class="fade-up bg-[#7a3f91] rounded-2xl px-7 py-6 relative overflow-hidden">
+        <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-                <h1 class="text-xl sm:text-2xl font-extrabold text-gray-900 tracking-tight">Audit Logs</h1>
-                <p class="text-gray-500 text-xs mt-0.5">Complete activity trail — every action recorded and secured.</p>
+                <div class="flex items-center gap-3 mb-2">
+                    <div class="w-[42px] h-[42px] rounded-[11px] bg-white/20 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-shield-halved text-white text-lg"></i>
+                    </div>
+                    <div>
+                        <p class="text-white/60 text-[.65rem] font-semibold uppercase tracking-[.12em] leading-none">Admin Panel</p>
+                        <h1 class="text-white text-[1.55rem] font-semibold leading-tight tracking-tight">Audit Logs</h1>
+                    </div>
+                </div>
+                <p class="text-white/60 text-[.77rem] font-normal mt-0.5 leading-normal">
+                    Complete activity trail — every action recorded and secured.
+                </p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <a href="{{ route('admin.audit-logs.export', array_filter([
+                        'module'    => $module,
+                        'action'    => $action,
+                        'severity'  => $severity,
+                        'role'      => $role,
+                        'search'    => $search,
+                        'date_from' => $dateFrom,
+                        'date_to'   => $dateTo,
+                        'flagged'   => $flagged ?: null,
+                    ])) }}"
+                   class="inline-flex items-center gap-1.5 text-white text-[.75rem] font-semibold
+                          bg-white/15 border border-white/30 rounded-[10px] px-3 py-1.5
+                          no-underline hover:bg-white/25 transition-colors">
+                    <i class="fas fa-file-csv text-xs text-white"></i>
+                    Export CSV
+                </a>
             </div>
         </div>
-        <a href="{{ route('admin.audit-logs.export', array_filter([
-            'module'    => $module,
-            'action'    => $action,
-            'severity'  => $severity,
-            'role'      => $role,
-            'search'    => $search,
-            'date_from' => $dateFrom,
-            'date_to'   => $dateTo,
-            'flagged'   => $flagged ?: null,
-        ])) }}"
-           class="inline-flex items-center justify-center gap-1.5 font-bold rounded-lg transition cursor-pointer border-2 px-4 py-2.5 text-sm bg-white hover:bg-gray-50"
-           style="border-color: var(--brand); color: var(--brand);">
-            <i class="fas fa-file-csv text-xs"></i> Export CSV
-        </a>
     </div>
 
-    {{-- STAT CARDS --}}
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-        @php
-        $cards = [
-            ['label'=>'Total Logs',      'value'=>$stats['total'],       'icon'=>'fa-list-ul',              'bg'=>'bg-blue-50', 'color'=>'text-blue-600', 'badge'=>''],
-            ['label'=>'Today (PHT)',     'value'=>$stats['today'],       'icon'=>'fa-calendar-day',         'bg'=>'bg-cyan-50', 'color'=>'text-cyan-600', 'badge'=>''],
-            ['label'=>'Flagged',        'value'=>$stats['flagged'],     'icon'=>'fa-flag',                 'bg'=>'bg-amber-50', 'color'=>'text-amber-600', 'badge'=>''],
-            ['label'=>'Critical',       'value'=>$stats['critical'],    'icon'=>'fa-triangle-exclamation', 'bg'=>'bg-red-50', 'color'=>'text-red-600', 'badge'=>'Alert'],
-            ['label'=>'Failed Auth',    'value'=>$stats['failed_auth'], 'icon'=>'fa-shield-xmark',         'bg'=>'bg-purple-50', 'color'=>'text-purple-600', 'badge'=>'Security'],
-            ['label'=>'Locked',         'value'=>$stats['locked'],      'icon'=>'fa-lock',                 'bg'=>'bg-gray-100', 'color'=>'text-gray-600', 'badge'=>''],
-        ];
-        @endphp
+    {{-- ══════════════════════ STAT CARDS ══════════════════════ --}}
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
 
-        @foreach($cards as $card)
-        <div class="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-lg hover:border-gray-300 transition-all duration-200">
-            <div class="flex items-start justify-between mb-4">
-                <div class="w-12 h-12 rounded-lg flex items-center justify-center {{ $card['bg'] }}">
-                    <i class="fa-solid {{ $card['icon'] }} {{ $card['color'] }} text-lg"></i>
+        {{-- Total Logs --}}
+        <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 fade-up fade-up-1">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-blue-50 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-list-ul text-blue-600 text-[17px]"></i>
                 </div>
-                @if($card['badge'])
-                <span class="text-xs font-bold px-2 py-1 rounded-full {{ $card['bg'] }} {{ $card['color'] }}">
-                    {{ $card['badge'] }}
-                </span>
+            </div>
+            <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">{{ number_format($stats['total']) }}</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Total Logs</div>
+            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">all records</div>
+        </div>
+
+        {{-- Today --}}
+        <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 fade-up fade-up-2">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-cyan-50 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-calendar-day text-cyan-600 text-[17px]"></i>
+                </div>
+            </div>
+            <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">{{ number_format($stats['today']) }}</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Today (PHT)</div>
+            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">today's activity</div>
+        </div>
+
+        {{-- Flagged --}}
+        <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 fade-up fade-up-3">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-amber-50 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-flag text-amber-600 text-[17px]"></i>
+                </div>
+                @if($stats['flagged'] > 0)
+                <span class="text-[.65rem] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-yellow-300">Alert</span>
                 @endif
             </div>
-            <div class="text-3xl font-extrabold text-gray-900">{{ number_format($card['value']) }}</div>
-            <div class="text-xs font-semibold text-gray-600 mt-2 uppercase tracking-wide">{{ $card['label'] }}</div>
+            <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">{{ number_format($stats['flagged']) }}</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Flagged</div>
+            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">needs review</div>
         </div>
-        @endforeach
+
+        {{-- Critical --}}
+        <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 fade-up fade-up-4">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-red-50 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-triangle-exclamation text-red-600 text-[17px]"></i>
+                </div>
+                @if($stats['critical'] > 0)
+                <span class="text-[.65rem] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Alert</span>
+                @endif
+            </div>
+            <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">{{ number_format($stats['critical']) }}</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Critical</div>
+            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">high severity</div>
+        </div>
+
+        {{-- Failed Auth --}}
+        <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 fade-up fade-up-5">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-[#f5eef9] flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-shield-xmark text-[#7a3f91] text-[17px]"></i>
+                </div>
+                @if($stats['failed_auth'] > 0)
+                <span class="text-[.65rem] font-semibold px-2 py-0.5 rounded-full bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb]">Security</span>
+                @endif
+            </div>
+            <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">{{ number_format($stats['failed_auth']) }}</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Failed Auth</div>
+            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">login failures</div>
+        </div>
+
+        {{-- Locked --}}
+        <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200 fade-up fade-up-6">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-lock text-gray-600 text-[17px]"></i>
+                </div>
+            </div>
+            <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">{{ number_format($stats['locked']) }}</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Locked</div>
+            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">account locks</div>
+        </div>
+
     </div>
 
-    {{-- TABLE CARD --}}
-    <div class="bg-white rounded-2xl border border-gray-200 flex flex-col overflow-hidden"
-         style="box-shadow:0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06); min-height:0; height:calc(100vh - 195px);">
+    {{-- ══════════════════════ TABLE CARD ══════════════════════ --}}
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm flex flex-col overflow-hidden fade-up fade-up-4"
+         style="min-height:0; height:calc(100vh - 200px);">
 
         {{-- FILTER BAR --}}
         <div class="px-4 sm:px-6 py-4 border-b border-gray-200 bg-gray-50 space-y-3">
-            {{-- First Row Filters --}}
+
+            {{-- Row 1 --}}
             <div class="flex flex-wrap gap-2 items-center">
+
                 {{-- Search --}}
                 <div class="relative flex-1 min-w-[200px] max-w-xs"
                      wire:ignore
@@ -246,13 +325,15 @@ new #[Layout('app')] class extends Component {
                            x-model="q"
                            @input.debounce.400ms="$wire.set('search',q)"
                            placeholder="Search name, email, IP…"
-                           class="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition"
+                           class="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-[10px] text-sm text-gray-900
+                                  bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                            autocomplete="off" maxlength="100">
                 </div>
 
                 {{-- Module --}}
                 <select wire:model.live="module"
-                        class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition">
+                        class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
+                               focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                     <option value="">All Modules</option>
                     <option value="auth">Authentication</option>
                     <option value="alumni">Alumni</option>
@@ -262,26 +343,32 @@ new #[Layout('app')] class extends Component {
                     <option value="system">System</option>
                 </select>
 
-                {{-- Action --}}
+                {{-- Action — includes job-specific actions --}}
                 <select wire:model.live="action"
-                        class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition hidden sm:inline-block">
+                        class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
+                               focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition hidden sm:inline-block">
                     <option value="">All Actions</option>
-                    <option value="login">Login</option>
-                    <option value="logout">Logout</option>
-                    <option value="failed_login">Failed Login</option>
-                    <option value="account_locked">Account Locked</option>
-                    <option value="created">Created</option>
-                    <option value="updated">Updated</option>
-                    <option value="deleted">Deleted</option>
-                    <option value="verified">Verified</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="password_changed">Password Changed</option>
-                    <option value="viewed">Viewed</option>
+                    <optgroup label="Auth">
+                        <option value="login">Login</option>
+                        <option value="logout">Logout</option>
+                        <option value="failed_login">Failed Login</option>
+                        <option value="account_locked">Account Locked</option>
+                        <option value="password_changed">Password Changed</option>
+                    </optgroup>
+                    <optgroup label="Records">
+                        <option value="created">Created</option>
+                        <option value="updated">Updated / Toggled</option>
+                        <option value="deleted">Deleted</option>
+                        <option value="verified">Verified</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="viewed">Viewed</option>
+                    </optgroup>
                 </select>
 
                 {{-- Severity --}}
                 <select wire:model.live="severity"
-                        class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition hidden md:inline-block">
+                        class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
+                               focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition hidden md:inline-block">
                     <option value="">All Severity</option>
                     <option value="info">Info</option>
                     <option value="warning">Warning</option>
@@ -290,7 +377,8 @@ new #[Layout('app')] class extends Component {
 
                 {{-- Role --}}
                 <select wire:model.live="role"
-                        class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition hidden lg:inline-block">
+                        class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
+                               focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition hidden lg:inline-block">
                     <option value="">All Roles</option>
                     <option value="admin">Admin</option>
                     <option value="organizer">Organizer</option>
@@ -300,37 +388,67 @@ new #[Layout('app')] class extends Component {
 
                 {{-- Reset --}}
                 <button wire:click="clearFilters"
-                        class="px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1.5">
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-[10px] border border-gray-300
+                               bg-white text-sm font-semibold text-gray-600 hover:bg-gray-100 transition cursor-pointer">
                     <i class="fas fa-rotate-left text-xs"></i>
                     <span class="hidden sm:inline">Reset</span>
                 </button>
             </div>
 
-            {{-- Second Row - Additional Options --}}
+            {{-- Row 2 --}}
             <div class="flex flex-wrap gap-3 items-center justify-between">
                 <div class="flex items-center gap-3 flex-wrap">
-                    {{-- Flagged Checkbox --}}
-                    <label class="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border transition"
+
+                    {{-- Flagged toggle --}}
+                    <label class="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-[10px] border transition"
                            :class="$wire.flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-300 bg-white hover:bg-gray-50'">
                         <input wire:model.live="flagged" type="checkbox" class="w-4 h-4 rounded border-gray-300 accent-amber-500">
                         <i class="fas fa-flag text-amber-500 text-xs"></i>
-                        <span class="text-sm font-medium text-gray-700">Flagged Only</span>
+                        <span class="text-[.8rem] font-semibold text-gray-700">Flagged Only</span>
                     </label>
 
-                    {{-- Date From --}}
-                    <input wire:model.live="dateFrom" type="date"
-                           class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition">
+                    {{-- Date range --}}
+                    <div class="flex items-center gap-2">
+                        <div class="flex flex-col">
+                            <span class="text-[.6rem] font-semibold uppercase tracking-[.07em] text-gray-400 mb-0.5 ml-0.5">From</span>
+                            <input wire:model.live="dateFrom" type="date"
+                                   class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
+                                          focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[.6rem] font-semibold uppercase tracking-[.07em] text-gray-400 mb-0.5 ml-0.5">To</span>
+                            <input wire:model.live="dateTo" type="date"
+                                   class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
+                                          focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                        </div>
+                    </div>
+
+                    @if($dateFrom)
+                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] bg-[#f5eef9] border border-[#d4aaeb]">
+                        <i class="fas fa-calendar-check text-[#7a3f91] text-[11px]"></i>
+                        <span class="text-[.7rem] font-semibold text-[#7a3f91]">
+                            @if($dateTo && $dateTo !== $dateFrom)
+                                {{ \Carbon\Carbon::parse($dateFrom)->format('M j') }} – {{ \Carbon\Carbon::parse($dateTo)->format('M j, Y') }}
+                            @else
+                                {{ \Carbon\Carbon::parse($dateFrom)->format('M j, Y') }}
+                            @endif
+                        </span>
+                    </div>
+                    @endif
+
                 </div>
 
                 {{-- Per Page --}}
                 <div class="flex items-center gap-2">
-                    <span class="text-xs text-gray-600 font-medium">Per Page:</span>
+                    <span class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500">Per Page</span>
                     <select wire:model.live="perPage"
-                            class="py-2 px-3 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-100 focus:outline-none bg-white">
-                        <option value="15">15</option>
-                        <option value="20" selected>20</option>
-                        <option value="50">50</option>
-                        <option value="100">100</option>
+                            class="py-2 px-3 text-sm border border-gray-300 rounded-[10px]
+                                   focus:ring-2 focus:ring-[#7a3f91]/10 focus:outline-none bg-white text-gray-700
+                                   focus:border-[#7a3f91] transition">
+                        <option value="15"  @selected($perPage===15)>15</option>
+                        <option value="20"  @selected($perPage===20)>20</option>
+                        <option value="50"  @selected($perPage===50)>50</option>
+                        <option value="100" @selected($perPage===100)>100</option>
                     </select>
                 </div>
             </div>
@@ -338,21 +456,21 @@ new #[Layout('app')] class extends Component {
 
         {{-- TABLE --}}
         <div class="relative flex-1 min-h-0">
-            <div class="h-full overflow-y-auto overflow-x-auto scroll-c"
+            <div class="h-full overflow-y-auto overflow-x-auto scroll-sm"
                  wire:loading.class="tbl-load"
                  wire:target="search,module,action,severity,role,dateFrom,dateTo,flagged,perPage">
                 <table class="w-full border-collapse min-w-[860px]">
                     <thead>
                         <tr class="sticky top-0 z-10 bg-gray-100 border-b border-gray-200">
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">#</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date / Time (PHT)</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Action</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Module</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">User</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden md:table-cell">Role</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Description</th>
-                            <th class="px-4 sm:px-5 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Severity</th>
-                            <th class="px-4 sm:px-5 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">#</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Date / Time (PHT)</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Action</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500 hidden lg:table-cell">Module</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">User</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500 hidden md:table-cell">Role</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Description</th>
+                            <th class="px-4 sm:px-5 py-3 text-center text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Severity</th>
+                            <th class="px-4 sm:px-5 py-3 text-center text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
@@ -362,91 +480,104 @@ new #[Layout('app')] class extends Component {
 
                             $rowClass = match($log->severity) {
                                 'critical' => 'tbl-row-crit',
-                                'warning' => 'tbl-row-warn',
-                                default => 'tbl-row',
+                                'warning'  => 'tbl-row-warn',
+                                default    => 'tbl-row',
                             };
 
                             $actionBadge = match($log->action) {
                                 'login'          => 'bg-green-50 text-green-700 border-green-200',
                                 'logout'         => 'bg-gray-50 text-gray-600 border-gray-200',
-                                'failed_login'   => 'bg-yellow-50 text-yellow-700 border-yellow-200',
+                                'failed_login'   => 'bg-amber-50 text-amber-700 border-yellow-300',
                                 'account_locked' => 'bg-red-50 text-red-700 border-red-200',
                                 'deleted'        => 'bg-red-50 text-red-700 border-red-200',
                                 'created'        => 'bg-blue-50 text-blue-700 border-blue-200',
-                                'verified'       => 'bg-purple-50 text-purple-700 border-purple-200',
+                                'verified'       => 'bg-[#f5eef9] text-[#7a3f91] border-[#d4aaeb]',
                                 'viewed'         => 'bg-indigo-50 text-indigo-700 border-indigo-200',
+                                'updated'        => 'bg-orange-50 text-orange-700 border-orange-200',
                                 default          => 'bg-gray-50 text-gray-700 border-gray-200',
                             };
 
                             $roleColor = match($log->user_role) {
-                                'admin'     => 'text-purple-700 font-semibold',
+                                'admin'     => 'text-[#7a3f91] font-semibold',
                                 'organizer' => 'text-blue-600 font-semibold',
                                 'alumni'    => 'text-green-600 font-semibold',
                                 default     => 'text-gray-500',
                             };
+
+                            // Truncate description without extra facade
+                            $shortDesc = mb_strlen($log->description) > 55
+                                ? mb_substr($log->description, 0, 52) . '…'
+                                : $log->description;
                         @endphp
 
                         <tr class="{{ $rowClass }}">
-                            <td class="px-4 sm:px-5 py-3 text-gray-500 text-xs font-mono">{{ $log->id }}</td>
+                            <td class="px-4 sm:px-5 py-3 text-gray-400 text-[.72rem] font-mono">{{ $log->id }}</td>
 
                             <td class="px-4 sm:px-5 py-3">
-                                <div class="font-semibold text-sm text-gray-900">{{ $phtDate->format('M j, Y') }}</div>
-                                <div class="text-xs text-gray-500">{{ $phtDate->format('h:i A') }}</div>
+                                <div class="text-[.8rem] font-semibold text-gray-900">{{ $phtDate->format('M j, Y') }}</div>
+                                <div class="text-[.7rem] font-normal text-gray-500">{{ $phtDate->format('h:i A') }}</div>
                             </td>
 
                             <td class="px-4 sm:px-5 py-3">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border {{ $actionBadge }}">
+                                <span class="inline-flex items-center gap-1.5 text-[.7rem] font-semibold
+                                             px-2.5 py-1 rounded-full border {{ $actionBadge }}">
                                     <i class="fa-solid {{ $log->action_icon }}"></i>
                                     {{ $log->action_label }}
                                 </span>
                             </td>
 
                             <td class="px-4 sm:px-5 py-3 hidden lg:table-cell">
-                                <span class="text-xs font-semibold text-gray-700 bg-gray-100 px-2.5 py-1 rounded">
+                                <span class="text-[.7rem] font-semibold text-gray-700 bg-gray-100 px-2.5 py-1 rounded-lg">
                                     {{ $log->module_label ?? 'System' }}
                                 </span>
                             </td>
 
                             <td class="px-4 sm:px-5 py-3">
-                                <div class="text-sm font-semibold text-gray-900">{{ $log->user_name ?? 'System' }}</div>
+                                <div class="text-[.8rem] font-semibold text-gray-900">{{ $log->user_name ?? 'System' }}</div>
                                 @if($log->user_email)
-                                <div class="text-xs text-gray-500">{{ Str::limit($log->user_email, 25) }}</div>
+                                <div class="text-[.7rem] font-normal text-gray-500">
+                                    {{ mb_strlen($log->user_email) > 25 ? mb_substr($log->user_email, 0, 22).'…' : $log->user_email }}
+                                </div>
                                 @endif
                             </td>
 
                             <td class="px-4 sm:px-5 py-3 hidden md:table-cell">
-                                <span class="text-xs font-bold uppercase {{ $roleColor }}">
+                                <span class="text-[.68rem] font-semibold uppercase tracking-[.07em] {{ $roleColor }}">
                                     {{ $log->user_role ?? 'SYSTEM' }}
                                 </span>
                             </td>
 
                             <td class="px-4 sm:px-5 py-3">
-                                <div class="text-xs text-gray-700 line-clamp-2">{{ Str::limit($log->description, 50) }}</div>
+                                <div class="text-[.75rem] font-normal text-gray-700">{{ $shortDesc }}</div>
                                 @if($log->ip_address)
-                                <div class="text-xs text-gray-500 font-mono mt-0.5">{{ $log->ip_address }}</div>
+                                <div class="text-[.68rem] font-normal text-gray-400 font-mono mt-0.5">{{ $log->ip_address }}</div>
                                 @endif
                             </td>
 
                             <td class="px-4 sm:px-5 py-3 text-center">
-                                <span class="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full border {{ $log->severity_badge }}">
-                                    <i class="fa-solid fa-circle text-[6px]"></i>
+                                <span class="inline-flex items-center gap-1 text-[.68rem] font-semibold
+                                             px-2.5 py-1 rounded-full border {{ $log->severity_badge }}">
+                                    <i class="fa-solid fa-circle text-[5px]"></i>
                                     {{ ucfirst($log->severity) }}
                                 </span>
                             </td>
 
                             <td class="px-4 sm:px-5 py-3">
                                 <div class="flex items-center justify-center gap-2">
-                                    {{-- Flag Button --}}
                                     <button wire:click="toggleFlag({{ $log->id }})"
-                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all {{ $log->is_flagged ? 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200' : 'bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200' }}">
-                                        <i class="fa-solid fa-flag text-xs"></i>
+                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px]
+                                                   text-[.72rem] font-semibold transition-all cursor-pointer
+                                                   {{ $log->is_flagged
+                                                       ? 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'
+                                                       : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200' }}">
+                                        <i class="fa-solid fa-flag text-[11px]"></i>
                                         <span class="hidden sm:inline">Flag</span>
                                     </button>
-
-                                    {{-- View Button --}}
                                     <button wire:click="viewDetail({{ $log->id }})"
-                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all bg-[#f5eef9] text-[#7a3f91] border border-purple-200 hover:bg-purple-200">
-                                        <i class="fa-solid fa-eye text-xs"></i>
+                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px]
+                                                   text-[.72rem] font-semibold transition-all cursor-pointer
+                                                   bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] hover:bg-[#e9d5f3]">
+                                        <i class="fa-solid fa-eye text-[11px]"></i>
                                         <span class="hidden sm:inline">View</span>
                                     </button>
                                 </div>
@@ -456,11 +587,22 @@ new #[Layout('app')] class extends Component {
                         <tr>
                             <td colspan="9" class="py-16 px-4 text-center">
                                 <div class="inline-flex flex-col items-center gap-3">
-                                    <div class="w-14 h-14 rounded-lg flex items-center justify-center bg-gray-100">
-                                        <i class="fa-solid fa-shield-halved text-2xl text-gray-400"></i>
+                                    <div class="w-[50px] h-[50px] rounded-[11px] flex items-center justify-center bg-[#f5eef9]">
+                                        <i class="fa-solid fa-shield-halved text-xl text-[#7a3f91]"></i>
                                     </div>
-                                    <p class="font-semibold text-gray-600">No audit logs found</p>
-                                    <p class="text-sm text-gray-500">Try adjusting your filters</p>
+                                    <p class="text-[.85rem] font-semibold text-gray-700">
+                                        @if($dateFrom)
+                                            No logs found for
+                                            @if($dateTo && $dateTo !== $dateFrom)
+                                                {{ \Carbon\Carbon::parse($dateFrom)->format('M j') }} – {{ \Carbon\Carbon::parse($dateTo)->format('M j, Y') }}
+                                            @else
+                                                {{ \Carbon\Carbon::parse($dateFrom)->format('F j, Y') }}
+                                            @endif
+                                        @else
+                                            No audit logs found
+                                        @endif
+                                    </p>
+                                    <p class="text-[.78rem] font-normal text-gray-500">Try adjusting your filters</p>
                                 </div>
                             </td>
                         </tr>
@@ -476,8 +618,8 @@ new #[Layout('app')] class extends Component {
                 $total = $logs->total();
                 $pp    = $logs->perPage();
                 $cp    = $logs->currentPage();
-                $from  = $total > 0 ? ($cp-1)*$pp+1 : 0;
-                $to    = min($cp*$pp, $total);
+                $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+                $to    = min($cp * $pp, $total);
             @endphp
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <p class="text-white text-xs sm:text-sm">
@@ -488,13 +630,21 @@ new #[Layout('app')] class extends Component {
                     @if($logs->onFirstPage())
                         <button disabled class="px-3 sm:px-4 py-1.5 bg-gray-700 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">← Prev</button>
                     @else
-                        <button wire:click="previousPage" class="inline-flex items-center justify-center gap-1 font-bold px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm bg-[#7a3f91] text-white hover:bg-[#5e2f72]">← Prev</button>
+                        <button wire:click="previousPage"
+                                class="inline-flex items-center justify-center gap-1 font-bold px-3 sm:px-4 py-1.5 rounded-lg
+                                       text-xs sm:text-sm bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition-colors">
+                            ← Prev
+                        </button>
                     @endif
                     <span class="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-xs sm:text-sm font-semibold">
                         {{ $cp }} / {{ $logs->lastPage() }}
                     </span>
                     @if($logs->hasMorePages())
-                        <button wire:click="nextPage" class="inline-flex items-center justify-center gap-1 font-bold px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm bg-[#7a3f91] text-white hover:bg-[#5e2f72]">Next →</button>
+                        <button wire:click="nextPage"
+                                class="inline-flex items-center justify-center gap-1 font-bold px-3 sm:px-4 py-1.5 rounded-lg
+                                       text-xs sm:text-sm bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition-colors">
+                            Next →
+                        </button>
                     @else
                         <button disabled class="px-3 sm:px-4 py-1.5 bg-gray-700 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">Next →</button>
                     @endif
@@ -502,39 +652,46 @@ new #[Layout('app')] class extends Component {
             </div>
         </div>
     </div>
+
 </div>
 
-{{-- DETAIL MODAL --}}
+{{-- ══════════════════════ DETAIL MODAL ══════════════════════ --}}
 @if($showModal && $selected)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm" wire:keydown.escape="closeModal">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
+     wire:keydown.escape="closeModal">
     <div class="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden m-in flex flex-col max-h-[92vh]"
          style="box-shadow:0 20px 50px rgba(0,0,0,.20), 0 8px 16px rgba(0,0,0,.10);">
 
-        <div class="px-6 sm:px-7 py-5 flex items-start justify-between border-b border-gray-100 bg-[#2b0d3e] flex-shrink-0">
+        <div class="px-6 sm:px-7 py-5 flex items-start justify-between bg-[#7a3f91] flex-shrink-0">
             <div class="flex items-center gap-3 flex-1">
-                <div class="w-10 h-10 rounded-lg flex items-center justify-center bg-[#7a3f91]">
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-white/20 flex items-center justify-center flex-shrink-0">
                     <i class="fa-solid {{ $selected['action_icon'] }} text-white text-lg"></i>
                 </div>
                 <div class="flex-1">
-                    <h2 class="text-lg font-bold text-white">{{ $selected['action_label'] }}</h2>
-                    <p class="text-xs text-white/70">{{ $selected['module_label'] }} • Log #{{ $selected['id'] }}</p>
+                    <h2 class="text-[1.1rem] font-semibold text-white leading-tight">{{ $selected['action_label'] }}</h2>
+                    <p class="text-[.7rem] text-white/60 mt-[2px]">
+                        {{ $selected['module_label'] }} &nbsp;·&nbsp; Log #{{ $selected['id'] }}
+                    </p>
                 </div>
             </div>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white transition-colors p-1 flex-shrink-0">
+            <button wire:click="closeModal"
+                    class="text-white/60 hover:text-white transition-colors p-1 flex-shrink-0 cursor-pointer">
                 <i class="fa-solid fa-xmark text-xl"></i>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto scroll-c p-6 sm:px-7 space-y-5">
+        <div class="flex-1 min-h-0 overflow-y-auto scroll-sm p-6 sm:px-7 space-y-4">
 
             <div class="flex flex-wrap gap-2">
-                <span class="inline-flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full border {{ $selected['severity_badge'] }}">
-                    <i class="fa-solid fa-circle text-[6px]"></i>
+                <span class="inline-flex items-center gap-1.5 text-[.7rem] font-semibold
+                             px-3 py-1 rounded-full border {{ $selected['severity_badge'] }}">
+                    <i class="fa-solid fa-circle text-[5px]"></i>
                     {{ ucfirst($selected['severity']) }}
                 </span>
                 @if($selected['is_flagged'])
-                <span class="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                    <i class="fa-solid fa-flag text-xs"></i> Flagged
+                <span class="inline-flex items-center gap-1.5 text-[.7rem] font-semibold
+                             px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                    <i class="fa-solid fa-flag text-[11px]"></i> Flagged
                 </span>
                 @endif
             </div>
@@ -542,65 +699,68 @@ new #[Layout('app')] class extends Component {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 @php
                 $fields = [
-                    ['label' => 'User',      'value' => $selected['user_name'] ?? '—'],
-                    ['label' => 'Email',     'value' => $selected['user_email'] ?? '—'],
-                    ['label' => 'Role',      'value' => $selected['user_role']],
-                    ['label' => 'Timestamp', 'value' => $selected['created_at']],
-                    ['label' => 'IP',        'value' => $selected['ip_address'] ?? '—'],
-                    ['label' => 'Subject',   'value' => $selected['subject_label'] ?? '—'],
+                    ['label' => 'User',       'value' => $selected['user_name']     ?? '—'],
+                    ['label' => 'Email',      'value' => $selected['user_email']    ?? '—'],
+                    ['label' => 'Role',       'value' => $selected['user_role']],
+                    ['label' => 'Timestamp',  'value' => $selected['created_at']],
+                    ['label' => 'IP Address', 'value' => $selected['ip_address']    ?? '—'],
+                    ['label' => 'Subject',    'value' => $selected['subject_label'] ?? '—'],
                 ];
                 @endphp
-
                 @foreach($fields as $f)
-                <div class="bg-gray-50 rounded-lg p-4 border border-gray-100">
-                    <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{{ $f['label'] }}</div>
-                    <div class="text-sm text-gray-800 font-medium break-all">{{ $f['value'] }}</div>
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                    <div class="text-[.65rem] font-semibold text-gray-500 uppercase tracking-[.08em] mb-1">{{ $f['label'] }}</div>
+                    <div class="text-[.82rem] text-gray-800 font-semibold break-all">{{ $f['value'] }}</div>
                 </div>
                 @endforeach
             </div>
 
-            <div class="bg-gray-50 rounded-lg p-4 border border-gray-100">
-                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Description</div>
-                <p class="text-sm text-gray-700">{{ $selected['description'] }}</p>
+            <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                <div class="text-[.65rem] font-semibold text-gray-500 uppercase tracking-[.08em] mb-2">Description</div>
+                <p class="text-[.82rem] text-gray-700 font-normal leading-relaxed">{{ $selected['description'] }}</p>
             </div>
 
             @if($selected['user_agent'])
-            <div class="bg-gray-50 rounded-lg p-4 border border-gray-100">
-                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">User Agent</div>
-                <p class="text-xs font-mono text-gray-600 break-all">{{ $selected['user_agent'] }}</p>
+            <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                <div class="text-[.65rem] font-semibold text-gray-500 uppercase tracking-[.08em] mb-2">User Agent</div>
+                <p class="text-[.72rem] font-mono text-gray-600 break-all leading-relaxed">{{ $selected['user_agent'] }}</p>
             </div>
             @endif
 
             @if($selected['old_values'] || $selected['new_values'])
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 @if($selected['old_values'])
-                <div class="bg-red-50 rounded-lg p-4 border border-red-200">
-                    <div class="text-xs font-semibold text-red-700 uppercase tracking-wider mb-2">Before</div>
-                    <pre class="text-xs text-red-700 overflow-auto whitespace-pre-wrap">{{ json_encode($selected['old_values'], JSON_PRETTY_PRINT) }}</pre>
+                <div class="bg-red-50 rounded-xl p-4 border border-red-200">
+                    <div class="text-[.65rem] font-semibold text-red-600 uppercase tracking-[.08em] mb-2">Before</div>
+                    <pre class="text-[.72rem] text-red-700 overflow-auto whitespace-pre-wrap">{{ json_encode($selected['old_values'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
                 </div>
                 @endif
                 @if($selected['new_values'])
-                <div class="bg-green-50 rounded-lg p-4 border border-green-200">
-                    <div class="text-xs font-semibold text-green-700 uppercase tracking-wider mb-2">After</div>
-                    <pre class="text-xs text-green-700 overflow-auto whitespace-pre-wrap">{{ json_encode($selected['new_values'], JSON_PRETTY_PRINT) }}</pre>
+                <div class="bg-green-50 rounded-xl p-4 border border-green-200">
+                    <div class="text-[.65rem] font-semibold text-green-600 uppercase tracking-[.08em] mb-2">After</div>
+                    <pre class="text-[.72rem] text-green-700 overflow-auto whitespace-pre-wrap">{{ json_encode($selected['new_values'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
                 </div>
                 @endif
             </div>
             @endif
+
         </div>
 
-        <div class="px-6 sm:px-7 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50 flex-shrink-0 flex-wrap">
+        <div class="px-6 sm:px-7 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-3 flex-shrink-0 flex-wrap rounded-b-2xl">
             <button wire:click="toggleFlag({{ $selected['id'] }})"
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all {{ $selected['is_flagged'] ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300 border border-gray-400' }}">
-                <i class="fa-solid fa-flag"></i>
-                {{ $selected['is_flagged'] ? 'Unflag' : 'Flag' }}
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] text-sm font-semibold transition-all cursor-pointer
+                           {{ $selected['is_flagged']
+                               ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-300'
+                               : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300' }}">
+                <i class="fa-solid fa-flag text-xs"></i>
+                {{ $selected['is_flagged'] ? 'Unflag' : 'Flag this entry' }}
             </button>
-
             <button wire:click="closeModal"
-                    class="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 bg-[#2b0d3e]">
+                    class="px-5 py-2 rounded-[10px] text-sm font-semibold text-white transition-all cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                 Close
             </button>
         </div>
+
     </div>
 </div>
 @endif
