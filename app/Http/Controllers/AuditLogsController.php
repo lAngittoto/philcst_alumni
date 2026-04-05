@@ -1,26 +1,23 @@
 <?php
 
-namespace App\Http\Controllers\Admin;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Routing\Controller;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AuditLogsController extends Controller
 {
-    // ── Middleware ─────────────────────────────────────────────────────────────
+    // ── Authorization Check ────────────────────────────────────────────────────
 
-    public function __construct()
+    private function authorizeAdmin()
     {
-        $this->middleware(function ($request, $next) {
-            if (!Auth::check() || Auth::user()->role !== 'admin') {
-                abort(403, 'Unauthorized');
-            }
-            return $next($request);
-        });
+        if (!Auth::check() || Auth::user()->role !== 'admin') {
+            abort(403, 'Unauthorized access.');
+        }
     }
 
     // ── Export CSV ────────────────────────────────────────────────────────────
@@ -31,6 +28,8 @@ class AuditLogsController extends Controller
      */
     public function export(Request $request): StreamedResponse
     {
+        $this->authorizeAdmin();
+
         $request->validate([
             'module'    => 'nullable|string|max:50',
             'action'    => 'nullable|string|max:50',
@@ -100,8 +99,10 @@ class AuditLogsController extends Controller
      * Toggle the is_flagged status of an audit log entry.
      * Route: PATCH /admin/audit-logs/{log}/flag
      */
-    public function toggleFlag(Request $request, AuditLog $log)
+    public function toggleFlag(Request $request, AuditLog $log): JsonResponse
     {
+        $this->authorizeAdmin();
+
         $wasFlagged = $log->is_flagged;
 
         $log->update([
@@ -129,8 +130,10 @@ class AuditLogsController extends Controller
      * Return live stats for dashboard widgets.
      * Route: GET /admin/audit-logs/stats
      */
-    public function stats(): \Illuminate\Http\JsonResponse
+    public function stats(): JsonResponse
     {
+        $this->authorizeAdmin();
+
         return response()->json(AuditLog::stats());
     }
 
@@ -140,8 +143,10 @@ class AuditLogsController extends Controller
      * Return full detail for a specific log entry (for modal display).
      * Route: GET /admin/audit-logs/{log}
      */
-    public function show(AuditLog $log): \Illuminate\Http\JsonResponse
+    public function show(AuditLog $log): JsonResponse
     {
+        $this->authorizeAdmin();
+
         return response()->json([
             'id'            => $log->id,
             'action'        => $log->action,

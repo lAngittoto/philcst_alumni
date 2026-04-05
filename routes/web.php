@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\Admin\AuditLogsController;
+use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\CourseController;
 use App\Http\Controllers\OrganizerController;
