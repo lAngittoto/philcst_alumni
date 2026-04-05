@@ -1,8 +1,9 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditLogsController;
 use App\Http\Controllers\AlumniController;
-use App\Http\Controllers\OrganizerController;
 use App\Http\Controllers\CourseController;
+use App\Http\Controllers\OrganizerController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -47,6 +48,12 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::view('/admin/dashboard', 'admin.admin-dashboard-wrapper')->name('admin.dashboard');
+
+    Route::get('/audit/logs', fn() => view('admin.audit-logs-wrapper'))->name('audit.logs');
+    Route::get('/admin/audit-logs/export', [AuditLogsController::class, 'export'])->name('admin.audit-logs.export');
+    Route::get('/admin/audit-logs/stats',  [AuditLogsController::class, 'stats'])->name('admin.audit-logs.stats');
+    Route::get('/admin/audit-logs/{log}',  [AuditLogsController::class, 'show'])->name('admin.audit-logs.show');
+
 
     Route::get('/user/management', fn() => view('admin.alumni-management-wrapper'))->name('user.management');
     Route::get('/yearbook', fn() => view('admin.yearbook-wrapper'))->name('admin.yearbook');

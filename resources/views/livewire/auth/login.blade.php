@@ -5,22 +5,29 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use App\Models\Organizer;
+use App\Models\AuditLog;
 use Illuminate\Support\Facades\Hash;
 
 new #[Layout('app')] class extends Component {
 
+    // ── Config ────────────────────────────────────────────────────────────────
+    const MAX_ATTEMPTS    = 5;          // wrong password strikes before lockout
+    const LOCKOUT_SECONDS = 600;        // 10 minutes
+
     public string $name     = '';
     public string $password = '';
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     public function mount(): void
     {
         if (Auth::check()) {
             $user = Auth::user();
-            
-            // If organizer hasn't changed password yet, logout and show login form
+
             if ($user->role === 'organizer') {
                 $organizer = $user->organizer;
                 if ($organizer && $organizer->password_changed_at === null) {
@@ -29,11 +36,10 @@ new #[Layout('app')] class extends Component {
                     session()->regenerateToken();
                     return;
                 }
-                // Password already changed → go to dashboard
                 $this->redirect(route('organizer.dashboard'));
                 return;
             }
-            
+
             if ($user->role === 'admin') {
                 $this->redirect(route('admin.dashboard'));
             } else {
@@ -42,52 +48,190 @@ new #[Layout('app')] class extends Component {
         }
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Cache key for tracking wrong-password attempts PER ACCOUNT (not per IP).
+     * This fires even on a single-character wrong password.
+     */
+    protected function accountAttemptsKey(): string
+    {
+        return 'login_attempts_' . Str::lower(trim($this->name));
+    }
+
+    /**
+     * Cache key that marks an account as temporarily locked.
+     */
+    protected function accountLockedKey(): string
+    {
+        return 'account_locked_' . Str::lower(trim($this->name));
+    }
+
+    /**
+     * IP-based throttle key (secondary, broad protection).
+     */
     protected function throttleKey(): string
     {
-        return Str::lower($this->name) . '|' . request()->ip();
+        return 'login_ip_' . Str::lower($this->name) . '|' . request()->ip();
     }
+
+    /**
+     * Check if this account is currently locked out.
+     * Returns remaining seconds, or 0 if not locked.
+     */
+    protected function accountLockedSeconds(): int
+    {
+        $expires = Cache::get($this->accountLockedKey());
+        if (!$expires) return 0;
+        $remaining = $expires - now()->timestamp;
+        return max(0, $remaining);
+    }
+
+    /**
+     * Increment wrong-password strike counter for the account.
+     * Returns updated attempt count.
+     */
+    protected function recordFailedAttempt(): int
+    {
+        $key      = $this->accountAttemptsKey();
+        $attempts = (int) Cache::get($key, 0) + 1;
+        Cache::put($key, $attempts, self::LOCKOUT_SECONDS + 60);
+
+        // Lock the account after MAX_ATTEMPTS strikes
+        if ($attempts >= self::MAX_ATTEMPTS) {
+            Cache::put(
+                $this->accountLockedKey(),
+                now()->addSeconds(self::LOCKOUT_SECONDS)->timestamp,
+                self::LOCKOUT_SECONDS
+            );
+        }
+
+        return $attempts;
+    }
+
+    /**
+     * Clear all attempt counters for this account on successful login.
+     */
+    protected function clearAttempts(): void
+    {
+        Cache::forget($this->accountAttemptsKey());
+        Cache::forget($this->accountLockedKey());
+        RateLimiter::clear($this->throttleKey());
+    }
+
+    /**
+     * Format a seconds-remaining value for display.
+     */
+    protected function formatLockTime(int $seconds): string
+    {
+        if ($seconds >= 60) {
+            $mins = ceil($seconds / 60);
+            return "{$mins} minute" . ($mins !== 1 ? 's' : '');
+        }
+        return "{$seconds} second" . ($seconds !== 1 ? 's' : '');
+    }
+
+    // ── Login Action ──────────────────────────────────────────────────────────
 
     public function login(): void
     {
         $this->validate([
             'name'     => 'required|string|max:255',
-            'password' => 'required|string|min:6',
+            'password' => 'required|string|min:1',   // min:1 — catch even single-char wrong pw
         ]);
 
-        if (RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
-            $seconds = RateLimiter::availableIn($this->throttleKey());
-            $this->addError('invalid', "Too many attempts. Try again in {$seconds} seconds.");
+        $identifier = Str::lower(trim($this->name));
+
+        // ── 1. Check account-level lockout ─────────────────────────────────────
+        $lockedFor = $this->accountLockedSeconds();
+        if ($lockedFor > 0) {
+            $this->password = '';
+            $this->addError('invalid',
+                "This account is temporarily locked. Please try again in "
+                . $this->formatLockTime($lockedFor) . '.'
+            );
             return;
         }
 
-        // ── Try organizer first (Teacher ID lookup) ──
+        // ── 2. IP-level rate limit (broad sweep) ───────────────────────────────
+        if (RateLimiter::tooManyAttempts($this->throttleKey(), 15)) {
+            $seconds = RateLimiter::availableIn($this->throttleKey());
+            $this->password = '';
+            $this->addError('invalid',
+                "Too many requests from your IP. Try again in "
+                . $this->formatLockTime($seconds) . '.'
+            );
+            return;
+        }
+
+        // ── 3. Try ORGANIZER (Teacher ID) login ────────────────────────────────
         $organizer = Organizer::where('id_number', $this->name)->first();
 
         if ($organizer && $organizer->user) {
             $user = $organizer->user;
 
+            // Wrong password — any character mismatch counts
             if (!Hash::check($this->password, $user->password)) {
-                RateLimiter::hit($this->throttleKey(), 60);
+                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+                $attempts = $this->recordFailedAttempt();
+
+                // Log the failed attempt
+                AuditLog::logLogin([
+                    'id'    => $user->id,
+                    'name'  => $organizer->name,
+                    'email' => $organizer->email,
+                    'role'  => 'organizer',
+                ], false, 'Incorrect password');
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    // Log the lockout
+                    AuditLog::logAccountLocked($this->name, $attempts, $user->id);
+
+                    $this->password = '';
+                    $this->addError('invalid',
+                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                        . " after {$attempts} failed attempts."
+                    );
+                    return;
+                }
+
+                $remaining = self::MAX_ATTEMPTS - $attempts;
                 $this->password = '';
-                $this->addError('invalid', 'Username/ID or password is invalid.');
+                $this->addError('invalid',
+                    'Username/ID or password is invalid. '
+                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
                 return;
             }
 
+            // Account status check
             if ($organizer->status !== 'ACTIVE') {
                 $this->password = '';
-                $this->addError('invalid', 'Your account is ' . strtolower($organizer->status) . '. Please contact administrator.');
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($organizer->status) . '. Please contact the administrator.'
+                );
                 return;
             }
 
+            // ✅ SUCCESS
             Auth::login($user, false);
-            RateLimiter::clear($this->throttleKey());
+            $this->clearAttempts();
             session()->regenerate();
 
-            // ── First login: password not yet changed ──
+            // Update last login timestamp
+            $organizer->update(['last_login' => now()]);
+
+            // Log successful login
+            AuditLog::logLogin([
+                'id'    => $user->id,
+                'name'  => $organizer->name,
+                'email' => $organizer->email,
+                'role'  => 'organizer',
+            ], true);
+
+            // First login — must change password
             if ($organizer->password_changed_at === null) {
-                // Clean up any stale data
                 session()->forget(['pending_password_plain', 'password_reset_step']);
-                // Set flag indicating fresh authenticated login
                 session()->put('organizer_requires_password_change', true);
                 $this->redirectRoute('organizer.change-password', navigate: true);
                 return;
@@ -97,16 +241,42 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Try admin (username lookup) ──
+        // ── 4. Try ADMIN (username) login ──────────────────────────────────────
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
-            RateLimiter::hit($this->throttleKey(), 60);
+            RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+            $attempts = $this->recordFailedAttempt();
+
+            // Log the failed attempt (minimal info — we don't know who this is)
+            AuditLog::logLogin([
+                'id'    => null,
+                'name'  => $this->name,
+                'email' => null,
+                'role'  => 'unknown',
+            ], false, 'Invalid username or password');
+
+            if ($attempts >= self::MAX_ATTEMPTS) {
+                AuditLog::logAccountLocked($this->name, $attempts);
+
+                $this->password = '';
+                $this->addError('invalid',
+                    "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                    . " after {$attempts} failed attempts."
+                );
+                return;
+            }
+
+            $remaining = self::MAX_ATTEMPTS - $attempts;
             $this->password = '';
-            $this->addError('invalid', 'Username/ID or password is invalid.');
+            $this->addError('invalid',
+                'Username/ID or password is invalid. '
+                . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+            );
             return;
         }
 
         $user = Auth::user();
 
+        // Must be admin
         if ($user->role !== 'admin') {
             Auth::logout();
             $this->password = '';
@@ -114,8 +284,18 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ✅ ADMIN SUCCESS
+        $this->clearAttempts();
         RateLimiter::clear($this->throttleKey());
         session()->regenerate();
+
+        AuditLog::logLogin([
+            'id'    => $user->id,
+            'name'  => $user->name,
+            'email' => $user->email,
+            'role'  => 'admin',
+        ], true);
+
         $this->redirectRoute('admin.dashboard', navigate: true);
     }
 
@@ -179,9 +359,9 @@ new #[Layout('app')] class extends Component {
                 <div x-transition:enter="transition ease-out duration-300"
                      x-transition:enter-start="opacity-0 scale-90"
                      x-transition:enter-end="opacity-100 scale-100"
-                     class="flex items-center gap-3 bg-red-50 text-red-700 p-4 rounded-2xl text-xs font-bold uppercase tracking-wider border-2 border-red-100">
-                    <i class="fa-solid fa-circle-exclamation text-lg flex-shrink-0"></i>
-                    {{ $errors->first('invalid') }}
+                     class="flex items-start gap-3 bg-red-50 text-red-700 p-4 rounded-2xl text-xs font-bold uppercase tracking-wider border-2 border-red-100">
+                    <i class="fa-solid fa-circle-exclamation text-lg flex-shrink-0 mt-0.5"></i>
+                    <span>{{ $errors->first('invalid') }}</span>
                 </div>
             @endif
 
@@ -189,12 +369,12 @@ new #[Layout('app')] class extends Component {
             <div class="space-y-2">
                 <label class="text-xs font-bold uppercase tracking-widest text-[#2b0d3e] ml-1 flex items-center gap-2">
                     <i class="fa-solid fa-user text-[#7a3f91]"></i>
-                    Username
+                    Username / Teacher ID
                 </label>
                 <input
                     wire:model="name"
                     type="text"
-                    placeholder="Enter username"
+                    placeholder="Enter username or Teacher ID"
                     autocomplete="username"
                     required
                     class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10"
@@ -214,6 +394,7 @@ new #[Layout('app')] class extends Component {
                         placeholder="••••••••"
                         autocomplete="current-password"
                         required
+                        minlength="1"
                         class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10"
                     >
                     <button
@@ -232,6 +413,11 @@ new #[Layout('app')] class extends Component {
                 </div>
             </div>
 
+            {{-- Attempt counter hint --}}
+ <p class="text-[11px] text-gray-400 text-center -mt-2 font-medium">
+    Accounts are locked for 10 minutes after 5 consecutive failed attempts.
+</p>
+
             {{-- Submit --}}
             <div class="pt-2">
                 <button
@@ -246,7 +432,7 @@ new #[Layout('app')] class extends Component {
                     </div>
                     <div class="flex items-center justify-center gap-2" wire:loading wire:target="login" x-cloak>
                         <i class="fa-solid fa-circle-notch fa-spin"></i>
-                        <span>Verifying...</span>
+                        <span>Verifying…</span>
                     </div>
                 </button>
             </div>

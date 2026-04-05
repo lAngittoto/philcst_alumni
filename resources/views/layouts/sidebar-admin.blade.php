@@ -56,11 +56,11 @@
                     ['route' => 'admin.dashboard',  'icon' => 'gauge-high',      'label' => 'Dashboard',           'pattern' => 'admin/dashboard*'],
                     ['route' => 'user.management',  'icon' => 'users-gear',      'label' => 'User Management',     'pattern' => 'user/management*'],
                     ['url'   => '/employment',       'icon' => 'chart-line',      'label' => 'Employment Tracking', 'pattern' => 'employment*'],
-                    ['url'   => '/events',           'icon' => 'calendar-check',  'label' => 'Events',              'pattern' => 'events*'],
+                    ['route'   => 'events',           'icon' => 'calendar-check',  'label' => 'Events',              'pattern' => 'events*'],
                     ['route'   => 'job.posts',             'icon' => 'briefcase',       'label' => 'Job Posts',   'pattern' => 'job/posts*'],
                     ['route' => 'admin.yearbook',    'icon' => 'book-open',       'label' => 'Yearbook',            'pattern' => 'yearbook*'],
                     ['url'   => '/reports',          'icon' => 'file-export',     'label' => 'Reports',             'pattern' => 'reports*'],
-                    ['url'   => '/audit-logs',       'icon' => 'clipboard-list',  'label' => 'Audit Logs',          'pattern' => 'audit-logs*'],
+                    ['route'   => 'audit.logs',       'icon' => 'clipboard-list',  'label' => 'Audit Logs',          'pattern' => 'audit/logs*'],
                 ];
             @endphp
 
