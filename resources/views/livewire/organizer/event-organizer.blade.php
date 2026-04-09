@@ -7,6 +7,7 @@ use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use App\Models\OrganizerEvent;
+use App\Models\AuditLog;
 use App\Http\Controllers\OrganizerEventController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -62,18 +63,26 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────────
     public function mount(): void
     {
-        ini_set('max_execution_time', 600);
+        // TASK 4: Extend execution time — set_time_limit() resets the timer
+        // from this point, giving the request a full 10 minutes from here.
+        set_time_limit(600);
 
         $user = Auth::user();
         if (!$user || !$user->organizer) {
             abort(403, 'Access denied.');
         }
 
-        // AUTO-REJECT: mark PENDING events whose event date has already passed
-        $this->autoRejectExpiredPendingEvents();
+        $orgId = $user->organizer->id;
 
-        // AUTO-COMPLETE: mark APPROVED events whose end time (or start time) has passed
-        $this->autoCompleteExpiredEvents();
+        // TASK 4: Cache-throttle auto-ops so they run at most every 5 minutes
+        // per organizer instead of on every single page load/request.
+        // This prevents DB timeout on the CSRF/middleware layer.
+        $throttleKey = "auto_event_ops_{$orgId}";
+        if (!Cache::has($throttleKey)) {
+            Cache::put($throttleKey, true, now()->addMinutes(5));
+            $this->autoRejectExpiredPendingEvents();
+            $this->autoCompleteExpiredEvents();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -108,12 +117,10 @@ new class extends Component {
         OrganizerEvent::where('organizer_id', $orgId)
             ->where('status', 'APPROVED')
             ->where(function ($q) use ($now) {
-                // Has end date and it has passed
                 $q->where(function ($sub) use ($now) {
                     $sub->whereNotNull('event_end_date')
                         ->where('event_end_date', '<=', $now);
                 })
-                // No end date: use start date
                 ->orWhere(function ($sub) use ($now) {
                     $sub->whereNull('event_end_date')
                         ->where('event_date', '<=', $now);
@@ -155,7 +162,7 @@ new class extends Component {
     {
         $dept = $this->organizerDepartment;
         if (!$dept) return [];
-        
+
         $cacheKey = 'organizer_courses_' . $dept;
         return Cache::remember($cacheKey, 300, function () use ($dept) {
             return Alumni::where('alumni.status', 'VERIFIED')
@@ -276,7 +283,6 @@ new class extends Component {
         $coursesPart = trim($parts[0] ?? '');
         $this->batchYear = trim($parts[1] ?? '');
 
-        // Parse selected courses
         $this->selectedCourses = !empty($coursesPart) && $coursesPart !== 'All Courses'
             ? array_map('trim', explode(',', $coursesPart))
             : [];
@@ -316,9 +322,11 @@ new class extends Component {
             $errors['contact_email'] = 'Please enter a valid email address.';
         }
 
-        if (!trim($this->title))      $errors['title']      = 'Event title is required.';
-        if (!trim($this->event_date)) $errors['event_date'] = 'Event date is required.';
-        if (!trim($this->venue))      $errors['venue']      = 'Venue / Location is required.';
+        if (!trim($this->title))       $errors['title']       = 'Event title is required.';
+        // TASK 2: Description is now required
+        if (!trim($this->description)) $errors['description'] = 'Event description is required.';
+        if (!trim($this->event_date))  $errors['event_date']  = 'Event date is required.';
+        if (!trim($this->venue))       $errors['venue']       = 'Venue / Location is required.';
 
         if (!trim($this->start_time)) {
             $errors['start_time'] = 'Start time is required.';
@@ -371,16 +379,17 @@ new class extends Component {
             }
         }
 
-        if (!isset($errors['title']) && !isset($errors['event_date']) && trim($this->title) && trim($this->event_date)) {
+        // TASK 2: Duplicate check — title only (case-insensitive), no date constraint.
+        // "Q" and "q" are the same title — block regardless of different dates.
+        if (!isset($errors['title']) && trim($this->title)) {
             $dupQuery = OrganizerEvent::where('organizer_id', $this->organizerId)
                 ->whereRaw('LOWER(title) = ?', [strtolower(trim($this->title))])
-                ->whereDate('event_date', $this->event_date)
                 ->whereIn('status', ['PENDING', 'APPROVED']);
             if ($this->isEditing && $this->editingEventId) {
                 $dupQuery->where('id', '!=', $this->editingEventId);
             }
             if ($dupQuery->exists()) {
-                $errors['title'] = 'A PENDING or APPROVED event with the same title and date already exists. Please use a different title or date.';
+                $errors['title'] = 'A PENDING or APPROVED event with this title already exists (title check is case-insensitive). Please use a different title.';
             }
         }
 
@@ -420,7 +429,7 @@ new class extends Component {
 
         $data = [
             'title'               => trim($this->title),
-            'description'         => trim($this->description) ?: null,
+            'description'         => trim($this->description),
             'event_date'          => $startDt->format('Y-m-d H:i:s'),
             'event_end_date'      => $endDt ? $endDt->format('Y-m-d H:i:s') : null,
             'venue'               => trim($this->venue),
@@ -439,6 +448,18 @@ new class extends Component {
             $event = OrganizerEvent::where('id', $this->editingEventId)
                 ->where('organizer_id', $this->organizerId)->firstOrFail();
 
+            // TASK 3: Capture before-state for audit log
+            $oldValues = [
+                'title'               => $event->title,
+                'description'         => $event->description,
+                'event_date'          => $event->event_date?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'event_end_date'      => $event->event_end_date?->setTimezone('Asia/Manila')->format('g:i A'),
+                'venue'               => $event->venue,
+                'venue_address'       => $event->venue_address,
+                'target_participants' => $event->target_participants,
+                'notes'               => $event->notes,
+            ];
+
             if ($this->removePhoto && !$photo) {
                 if ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO) {
                     Storage::disk('public')->delete($event->photo);
@@ -451,9 +472,65 @@ new class extends Component {
             } else {
                 $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
             }
+
+            // TASK 3: Audit log — event updated
+            try {
+                AuditLog::create([
+                    'user_id'       => Auth::id(),
+                    'user_name'     => Auth::user()?->name ?? 'Organizer',
+                    'user_email'    => Auth::user()?->email,
+                    'user_role'     => 'organizer',
+                    'action'        => 'updated',
+                    'module'        => 'event',
+                    'subject_id'    => $this->editingEventId,
+                    'subject_label' => trim($this->title),
+                    'description'   => "Organizer updated event: '" . trim($this->title) . "'.",
+                    'old_values'    => $oldValues,
+                    'new_values'    => [
+                        'title'               => trim($this->title),
+                        'description'         => trim($this->description),
+                        'event_date'          => $startDt->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                        'venue'               => trim($this->venue),
+                        'target_participants' => $targetStr,
+                    ],
+                    'ip_address'    => request()->ip(),
+                    'user_agent'    => request()->userAgent(),
+                    'severity'      => 'info',
+                ]);
+            } catch (\Throwable) {
+                // Silently swallow — never break the main operation
+            }
+
             $this->dispatch('flash-message', type: 'success', message: 'Event updated successfully!');
         } else {
             $ctrl->createEvent($data, $photo ?: null);
+
+            // TASK 3: Audit log — event created
+            try {
+                AuditLog::create([
+                    'user_id'       => Auth::id(),
+                    'user_name'     => Auth::user()?->name ?? 'Organizer',
+                    'user_email'    => Auth::user()?->email,
+                    'user_role'     => 'organizer',
+                    'action'        => 'created',
+                    'module'        => 'event',
+                    'subject_label' => trim($this->title),
+                    'description'   => "Organizer submitted new event: '" . trim($this->title) . "' for admin review.",
+                    'new_values'    => [
+                        'title'               => trim($this->title),
+                        'description'         => trim($this->description),
+                        'event_date'          => $startDt->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                        'venue'               => trim($this->venue),
+                        'target_participants' => $targetStr,
+                    ],
+                    'ip_address'    => request()->ip(),
+                    'user_agent'    => request()->userAgent(),
+                    'severity'      => 'info',
+                ]);
+            } catch (\Throwable) {
+                // Silently swallow — never break the main operation
+            }
+
             $this->dispatch('flash-message', type: 'success', message: 'Event submitted for admin review!');
         }
 
@@ -482,7 +559,36 @@ new class extends Component {
     public function executeDelete(): void
     {
         if ($this->deleteEventId) {
-            OrganizerEvent::where('id', $this->deleteEventId)->where('organizer_id', $this->organizerId)->firstOrFail();
+            $event = OrganizerEvent::where('id', $this->deleteEventId)
+                ->where('organizer_id', $this->organizerId)->firstOrFail();
+
+            // TASK 3: Audit log — capture state BEFORE deletion
+            try {
+                AuditLog::create([
+                    'user_id'       => Auth::id(),
+                    'user_name'     => Auth::user()?->name ?? 'Organizer',
+                    'user_email'    => Auth::user()?->email,
+                    'user_role'     => 'organizer',
+                    'action'        => 'deleted',
+                    'module'        => 'event',
+                    'subject_id'    => $event->id,
+                    'subject_label' => $event->title,
+                    'description'   => "Organizer deleted event: '{$event->title}'.",
+                    'old_values'    => [
+                        'title'               => $event->title,
+                        'status'              => $event->status,
+                        'event_date'          => $event->event_date?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                        'venue'               => $event->venue,
+                        'target_participants' => $event->target_participants,
+                    ],
+                    'ip_address'    => request()->ip(),
+                    'user_agent'    => request()->userAgent(),
+                    'severity'      => 'warning',
+                ]);
+            } catch (\Throwable) {
+                // Silently swallow — never block deletion
+            }
+
             app(OrganizerEventController::class)->deleteEvent($this->deleteEventId);
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteEventTitle}' deleted.");
         }
@@ -737,7 +843,6 @@ new class extends Component {
                                     <button wire:click="viewEvent({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
                                         <i class="fas fa-eye text-[10px]"></i><span class="hidden sm:inline">View</span>
                                     </button>
-                                    {{-- Approved & Completed: view only. Pending & Rejected: edit + delete --}}
                                     @if(!$isDeleted && !$isCompleted && !$isApproved)
                                     <button wire:click="openEditModal({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition">
                                         <i class="fas fa-pen-to-square text-[10px]"></i><span class="hidden sm:inline">Edit</span>
@@ -899,11 +1004,15 @@ new class extends Component {
                                class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white transition focus:outline-none focus:ring-2 {{ isset($formErrors['title'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}">
                         @if(isset($formErrors['title']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['title'] }}</span></p>@endif
                     </div>
+
+                    {{-- TASK 2: Description is now required --}}
                     <div>
-                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Description</label>
+                        <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Description <span class="text-red-500">*</span></label>
                         <textarea wire:model.defer="description" rows="3" placeholder="Describe the event, agenda, highlights…"
-                                  class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition resize-none"></textarea>
+                                  class="w-full px-4 py-2.5 border rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 transition resize-none {{ isset($formErrors['description'])?'border-red-400 bg-red-50 focus:border-red-400 focus:ring-red-100':'border-gray-200 focus:border-purple-400 focus:ring-purple-100' }}"></textarea>
+                        @if(isset($formErrors['description']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['description'] }}</span></p>@endif
                     </div>
+
                     <div>
                         <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Event Date <span class="text-red-500">*</span></label>
                         <input wire:model="event_date" type="date" min="{{ now('Asia/Manila')->format('Y-m-d') }}"
@@ -1166,7 +1275,6 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Footer: Approved & Completed = Close only. Pending & Rejected = Edit + Delete --}}
         <div class="px-5 sm:px-8 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
             <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
             @if(!$isCompleted && !$isApproved && $ev->status !== 'ORGANIZER_DELETED')

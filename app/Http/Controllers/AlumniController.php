@@ -1,18 +1,33 @@
 <?php
+
 namespace App\Http\Controllers;
 
-use App\Mail\AlumniRegistered;
 use App\Models\Alumni;
 use App\Models\Course;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 
 class AlumniController extends Controller
 {
+    // ─────────────────────────────────────────────────────
+    // Temporary Password Generator
+    // Format : {student_id}_{Xx}   e.g. "00037801_Ar"
+    // Xx      = first 2 letters of last name, Title-cased
+    // ─────────────────────────────────────────────────────
+
+    private function generateTempPassword(string $studentId, string $lastName): string
+    {
+        $part = substr(trim($lastName), 0, 2);   // first 2 chars
+        $part = ucfirst(strtolower($part));       // → "Ar"
+        return $studentId . '_' . $part;          // → "00037801_Ar"
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Import
+    // ─────────────────────────────────────────────────────
+
     public function import(Request $request)
     {
         try {
@@ -38,32 +53,42 @@ class AlumniController extends Controller
                 return redirect()->back()->with('error', '❌ No valid data rows found in file!');
             }
 
-            $firstRow     = $rows[0] ?? [];
-            $hasFirstLast = array_key_exists('first_name', $firstRow) && array_key_exists('last_name', $firstRow);
-            $hasName      = array_key_exists('name', $firstRow);
+            $firstRow = $rows[0] ?? [];
 
-            if (!$hasFirstLast && !$hasName) {
-                return redirect()->back()->with('error', '❌ Missing name column(s). Use "first_name"+"last_name" or a single "name" column.');
+            if (!array_key_exists('first_name', $firstRow) || !array_key_exists('last_name', $firstRow)) {
+                return redirect()->back()->with('error', '❌ Missing required columns: "first_name" and "last_name" must both be present.');
+            }
+
+            foreach (['middle_initial', 'student_id', 'course_code', 'batch'] as $required) {
+                if (!array_key_exists($required, $firstRow)) {
+                    return redirect()->back()->with('error', "❌ Missing required column: \"{$required}\".");
+                }
             }
 
             $courseMap = Course::pluck('name', 'code')
                 ->mapWithKeys(fn($n, $c) => [strtoupper($c) => $n])
                 ->toArray();
 
-            $existingAlumniEmails = Alumni::pluck('email')
-                ->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
-
             $existingAlumniIds = Alumni::pluck('student_id')
-                ->mapWithKeys(fn($id) => [$id => true])->toArray();
+                ->mapWithKeys(fn($id) => [$id => true])
+                ->toArray();
 
-            $existingUserEmails = User::pluck('email')
-                ->mapWithKeys(fn($e) => [strtolower($e) => true])->toArray();
+            $existingFullNames = Alumni::selectRaw(
+                    'LOWER(TRIM(first_name)) as fn,
+                     LOWER(TRIM(COALESCE(middle_initial,""))) as mi,
+                     LOWER(TRIM(last_name)) as ln,
+                     LOWER(TRIM(COALESCE(suffix,""))) as sf'
+                )
+                ->get()
+                ->map(fn($a) => $a->fn . '|' . $a->mi . '|' . $a->ln . '|' . $a->sf)
+                ->flip()
+                ->toArray();
 
-            $seenEmailsInBatch = [];
-            $seenIdsInBatch    = [];
-            $imported          = 0;
-            $errors            = [];
-            $duplicates        = [];
+            $seenIdsInBatch   = [];
+            $seenNamesInBatch = [];
+            $imported         = 0;
+            $errors           = [];
+            $duplicates       = [];
 
             foreach ($rows as $index => $row) {
                 $rowNum = $index + 2;
@@ -72,121 +97,118 @@ class AlumniController extends Controller
                     $row[$k] = is_null($v) ? '' : trim((string) $v);
                 }
 
-                if ($hasFirstLast) {
-                    $firstName     = trim($row['first_name']     ?? '');
-                    $middleInitial = trim($row['middle_initial'] ?? '');
-                    $lastName      = trim($row['last_name']      ?? '');
-                    $suffix        = trim($row['suffix']         ?? '');
-                    $fullName      = trim(implode(' ', array_filter([$firstName, $middleInitial ?: null, $lastName, $suffix ?: null])));
-                } else {
-                    $firstName     = trim($row['name'] ?? '');
-                    $middleInitial = '';
-                    $lastName      = '';
-                    $suffix        = '';
-                    $fullName      = $firstName;
-                }
+                $firstName     = trim($row['first_name']     ?? '');
+                $middleInitial = trim($row['middle_initial'] ?? '');
+                $lastName      = trim($row['last_name']      ?? '');
+                $suffix        = trim($row['suffix']         ?? '');
+                $fullName      = trim(implode(' ', array_filter([
+                    $firstName,
+                    $middleInitial ?: null,
+                    $lastName,
+                    $suffix        ?: null,
+                ])));
 
-                $email = strtolower(trim($row['email']       ?? ''));
-                $rawId = trim($row['student_id']             ?? '');
+                $rawId = rtrim(rtrim((string) ($row['student_id'] ?? ''), '0'), '.');
+                $rawId = preg_replace('/\..*$/', '', $rawId);
                 $code  = strtoupper(trim($row['course_code'] ?? ''));
-                $year  = trim($row['year']                   ?? '');
+                $year  = (string)(int)($row['batch'] ?? 0);
                 $label = "Row {$rowNum}" . ($fullName ? " ({$fullName})" : '');
 
-                if (!$firstName) { $errors[] = "{$label}: First name is empty."; continue; }
-                if ($hasFirstLast && !$lastName) { $errors[] = "{$label}: Last name is empty."; continue; }
-                if (!$email || !$rawId || !$code || !$year) {
-                    $errors[] = "{$label}: Missing required fields (email, student_id, course_code, year).";
+                // ── Validate name fields ──────────────────────────────────
+                if (!$firstName) {
+                    $errors[] = "{$label}: First name is empty.";
                     continue;
                 }
                 if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $firstName)) {
                     $errors[] = "{$label}: First name \"{$firstName}\" contains invalid characters.";
                     continue;
                 }
-                if ($hasFirstLast && $lastName && !preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName)) {
+                if (!$lastName) {
+                    $errors[] = "{$label}: Last name is empty.";
+                    continue;
+                }
+                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName)) {
                     $errors[] = "{$label}: Last name \"{$lastName}\" contains invalid characters.";
                     continue;
                 }
-                if ($middleInitial !== '' && !preg_match('/^[a-zA-Z]{1,2}$/', $middleInitial)) {
-                    $errors[] = "{$label}: Middle initial \"{$middleInitial}\" must be 1–2 letters.";
+                if ($middleInitial === '') {
+                    $errors[] = "{$label}: Middle initial is required.";
                     continue;
                 }
-                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    $errors[] = "{$label}: Email \"{$email}\" is not valid.";
-                    continue;
-                }
-                if (isset($existingAlumniEmails[$email]) || isset($seenEmailsInBatch[$email])) {
-                    $duplicates[] = "{$label}: Email \"{$email}\" already exists.";
-                    continue;
-                }
-                if (isset($existingUserEmails[$email])) {
-                    $duplicates[] = "{$label}: Email \"{$email}\" already used by another account.";
+                if (!preg_match('/^[a-zA-Z]{1,2}$/', $middleInitial)) {
+                    $errors[] = "{$label}: Middle initial must be 1–2 letters.";
                     continue;
                 }
 
-                $rawId = preg_replace('/\D/', '', $rawId);
-                if ($rawId === '' || strlen($rawId) > 8) {
-                    $errors[] = "{$label}: Student ID must be 1–8 digits.";
+                // ── Full name duplicate check ─────────────────────────────
+                $nameKey = strtolower($firstName) . '|' . strtolower($middleInitial) . '|' . strtolower($lastName) . '|' . strtolower($suffix);
+                if (isset($existingFullNames[$nameKey]) || isset($seenNamesInBatch[$nameKey])) {
+                    $duplicates[] = "{$label}: Full name \"{$fullName}\" already registered.";
                     continue;
                 }
-                $sid = str_pad($rawId, 8, '0', STR_PAD_LEFT);
+
+                // ── Validate student ID ───────────────────────────────────
+                $rawIdClean = ltrim($rawId, '0') ?: '0';
+                if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int) $rawIdClean === 0) {
+                    $errors[] = "{$label}: Student ID \"{$rawId}\" is invalid (must be 1–8 digits).";
+                    continue;
+                }
+                $sid = str_pad($rawIdClean, 8, '0', STR_PAD_LEFT);
 
                 if (isset($existingAlumniIds[$sid]) || isset($seenIdsInBatch[$sid])) {
                     $duplicates[] = "{$label}: Student ID \"{$sid}\" already exists.";
                     continue;
                 }
+
+                // ── Validate course ───────────────────────────────────────
                 if (!isset($courseMap[$code])) {
-                    $errors[] = "{$label}: Course code \"{$code}\" does not exist in the system.";
+                    $errors[] = "{$label}: Course code \"{$code}\" does not exist.";
                     continue;
                 }
 
+                // ── Validate batch year ───────────────────────────────────
                 $batchYear = (int) $year;
-                if (!preg_match('/^\d{4}$/', $year) || $batchYear < 1000) {
-                    $errors[] = "{$label}: Year \"{$year}\" is invalid (must be 4-digit year e.g. 2024).";
+                if ($batchYear < 1000 || $batchYear > 9999) {
+                    $errors[] = "{$label}: Batch \"{$year}\" must be a 4-digit year.";
                     continue;
                 }
 
-                $status = 'VERIFIED';
-                if (!empty($row['status'] ?? '')) {
-                    $s = strtoupper($row['status']);
-                    if (in_array($s, ['VERIFIED', 'PENDING', 'REJECTED'])) $status = $s;
-                }
+                // ── Generate temp password & create User record ───────────
+                // Plain:            {student_id}_{Xx}        e.g. "00037801_Ar"
+                // Stored in:        users.password           as bcrypt hash
+                // Placeholder email for PENDING alumni (no real email yet):
+                //                   {student_id}@pending.local
+                //                   → replaced when alumni claims their account
+                $tempPassword     = $this->generateTempPassword($sid, $lastName);
+                $placeholderEmail = $sid . '@pending.local';
 
                 try {
-                    $tempPassword = Str::random(10);
-
-                    // 1. Create User FIRST
+                    // 1️⃣  Create the User account with the hashed temp password
                     $user = User::create([
                         'name'     => $fullName,
-                        'email'    => $email,
-                        'password' => Hash::make($tempPassword),
                         'role'     => 'alumni',
+                        'email'    => $placeholderEmail,
+                        'password' => Hash::make($tempPassword),
                     ]);
 
-                    // 2. Create Alumni linked to User
-                    $alumni = Alumni::create([
+                    // 2️⃣  Create the Alumni record linked to that User
+                    Alumni::create([
                         'user_id'        => $user->id,
                         'first_name'     => $firstName,
                         'middle_initial' => $middleInitial ?: null,
-                        'last_name'      => $lastName      ?: null,
+                        'last_name'      => $lastName,
                         'suffix'         => $suffix        ?: null,
                         'student_id'     => $sid,
-                        'email'          => $email,
+                        'email'          => null,           // real email set on claim
                         'course_code'    => $code,
                         'course_name'    => $courseMap[$code],
                         'batch'          => $batchYear,
-                        'status'         => $status,
+                        'status'         => 'PENDING',
                         'profile_photo'  => null,
                     ]);
 
-                    // 3. Send welcome email ← THIS WAS MISSING
-                    try {
-                        Mail::to($email)->send(new AlumniRegistered($alumni, $tempPassword));
-                    } catch (\Exception $mailError) {
-                        Log::warning("Email failed for {$email}: " . $mailError->getMessage());
-                    }
-
-                    $seenEmailsInBatch[$email] = true;
                     $seenIdsInBatch[$sid]      = true;
+                    $seenNamesInBatch[$nameKey] = true;
                     $imported++;
 
                 } catch (\Exception $e) {
@@ -207,7 +229,9 @@ class AlumniController extends Controller
             if (!empty($allIssues)) {
                 $shown = array_slice($allIssues, 0, 5);
                 $msg  .= "\n\n" . implode("\n", $shown);
-                if (count($allIssues) > 5) $msg .= "\n… and " . (count($allIssues) - 5) . " more row(s)";
+                if (count($allIssues) > 5) {
+                    $msg .= "\n… and " . (count($allIssues) - 5) . " more row(s)";
+                }
             }
             return redirect()->back()->with('error', $msg);
 
@@ -218,6 +242,10 @@ class AlumniController extends Controller
             return redirect()->back()->with('error', '❌ ' . $e->getMessage());
         }
     }
+
+    // ─────────────────────────────────────────────────────
+    // File Parsers
+    // ─────────────────────────────────────────────────────
 
     private function parseFile(string $filePath, string $extension): array
     {
@@ -280,7 +308,9 @@ class AlumniController extends Controller
 
                 for ($c = 'A'; $c <= $maxCol; $c++) {
                     $val = $sheet->getCell($c . $r)->getFormattedValue();
-                    if ($val === null || $val === '') $val = $sheet->getCell($c . $r)->getValue();
+                    if ($val === null || $val === '') {
+                        $val = $sheet->getCell($c . $r)->getValue();
+                    }
                     $val       = is_null($val) ? '' : (string) $val;
                     $rowData[] = $val;
                     if ($val !== '') $isEmpty = false;

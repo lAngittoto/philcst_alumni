@@ -9,14 +9,14 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use App\Models\Organizer;
+use App\Models\Alumni;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Hash;
 
 new #[Layout('app')] class extends Component {
 
-    // ── Config ────────────────────────────────────────────────────────────────
-    const MAX_ATTEMPTS    = 5;          // wrong password strikes before lockout
-    const LOCKOUT_SECONDS = 600;        // 10 minutes
+    const MAX_ATTEMPTS    = 5;
+    const LOCKOUT_SECONDS = 600;
 
     public string $name     = '';
     public string $password = '';
@@ -29,7 +29,7 @@ new #[Layout('app')] class extends Component {
             $user = Auth::user();
 
             if ($user->role === 'organizer') {
-                $organizer = $user->organizer;
+                $organizer = Organizer::where('user_id', $user->id)->first();
                 if ($organizer && $organizer->password_changed_at === null) {
                     Auth::logout();
                     session()->invalidate();
@@ -37,6 +37,20 @@ new #[Layout('app')] class extends Component {
                     return;
                 }
                 $this->redirect(route('organizer.dashboard'));
+                return;
+            }
+
+            if ($user->role === 'alumni') {
+                $alumni = Alumni::where('user_id', $user->id)->first();
+
+                if ($alumni && $alumni->needsAccountSetup()) {
+                    Auth::logout();
+                    session()->invalidate();
+                    session()->regenerateToken();
+                    return;
+                }
+
+                $this->redirect(route('alumni.dashboard'));
                 return;
             }
 
@@ -50,54 +64,34 @@ new #[Layout('app')] class extends Component {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /**
-     * Cache key for tracking wrong-password attempts PER ACCOUNT (not per IP).
-     * This fires even on a single-character wrong password.
-     */
     protected function accountAttemptsKey(): string
     {
         return 'login_attempts_' . Str::lower(trim($this->name));
     }
 
-    /**
-     * Cache key that marks an account as temporarily locked.
-     */
     protected function accountLockedKey(): string
     {
         return 'account_locked_' . Str::lower(trim($this->name));
     }
 
-    /**
-     * IP-based throttle key (secondary, broad protection).
-     */
     protected function throttleKey(): string
     {
         return 'login_ip_' . Str::lower($this->name) . '|' . request()->ip();
     }
 
-    /**
-     * Check if this account is currently locked out.
-     * Returns remaining seconds, or 0 if not locked.
-     */
     protected function accountLockedSeconds(): int
     {
         $expires = Cache::get($this->accountLockedKey());
         if (!$expires) return 0;
-        $remaining = $expires - now()->timestamp;
-        return max(0, $remaining);
+        return max(0, $expires - now()->timestamp);
     }
 
-    /**
-     * Increment wrong-password strike counter for the account.
-     * Returns updated attempt count.
-     */
     protected function recordFailedAttempt(): int
     {
         $key      = $this->accountAttemptsKey();
         $attempts = (int) Cache::get($key, 0) + 1;
         Cache::put($key, $attempts, self::LOCKOUT_SECONDS + 60);
 
-        // Lock the account after MAX_ATTEMPTS strikes
         if ($attempts >= self::MAX_ATTEMPTS) {
             Cache::put(
                 $this->accountLockedKey(),
@@ -109,9 +103,6 @@ new #[Layout('app')] class extends Component {
         return $attempts;
     }
 
-    /**
-     * Clear all attempt counters for this account on successful login.
-     */
     protected function clearAttempts(): void
     {
         Cache::forget($this->accountAttemptsKey());
@@ -119,9 +110,6 @@ new #[Layout('app')] class extends Component {
         RateLimiter::clear($this->throttleKey());
     }
 
-    /**
-     * Format a seconds-remaining value for display.
-     */
     protected function formatLockTime(int $seconds): string
     {
         if ($seconds >= 60) {
@@ -137,10 +125,8 @@ new #[Layout('app')] class extends Component {
     {
         $this->validate([
             'name'     => 'required|string|max:255',
-            'password' => 'required|string|min:1',   // min:1 — catch even single-char wrong pw
+            'password' => 'required|string|min:1',
         ]);
-
-        $identifier = Str::lower(trim($this->name));
 
         // ── 1. Check account-level lockout ─────────────────────────────────────
         $lockedFor = $this->accountLockedSeconds();
@@ -153,7 +139,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 2. IP-level rate limit (broad sweep) ───────────────────────────────
+        // ── 2. IP-level rate limit ─────────────────────────────────────────────
         if (RateLimiter::tooManyAttempts($this->throttleKey(), 15)) {
             $seconds = RateLimiter::availableIn($this->throttleKey());
             $this->password = '';
@@ -164,18 +150,82 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 3. Try ORGANIZER (Teacher ID) login ────────────────────────────────
+        // ── 3. Try ALUMNI (Student ID) login ───────────────────────────────────
+        $rawId    = ltrim(preg_replace('/[^0-9]/', '', $this->name), '0') ?: '0';
+        $paddedId = str_pad($rawId, 8, '0', STR_PAD_LEFT);
+
+        $alumni = Alumni::where('student_id', $this->name)
+            ->orWhere('student_id', $paddedId)
+            ->first();
+
+        if ($alumni && $alumni->user) {
+            $user = $alumni->user;
+
+            if (!Hash::check($this->password, $user->password)) {
+                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+                $attempts = $this->recordFailedAttempt();
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    $this->password = '';
+                    $this->addError('invalid',
+                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                        . " after {$attempts} failed attempts."
+                    );
+                    return;
+                }
+
+                $remaining = self::MAX_ATTEMPTS - $attempts;
+                $this->password = '';
+                $this->addError('invalid',
+                    'Student ID or password is invalid. '
+                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
+                return;
+            }
+
+            // ✅ ALUMNI PASSWORD CORRECT
+            Auth::login($user, false);
+            $this->clearAttempts();
+            session()->regenerate();
+
+            // ── Re-fetch fresh alumni record AFTER session regenerate ──────────
+            // Use the Alumni model directly — User::alumni() relationship
+            // may not be defined, so we query the Alumni table instead.
+            $alumni = Alumni::where('user_id', $user->id)->first();
+
+            // needsAccountSetup() is the SINGLE gate:
+            //   • status === 'PENDING'          → must complete wizard
+            //   • email is null / empty         → must complete wizard
+            //   • still on temp password hash   → must complete wizard
+            // ALL THREE must be false to access the dashboard.
+            if (!$alumni || $alumni->needsAccountSetup()) {
+                // Clear any stale wizard keys from previous sessions, then set
+                // the fresh-login flag for the middleware and wizard mount().
+                session()->forget([
+                    'alumni_pending_email',
+                    'alumni_pending_password',
+                    'alumni_password_reset_step',
+                ]);
+                session()->put('alumni_requires_password_change', true);
+
+                $this->redirectRoute('alumni.change-password', navigate: true);
+                return;
+            }
+
+            $this->redirectRoute('alumni.dashboard', navigate: true);
+            return;
+        }
+
+        // ── 4. Try ORGANIZER (Teacher ID) login ────────────────────────────────
         $organizer = Organizer::where('id_number', $this->name)->first();
 
         if ($organizer && $organizer->user) {
             $user = $organizer->user;
 
-            // Wrong password — any character mismatch counts
             if (!Hash::check($this->password, $user->password)) {
                 RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
                 $attempts = $this->recordFailedAttempt();
 
-                // Log the failed attempt
                 AuditLog::logLogin([
                     'id'    => $user->id,
                     'name'  => $organizer->name,
@@ -184,9 +234,7 @@ new #[Layout('app')] class extends Component {
                 ], false, 'Incorrect password');
 
                 if ($attempts >= self::MAX_ATTEMPTS) {
-                    // Log the lockout
                     AuditLog::logAccountLocked($this->name, $attempts, $user->id);
-
                     $this->password = '';
                     $this->addError('invalid',
                         "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
@@ -204,7 +252,6 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // Account status check
             if ($organizer->status !== 'ACTIVE') {
                 $this->password = '';
                 $this->addError('invalid',
@@ -213,15 +260,12 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // ✅ SUCCESS
+            // ✅ ORGANIZER SUCCESS
             Auth::login($user, false);
             $this->clearAttempts();
             session()->regenerate();
-
-            // Update last login timestamp
             $organizer->update(['last_login' => now()]);
 
-            // Log successful login
             AuditLog::logLogin([
                 'id'    => $user->id,
                 'name'  => $organizer->name,
@@ -229,7 +273,6 @@ new #[Layout('app')] class extends Component {
                 'role'  => 'organizer',
             ], true);
 
-            // First login — must change password
             if ($organizer->password_changed_at === null) {
                 session()->forget(['pending_password_plain', 'password_reset_step']);
                 session()->put('organizer_requires_password_change', true);
@@ -241,12 +284,11 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 4. Try ADMIN (username) login ──────────────────────────────────────
+        // ── 5. Try ADMIN (username) login ──────────────────────────────────────
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
             RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
             $attempts = $this->recordFailedAttempt();
 
-            // Log the failed attempt (minimal info — we don't know who this is)
             AuditLog::logLogin([
                 'id'    => null,
                 'name'  => $this->name,
@@ -256,7 +298,6 @@ new #[Layout('app')] class extends Component {
 
             if ($attempts >= self::MAX_ATTEMPTS) {
                 AuditLog::logAccountLocked($this->name, $attempts);
-
                 $this->password = '';
                 $this->addError('invalid',
                     "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
@@ -276,7 +317,6 @@ new #[Layout('app')] class extends Component {
 
         $user = Auth::user();
 
-        // Must be admin
         if ($user->role !== 'admin') {
             Auth::logout();
             $this->password = '';
@@ -305,34 +345,24 @@ new #[Layout('app')] class extends Component {
      x-data="{ loading: false }"
      style="background-image: url('{{ asset('images/school-1.jpg') }}'); background-size: cover; background-position: center; background-repeat: no-repeat;">
 
-    {{-- Dark overlay --}}
     <div class="absolute inset-0 bg-black/40 z-0"></div>
 
     <style>
         [x-cloak] { display: none !important; }
-
-        .fade-in-up {
-            animation: fadeInUp 0.6s ease-out forwards;
-        }
+        .fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(20px); }
             to   { opacity: 1; transform: translateY(0); }
         }
-
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
             25%       { transform: translateX(-8px); }
             75%       { transform: translateX(8px); }
         }
-        .animate-shake {
-            animation: shake 0.3s ease-in-out;
-            animation-iteration-count: 2;
-        }
+        .animate-shake { animation: shake 0.3s ease-in-out; animation-iteration-count: 2; }
     </style>
 
-    {{-- Back to Home --}}
-    <a href="/"
-       wire:navigate
+    <a href="/" wire:navigate
        class="fixed top-8 left-8 z-50 flex items-center gap-3 text-white hover:text-purple-200 transition-all duration-300 transform hover:-translate-x-1 group">
         <div class="w-12 h-12 flex items-center justify-center rounded-full border-2 border-white/30 group-hover:border-white group-hover:bg-white/10 transition-all duration-300">
             <i class="fa-solid fa-arrow-left text-lg"></i>
@@ -340,11 +370,9 @@ new #[Layout('app')] class extends Component {
         <span class="font-bold uppercase text-xs tracking-widest shadow-sm">Back to Home</span>
     </a>
 
-    {{-- Card --}}
     <div wire:ignore.self
          class="relative z-10 w-full max-w-md bg-white rounded-[3.5rem] shadow-[0_25px_60px_rgba(0,0,0,0.4)] p-10 md:p-14 fade-in-up {{ $errors->has('invalid') ? 'animate-shake' : '' }}">
 
-        {{-- Logo + Title --}}
         <div class="text-center mb-10">
             <div class="inline-flex items-center justify-center w-20 h-20 bg-[#f2eaf7] rounded-[2rem] mb-6 text-[#7a3f91] shadow-inner transform transition-transform duration-500 hover:rotate-12">
                 <i class="fa-solid fa-user-shield text-4xl"></i>
@@ -354,7 +382,6 @@ new #[Layout('app')] class extends Component {
 
         <form wire:submit.prevent="login" @submit="loading = true" class="space-y-6">
 
-            {{-- Error message --}}
             @if ($errors->has('invalid'))
                 <div x-transition:enter="transition ease-out duration-300"
                      x-transition:enter-start="opacity-0 scale-90"
@@ -365,43 +392,28 @@ new #[Layout('app')] class extends Component {
                 </div>
             @endif
 
-            {{-- Username / Teacher ID --}}
             <div class="space-y-2">
                 <label class="text-xs font-bold uppercase tracking-widest text-[#2b0d3e] ml-1 flex items-center gap-2">
                     <i class="fa-solid fa-user text-[#7a3f91]"></i>
-                    Username / Teacher ID
+                    Username / Teacher ID / Student ID
                 </label>
-                <input
-                    wire:model="name"
-                    type="text"
-                    placeholder="Enter username or Teacher ID"
-                    autocomplete="username"
-                    required
-                    class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10"
-                >
+                <input wire:model="name" type="text"
+                       placeholder="Enter username, Teacher ID, or Student ID"
+                       autocomplete="username" required
+                       class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10">
             </div>
 
-            {{-- Password --}}
             <div class="space-y-2" x-data="{ show: false }">
                 <label class="text-xs font-bold uppercase tracking-widest text-[#2b0d3e] ml-1 flex items-center gap-2">
                     <i class="fa-solid fa-lock text-[#7a3f91]"></i>
                     Password
                 </label>
                 <div class="relative">
-                    <input
-                        wire:model="password"
-                        :type="show ? 'text' : 'password'"
-                        placeholder="••••••••"
-                        autocomplete="current-password"
-                        required
-                        minlength="1"
-                        class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10"
-                    >
-                    <button
-                        type="button"
-                        @click="show = !show"
-                        class="absolute inset-y-0 right-0 pr-6 flex items-center text-[#7a3f91] hover:text-[#2b0d3e] transition-colors duration-300 focus:outline-none z-10"
-                    >
+                    <input wire:model="password" :type="show ? 'text' : 'password'"
+                           placeholder="••••••••" autocomplete="current-password" required minlength="1"
+                           class="w-full px-6 py-4 bg-gray-50 border-2 border-transparent rounded-2xl outline-none transition-all duration-300 font-bold text-[#2b0d3e] focus:border-[#7a3f91] focus:bg-white focus:ring-4 focus:ring-purple-500/10">
+                    <button type="button" @click="show = !show"
+                            class="absolute inset-y-0 right-0 pr-6 flex items-center text-[#7a3f91] hover:text-[#2b0d3e] transition-colors duration-300 focus:outline-none z-10">
                         <svg x-show="!show" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                             <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
@@ -413,19 +425,13 @@ new #[Layout('app')] class extends Component {
                 </div>
             </div>
 
-            {{-- Attempt counter hint --}}
- <p class="text-[11px] text-gray-400 text-center -mt-2 font-medium">
-    Accounts are locked for 10 minutes after 5 consecutive failed attempts.
-</p>
+            <p class="text-[11px] text-gray-400 text-center -mt-2 font-medium">
+                Accounts are locked for 10 minutes after 5 consecutive failed attempts.
+            </p>
 
-            {{-- Submit --}}
             <div class="pt-2">
-                <button
-                    type="submit"
-                    wire:loading.attr="disabled"
-                    wire:target="login"
-                    class="relative w-full bg-[#2b0d3e] text-white py-5 rounded-2xl font-bold uppercase tracking-widest text-sm shadow-xl transition-all duration-300 hover:bg-[#7a3f91] hover:shadow-purple-500/20 active:scale-[0.97] disabled:opacity-70 overflow-hidden"
-                >
+                <button type="submit" wire:loading.attr="disabled" wire:target="login"
+                        class="relative w-full bg-[#2b0d3e] text-white py-5 rounded-2xl font-bold uppercase tracking-widest text-sm shadow-xl transition-all duration-300 hover:bg-[#7a3f91] hover:shadow-purple-500/20 active:scale-[0.97] disabled:opacity-70 overflow-hidden">
                     <div class="flex items-center justify-center gap-2" wire:loading.remove wire:target="login">
                         <span>Sign In</span>
                         <i class="fa-solid fa-paper-plane"></i>
@@ -440,7 +446,6 @@ new #[Layout('app')] class extends Component {
         </form>
     </div>
 
-    {{-- Footer --}}
     <div class="relative z-10 mt-12 text-center text-xs text-white/80 font-bold uppercase tracking-widest animate-pulse">
         &copy; {{ date('Y') }} Philippine College of Science and Technology
     </div>

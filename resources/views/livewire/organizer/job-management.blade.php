@@ -6,6 +6,7 @@
  *  - Organizer CANNOT change status — only Admin can activate/deactivate
  *  - saveEditJob preserves the current status, no auto-reactivation
  *  - Batch auto-inactive on deadline via SQL UPDATE (no dirty attr bug)
+ *  - All create / edit / delete actions are written to the audit log
  */
 
 use Livewire\Volt\Component;
@@ -13,6 +14,7 @@ use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
 use App\Models\JobPosting;
 use App\Models\JobOption;
+use App\Models\AuditLog;
 use App\Http\Controllers\JobController;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
@@ -75,6 +77,8 @@ new class extends Component {
         'Expert Level (5+ Years)',
     ];
 
+    // ── Auth / ownership guards ───────────────────────────────────────────────
+
     private function guardAuth(): void
     {
         if (! auth()->check()) {
@@ -108,6 +112,46 @@ new class extends Component {
         return strip_tags(trim($value));
     }
 
+    // ── Audit logging helper ──────────────────────────────────────────────────
+    //
+    // Wrapped in try/catch so a logging failure NEVER breaks the main action.
+    // Logs are fire-and-forget; the user experience always wins.
+    //
+    private function logAudit(
+        string  $action,
+        string  $subjectLabel,
+        string  $description,
+        array   $oldValues  = [],
+        array   $newValues  = [],
+        string  $severity   = 'info'
+    ): void {
+        try {
+            AuditLog::create([
+                'action'        => $action,
+                'module'        => 'job_posting',
+                'user_id'       => auth()->id(),
+                'user_name'     => auth()->user()?->name,
+                'user_email'    => auth()->user()?->email,
+                'user_role'     => 'organizer',
+                'subject_label' => $subjectLabel,
+                'description'   => $description,
+                'old_values'    => $oldValues  ?: null,
+                'new_values'    => $newValues  ?: null,
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+                'severity'      => $severity,
+                'is_flagged'    => false,
+            ]);
+
+            // Bust the stats cache so the admin's counters refresh immediately
+            Cache::forget('audit_stats');
+        } catch (\Throwable) {
+            // Silently swallow; logging must never cascade-fail to the UI
+        }
+    }
+
+    // ── Mount ────────────────────────────────────────────────────────────────
+
     public function mount(): void
     {
         $this->guardAuth();
@@ -124,6 +168,8 @@ new class extends Component {
             $this->philcstLocation = $philcst->default_location ?? '';
         }
     }
+
+    // ── Filter watchers ───────────────────────────────────────────────────────
 
     public function updatingSearch()       { $this->resetPage(); }
     public function updatingFilterStatus() { $this->resetPage(); }
@@ -150,6 +196,8 @@ new class extends Component {
             $this->editLocation = $opt->default_location;
         }
     }
+
+    // ── Computed properties ───────────────────────────────────────────────────
 
     #[Computed]
     public function organizerCollege(): ?string
@@ -281,12 +329,16 @@ new class extends Component {
         );
     }
 
+    // ── Filters ───────────────────────────────────────────────────────────────
+
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = $this->filterType = '';
         $this->filterSort = 'recent';
         $this->resetPage();
     }
+
+    // ── Post modal ────────────────────────────────────────────────────────────
 
     public function openPostModal(): void
     {
@@ -374,7 +426,7 @@ new class extends Component {
             return;
         }
 
-        JobPosting::create([
+        $job = JobPosting::create([
             'organizer_id'     => $org?->id,
             'job_title'        => $this->sanitize($this->postJobTitle),
             'company_name'     => $companyName,
@@ -391,6 +443,34 @@ new class extends Component {
             'updated_by_role'  => 'organizer',
         ]);
 
+        // ── Audit log: job created ────────────────────────────────────────────
+        $this->logAudit(
+            action:       'created',
+            subjectLabel: $job->job_title,
+            description:  sprintf(
+                'Organizer created job posting "%s" at %s (%s) — %s, deadline %s.',
+                $job->job_title,
+                $job->company_name,
+                $job->employment_type,
+                $job->experience_level,
+                \Carbon\Carbon::parse($job->deadline)->format('M j, Y')
+            ),
+            newValues: [
+                'job_title'        => $job->job_title,
+                'company_name'     => $job->company_name,
+                'company_type'     => $job->company_type,
+                'location'         => $job->location,
+                'employment_type'  => $job->employment_type,
+                'experience_level' => $job->experience_level,
+                'salary'           => $job->salary ?? 'Not disclosed',
+                'deadline'         => $job->deadline,
+                'target_college'   => $job->target_college,
+                'status'           => $job->status,
+            ],
+            severity: 'info'
+        );
+        // ─────────────────────────────────────────────────────────────────────
+
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
         $this->resetPostFields();
@@ -406,8 +486,12 @@ new class extends Component {
         $this->postErrors = [];
     }
 
+    // ── View modal ────────────────────────────────────────────────────────────
+
     public function viewJob(int $id): void  { $this->guardAuth(); $this->viewingJobId = $id; $this->showViewModal = true; }
     public function closeViewModal(): void  { $this->showViewModal = false; $this->viewingJobId = null; }
+
+    // ── Edit modal ────────────────────────────────────────────────────────────
 
     public function openEditModal(int $id): void
     {
@@ -495,6 +579,19 @@ new class extends Component {
         $job = app(JobController::class)->getJob($this->editingJobId);
         $this->guardOwnership($job);
 
+        // Capture before-state for the audit diff
+        $before = [
+            'job_title'        => $job->job_title,
+            'company_name'     => $job->company_name,
+            'company_type'     => $job->company_type,
+            'location'         => $job->location,
+            'employment_type'  => $job->employment_type,
+            'experience_level' => $job->experience_level,
+            'salary'           => $job->salary ?? 'Not disclosed',
+            'deadline'         => $job->deadline,
+            'target_college'   => $job->target_college,
+        ];
+
         // STATUS IS PRESERVED — organizer edits never change the status.
         // Only Admin can activate or deactivate a job.
         $job->update([
@@ -513,6 +610,34 @@ new class extends Component {
             'updated_by_role'  => 'organizer',
         ]);
 
+        // ── Audit log: job updated ────────────────────────────────────────────
+        $after = [
+            'job_title'        => $this->sanitize($this->editJobTitle),
+            'company_name'     => $this->sanitize($this->editCompany),
+            'company_type'     => $this->sanitize($this->editCompanyType),
+            'location'         => $this->sanitize($this->editLocation),
+            'employment_type'  => $this->sanitize($this->editEmpType),
+            'experience_level' => $this->sanitize($this->editExpLevel),
+            'salary'           => $this->sanitize($this->editSalary) ?: 'Not disclosed',
+            'deadline'         => $this->editDeadline,
+            'target_college'   => implode(',', $this->editTargetColleges) ?: null,
+        ];
+
+        $this->logAudit(
+            action:       'updated',
+            subjectLabel: $this->sanitize($this->editJobTitle),
+            description:  sprintf(
+                'Organizer updated job posting "%s" (ID #%d). Status preserved as %s.',
+                $this->sanitize($this->editJobTitle),
+                $job->id,
+                $job->status
+            ),
+            oldValues: $before,
+            newValues: $after,
+            severity:  'info'
+        );
+        // ─────────────────────────────────────────────────────────────────────
+
         $this->dispatch('flash-message', type: 'success', message: 'Job posting updated successfully.');
         $this->showEditModal = false;
         $this->resetEditFields();
@@ -527,6 +652,8 @@ new class extends Component {
         $this->editTargetColleges = [];
         $this->editErrors = [];
     }
+
+    // ── Delete modal ──────────────────────────────────────────────────────────
 
     public function confirmDelete(int $id): void
     {
@@ -546,11 +673,39 @@ new class extends Component {
         if ($this->deleteJobId) {
             $job = JobPosting::findOrFail($this->deleteJobId);
             $this->guardOwnership($job);
+
+            // Snapshot before soft-delete for the audit trail
+            $snapshot = [
+                'job_title'       => $job->job_title,
+                'company_name'    => $job->company_name,
+                'employment_type' => $job->employment_type,
+                'status_before'   => $job->status,
+                'deadline'        => $job->deadline,
+                'target_college'  => $job->target_college,
+            ];
+
             $job->update([
                 'status'          => 'ORGANIZER_DELETED',
                 'deleted_by'      => auth()->user()?->name,
                 'deleted_by_role' => 'organizer',
             ]);
+
+            // ── Audit log: job deleted ────────────────────────────────────────
+            $this->logAudit(
+                action:       'deleted',
+                subjectLabel: $snapshot['job_title'],
+                description:  sprintf(
+                    'Organizer deleted job posting "%s" (ID #%d) at %s. Status set to ORGANIZER_DELETED. Admin can restore.',
+                    $snapshot['job_title'],
+                    $job->id,
+                    $snapshot['company_name']
+                ),
+                oldValues: $snapshot,
+                newValues: ['status' => 'ORGANIZER_DELETED'],
+                severity:  'warning'
+            );
+            // ─────────────────────────────────────────────────────────────────
+
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteJobTitle}' has been deleted.");
         }
         $this->showDeleteModal = false;

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\AlumniController;
+use App\Http\Controllers\AlumniPasswordChangeController;
 use App\Http\Controllers\CourseController;
 use App\Http\Controllers\OrganizerController;
 use Illuminate\Support\Facades\Auth;
@@ -31,15 +32,42 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 
 // ===================================
 // Organizer — Main Portal
-// Only reachable after password has been changed (middleware enforces this)
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 
     Route::view('/organizer/dashboard', 'organizer.dashboard-wrapper')->name('organizer.dashboard');
-    Route::view('/organizer/event/organizer',      'organizer.event-organizer-wrapper')     ->name('organizer.event/organizer');
-    Route::view('/organizer/job/management',        'organizer.job-management-wrapper')       ->name('organizer.job/management');
-    Route::view('/organizer/employment',  'organizer.employment') ->name('organizer.employment');
-    Route::view('/organizer/reports',     'organizer.reports')    ->name('organizer.reports');
+    Route::view('/organizer/event/organizer', 'organizer.event-organizer-wrapper')->name('organizer.event/organizer');
+    Route::view('/organizer/job/management',  'organizer.job-management-wrapper') ->name('organizer.job/management');
+    Route::view('/organizer/employment',      'organizer.employment')             ->name('organizer.employment');
+    Route::view('/organizer/reports',         'organizer.reports')                ->name('organizer.reports');
+});
+
+// ===================================
+// Alumni — Password Change Wizard
+// Only accessible right after first login (session flag required)
+// Step 1 (GET)  → Volt handles the view
+// Steps 2–4 (POST) → AlumniPasswordChangeController handles logic
+// ===================================
+Route::middleware(['auth', 'alumni.password.ensure'])->group(function () {
+
+    // ── View (rendered by Volt) ───────────────────────────
+    Volt::route('/alumni/change-password', 'alumni/change-password')
+        ->name('alumni.change-password');
+
+    // ── Wizard POST actions (AlumniPasswordChangeController) ──
+   
+    Route::post('/alumni/send-otp',         [AlumniPasswordChangeController::class, 'sendOtp'])        ->name('alumni.send-otp');
+    Route::post('/alumni/resend-otp',       [AlumniPasswordChangeController::class, 'resendOtp'])      ->name('alumni.resend-otp');
+    Route::post('/alumni/verify-otp',       [AlumniPasswordChangeController::class, 'verifyOtp'])      ->name('alumni.verify-otp');
+    Route::post('/alumni/confirm-password', [AlumniPasswordChangeController::class, 'confirmPassword'])->name('alumni.confirm-password');
+});
+
+// ===================================
+// Alumni — Main Portal
+// Only reachable after account setup is complete
+// ===================================
+Route::middleware(['auth', 'alumni.password.ensure'])->group(function () {
+  Route::view('/alumni/dashboard', 'alumni.dashboard-wrapper')->name('alumni.dashboard');
 });
 
 // ===================================
@@ -51,14 +79,13 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::get('/audit/logs', fn() => view('admin.audit-logs-wrapper'))->name('audit.logs');
     Route::get('/admin/audit-logs/export', [AuditLogsController::class, 'export'])->name('admin.audit-logs.export');
-    Route::get('/admin/audit-logs/stats',  [AuditLogsController::class, 'stats'])->name('admin.audit-logs.stats');
-    Route::get('/admin/audit-logs/{log}',  [AuditLogsController::class, 'show'])->name('admin.audit-logs.show');
-
+    Route::get('/admin/audit-logs/stats',  [AuditLogsController::class, 'stats']) ->name('admin.audit-logs.stats');
+    Route::get('/admin/audit-logs/{log}',  [AuditLogsController::class, 'show'])  ->name('admin.audit-logs.show');
 
     Route::get('/user/management', fn() => view('admin.alumni-management-wrapper'))->name('user.management');
-    Route::get('/yearbook', fn() => view('admin.yearbook-wrapper'))->name('admin.yearbook');
-    Route::get('/job/posts', fn() => view('admin.job-posts-wrapper'))->name('job.posts');
-    Route::get('/events', fn() => view('admin.events-wrapper'))->name('events');
+    Route::get('/yearbook',        fn() => view('admin.yearbook-wrapper'))          ->name('admin.yearbook');
+    Route::get('/job/posts',       fn() => view('admin.job-posts-wrapper'))         ->name('job.posts');
+    Route::get('/events',          fn() => view('admin.events-wrapper'))            ->name('events');
 
     Route::post('/alumni/import', [AlumniController::class, 'import'])->name('alumni.import');
 

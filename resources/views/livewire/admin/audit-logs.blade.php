@@ -1,14 +1,4 @@
-{{-- resources/views/livewire/admin/audit-logs.blade.php
-     CHANGES FROM ORIGINAL:
-       - AuditLog::stats() result cached for 60s — was running 6 raw COUNT
-         queries on every Livewire render (stats cards refresh on every action)
-       - Added 'activated' / 'deactivated' action filter options so job toggle
-         actions (logged as 'updated' with those descriptions) surface easily
-       - Added 'job_posting' module as a visible default in module filter (was
-         already there, confirmed kept)
-       - perPage select now marks the correct option as selected via @selected
-       - Minor: replaced Str::limit call with PHP substr to avoid extra facade load
---}}
+{{-- resources/views/livewire/admin/audit-logs.blade.php --}}
 <?php
 
 use Livewire\Volt\Component;
@@ -111,6 +101,8 @@ new #[Layout('app')] class extends Component {
     public function with(): array
     {
         $query = AuditLog::query()
+            // job_posting module is now visible — organizer create/edit/delete
+            // actions are logged here so admins have full traceability.
             ->byModule($this->module   ?: null)
             ->byAction($this->action   ?: null)
             ->bySeverity($this->severity ?: null)
@@ -132,7 +124,7 @@ new #[Layout('app')] class extends Component {
             ->orderByDesc('id');
 
         // PERF: Cache stats for 60 s — was running 6 COUNT queries per render.
-        // Cache is busted immediately on toggleFlag() above.
+        // Cache is busted immediately on toggleFlag() above and on any job action.
         $stats = Cache::remember('audit_stats', 60, fn() => AuditLog::stats());
 
         return [
@@ -330,7 +322,7 @@ new #[Layout('app')] class extends Component {
                            autocomplete="off" maxlength="100">
                 </div>
 
-                {{-- Module --}}
+                {{-- Module — includes job_posting so organizer activity is visible --}}
                 <select wire:model.live="module"
                         class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
                                focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
@@ -343,7 +335,7 @@ new #[Layout('app')] class extends Component {
                     <option value="system">System</option>
                 </select>
 
-                {{-- Action — includes job-specific actions --}}
+                {{-- Action --}}
                 <select wire:model.live="action"
                         class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
                                focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition hidden sm:inline-block">
@@ -395,20 +387,24 @@ new #[Layout('app')] class extends Component {
                 </button>
             </div>
 
-            {{-- Row 2 --}}
-            <div class="flex flex-wrap gap-3 items-center justify-between">
-                <div class="flex items-center gap-3 flex-wrap">
+            {{-- Row 2: Flagged toggle + date range aligned to same baseline --}}
+            <div class="flex flex-wrap gap-3 items-end justify-between">
+                <div class="flex items-end gap-3 flex-wrap">
 
-                    {{-- Flagged toggle --}}
-                    <label class="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-[10px] border transition"
-                           :class="$wire.flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-300 bg-white hover:bg-gray-50'">
-                        <input wire:model.live="flagged" type="checkbox" class="w-4 h-4 rounded border-gray-300 accent-amber-500">
-                        <i class="fas fa-flag text-amber-500 text-xs"></i>
-                        <span class="text-[.8rem] font-semibold text-gray-700">Flagged Only</span>
-                    </label>
+                    {{-- Flagged toggle — wrapped in flex-col with invisible spacer label
+                         so it sits at the same baseline as the From/To date inputs --}}
+                    <div class="flex flex-col">
+                        <span class="text-[.6rem] font-semibold uppercase tracking-[.07em] text-transparent mb-0.5 ml-0.5 select-none" aria-hidden="true">·</span>
+                        <label class="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-[10px] border transition"
+                               :class="$wire.flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-300 bg-white hover:bg-gray-50'">
+                            <input wire:model.live="flagged" type="checkbox" class="w-4 h-4 rounded border-gray-300 accent-amber-500">
+                            <i class="fas fa-flag text-amber-500 text-xs"></i>
+                            <span class="text-[.8rem] font-semibold text-gray-700">Flagged Only</span>
+                        </label>
+                    </div>
 
                     {{-- Date range --}}
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-end gap-2">
                         <div class="flex flex-col">
                             <span class="text-[.6rem] font-semibold uppercase tracking-[.07em] text-gray-400 mb-0.5 ml-0.5">From</span>
                             <input wire:model.live="dateFrom" type="date"
@@ -424,15 +420,18 @@ new #[Layout('app')] class extends Component {
                     </div>
 
                     @if($dateFrom)
-                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px] bg-[#f5eef9] border border-[#d4aaeb]">
-                        <i class="fas fa-calendar-check text-[#7a3f91] text-[11px]"></i>
-                        <span class="text-[.7rem] font-semibold text-[#7a3f91]">
-                            @if($dateTo && $dateTo !== $dateFrom)
-                                {{ \Carbon\Carbon::parse($dateFrom)->format('M j') }} – {{ \Carbon\Carbon::parse($dateTo)->format('M j, Y') }}
-                            @else
-                                {{ \Carbon\Carbon::parse($dateFrom)->format('M j, Y') }}
-                            @endif
-                        </span>
+                    <div class="flex flex-col">
+                        <span class="text-[.6rem] font-semibold uppercase tracking-[.07em] text-transparent mb-0.5 ml-0.5 select-none" aria-hidden="true">·</span>
+                        <div class="inline-flex items-center gap-1.5 px-2.5 py-[9px] rounded-[8px] bg-[#f5eef9] border border-[#d4aaeb]">
+                            <i class="fas fa-calendar-check text-[#7a3f91] text-[11px]"></i>
+                            <span class="text-[.7rem] font-semibold text-[#7a3f91]">
+                                @if($dateTo && $dateTo !== $dateFrom)
+                                    {{ \Carbon\Carbon::parse($dateFrom)->format('M j') }} – {{ \Carbon\Carbon::parse($dateTo)->format('M j, Y') }}
+                                @else
+                                    {{ \Carbon\Carbon::parse($dateFrom)->format('M j, Y') }}
+                                @endif
+                            </span>
+                        </div>
                     </div>
                     @endif
 
@@ -462,7 +461,6 @@ new #[Layout('app')] class extends Component {
                 <table class="w-full border-collapse min-w-[860px]">
                     <thead>
                         <tr class="sticky top-0 z-10 bg-gray-100 border-b border-gray-200">
-                            <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">#</th>
                             <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Date / Time (PHT)</th>
                             <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500">Action</th>
                             <th class="px-4 sm:px-5 py-3 text-left text-[.7rem] font-semibold uppercase tracking-[.08em] text-gray-500 hidden lg:table-cell">Module</th>
@@ -504,15 +502,12 @@ new #[Layout('app')] class extends Component {
                                 default     => 'text-gray-500',
                             };
 
-                            // Truncate description without extra facade
                             $shortDesc = mb_strlen($log->description) > 55
                                 ? mb_substr($log->description, 0, 52) . '…'
                                 : $log->description;
                         @endphp
 
                         <tr class="{{ $rowClass }}">
-                            <td class="px-4 sm:px-5 py-3 text-gray-400 text-[.72rem] font-mono">{{ $log->id }}</td>
-
                             <td class="px-4 sm:px-5 py-3">
                                 <div class="text-[.8rem] font-semibold text-gray-900">{{ $phtDate->format('M j, Y') }}</div>
                                 <div class="text-[.7rem] font-normal text-gray-500">{{ $phtDate->format('h:i A') }}</div>
@@ -562,30 +557,31 @@ new #[Layout('app')] class extends Component {
                                 </span>
                             </td>
 
+                            {{-- ACTION BUTTONS: both use identical sizing so they're always equal height/width --}}
                             <td class="px-4 sm:px-5 py-3">
                                 <div class="flex items-center justify-center gap-2">
                                     <button wire:click="toggleFlag({{ $log->id }})"
-                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px]
+                                            class="inline-flex items-center justify-center gap-1.5 w-[72px] py-1.5 rounded-[8px]
                                                    text-[.72rem] font-semibold transition-all cursor-pointer
                                                    {{ $log->is_flagged
                                                        ? 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'
                                                        : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200' }}">
                                         <i class="fa-solid fa-flag text-[11px]"></i>
-                                        <span class="hidden sm:inline">Flag</span>
+                                        <span>{{ $log->is_flagged ? 'Unflag' : 'Flag' }}</span>
                                     </button>
                                     <button wire:click="viewDetail({{ $log->id }})"
-                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[8px]
+                                            class="inline-flex items-center justify-center gap-1.5 w-[72px] py-1.5 rounded-[8px]
                                                    text-[.72rem] font-semibold transition-all cursor-pointer
                                                    bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] hover:bg-[#e9d5f3]">
                                         <i class="fa-solid fa-eye text-[11px]"></i>
-                                        <span class="hidden sm:inline">View</span>
+                                        <span>View</span>
                                     </button>
                                 </div>
                             </td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="9" class="py-16 px-4 text-center">
+                            <td colspan="8" class="py-16 px-4 text-center">
                                 <div class="inline-flex flex-col items-center gap-3">
                                     <div class="w-[50px] h-[50px] rounded-[11px] flex items-center justify-center bg-[#f5eef9]">
                                         <i class="fa-solid fa-shield-halved text-xl text-[#7a3f91]"></i>
@@ -657,6 +653,36 @@ new #[Layout('app')] class extends Component {
 
 {{-- ══════════════════════ DETAIL MODAL ══════════════════════ --}}
 @if($showModal && $selected)
+
+{{-- Helper: formats a single value for readable display --}}
+@php
+    /**
+     * Recursively flattens a mixed value to a human-readable string.
+     * Arrays become comma-separated; null/empty become an em-dash.
+     */
+    function auditFormatValue(mixed $val): string {
+        if (is_null($val) || $val === '')     return '—';
+        if (is_bool($val))                    return $val ? 'Yes' : 'No';
+        if (is_array($val))                   return implode(', ', array_map('auditFormatValue', $val));
+        $str = (string) $val;
+        // Pretty-print ISO dates: 2026-04-06 12:30:00 → Apr 6, 2026 12:30 PM
+        if (preg_match('/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/', $str)) {
+            try {
+                return \Carbon\Carbon::parse($str)->setTimezone('Asia/Manila')->format('M j, Y · g:i A');
+            } catch (\Throwable) {}
+        }
+        return $str;
+    }
+
+    /**
+     * Converts a snake_case key to Title Case for display.
+     * e.g. "job_title" → "Job Title"
+     */
+    function auditFormatKey(string $key): string {
+        return ucwords(str_replace('_', ' ', $key));
+    }
+@endphp
+
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
      wire:keydown.escape="closeModal">
     <div class="w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden m-in flex flex-col max-h-[92vh]"
@@ -727,22 +753,49 @@ new #[Layout('app')] class extends Component {
             </div>
             @endif
 
+            {{-- ── Before / After — rendered as readable key-value pairs, never raw JSON ── --}}
             @if($selected['old_values'] || $selected['new_values'])
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
                 @if($selected['old_values'])
                 <div class="bg-red-50 rounded-xl p-4 border border-red-200">
-                    <div class="text-[.65rem] font-semibold text-red-600 uppercase tracking-[.08em] mb-2">Before</div>
-                    <pre class="text-[.72rem] text-red-700 overflow-auto whitespace-pre-wrap">{{ json_encode($selected['old_values'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                    <div class="text-[.65rem] font-semibold text-red-600 uppercase tracking-[.08em] mb-3">Before</div>
+                    <dl class="space-y-2">
+                        @foreach((array) $selected['old_values'] as $key => $val)
+                        <div class="flex flex-col gap-0.5">
+                            <dt class="text-[.62rem] font-bold text-red-500 uppercase tracking-wide">
+                                {{ auditFormatKey($key) }}
+                            </dt>
+                            <dd class="text-[.78rem] text-red-800 font-medium break-words leading-snug">
+                                {{ auditFormatValue($val) }}
+                            </dd>
+                        </div>
+                        @endforeach
+                    </dl>
                 </div>
                 @endif
+
                 @if($selected['new_values'])
                 <div class="bg-green-50 rounded-xl p-4 border border-green-200">
-                    <div class="text-[.65rem] font-semibold text-green-600 uppercase tracking-[.08em] mb-2">After</div>
-                    <pre class="text-[.72rem] text-green-700 overflow-auto whitespace-pre-wrap">{{ json_encode($selected['new_values'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                    <div class="text-[.65rem] font-semibold text-green-600 uppercase tracking-[.08em] mb-3">After</div>
+                    <dl class="space-y-2">
+                        @foreach((array) $selected['new_values'] as $key => $val)
+                        <div class="flex flex-col gap-0.5">
+                            <dt class="text-[.62rem] font-bold text-green-600 uppercase tracking-wide">
+                                {{ auditFormatKey($key) }}
+                            </dt>
+                            <dd class="text-[.78rem] text-green-800 font-medium break-words leading-snug">
+                                {{ auditFormatValue($val) }}
+                            </dd>
+                        </div>
+                        @endforeach
+                    </dl>
                 </div>
                 @endif
+
             </div>
             @endif
+            {{-- ── /Before / After ─────────────────────────────────────────────────────── --}}
 
         </div>
 

@@ -1,22 +1,14 @@
 <?php
-
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'email',
@@ -24,44 +16,57 @@ class User extends Authenticatable
         'role',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'email_verified_at' => 'datetime',
+            'password'          => 'hashed',
+        ];
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Role Helpers
+    // ─────────────────────────────────────────────────────
 
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
     }
 
-    /**
-     * Relationship: User has one Organizer record
-     */
-    public function organizer()
+    public function isAlumni(): bool
     {
-        return $this->hasOne(\App\Models\Organizer::class);
+        return $this->role === 'alumni';
+    }
+
+    public function isOrganizer(): bool
+    {
+        return $this->role === 'organizer';
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Relationships
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * The alumni record linked to this user account.
+     * A user with role="alumni" has exactly one Alumni record.
+     */
+    public function alumni()
+    {
+        return $this->hasOne(Alumni::class, 'user_id');
     }
 
     /**
-     * Get the attributes that should be cast.
-     *
-     * NOTE: 'password' cast is intentionally REMOVED.
-     * Laravel's 'hashed' cast auto-hashes on assignment via $model->password = 'plain'.
-     * Since we use Hash::make() explicitly before storing, the cast would double-hash.
-     * We control hashing manually in controllers/components.
-     *
-     * @return array<string, string>
+     * The organizer record linked to this user account.
+     * A user with role="organizer" has exactly one Organizer record.
      */
-    protected function casts(): array
+    public function organizer()
     {
-        return [
-            'email_verified_at' => 'datetime',
-            // 'password' => 'hashed',  <-- REMOVED: causes double-hashing
-        ];
+        return $this->hasOne(Organizer::class, 'user_id');
     }
 }

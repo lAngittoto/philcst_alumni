@@ -7,6 +7,7 @@ use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use App\Models\AdminEvent;
+use App\Models\AuditLog;
 use App\Http\Controllers\AdminEventController;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Gate;
@@ -78,15 +79,21 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────────
     public function mount(): void
     {
-        ini_set('max_execution_time', 600);
+        // Allow up to 10 minutes — set_time_limit is more reliable than ini_set
+        // across shared-hosting and PHP-FPM environments.
+        set_time_limit(600);
 
         abort_unless(auth()->check() && auth()->user()->role === 'admin', 403);
 
-        // AUTO-REJECT: mark all PENDING events whose date has already passed
-        $this->autoRejectExpiredPendingEvents();
-
-        // AUTO-COMPLETE: mark all APPROVED events whose end (or start) time has passed
-        $this->autoCompleteExpiredEvents();
+        // Throttle auto-processing: run at most once per 60 seconds.
+        // This prevents the expensive bulk-UPDATE from executing on every single
+        // Livewire render (which caused the 60-second timeout under load).
+        $cacheKey = 'admin_events_auto_processed';
+        if (! Cache::has($cacheKey)) {
+            $this->autoRejectExpiredPendingEvents();
+            $this->autoCompleteExpiredEvents();
+            Cache::put($cacheKey, true, 60); // re-check after 60 s
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -396,19 +403,48 @@ new class extends Component {
         $photo = $this->photo;
 
         if ($this->isEditing) {
+            // Capture old values before update for audit log
+            $oldEvent = $ctrl->getEvent($this->editingEventId);
+            $oldValues = [
+                'title'               => $oldEvent->title,
+                'event_date'          => $oldEvent->event_date->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'venue'               => $oldEvent->venue,
+                'target_participants' => $oldEvent->target_participants,
+            ];
+
             if ($this->removePhoto && !$photo) {
-                $event = $ctrl->getEvent($this->editingEventId);
-                if ($event->photo && $event->photo !== AdminEvent::DEFAULT_PHOTO) {
-                    Storage::disk('public')->delete($event->photo);
+                if ($oldEvent->photo && $oldEvent->photo !== AdminEvent::DEFAULT_PHOTO) {
+                    Storage::disk('public')->delete($oldEvent->photo);
                 }
                 $data['photo'] = null;
-                $event->update(array_merge($data, [
+                $oldEvent->update(array_merge($data, [
                     'updated_by'      => auth()->user()?->name,
                     'updated_by_role' => 'admin',
                 ]));
             } else {
                 $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
             }
+
+            AuditLog::create([
+                'action'        => 'updated',
+                'module'        => 'event',
+                'user_name'     => auth()->user()?->name,
+                'user_email'    => auth()->user()?->email,
+                'user_role'     => 'admin',
+                'subject_label' => $title,
+                'description'   => "Admin edited event: {$title}",
+                'old_values'    => $oldValues,
+                'new_values'    => [
+                    'title'               => $title,
+                    'event_date'          => $startDt->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                    'venue'               => $venue,
+                    'target_participants' => $targetStr,
+                ],
+                'severity'      => 'info',
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+            ]);
+
             $this->dispatch('flash-message', type: 'success', message: 'Event updated successfully!');
         }
 
@@ -443,6 +479,22 @@ new class extends Component {
         abort_unless(auth()->user()->role === 'admin', 403);
         if ($this->approveEventId) {
             app(AdminEventController::class)->approveEvent($this->approveEventId, trim($this->approveRemarks) ?: null);
+
+            AuditLog::create([
+                'action'        => 'verified',
+                'module'        => 'event',
+                'user_name'     => auth()->user()?->name,
+                'user_email'    => auth()->user()?->email,
+                'user_role'     => 'admin',
+                'subject_label' => $this->approveEventTitle,
+                'description'   => "Admin approved event: {$this->approveEventTitle}"
+                    . (trim($this->approveRemarks) ? " — Remarks: " . trim($this->approveRemarks) : ''),
+                'new_values'    => ['status' => 'APPROVED', 'remarks' => trim($this->approveRemarks) ?: null],
+                'severity'      => 'info',
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+            ]);
+
             $this->dispatch('flash-message', type: 'success', message: "'{$this->approveEventTitle}' approved!");
         }
         $this->showApproveModal  = false;
@@ -478,6 +530,21 @@ new class extends Component {
         }
         if ($this->rejectEventId) {
             app(AdminEventController::class)->rejectEvent($this->rejectEventId, trim($this->rejectRemarks));
+
+            AuditLog::create([
+                'action'        => 'rejected',
+                'module'        => 'event',
+                'user_name'     => auth()->user()?->name,
+                'user_email'    => auth()->user()?->email,
+                'user_role'     => 'admin',
+                'subject_label' => $this->rejectEventTitle,
+                'description'   => "Admin rejected event: {$this->rejectEventTitle} — Reason: {$this->rejectRemarks}",
+                'new_values'    => ['status' => 'REJECTED', 'reason' => trim($this->rejectRemarks)],
+                'severity'      => 'warning',
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+            ]);
+
             $this->dispatch('flash-message', type: 'success', message: "'{$this->rejectEventTitle}' rejected.");
         }
         $this->showRejectModal  = false;
@@ -508,6 +575,21 @@ new class extends Component {
         abort_unless(auth()->user()->role === 'admin', 403);
         if ($this->deleteEventId) {
             app(AdminEventController::class)->deleteEvent($this->deleteEventId);
+
+            AuditLog::create([
+                'action'        => 'deleted',
+                'module'        => 'event',
+                'user_name'     => auth()->user()?->name,
+                'user_email'    => auth()->user()?->email,
+                'user_role'     => 'admin',
+                'subject_label' => $this->deleteEventTitle,
+                'description'   => "Admin permanently deleted event: {$this->deleteEventTitle}",
+                'old_values'    => ['title' => $this->deleteEventTitle, 'status' => 'deleted'],
+                'severity'      => 'critical',
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+            ]);
+
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteEventTitle}' deleted.");
         }
         $this->showDeleteModal  = false;
@@ -545,6 +627,22 @@ new class extends Component {
                 'updated_by'      => auth()->user()?->name,
                 'updated_by_role' => 'admin',
             ]);
+
+            AuditLog::create([
+                'action'        => 'updated',
+                'module'        => 'event',
+                'user_name'     => auth()->user()?->name,
+                'user_email'    => auth()->user()?->email,
+                'user_role'     => 'admin',
+                'subject_label' => $this->restoreEventTitle,
+                'description'   => "Admin restored event: {$this->restoreEventTitle} — Status reset to PENDING",
+                'old_values'    => ['status' => 'ORGANIZER_DELETED'],
+                'new_values'    => ['status' => 'PENDING'],
+                'severity'      => 'info',
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+            ]);
+
             $this->dispatch('flash-message', type: 'success', message: "'{$this->restoreEventTitle}' restored!");
         }
         $this->showRestoreModal  = false;
@@ -700,13 +798,13 @@ new class extends Component {
                 <table class="w-full border-collapse min-w-[720px]">
                     <thead>
                         <tr class="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 sm:px-5 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">Event</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Organizer</th>
-                            <th class="px-4 sm:px-5 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">College</th>
-                            <th class="px-4 sm:px-5 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">RSVPs</th>
-                            <th class="px-4 sm:px-5 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-5 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Event</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Date & Time</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden md:table-cell">Organizer</th>
+                            <th class="px-4 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">College</th>
+                            <th class="px-4 sm:px-5 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">RSVPs</th>
+                            <th class="px-4 sm:px-5 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                            <th class="px-4 sm:px-5 py-3 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
@@ -1252,7 +1350,7 @@ new class extends Component {
             @if($ev->description)<div class="px-5 sm:px-7 py-5 border-b border-gray-100"><h3 class="text-sm font-bold text-gray-800 mb-3">About This Event</h3><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $ev->description }}</p></div>@endif
             @if($ev->notes)<div class="px-5 sm:px-7 py-5 border-b border-gray-100"><h3 class="text-sm font-bold text-gray-800 mb-3">Additional Notes</h3><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $ev->notes }}</p></div>@endif
 
-            {{-- Contact Person Section - VISIBLE FOR APPROVED EVENTS --}}
+            {{-- Contact Person --}}
             @if($ev->contact_person||$ev->contact_email||$ev->contact_phone)
             <div class="px-5 sm:px-7 py-5 border-b border-gray-100">
                 <h3 class="text-sm font-bold text-gray-800 mb-3">Contact Person</h3>
@@ -1264,22 +1362,42 @@ new class extends Component {
             </div>
             @endif
 
+            {{-- ── Posting Details ──────────────────────────────────────────── --}}
             <div class="px-5 sm:px-7 py-5">
                 <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Posting Details</p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 border border-gray-200 rounded-xl overflow-hidden divide-x divide-y divide-gray-100">
-                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted</p><p class="text-sm font-semibold text-gray-900">{{ $ev->created_at->setTimezone('Asia/Manila')->format('M d, Y') }}</p><p class="text-xs text-gray-500">{{ $ev->created_at->setTimezone('Asia/Manila')->format('g:i A') }}</p></div>
-                    @if(!$isOrgDeleted)
-                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Last Updated By</p><p class="text-sm font-semibold text-gray-900">{{ $ev->updated_by ?? 'System' }}</p><p class="text-xs text-gray-500">{{ $ev->updated_by_role ? ucfirst($ev->updated_by_role) : '—' }}</p></div>
+
+                    {{-- Submitted --}}
+                    <div class="px-4 py-3">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Submitted</p>
+                        <p class="text-sm font-semibold text-gray-900">{{ $ev->created_at->setTimezone('Asia/Manila')->format('M d, Y') }}</p>
+                        <p class="text-xs text-gray-500">{{ $ev->created_at->setTimezone('Asia/Manila')->format('g:i A') }}</p>
+                    </div>
+
+                    {{-- Last Updated — only shown when a real person made a change --}}
+                    @if($ev->updated_by)
+                    <div class="px-4 py-3">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Last Updated By</p>
+                        <p class="text-sm font-semibold text-gray-900">{{ $ev->updated_by }}</p>
+                        <p class="text-xs text-gray-500 capitalize">{{ $ev->updated_by_role ?? '' }}</p>
+                        <p class="text-xs text-gray-400 mt-0.5">{{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>
+                    </div>
                     @endif
-                    <div class="px-4 py-3"><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p>
+
+                    {{-- Current Status --}}
+                    <div class="px-4 py-3">
+                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Status</p>
                         @if($isCompleted)<p class="text-sm font-semibold text-green-700">Completed</p>
                         @elseif($isOrgDeleted)<p class="text-sm font-semibold text-red-600">Deleted by Organizer</p>
                         @elseif($ev->status==='PENDING')<p class="text-sm font-semibold text-amber-600">Pending</p>
                         @elseif($isApproved)<p class="text-sm font-semibold text-emerald-600">Approved</p>
                         @else<p class="text-sm font-semibold text-red-600">Rejected</p>@endif
                     </div>
+
                 </div>
             </div>
+            {{-- ── /Posting Details ─────────────────────────────────────────── --}}
+
         </div>
 
         {{-- Action footer --}}
