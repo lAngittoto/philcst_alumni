@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\AlumniPasswordChangeController;
+use App\Http\Controllers\AlumniInformationController;
 use App\Http\Controllers\CourseController;
 use App\Http\Controllers\OrganizerController;
 use Illuminate\Support\Facades\Auth;
@@ -25,7 +26,6 @@ Volt::route('/login', 'auth/login')->name('login');
 // Organizer — Password Change Wizard
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
-
     Volt::route('/organizer/change-password', 'organizer/change-password')
         ->name('organizer.change-password');
 });
@@ -34,40 +34,37 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 // Organizer — Main Portal
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
-
-    Route::view('/organizer/dashboard', 'organizer.dashboard-wrapper')->name('organizer.dashboard');
-    Route::view('/organizer/event/organizer', 'organizer.event-organizer-wrapper')->name('organizer.event/organizer');
-    Route::view('/organizer/job/management',  'organizer.job-management-wrapper') ->name('organizer.job/management');
-    Route::view('/organizer/employment',      'organizer.employment')             ->name('organizer.employment');
-    Route::view('/organizer/reports',         'organizer.reports')                ->name('organizer.reports');
+    Route::view('/organizer/dashboard',       'organizer.dashboard-wrapper')       ->name('organizer.dashboard');
+    Route::view('/organizer/event/organizer', 'organizer.event-organizer-wrapper') ->name('organizer.event/organizer');
+    Route::view('/organizer/job/management',  'organizer.job-management-wrapper')  ->name('organizer.job/management');
+    Route::view('/organizer/employment',      'organizer.employment')              ->name('organizer.employment');
+    Route::view('/organizer/reports',         'organizer.reports')                 ->name('organizer.reports');
 });
 
 // ===================================
-// Alumni — Password Change Wizard
-// Only accessible right after first login (session flag required)
-// Step 1 (GET)  → Volt handles the view
-// Steps 2–4 (POST) → AlumniPasswordChangeController handles logic
+// Alumni — All Routes
+// EnsureAlumniPasswordChanged handles both gates internally:
+//   Gate 1 → wizard    (needsAccountSetup)   → alumni.change-password
+//   Gate 2 → info page (isProfileComplete)   → alumni.information
 // ===================================
-Route::middleware(['auth', 'alumni.password.ensure'])->group(function () {
+Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
 
-    // ── View (rendered by Volt) ───────────────────────────
+    // ── Gate 1: Account setup wizard ─────────────────────────────────────────
     Volt::route('/alumni/change-password', 'alumni/change-password')
         ->name('alumni.change-password');
 
-    // ── Wizard POST actions (AlumniPasswordChangeController) ──
-   
     Route::post('/alumni/send-otp',         [AlumniPasswordChangeController::class, 'sendOtp'])        ->name('alumni.send-otp');
     Route::post('/alumni/resend-otp',       [AlumniPasswordChangeController::class, 'resendOtp'])      ->name('alumni.resend-otp');
     Route::post('/alumni/verify-otp',       [AlumniPasswordChangeController::class, 'verifyOtp'])      ->name('alumni.verify-otp');
     Route::post('/alumni/confirm-password', [AlumniPasswordChangeController::class, 'confirmPassword'])->name('alumni.confirm-password');
-});
 
-// ===================================
-// Alumni — Main Portal
-// Only reachable after account setup is complete
-// ===================================
-Route::middleware(['auth', 'alumni.password.ensure'])->group(function () {
-  Route::view('/alumni/dashboard', 'alumni.dashboard-wrapper')->name('alumni.dashboard');
+    // ── Gate 2: Profile information (always accessible — exempt in middleware) ─
+    Route::get('/alumni/information', [AlumniInformationController::class, 'show'])  ->name('alumni.information');
+    Route::put('/alumni/information', [AlumniInformationController::class, 'update'])->name('alumni.information.update');
+
+    // ── Protected pages (Gate 2 blocks until profile is complete) ─────────────
+    Route::view('/alumni/dashboard', 'alumni.dashboard-wrapper')->name('alumni.dashboard');
+    Route::view('/job/opportunities', 'alumni.job-opportunities-wrapper')->name('job.opportunities');
 });
 
 // ===================================
@@ -77,7 +74,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::view('/admin/dashboard', 'admin.admin-dashboard-wrapper')->name('admin.dashboard');
 
-    Route::get('/audit/logs', fn() => view('admin.audit-logs-wrapper'))->name('audit.logs');
+    Route::get('/audit/logs',              fn() => view('admin.audit-logs-wrapper'))->name('audit.logs');
     Route::get('/admin/audit-logs/export', [AuditLogsController::class, 'export'])->name('admin.audit-logs.export');
     Route::get('/admin/audit-logs/stats',  [AuditLogsController::class, 'stats']) ->name('admin.audit-logs.stats');
     Route::get('/admin/audit-logs/{log}',  [AuditLogsController::class, 'show'])  ->name('admin.audit-logs.show');

@@ -34,13 +34,13 @@
         class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
                shadow-2xl lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-white overflow-hidden shrink-0"
-        style="background-color: #0d2b3e;">
+        style="background-color: #2b0d3e;">
 
         {{-- Sidebar Header --}}
         <div class="flex items-center justify-between h-24 px-6 border-b border-white/10 shrink-0">
             <div class="text-left">
                 <h1 class="text-2xl font-black tracking-tighter uppercase text-white leading-tight">
-                    Alumni<span class="font-light opacity-70" style="color: #3f7a91;">Portal</span>
+                    Alumni<span class="font-light opacity-70" style="color: #7a3f91;">Portal</span>
                 </h1>
                 <p class="text-[10px] uppercase tracking-[0.2em] opacity-50 text-white font-bold">
                     Graduate Network
@@ -62,7 +62,7 @@
             <div class="flex items-center gap-3">
                 {{-- Avatar --}}
                 <div class="w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-lg"
-                     style="background-color: #3f7a91;">
+                     style="background-color: #7a3f91;">
                     @if($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png'))
                         <img src="{{ $alumni->getProfilePhotoUrl() }}"
                              class="w-10 h-10 rounded-full object-cover" alt="avatar">
@@ -98,16 +98,15 @@
         @endif
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-4 space-y-2 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
 
             @php
                 $sidebarLinks = [
-                    ['route' => 'alumni.dashboard', 'icon' => 'gauge-high', 'label' => 'Dashboard', 'pattern' => 'alumni/dashboard*'],
-                    // Add more alumni routes here as needed
-                    // ['route' => 'alumni.profile',   'icon' => 'user-circle', 'label' => 'My Profile',  'pattern' => 'alumni/profile*'],
-                    // ['route' => 'alumni.jobs',      'icon' => 'briefcase',   'label' => 'Job Board',   'pattern' => 'alumni/jobs*'],
-                    // ['route' => 'alumni.events',    'icon' => 'calendar',    'label' => 'Events',      'pattern' => 'alumni/events*'],
-                    // ['route' => 'alumni.yearbook',  'icon' => 'book-open',   'label' => 'Yearbook',    'pattern' => 'alumni/yearbook*'],
+                    ['route' => 'alumni.dashboard',   'icon' => 'gauge-high',  'label' => 'Dashboard',  'pattern' => 'alumni/dashboard*'],
+                    ['route' => 'alumni.information', 'icon' => 'user-circle', 'label' => 'My Profile', 'pattern' => 'alumni/information*'],
+                    ['route' => 'job.opportunities',     'icon' => 'briefcase',   'label' => 'Job Board',  'pattern' => 'job/opportunities*'],
+                    // ['route' => 'alumni.events',   'icon' => 'calendar',    'label' => 'Events',     'pattern' => 'alumni/events*'],
+                    // ['route' => 'alumni.yearbook', 'icon' => 'book-open',   'label' => 'Yearbook',   'pattern' => 'alumni/yearbook*'],
                 ];
             @endphp
 
@@ -136,7 +135,7 @@
                 @csrf
                 <button type="submit"
                         class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background-color: #3f7a91;">
+                        style="background-color: #7a3f91;">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
             </form>
@@ -148,14 +147,14 @@
 
         {{-- Mobile top bar --}}
         <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 lg:hidden shrink-0 z-30">
-            <button @click="open = !open" class="focus:outline-none p-2 rounded-lg hover:bg-gray-100 transition-colors" style="color: #0d2b3e;">
+            <button @click="open = !open" class="focus:outline-none p-2 rounded-lg hover:bg-gray-100 transition-colors" style="color: #2b0d3e;">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="open ? 'rotate-45 translate-y-2' : ''" class="w-full h-0.5 transition-all duration-300 origin-center" style="background-color: #0d2b3e;"></span>
-                    <span :class="open ? 'opacity-0' : ''" class="w-full h-0.5 transition-all duration-300" style="background-color: #0d2b3e;"></span>
-                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 transition-all duration-300 origin-center" style="background-color: #0d2b3e;"></span>
+                    <span :class="open ? 'rotate-45 translate-y-2' : ''" class="w-full h-0.5 transition-all duration-300 origin-center" style="background-color: #2b0d3e;"></span>
+                    <span :class="open ? 'opacity-0' : ''" class="w-full h-0.5 transition-all duration-300" style="background-color: #2b0d3e;"></span>
+                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 transition-all duration-300 origin-center" style="background-color: #2b0d3e;"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold" style="color: #0d2b3e;">Alumni Portal</h2>
+            <h2 class="text-lg font-bold" style="color: #2b0d3e;">Alumni Portal</h2>
             <div class="w-10"></div>
         </header>
 

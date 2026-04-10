@@ -61,13 +61,15 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $alumni = $user->alumni;
+        // ── Always fetch a fresh alumni record — never rely on cached relation ─
+        $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
 
         if (!$alumni) {
             $this->redirect(route('login'));
             return;
         }
 
+        // ── Setup already complete → go to information page ───────────────────
         if (!$alumni->needsAccountSetup()) {
             session()->forget([
                 'alumni_requires_password_change',
@@ -75,13 +77,13 @@ new #[Layout('app')] class extends Component {
                 'alumni_pending_password',
                 'alumni_password_reset_step',
             ]);
-            $this->redirect(route('alumni.dashboard'));
+            $this->redirect(route('alumni.information'));
             return;
         }
 
         session()->put('alumni_requires_password_change', true);
 
-        // ── Restore identity lock state ────────────────────────────────────
+        // ── Restore identity lock state ────────────────────────────────────────
         $identityLockKey = 'alumni_identity_locked:' . $alumni->id;
         if (cache()->has($identityLockKey)) {
             $this->identityLocked          = true;
@@ -117,7 +119,8 @@ new #[Layout('app')] class extends Component {
         $this->errorMessage   = '';
         $this->successMessage = '';
 
-        $alumni = auth()->user()->alumni;
+        // Fresh DB query — never use cached relation here
+        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         if (!$alumni) {
             $this->errorMessage = 'Alumni record not found.';
@@ -128,7 +131,6 @@ new #[Layout('app')] class extends Component {
         $lockTimeKey    = 'alumni_identity_locked_time:' . $alumni->id;
         $attemptsKey    = 'alumni_identity_attempts:'    . $alumni->id;
 
-        // ── 1. Check existing lock first ──────────────────────────────────
         if (cache()->has($lockKey)) {
             $remaining                     = (int) cache()->get($lockTimeKey, 600);
             $this->identityLocked          = true;
@@ -138,19 +140,9 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 2. Increment attempt BEFORE any field validation ──────────────
-        //       Every button click counts, even with blank/incomplete fields.
         $attempts = cache()->get($attemptsKey, 0) + 1;
-        cache()->put($attemptsKey, $attempts, 700); // slightly longer than lock TTL
+        cache()->put($attemptsKey, $attempts, 700);
 
-        // ── 3. Lock immediately if 3 attempts reached ─────────────────────
-        if ($attempts >= 3) {
-            // Do one last check: if fields are valid on this 3rd attempt,
-            // allow it through before locking — otherwise lock right now.
-            // We fall through to the validation below and lock on mismatch.
-        }
-
-        // ── 4. Validate the submitted fields ─────────────────────────────
         $inputFn  = strtolower(trim($this->first_name));
         $inputMi  = strtolower(trim($this->middle_initial));
         $inputLn  = strtolower(trim($this->last_name));
@@ -178,7 +170,6 @@ new #[Layout('app')] class extends Component {
               && $inputBat === $dbBat;
 
         if (!$valid) {
-            // ── Lock when 3rd attempt fails ───────────────────────────────
             if ($attempts >= 3) {
                 cache()->put($lockKey,     true, 600);
                 cache()->put($lockTimeKey, 600,  600);
@@ -192,7 +183,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 5. Identity matched — clear counters & advance ────────────────
         cache()->forget($attemptsKey);
         cache()->forget($lockKey);
         cache()->forget($lockTimeKey);
@@ -205,6 +195,13 @@ new #[Layout('app')] class extends Component {
     // ─────────────────────────────────────────────────────────────────────────
     // Step 2 — Set Email
     // ─────────────────────────────────────────────────────────────────────────
+
+    public function canSetEmail(): bool
+    {
+        return $this->email !== ''
+            && $this->email_confirmation !== ''
+            && $this->email === $this->email_confirmation;
+    }
 
     public function setEmail(): void
     {
@@ -226,7 +223,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $alumni = auth()->user()->alumni;
+        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         $exists = \App\Models\Alumni::where('email', $this->email)
             ->where('id', '!=', $alumni->id)
@@ -339,7 +336,8 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $alumni = auth()->user()->alumni;
+        // Fresh DB query
+        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         if (!$alumni) {
             $this->errorMessage = 'Alumni record not found.';
@@ -385,6 +383,7 @@ new #[Layout('app')] class extends Component {
         $this->successMessage = '';
 
         $trimmedOtp = trim($this->otp);
+
         if ($trimmedOtp === '' || strlen($trimmedOtp) < 6) {
             $this->errorMessage = 'Please enter the complete 6-digit verification code.';
             return;
@@ -395,8 +394,10 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $user   = auth()->user();
-        $alumni = $user->alumni;
+        $user = auth()->user();
+
+        // ── ALWAYS use a fresh DB query — never rely on cached relation ────────
+        $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
 
         if (!$alumni) {
             $this->errorMessage = 'Alumni record not found.';
@@ -420,18 +421,16 @@ new #[Layout('app')] class extends Component {
         }
 
         try {
-            $lockKey     = 'alumni_otp_locked:'    . $alumni->id;
-            $attemptsKey = 'alumni_otp_attempts:'  . $alumni->id;
+            $lockKey     = 'alumni_otp_locked:'   . $alumni->id;
+            $attemptsKey = 'alumni_otp_attempts:' . $alumni->id;
             $attempts    = cache()->get($attemptsKey, 0);
 
-            // ── Guard: already locked (must wait for timer / resend) ──────
             if (cache()->has($lockKey)) {
                 $this->otpLocked    = true;
                 $this->errorMessage = 'Too many failed attempts. Please wait for the timer to expire, then request a new code.';
                 return;
             }
 
-            // ── Guard: hit attempt limit ──────────────────────────────────
             if ($attempts >= 3) {
                 cache()->put($lockKey, true, 700);
                 $this->otpLocked    = true;
@@ -454,25 +453,57 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // ── OTP valid — save everything atomically ────────────────────
+            // ── OTP valid — clear rate-limit keys ─────────────────────────────
             cache()->forget($attemptsKey);
             cache()->forget($lockKey);
             $alumni->clearOtp();
 
-            DB::transaction(function () use ($user, $alumni, $pendingEmail, $pendingPassword) {
+            // ── Persist email + password + mark setup complete ─────────────────
+            // FIX: Set password_changed_at directly inside the alumni update()
+            //      call instead of relying on a separate markPasswordChanged()
+            //      method call, which could silently fail or not persist
+            //      properly. This guarantees needsAccountSetup() = false.
+            $now = now();
+
+            DB::transaction(function () use ($user, $alumni, $pendingEmail, $pendingPassword, $now) {
+
+                // 1. Update users table — real email + hashed new password
                 DB::table('users')
                     ->where('id', $user->id)
                     ->update([
-                        'email'    => $pendingEmail,
-                        'password' => Hash::make($pendingPassword),
+                        'email'      => $pendingEmail,
+                        'password'   => Hash::make($pendingPassword),
+                        'updated_at' => $now,
                     ]);
 
-                $alumni->update([
-                    'email'  => $pendingEmail,
-                    'status' => 'VERIFIED',
-                ]);
+                // 2. Update alumni record — verified email + VERIFIED status
+                //    + password_changed_at stamped HERE directly (no separate call)
+                //    This is the fix: one atomic update ensures all three fields
+                //    are committed together. If markPasswordChanged() was a
+                //    separate call it could be silently skipped on exception.
+                DB::table('alumni')
+                    ->where('id', $alumni->id)
+                    ->update([
+                        'email'               => $pendingEmail,
+                        'status'              => 'VERIFIED',
+                        'password_changed_at' => $now,
+                        'updated_at'          => $now,
+                    ]);
             });
 
+            // ── Refresh the in-memory Eloquent model to reflect DB state ───────
+            // This ensures any subsequent code in this request sees the correct
+            // values and won't accidentally use stale cached data.
+            $alumni->refresh();
+
+            // ── Sanity check — confirm setup is truly complete ─────────────────
+            if ($alumni->needsAccountSetup()) {
+                Log::error("Alumni verifyOtp: needsAccountSetup() still true after update for alumni #{$alumni->id}. Check model method and DB columns.");
+                $this->errorMessage = 'Account activation failed due to a data error. Please contact support.';
+                return;
+            }
+
+            // ── Clear all wizard session keys ─────────────────────────────────
             session()->forget([
                 'alumni_pending_email',
                 'alumni_pending_password',
@@ -480,13 +511,13 @@ new #[Layout('app')] class extends Component {
                 'alumni_requires_password_change',
             ]);
 
-            Log::info("Alumni account setup completed: {$pendingEmail} (student_id: {$alumni->student_id})");
+            Log::info("Alumni account setup completed: {$pendingEmail} (alumni_id: {$alumni->id}, student_id: {$alumni->student_id})");
 
             $this->showSuccessModal = true;
             $this->dispatch('account-activated');
 
         } catch (\Exception $e) {
-            Log::error("Alumni verifyOtp error: " . $e->getMessage());
+            Log::error("Alumni verifyOtp error: " . $e->getMessage() . " | Trace: " . $e->getTraceAsString());
             $this->errorMessage = 'Verification failed. Please try again.';
         }
     }
@@ -497,7 +528,9 @@ new #[Layout('app')] class extends Component {
         $this->successMessage = '';
 
         $pendingEmail = session('alumni_pending_email');
-        $alumni       = auth()->user()->alumni;
+
+        // Fresh DB query
+        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         if (!$alumni || !$pendingEmail) {
             $this->errorMessage = 'Session expired. Please start over.';
@@ -515,7 +548,6 @@ new #[Layout('app')] class extends Component {
                 Log::warning("Alumni resend OTP mail failed: " . $e->getMessage());
             }
 
-            // Clear all OTP rate-limit state so user gets 3 fresh attempts
             cache()->forget('alumni_otp_attempts:' . $alumni->id);
             cache()->forget('alumni_otp_locked:'   . $alumni->id);
 
@@ -563,9 +595,22 @@ new #[Layout('app')] class extends Component {
         }
     }
 
+    // ── After account setup → always go to profile information page first ─────
+    // The profile gate (Gate 2) in middleware will redirect to dashboard
+    // automatically once the profile is also completed.
     public function goToDashboard(): void
     {
-        $this->redirect(route('alumni.dashboard'));
+        // Fresh query to verify setup is genuinely done before redirecting
+        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
+
+        if ($alumni && !$alumni->needsAccountSetup()) {
+            $this->redirect(route('alumni.information'));
+        } else {
+            // Should never reach here after successful verifyOtp(), but
+            // guard against any edge-case where the DB write didn't land.
+            Log::warning("goToDashboard called but needsAccountSetup() still true for user #" . auth()->id());
+            $this->errorMessage = 'Account activation is still pending. Please refresh and try again.';
+        }
     }
 
 }; ?>
@@ -628,10 +673,10 @@ new #[Layout('app')] class extends Component {
                     </div>
 
                     <div class="space-y-2">
-                        <h2 class="text-2xl font-extrabold text-gray-900 tracking-tight">🎉 Congratulations!</h2>
-                        <p class="text-base font-semibold text-gray-700">Your alumni account has been activated.</p>
+                        <h2 class="text-2xl font-extrabold text-gray-900 tracking-tight">🎉 Account Activated!</h2>
+                        <p class="text-base font-semibold text-gray-700">Your alumni account has been verified.</p>
                         <p class="text-sm text-gray-500 leading-relaxed">
-                            Welcome to the PCST Alumni Portal! You can now access your dashboard, track job opportunities, and stay connected with your alma mater.
+                            Welcome to the PCST Alumni Portal! Please complete your profile information to access all features.
                         </p>
                     </div>
 
@@ -653,7 +698,7 @@ new #[Layout('app')] class extends Component {
                         class="w-full bg-gradient-to-r from-[#7a3f91] to-[#6a3080] hover:from-[#6a3080] hover:to-[#5a2670] text-white py-3.5 rounded-2xl font-bold text-base shadow-lg shadow-purple-200 hover:shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                     >
                         <span wire:loading.remove wire:target="goToDashboard">
-                            <i class="fa-solid fa-arrow-right-to-bracket mr-2"></i>Go to My Dashboard
+                            <i class="fa-solid fa-user-circle mr-2"></i>Complete My Profile
                         </span>
                         <span wire:loading wire:target="goToDashboard">
                             <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Loading…
@@ -734,7 +779,6 @@ new #[Layout('app')] class extends Component {
                     </div>
 
                     @if ($identityLocked)
-                        {{-- ── Locked notice ── --}}
                         <div class="bg-red-50 border-2 border-red-300 rounded-xl p-4 flex items-start gap-3">
                             <i class="fa-solid fa-lock text-red-500 mt-0.5 flex-shrink-0"></i>
                             <div>
@@ -752,7 +796,6 @@ new #[Layout('app')] class extends Component {
                         </div>
                     @endif
 
-                    {{-- Fields — always rendered so user can see them, but disabled when locked --}}
                     <div class="grid grid-cols-3 gap-3">
                         <div>
                             <label class="block text-sm font-semibold text-gray-800 mb-1">First Name</label>
@@ -785,7 +828,6 @@ new #[Layout('app')] class extends Component {
                         </div>
                         <div>
                             <label class="block text-sm font-semibold text-gray-800 mb-1">Student ID</label>
-                            {{-- No maxlength — user can enter any number of digits --}}
                             <input wire:model="student_id" type="text" autocomplete="off"
                                    {{ $identityLocked ? 'disabled' : '' }}
                                    class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
@@ -851,7 +893,7 @@ new #[Layout('app')] class extends Component {
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-semibold text-gray-800 mb-1">Email Address <span class="text-red-500">*</span></label>
-                            <input wire:model.blur="email" type="email" autocomplete="email"
+                            <input wire:model.live.debounce.300ms="email" type="email" autocomplete="email"
                                    class="w-full px-3 py-2.5 text-sm border-2 rounded-xl focus:outline-none focus:ring-2 transition-all bg-white text-gray-900
                                        {{ $errors->has('email') ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : 'border-gray-300 focus:border-[#7a3f91] focus:ring-[#7a3f91]/20' }}">
                             @error('email')
@@ -863,7 +905,7 @@ new #[Layout('app')] class extends Component {
 
                         <div>
                             <label class="block text-sm font-semibold text-gray-800 mb-1">Confirm Email <span class="text-red-500">*</span></label>
-                            <input wire:model.blur="email_confirmation" type="email" autocomplete="email"
+                            <input wire:model.live.debounce.300ms="email_confirmation" type="email" autocomplete="email"
                                    class="w-full px-3 py-2.5 text-sm border-2 rounded-xl focus:outline-none focus:ring-2 transition-all bg-white text-gray-900
                                        {{ $errors->has('email_confirmation') ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ($email_confirmation !== '' && $email !== $email_confirmation ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ($email_confirmation !== '' && $email === $email_confirmation ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-100' : 'border-gray-300 focus:border-[#7a3f91] focus:ring-[#7a3f91]/20')) }}">
                             @error('email_confirmation')
@@ -888,9 +930,14 @@ new #[Layout('app')] class extends Component {
                     <button wire:click="setEmail"
                             wire:loading.attr="disabled"
                             wire:target="setEmail"
-                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] text-white py-2.5 rounded-xl font-semibold text-sm shadow-md hover:shadow-lg active:scale-[0.98] disabled:opacity-70 transition-all flex items-center justify-center gap-2">
+                            {{ !$this->canSetEmail() ? 'disabled' : '' }}
+                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-2.5 rounded-xl font-semibold text-sm shadow-md hover:shadow-lg active:scale-[0.98] disabled:shadow-none disabled:opacity-70 transition-all flex items-center justify-center gap-2">
                         <span wire:loading.remove wire:target="setEmail">
-                            <i class="fa-solid fa-envelope mr-1"></i> Save Email & Continue
+                            @if (!$this->canSetEmail())
+                                <i class="fa-solid fa-lock mr-1"></i> Enter matching emails to continue
+                            @else
+                                <i class="fa-solid fa-envelope mr-1"></i> Save Email & Continue
+                            @endif
                         </span>
                         <span wire:loading wire:target="setEmail">
                             <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Saving…
@@ -1038,7 +1085,6 @@ new #[Layout('app')] class extends Component {
                             </p>
 
                             @if ($otpLocked)
-                                {{-- When locked, show message telling user to wait for timer --}}
                                 <p class="text-xs text-red-600 mt-2 font-semibold">
                                     <i class="fa-solid fa-lock mr-1"></i>
                                     Wait for timer to expire, then request a new code.
@@ -1064,7 +1110,6 @@ new #[Layout('app')] class extends Component {
                             </div>
 
                             @if (!$otpLocked)
-                                {{-- Normal state: show verify button --}}
                                 <button wire:click="verifyOtp"
                                         wire:loading.attr="disabled"
                                         wire:target="verifyOtp"
@@ -1079,7 +1124,6 @@ new #[Layout('app')] class extends Component {
                                     </span>
                                 </button>
                             @else
-                                {{-- Locked state: show prominent notice --}}
                                 <div class="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
                                     <i class="fa-solid fa-lock text-red-500 text-lg mb-1"></i>
                                     <p class="text-sm font-semibold text-red-700">Verification locked</p>
@@ -1087,12 +1131,6 @@ new #[Layout('app')] class extends Component {
                                 </div>
                             @endif
 
-                            {{--
-                                RESEND BUTTON:
-                                - When NOT locked  → disabled until timer expires (canResend = true)
-                                - When locked      → ALSO disabled until timer expires (canResend = true)
-                                In both cases the user MUST wait for the countdown to reach 0 first.
-                            --}}
                             <button wire:click="resendOtp"
                                     wire:loading.attr="disabled"
                                     wire:target="resendOtp"

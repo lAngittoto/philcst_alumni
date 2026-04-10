@@ -41,12 +41,21 @@ new #[Layout('app')] class extends Component {
             }
 
             if ($user->role === 'alumni') {
+                // FIX: fresh direct query, never use cached relation
                 $alumni = Alumni::where('user_id', $user->id)->first();
 
                 if ($alumni && $alumni->needsAccountSetup()) {
                     Auth::logout();
                     session()->invalidate();
                     session()->regenerateToken();
+                    return;
+                }
+
+                // FIX: redirect to information first — middleware (Gate 2) will
+                // forward to dashboard automatically once profile is complete.
+                // This prevents a stale $user->alumni causing a loop.
+                if ($alumni && !$alumni->isProfileComplete()) {
+                    $this->redirect(route('alumni.information'));
                     return;
                 }
 
@@ -128,7 +137,7 @@ new #[Layout('app')] class extends Component {
             'password' => 'required|string|min:1',
         ]);
 
-        // ── 1. Check account-level lockout ─────────────────────────────────────
+        // ── 1. Check account-level lockout ────────────────────────────────────
         $lockedFor = $this->accountLockedSeconds();
         if ($lockedFor > 0) {
             $this->password = '';
@@ -139,7 +148,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 2. IP-level rate limit ─────────────────────────────────────────────
+        // ── 2. IP-level rate limit ────────────────────────────────────────────
         if (RateLimiter::tooManyAttempts($this->throttleKey(), 15)) {
             $seconds = RateLimiter::availableIn($this->throttleKey());
             $this->password = '';
@@ -150,7 +159,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 3. Try ALUMNI (Student ID) login ───────────────────────────────────
+        // ── 3. Try ALUMNI (Student ID) login ──────────────────────────────────
         $rawId    = ltrim(preg_replace('/[^0-9]/', '', $this->name), '0') ?: '0';
         $paddedId = str_pad($rawId, 8, '0', STR_PAD_LEFT);
 
@@ -189,34 +198,35 @@ new #[Layout('app')] class extends Component {
             session()->regenerate();
 
             // ── Re-fetch fresh alumni record AFTER session regenerate ──────────
-            // Use the Alumni model directly — User::alumni() relationship
-            // may not be defined, so we query the Alumni table instead.
+            // FIX: direct query guarantees we never get a stale cached model.
             $alumni = Alumni::where('user_id', $user->id)->first();
 
-            // needsAccountSetup() is the SINGLE gate:
-            //   • status === 'PENDING'          → must complete wizard
-            //   • email is null / empty         → must complete wizard
-            //   • still on temp password hash   → must complete wizard
-            // ALL THREE must be false to access the dashboard.
+            // GATE 1: needs wizard?
             if (!$alumni || $alumni->needsAccountSetup()) {
-                // Clear any stale wizard keys from previous sessions, then set
-                // the fresh-login flag for the middleware and wizard mount().
                 session()->forget([
                     'alumni_pending_email',
                     'alumni_pending_password',
                     'alumni_password_reset_step',
                 ]);
                 session()->put('alumni_requires_password_change', true);
-
                 $this->redirectRoute('alumni.change-password', navigate: true);
                 return;
             }
 
+            // GATE 2: needs profile? → send to information page directly.
+            // The middleware will handle forwarding to dashboard once the
+            // profile is complete so we never need to decide here.
+            if (!$alumni->isProfileComplete()) {
+                $this->redirectRoute('alumni.information', navigate: true);
+                return;
+            }
+
+            // Both gates passed → dashboard
             $this->redirectRoute('alumni.dashboard', navigate: true);
             return;
         }
 
-        // ── 4. Try ORGANIZER (Teacher ID) login ────────────────────────────────
+        // ── 4. Try ORGANIZER (Teacher ID) login ───────────────────────────────
         $organizer = Organizer::where('id_number', $this->name)->first();
 
         if ($organizer && $organizer->user) {
