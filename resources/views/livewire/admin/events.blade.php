@@ -822,33 +822,17 @@ new class extends Component {
                             }
                         @endphp
 
-                        <tr class="
-                            @if($isCompleted) bg-green-50 hover:bg-green-100
-                            @elseif($isOrgDeleted) bg-red-50 hover:bg-red-100
-                            @else bg-white hover:bg-gray-50
-                            @endif transition-colors duration-100">
+                        <tr class="bg-white hover:bg-gray-50 transition-colors duration-100">
 
                             {{-- Title --}}
                             <td class="px-4 sm:px-5 py-3.5 max-w-[180px] sm:max-w-[220px]">
-                                <p class="font-semibold text-sm truncate
-                                    @if($isCompleted) text-green-800
-                                    @elseif($isOrgDeleted) text-red-600 line-through
-                                    @else text-gray-900
-                                    @endif">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm truncate text-gray-900 {{ $isOrgDeleted ? 'line-through' : '' }}">{{ $event->title }}</p>
                             </td>
 
                             {{-- Date / Time --}}
                             <td class="px-4 sm:px-5 py-3.5 whitespace-nowrap">
-                                <span class="text-sm font-semibold
-                                    @if($isCompleted) text-green-800
-                                    @elseif($isOrgDeleted) text-red-600
-                                    @else text-gray-900
-                                    @endif">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
-                                <p class="text-xs mt-0.5
-                                    @if($isCompleted) text-green-600
-                                    @elseif($isOrgDeleted) text-red-500
-                                    @else text-gray-500
-                                    @endif">
+                                <span class="text-sm font-semibold text-gray-900">{{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y') }}</span>
+                                <p class="text-xs mt-0.5 text-gray-500">
                                     {{ $event->event_date->setTimezone('Asia/Manila')->format('g:i A') }}
                                     @if($event->event_end_date)<span class="mx-1">–</span>{{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif
                                 </p>
@@ -857,11 +841,7 @@ new class extends Component {
                             {{-- Organizer --}}
                             <td class="px-4 sm:px-5 py-3.5 hidden md:table-cell">
                                 @if($event->organizer)
-                                    <p class="text-xs font-semibold
-                                        @if($isCompleted) text-green-700
-                                        @elseif($isOrgDeleted) text-red-600
-                                        @else text-gray-800
-                                        @endif">{{ $event->organizer->name }}</p>
+                                    <p class="text-xs font-semibold text-gray-800">{{ $event->organizer->name }}</p>
                                 @else
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs font-bold">
                                         <i class="fas fa-shield-halved text-[9px]"></i> Admin
@@ -871,11 +851,7 @@ new class extends Component {
 
                             {{-- College --}}
                             <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell">
-                                <p class="text-xs font-semibold max-w-[140px] truncate
-                                    @if($isCompleted) text-green-700
-                                    @elseif($isOrgDeleted) text-red-600
-                                    @else text-gray-700
-                                    @endif" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
+                                <p class="text-xs font-semibold max-w-[140px] truncate text-gray-700" title="{{ $displayCollege }}">{{ $displayCollege }}</p>
                             </td>
 
                             {{-- RSVPs --}}
@@ -929,7 +905,7 @@ new class extends Component {
                                     {{-- View (always) --}}
                                     <button wire:click="viewEvent({{ $event->id }})"
                                             class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
-                                        <i class="fas fa-eye text-[10px]"></i><span class="hidden sm:inline">View</span>
+                                        <i class="fas fa-eye text-[10px]"></i><span>View</span>
                                     </button>
 
                                     @if($isCompleted)
@@ -941,35 +917,35 @@ new class extends Component {
                                     @elseif($isOrgDeleted)
                                         <button wire:click="confirmRestore({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 rounded-lg transition">
-                                            <i class="fas fa-rotate-left text-[10px]"></i><span class="hidden sm:inline">Restore</span>
+                                            <i class="fas fa-rotate-left text-[10px]"></i><span>Restore</span>
                                         </button>
                                         <button wire:click="confirmDelete({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
-                                            <i class="fas fa-trash text-[10px]"></i><span class="hidden lg:inline">Delete</span>
+                                            <i class="fas fa-trash text-[10px]"></i><span>Delete</span>
                                         </button>
 
                                     @elseif($event->status === 'PENDING')
                                         <button wire:click="confirmApprove({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg transition">
-                                            <i class="fas fa-check text-[10px]"></i><span class="hidden sm:inline">Approve</span>
+                                            <i class="fas fa-check text-[10px]"></i><span>Approve</span>
                                         </button>
                                         <button wire:click="confirmReject({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 rounded-lg transition">
-                                            <i class="fas fa-xmark text-[10px]"></i><span class="hidden sm:inline">Reject</span>
+                                            <i class="fas fa-xmark text-[10px]"></i><span>Reject</span>
                                         </button>
                                         <button wire:click="confirmDelete({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
-                                            <i class="fas fa-trash text-[10px]"></i><span class="hidden lg:inline">Delete</span>
+                                            <i class="fas fa-trash text-[10px]"></i><span>Delete</span>
                                         </button>
 
                                     @elseif($event->status === 'REJECTED')
                                         <button wire:click="confirmApprove({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg transition">
-                                            <i class="fas fa-rotate-left text-[10px]"></i><span class="hidden sm:inline">Re-Approve</span>
+                                            <i class="fas fa-rotate-left text-[10px]"></i><span>Re-Approve</span>
                                         </button>
                                         <button wire:click="confirmDelete({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
-                                            <i class="fas fa-trash text-[10px]"></i><span class="hidden lg:inline">Delete</span>
+                                            <i class="fas fa-trash text-[10px]"></i><span>Delete</span>
                                         </button>
                                     @endif
                                 </div>
@@ -1286,7 +1262,7 @@ new class extends Component {
             @endif
 
             <div class="flex items-start justify-between gap-3 mb-4">
-                <h2 class="text-base sm:text-lg font-bold leading-snug {{ $isCompleted ? 'text-green-800' : ($isOrgDeleted ? 'line-through text-red-500' : 'text-gray-900') }}">{{ $ev->title }}</h2>
+                <h2 class="text-base sm:text-lg font-bold leading-snug text-gray-900">{{ $ev->title }}</h2>
                 @if($isCompleted)
                     <span class="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 border border-green-300 rounded-full text-[11px] font-bold"><i class="fas fa-circle-check text-[9px]"></i> Completed</span>
                 @elseif($isOrgDeleted)

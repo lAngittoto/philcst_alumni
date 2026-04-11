@@ -105,7 +105,7 @@
                     ['route' => 'alumni.dashboard',   'icon' => 'gauge-high',  'label' => 'Dashboard',  'pattern' => 'alumni/dashboard*'],
                     ['route' => 'alumni.information', 'icon' => 'user-circle', 'label' => 'My Profile', 'pattern' => 'alumni/information*'],
                     ['route' => 'job.opportunities',     'icon' => 'briefcase',   'label' => 'Job Board',  'pattern' => 'job/opportunities*'],
-                    // ['route' => 'alumni.events',   'icon' => 'calendar',    'label' => 'Events',     'pattern' => 'alumni/events*'],
+                    ['route' => 'upcoming.events',   'icon' => 'calendar',    'label' => 'Events',     'pattern' => 'upcoming/events*'],
                     // ['route' => 'alumni.yearbook', 'icon' => 'book-open',   'label' => 'Yearbook',   'pattern' => 'alumni/yearbook*'],
                 ];
             @endphp

@@ -1,5 +1,3 @@
-{{-- resources/views/livewire/alumni/change-password.blade.php --}}
-
 <?php
 
 use Livewire\Volt\Component;
@@ -49,7 +47,33 @@ new #[Layout('app')] class extends Component {
     public bool   $showSuccessModal = false;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Mount
+    // Cache key helpers — keyed by alumni ID so they survive session resets
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function cacheEmailKey(int $alumniId): string
+    {
+        return "alumni_pending_email:{$alumniId}";
+    }
+
+    private function cachePasswordKey(int $alumniId): string
+    {
+        return "alumni_pending_password:{$alumniId}";
+    }
+
+    private function cacheStepKey(int $alumniId): string
+    {
+        return "alumni_pending_step:{$alumniId}";
+    }
+
+    private function clearWizardCache(int $alumniId): void
+    {
+        cache()->forget($this->cacheEmailKey($alumniId));
+        cache()->forget($this->cachePasswordKey($alumniId));
+        cache()->forget($this->cacheStepKey($alumniId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mount — DB-first: OTP in DB is the source of truth, not session
     // ─────────────────────────────────────────────────────────────────────────
 
     public function mount(): void
@@ -61,7 +85,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Always fetch a fresh alumni record — never rely on cached relation ─
         $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
 
         if (!$alumni) {
@@ -69,7 +92,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Setup already complete → go to information page ───────────────────
         if (!$alumni->needsAccountSetup()) {
             session()->forget([
                 'alumni_requires_password_change',
@@ -77,26 +99,60 @@ new #[Layout('app')] class extends Component {
                 'alumni_pending_password',
                 'alumni_password_reset_step',
             ]);
+            $this->clearWizardCache($alumni->id);
             $this->redirect(route('alumni.information'));
             return;
         }
 
         session()->put('alumni_requires_password_change', true);
 
-        // ── Restore identity lock state ────────────────────────────────────────
+        // ── Identity lock state ───────────────────────────────────────────────
         $identityLockKey = 'alumni_identity_locked:' . $alumni->id;
         if (cache()->has($identityLockKey)) {
             $this->identityLocked          = true;
             $this->identityLockSecondsLeft = (int) cache()->get('alumni_identity_locked_time:' . $alumni->id, 600);
         }
 
+        // ── DB-FIRST: If OTP is still active in DB, force Step 4 ─────────────
+        // This is the primary fix: alumni cannot bypass Step 4 by logging out
+        // and back in. The active OTP in the DB overrides any session state.
+        // pending_email and pending_password are read from cache (keyed by
+        // alumni ID) — these survive session resets / re-logins.
+        if ($alumni->isOtpStillActive()) {
+            $cachedEmail    = cache()->get($this->cacheEmailKey($alumni->id));
+            $cachedPassword = cache()->get($this->cachePasswordKey($alumni->id));
+
+            if ($cachedEmail && $cachedPassword) {
+                // Restore session from cache so the rest of the wizard works
+                session()->put('alumni_pending_email',       $cachedEmail);
+                session()->put('alumni_pending_password',    $cachedPassword);
+                session()->put('alumni_password_reset_step', 'password_set');
+
+                $this->step      = 4;
+                $this->otpSent   = true;
+                $this->otpLocked = cache()->has('alumni_otp_locked:' . $alumni->id);
+
+                // Restore countdown from localStorage (timer stored client-side)
+                $this->dispatch('otp-sent');
+                return;
+            }
+
+            // OTP is active but cache is missing (very rare edge case —
+            // cache evicted while OTP is still valid). Clear the stale OTP
+            // so the alumni can start fresh from Step 1.
+            $alumni->clearOtp();
+            cache()->forget('alumni_otp_attempts:' . $alumni->id);
+            cache()->forget('alumni_otp_locked:'   . $alumni->id);
+        }
+
+        // ── Fallback: restore from session (same browser, session intact) ─────
         $resetStep       = session('alumni_password_reset_step');
         $pendingEmail    = session('alumni_pending_email');
         $pendingPassword = session('alumni_pending_password');
 
-        if ($resetStep === 'password_set' && $pendingEmail && $pendingPassword && $alumni->otp) {
-            $this->step    = 4;
-            $this->otpSent = true;
+        if ($resetStep === 'password_set' && $pendingEmail && $pendingPassword) {
+            $this->step      = 4;
+            $this->otpSent   = true;
             $this->otpLocked = cache()->has('alumni_otp_locked:' . $alumni->id);
             $this->dispatch('otp-sent');
         } elseif ($resetStep === 'email_set' && $pendingEmail) {
@@ -107,6 +163,8 @@ new #[Layout('app')] class extends Component {
         } else {
             $this->step = 1;
             session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
+            $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
+            if ($alumni) $this->clearWizardCache($alumni->id);
         }
     }
 
@@ -119,7 +177,6 @@ new #[Layout('app')] class extends Component {
         $this->errorMessage   = '';
         $this->successMessage = '';
 
-        // Fresh DB query — never use cached relation here
         $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         if (!$alumni) {
@@ -245,8 +302,11 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // Persist email in both session AND cache (cache survives re-logins)
         session()->put('alumni_pending_email', $this->email);
         session()->put('alumni_password_reset_step', 'email_set');
+        cache()->put($this->cacheEmailKey($alumni->id), $this->email, now()->addHour());
+        cache()->put($this->cacheStepKey($alumni->id), 'email_set', now()->addHour());
 
         $this->step           = 3;
         $this->successMessage = 'Email saved! Now create a strong password for your account.';
@@ -328,7 +388,10 @@ new #[Layout('app')] class extends Component {
             'password_confirmation.same' => 'Passwords do not match.',
         ]);
 
-        $pendingEmail = session('alumni_pending_email');
+        $pendingEmail = session('alumni_pending_email')
+            ?? cache()->get($this->cacheEmailKey(
+                \App\Models\Alumni::where('user_id', auth()->id())->value('id')
+            ));
 
         if (!$pendingEmail) {
             $this->errorMessage = 'Session expired. Please go back and re-enter your email.';
@@ -336,7 +399,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // Fresh DB query
         $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         if (!$alumni) {
@@ -354,8 +416,14 @@ new #[Layout('app')] class extends Component {
                 Log::warning("Alumni OTP mail failed for {$pendingEmail}: " . $e->getMessage());
             }
 
-            session()->put('alumni_pending_password', $this->password);
+            // Persist in session AND cache (15-min TTL matches OTP lifetime)
+            session()->put('alumni_pending_password',    $this->password);
+            session()->put('alumni_pending_email',       $pendingEmail);
             session()->put('alumni_password_reset_step', 'password_set');
+
+            cache()->put($this->cachePasswordKey($alumni->id), $this->password,  now()->addMinutes(15));
+            cache()->put($this->cacheEmailKey($alumni->id),    $pendingEmail,     now()->addMinutes(15));
+            cache()->put($this->cacheStepKey($alumni->id),     'password_set',   now()->addMinutes(15));
 
             cache()->forget('alumni_otp_attempts:' . $alumni->id);
             cache()->forget('alumni_otp_locked:'   . $alumni->id);
@@ -394,9 +462,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $user = auth()->user();
-
-        // ── ALWAYS use a fresh DB query — never rely on cached relation ────────
+        $user   = auth()->user();
         $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
 
         if (!$alumni) {
@@ -404,19 +470,17 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        if (session('alumni_password_reset_step') !== 'password_set') {
-            $this->errorMessage = 'Invalid session state. Please start over.';
-            $this->step = 1;
-            return;
-        }
-
-        $pendingEmail    = session('alumni_pending_email');
-        $pendingPassword = session('alumni_pending_password');
+        // Read from session first, fall back to cache (survived re-login)
+        $pendingEmail    = session('alumni_pending_email')
+            ?? cache()->get($this->cacheEmailKey($alumni->id));
+        $pendingPassword = session('alumni_pending_password')
+            ?? cache()->get($this->cachePasswordKey($alumni->id));
 
         if (!$pendingEmail || !$pendingPassword) {
             $this->errorMessage = 'Session expired. Please start over.';
             $this->step = 1;
             session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
+            $this->clearWizardCache($alumni->id);
             return;
         }
 
@@ -453,21 +517,13 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // ── OTP valid — clear rate-limit keys ─────────────────────────────
             cache()->forget($attemptsKey);
             cache()->forget($lockKey);
             $alumni->clearOtp();
 
-            // ── Persist email + password + mark setup complete ─────────────────
-            // FIX: Set password_changed_at directly inside the alumni update()
-            //      call instead of relying on a separate markPasswordChanged()
-            //      method call, which could silently fail or not persist
-            //      properly. This guarantees needsAccountSetup() = false.
             $now = now();
 
             DB::transaction(function () use ($user, $alumni, $pendingEmail, $pendingPassword, $now) {
-
-                // 1. Update users table — real email + hashed new password
                 DB::table('users')
                     ->where('id', $user->id)
                     ->update([
@@ -476,11 +532,6 @@ new #[Layout('app')] class extends Component {
                         'updated_at' => $now,
                     ]);
 
-                // 2. Update alumni record — verified email + VERIFIED status
-                //    + password_changed_at stamped HERE directly (no separate call)
-                //    This is the fix: one atomic update ensures all three fields
-                //    are committed together. If markPasswordChanged() was a
-                //    separate call it could be silently skipped on exception.
                 DB::table('alumni')
                     ->where('id', $alumni->id)
                     ->update([
@@ -491,25 +542,22 @@ new #[Layout('app')] class extends Component {
                     ]);
             });
 
-            // ── Refresh the in-memory Eloquent model to reflect DB state ───────
-            // This ensures any subsequent code in this request sees the correct
-            // values and won't accidentally use stale cached data.
             $alumni->refresh();
 
-            // ── Sanity check — confirm setup is truly complete ─────────────────
             if ($alumni->needsAccountSetup()) {
-                Log::error("Alumni verifyOtp: needsAccountSetup() still true after update for alumni #{$alumni->id}. Check model method and DB columns.");
+                Log::error("Alumni verifyOtp: needsAccountSetup() still true after update for alumni #{$alumni->id}.");
                 $this->errorMessage = 'Account activation failed due to a data error. Please contact support.';
                 return;
             }
 
-            // ── Clear all wizard session keys ─────────────────────────────────
+            // Clear everything — session + cache
             session()->forget([
                 'alumni_pending_email',
                 'alumni_pending_password',
                 'alumni_password_reset_step',
                 'alumni_requires_password_change',
             ]);
+            $this->clearWizardCache($alumni->id);
 
             Log::info("Alumni account setup completed: {$pendingEmail} (alumni_id: {$alumni->id}, student_id: {$alumni->student_id})");
 
@@ -527,10 +575,11 @@ new #[Layout('app')] class extends Component {
         $this->errorMessage   = '';
         $this->successMessage = '';
 
-        $pendingEmail = session('alumni_pending_email');
-
-        // Fresh DB query
         $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
+
+        // Read from session first, fall back to cache
+        $pendingEmail = session('alumni_pending_email')
+            ?? ($alumni ? cache()->get($this->cacheEmailKey($alumni->id)) : null);
 
         if (!$alumni || !$pendingEmail) {
             $this->errorMessage = 'Session expired. Please start over.';
@@ -547,6 +596,14 @@ new #[Layout('app')] class extends Component {
             } catch (\Exception $e) {
                 Log::warning("Alumni resend OTP mail failed: " . $e->getMessage());
             }
+
+            // Refresh cache TTL to another 15 minutes on resend
+            $pendingPassword = session('alumni_pending_password')
+                ?? cache()->get($this->cachePasswordKey($alumni->id));
+
+            cache()->put($this->cacheEmailKey($alumni->id),    $pendingEmail,     now()->addMinutes(15));
+            cache()->put($this->cachePasswordKey($alumni->id), $pendingPassword,  now()->addMinutes(15));
+            cache()->put($this->cacheStepKey($alumni->id),     'password_set',   now()->addMinutes(15));
 
             cache()->forget('alumni_otp_attempts:' . $alumni->id);
             cache()->forget('alumni_otp_locked:'   . $alumni->id);
@@ -571,6 +628,22 @@ new #[Layout('app')] class extends Component {
     {
         if ($this->step <= 1) return;
 
+        // Server-side guard: block back from Step 4 while OTP is active
+        if ($this->step === 4) {
+            $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
+            if ($alumni && $alumni->isOtpStillActive()) {
+                $this->errorMessage = 'You cannot go back while a verification code is active. Please wait for the timer to expire, then request a new code.';
+                return;
+            }
+            // OTP expired — clear it and wizard cache so alumni starts fresh
+            if ($alumni) {
+                $alumni->clearOtp();
+                cache()->forget('alumni_otp_attempts:' . $alumni->id);
+                cache()->forget('alumni_otp_locked:'   . $alumni->id);
+                $this->clearWizardCache($alumni->id);
+            }
+        }
+
         $this->step--;
         $this->errorMessage   = '';
         $this->successMessage = '';
@@ -579,6 +652,8 @@ new #[Layout('app')] class extends Component {
 
         if ($this->step === 1) {
             session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
+            $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
+            if ($alumni) $this->clearWizardCache($alumni->id);
             $this->first_name = $this->middle_initial = $this->last_name = '';
             $this->suffix = $this->student_id = $this->course_code = $this->batch = '';
         } elseif ($this->step === 2) {
@@ -595,19 +670,13 @@ new #[Layout('app')] class extends Component {
         }
     }
 
-    // ── After account setup → always go to profile information page first ─────
-    // The profile gate (Gate 2) in middleware will redirect to dashboard
-    // automatically once the profile is also completed.
     public function goToDashboard(): void
     {
-        // Fresh query to verify setup is genuinely done before redirecting
         $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
         if ($alumni && !$alumni->needsAccountSetup()) {
             $this->redirect(route('alumni.information'));
         } else {
-            // Should never reach here after successful verifyOtp(), but
-            // guard against any edge-case where the DB write didn't land.
             Log::warning("goToDashboard called but needsAccountSetup() still true for user #" . auth()->id());
             $this->errorMessage = 'Account activation is still pending. Please refresh and try again.';
         }
@@ -831,10 +900,10 @@ new #[Layout('app')] class extends Component {
                             <input wire:model="student_id" type="text" autocomplete="off"
                                    {{ $identityLocked ? 'disabled' : '' }}
                                    class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                   placeholder="Student ID number">
+                                   >
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold text-gray-800 mb-1">Course Code</label>
+                            <label class="block text-sm font-semibold text-gray-800 mb-1">Course</label>
                             <input wire:model="course_code" type="text" autocomplete="off"
                                    {{ $identityLocked ? 'disabled' : '' }}
                                    class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
@@ -847,7 +916,7 @@ new #[Layout('app')] class extends Component {
                             <input wire:model="batch" type="text" maxlength="4" autocomplete="off"
                                    {{ $identityLocked ? 'disabled' : '' }}
                                    class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                   placeholder="e.g. 2023">
+                                   >
                         </div>
                     </div>
 
@@ -1066,7 +1135,11 @@ new #[Layout('app')] class extends Component {
                         <h2 class="text-lg font-bold text-gray-900">Verify Your Email</h2>
                         <p class="text-sm text-gray-600 mt-0.5">
                             Enter the 6-digit code sent to
-                            <strong class="text-[#7a3f91]">{{ session('alumni_pending_email', 'your email') }}</strong>.
+                            <strong class="text-[#7a3f91]">
+                                {{ session('alumni_pending_email')
+                                    ?? cache()->get('alumni_pending_email:' . (\App\Models\Alumni::where('user_id', auth()->id())->value('id') ?? 0))
+                                    ?? 'your email' }}
+                            </strong>.
                         </p>
                     </div>
 
@@ -1165,10 +1238,32 @@ new #[Layout('app')] class extends Component {
                         </div>
                     </div>
 
-                    <button wire:click="previousStep" type="button"
-                            class="w-full text-sm text-gray-600 py-1.5 text-center hover:text-[#7a3f91] hover:bg-gray-50 rounded-lg transition-colors font-medium">
-                        ← Back to Password Setup
-                    </button>
+                    {{-- Back button — locked while OTP is active --}}
+                    <div x-data>
+                        <button
+                            wire:click="previousStep"
+                            type="button"
+                            x-bind:disabled="!canResend"
+                            x-bind:title="!canResend ? 'You cannot go back while a verification code is active. Wait for the timer to expire.' : ''"
+                            :class="canResend
+                                ? 'text-gray-600 hover:text-[#7a3f91] hover:bg-gray-50 cursor-pointer'
+                                : 'text-gray-300 cursor-not-allowed'"
+                            class="w-full text-sm py-1.5 text-center rounded-lg transition-colors font-medium flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-arrow-left text-xs"></i>
+                            <span x-show="canResend">Back to Password Setup</span>
+                            <span x-show="!canResend" x-cloak class="flex items-center gap-1.5">
+                                <i class="fa-solid fa-lock text-xs text-gray-300"></i>
+                                Back locked — wait for timer to expire
+                            </span>
+                        </button>
+
+                        <p x-show="!canResend" x-cloak
+                           class="text-[0.7rem] text-center text-amber-600 mt-1 font-medium">
+                            <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                            A verification code is active. You can go back only after it expires.
+                        </p>
+                    </div>
+
                 </div>
             @endif
 

@@ -65,6 +65,7 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
     // ── Protected pages (Gate 2 blocks until profile is complete) ─────────────
     Route::view('/alumni/dashboard', 'alumni.dashboard-wrapper')->name('alumni.dashboard');
     Route::view('/job/opportunities', 'alumni.job-opportunities-wrapper')->name('job.opportunities');
+    Route::view('/upcoming/events', 'alumni.upcoming-events-wrapper')->name('upcoming.events');
 });
 
 // ===================================

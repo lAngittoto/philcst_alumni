@@ -10,9 +10,7 @@ use Illuminate\Http\UploadedFile;
 
 class AdminEventController extends Controller
 {
-    /**
-     * Admin can see ALL events including soft-deleted (ORGANIZER_DELETED).
-     */
+    
     public function getEvent(int $id): AdminEvent
     {
         return AdminEvent::withTrashed()->findOrFail($id);

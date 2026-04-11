@@ -2,15 +2,14 @@
 /**
  * FILE: resources/views/livewire/admin/job-posts.blade.php
  *
- * CHANGES FROM ORIGINAL:
- *  - Added AuditLog::create() calls to all job actions (main goal)
- *  - Replaced app(JobController::class) and app(OrganizerJobController::class)
- *    with direct Eloquent — fixes the ClassLoader 60-second timeout on Windows
- *    by eliminating heavy class autoloading on every Livewire render
- *  - Inlined college resolution query (no more controller call in Computed property)
- *  - Cached AuditLog writes are isolated in try/catch — failures never break main ops
- *  - Removed redundant ->with('organizer') re-fetches; reuse already-paginated data
- *  - Added writeAuditLog() helper (DRY, non-blocking)
+ * CHANGES:
+ *  - Removed all row background colors (orange/red) — uniform white rows
+ *  - Job Title, Organization, Deadline columns = pure black text always
+ *  - Auto-inactive: expired ACTIVE jobs are set to INACTIVE on mount
+ *  - Activating a job with passed deadline forces admin to update deadline first
+ *  - AuditLog::create() calls on all job actions
+ *  - Direct Eloquent instead of controller autoloads (Windows ClassLoader fix)
+ *  - writeAuditLog() helper — non-blocking
  */
 
 use Livewire\Volt\Component;
@@ -98,7 +97,31 @@ new class extends Component {
     {
         abort_unless(auth()->check() && auth()->user()->role === 'admin', 403);
 
-        // PERF: Use firstWhere (single query, no where builder overhead)
+        // AUTO-INACTIVE: Set all ACTIVE jobs with passed deadlines to INACTIVE
+        $expiredCount = JobPosting::where('status', 'ACTIVE')
+            ->whereDate('deadline', '<', now('Asia/Manila')->toDateString())
+            ->count();
+
+        if ($expiredCount > 0) {
+            JobPosting::where('status', 'ACTIVE')
+                ->whereDate('deadline', '<', now('Asia/Manila')->toDateString())
+                ->update([
+                    'status'          => 'INACTIVE',
+                    'updated_by'      => 'System (Auto-Expired)',
+                    'updated_by_role' => 'admin',
+                    'updated_at'      => now(),
+                ]);
+
+            // Audit the auto-expiry batch
+            $this->writeAuditLog(
+                action:      'updated',
+                description: "System auto-deactivated {$expiredCount} expired job(s) on page load.",
+                severity:    'info',
+                subject:     'Auto-Expiry',
+                newValues:   ['status' => 'INACTIVE', 'count' => $expiredCount],
+            );
+        }
+
         $philcst = JobOption::where('type', 'company_type')
             ->where('label', 'like', '%PHILCST%')
             ->orderBy('label')
@@ -118,12 +141,6 @@ new class extends Component {
         return strip_tags(trim($value));
     }
 
-    /**
-     * Non-blocking audit log writer.
-     * Wrapped in try/catch so a DB hiccup here never kills the main operation.
-     *
-     * @param  array<string,mixed> $extra  Merge extra fields (old_values, new_values, severity…)
-     */
     private function writeAuditLog(
         string $action,
         string $description,
@@ -153,10 +170,6 @@ new class extends Component {
         }
     }
 
-    /**
-     * Fetch a single JobPosting with organizer — replaces app(JobController)->getJob().
-     * Direct Eloquent avoids the autoloader cost of instantiating a separate controller.
-     */
     private function fetchJob(int $id): JobPosting
     {
         return JobPosting::with('organizer')->findOrFail($id);
@@ -206,15 +219,6 @@ new class extends Component {
     // ──────────────────────────────────────────────────────────────────────────
     // COMPUTED PROPERTIES
     // ──────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Main job listing.
-     *
-     * PERF optimisations vs original:
-     *  - organizer eager-loaded in a single JOIN (already was), kept as-is
-     *  - College map built with a single whereIn query, not inside transform loop
-     *  - _isDeadlinePassed computed once per row, not re-parsed in Blade
-     */
     #[Computed]
     public function jobPostings()
     {
@@ -229,7 +233,6 @@ new class extends Component {
                 'deleted_by','deleted_by_role',
             ]);
 
-        // Status filter
         if ($this->filterStatus === 'DELETED') {
             $q->whereIn('status', ['ORGANIZER_DELETED', 'ADMIN_DELETED']);
         } elseif ($this->filterStatus !== '') {
@@ -238,7 +241,6 @@ new class extends Component {
             $q->whereIn('status', ['ACTIVE', 'INACTIVE', 'ORGANIZER_DELETED', 'ADMIN_DELETED']);
         }
 
-        // Search
         if ($this->search !== '') {
             $s = $this->sanitize($this->search);
             $q->where(fn($sub) =>
@@ -247,7 +249,6 @@ new class extends Component {
             );
         }
 
-        // Type filter
         if ($this->filterType !== '') {
             $q->where('employment_type', $this->sanitize($this->filterType));
         }
@@ -256,8 +257,6 @@ new class extends Component {
 
         $paginated = $q->paginate(20);
 
-        // PERF: Collect all departments from current page, then do ONE query
-        // for the college map — no N+1, no per-row Course queries.
         $depts = $paginated->getCollection()
             ->pluck('organizer.department')
             ->filter()
@@ -268,7 +267,7 @@ new class extends Component {
         if ($depts->isNotEmpty()) {
             $collegeMap = Course::whereIn('college', $depts)
                 ->distinct()
-                ->pluck('college', 'college')   // key => value (same string)
+                ->pluck('college', 'college')
                 ->toArray();
         }
 
@@ -287,7 +286,6 @@ new class extends Component {
         return $paginated;
     }
 
-    /** Job options — cached 5 min, invalidated on savePost. */
     #[Computed]
     public function jobOptions()
     {
@@ -310,10 +308,6 @@ new class extends Component {
         return $ordered;
     }
 
-    /**
-     * Viewing job detail.
-     * PERF: Direct Eloquent instead of app(JobController) — no controller autoload cost.
-     */
     #[Computed]
     public function viewingJob(): ?JobPosting
     {
@@ -321,12 +315,6 @@ new class extends Component {
         return JobPosting::with('organizer')->find($this->viewingJobId);
     }
 
-    /**
-     * Colleges list for checkboxes.
-     * PERF: Replaced app(OrganizerJobController)->getCollegesWithDepts() with a direct
-     * Course query — eliminates controller autoloading on every Livewire render.
-     * Cached 10 min; structure matches what Blade expects: [['name' => 'College Name']].
-     */
     #[Computed]
     public function collegesWithDepts(): array
     {
@@ -411,8 +399,8 @@ new class extends Component {
             if (!$location)   $errors['postLocation']   = 'Location is required.';
         }
 
-        if (!$empType)  $errors['postEmpType']    = 'Employment type is required.';
-        if (!$expLevel) $errors['postExpLevel']   = 'Experience level is required.';
+        if (!$empType)  $errors['postEmpType']  = 'Employment type is required.';
+        if (!$expLevel) $errors['postExpLevel'] = 'Experience level is required.';
 
         if (!$deadline) {
             $errors['postDeadline'] = 'Deadline is required.';
@@ -478,7 +466,6 @@ new class extends Component {
             'updated_by_role'  => 'admin',
         ]);
 
-        // ── AUDIT LOG ────────────────────────────────────────────────────────
         $this->writeAuditLog(
             action:      'created',
             description: "Admin posted new job: \"{$title}\" at {$companyName} ({$empType})",
@@ -497,7 +484,6 @@ new class extends Component {
                 'status'           => 'ACTIVE',
             ],
         );
-        // ────────────────────────────────────────────────────────────────────
 
         Cache::forget('job_options_grouped');
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
@@ -539,7 +525,6 @@ new class extends Component {
     {
         abort_unless(auth()->check() && auth()->user()->role === 'admin', 403);
 
-        // PERF: Direct Eloquent — no controller autoload
         $job = $this->fetchJob($id);
 
         $this->editingJobId       = $id;
@@ -630,10 +615,8 @@ new class extends Component {
             return;
         }
 
-        // PERF: Direct Eloquent — no controller autoload
         $job = JobPosting::findOrFail($this->editingJobId);
 
-        // Capture old values for audit log BEFORE updating
         $oldValues = [
             'job_title'        => $job->job_title,
             'company_name'     => $job->company_name,
@@ -660,24 +643,32 @@ new class extends Component {
             'target_college'   => $targetCollegeStr,
         ];
 
+        // If deadline was previously expired and is now future, re-activate
+        $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->endOfDay();
+        $shouldReactivate = $job->status === 'INACTIVE' && $deadlineDate >= now('Asia/Manila');
+
         $job->update(array_merge($newValues, [
-            'description'    => $description,
-            'updated_by'     => auth()->user()->name,
-            'updated_by_role'=> 'admin',
+            'description'     => $description,
+            'updated_by'      => auth()->user()->name,
+            'updated_by_role' => 'admin',
+            'status'          => $shouldReactivate ? 'ACTIVE' : $job->status,
         ]));
 
-        // ── AUDIT LOG ────────────────────────────────────────────────────────
         $this->writeAuditLog(
             action:      'updated',
-            description: "Admin edited job: \"{$title}\" (ID {$job->id}) at {$company}",
+            description: "Admin edited job: \"{$title}\" (ID {$job->id}) at {$company}"
+                . ($shouldReactivate ? ' — re-activated after deadline update.' : ''),
             severity:    'info',
             subject:     $title,
             oldValues:   $oldValues,
-            newValues:   $newValues,
+            newValues:   array_merge($newValues, $shouldReactivate ? ['status' => 'ACTIVE'] : []),
         );
-        // ────────────────────────────────────────────────────────────────────
 
-        $this->dispatch('flash-message', type: 'success', message: 'Job posting updated successfully.');
+        $msg = $shouldReactivate
+            ? 'Job updated and re-activated successfully.'
+            : 'Job posting updated successfully.';
+
+        $this->dispatch('flash-message', type: 'success', message: $msg);
         $this->showEditModal = false;
         $this->resetEditFields();
     }
@@ -701,19 +692,21 @@ new class extends Component {
         abort_unless(auth()->check() && auth()->user()->role === 'admin', 403);
         $job = JobPosting::findOrFail($id);
 
+        // If trying to activate, check deadline first
         if ($job->status === 'INACTIVE') {
             $deadline = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay();
             $today    = now('Asia/Manila')->startOfDay();
 
             if ($today > $deadline) {
-                $this->dispatch('flash-message', type: 'warning', message: 'This job\'s deadline has passed. Please update the deadline before activating.');
+                $this->dispatch('flash-message', type: 'warning',
+                    message: 'Deadline has already passed. Please update the deadline before activating.');
                 $this->openEditModal($id);
                 return;
             }
         }
 
-        $this->confirmJobId  = $id;
-        $this->confirmAction = $job->status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        $this->confirmJobId     = $id;
+        $this->confirmAction    = $job->status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
         $this->showConfirmModal = true;
     }
 
@@ -725,13 +718,16 @@ new class extends Component {
 
         $job = JobPosting::findOrFail($this->confirmJobId);
 
+        // Double-check deadline before activating
         if ($job->status === 'INACTIVE') {
             $deadline = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay();
             $today    = now('Asia/Manila')->startOfDay();
 
             if ($today > $deadline) {
-                $this->dispatch('flash-message', type: 'error', message: 'Cannot activate: deadline has passed.');
+                $this->dispatch('flash-message', type: 'error',
+                    message: 'Cannot activate: deadline has already passed. Update the deadline first.');
                 $this->showConfirmModal = false;
+                $this->openEditModal($this->confirmJobId);
                 return;
             }
         }
@@ -747,7 +743,6 @@ new class extends Component {
 
         $label = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
 
-        // ── AUDIT LOG ────────────────────────────────────────────────────────
         $this->writeAuditLog(
             action:      'updated',
             description: "Admin {$label} job: \"{$job->job_title}\" (ID {$job->id})",
@@ -756,7 +751,6 @@ new class extends Component {
             oldValues:   ['status' => $oldStatus],
             newValues:   ['status' => $newStatus],
         );
-        // ────────────────────────────────────────────────────────────────────
 
         $this->dispatch('flash-message', type: 'success', message: "Job posting has been {$label}.");
         $this->showConfirmModal = false;
@@ -772,8 +766,8 @@ new class extends Component {
     {
         abort_unless(auth()->check() && auth()->user()->role === 'admin', 403);
         $job = JobPosting::findOrFail($id);
-        $this->deleteJobId    = $id;
-        $this->deleteJobTitle = $job->job_title;
+        $this->deleteJobId     = $id;
+        $this->deleteJobTitle  = $job->job_title;
         $this->showDeleteModal = true;
     }
 
@@ -792,7 +786,6 @@ new class extends Component {
 
         $job = JobPosting::findOrFail($this->deleteJobId);
 
-        // Snapshot before mutation for audit log
         $snapshot = [
             'job_title'       => $job->job_title,
             'company_name'    => $job->company_name,
@@ -806,7 +799,6 @@ new class extends Component {
             'deleted_by_role' => 'admin',
         ]);
 
-        // ── AUDIT LOG ────────────────────────────────────────────────────────
         $this->writeAuditLog(
             action:      'deleted',
             description: "Admin deleted job: \"{$this->deleteJobTitle}\" (ID {$job->id})",
@@ -815,7 +807,6 @@ new class extends Component {
             oldValues:   $snapshot,
             newValues:   ['status' => 'ADMIN_DELETED', 'deleted_by' => auth()->user()?->name],
         );
-        // ────────────────────────────────────────────────────────────────────
 
         $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteJobTitle}' has been deleted.");
         $this->showDeleteModal = false;
@@ -839,8 +830,8 @@ new class extends Component {
     {
         abort_unless(auth()->check() && auth()->user()->role === 'admin', 403);
         $job = JobPosting::findOrFail($id);
-        $this->restoreJobId    = $id;
-        $this->restoreJobTitle = $job->job_title;
+        $this->restoreJobId     = $id;
+        $this->restoreJobTitle  = $job->job_title;
         $this->showRestoreModal = true;
     }
 
@@ -851,29 +842,35 @@ new class extends Component {
         if (!$this->restoreJobId) { $this->showRestoreModal = false; return; }
 
         $job = JobPosting::findOrFail($this->restoreJobId);
-
         $oldStatus = $job->status;
 
+        // If deadline already passed, restore as INACTIVE and notify admin to update
+        $deadline = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay();
+        $today    = now('Asia/Manila')->startOfDay();
+        $restoreStatus = ($today > $deadline) ? 'INACTIVE' : 'ACTIVE';
+
         $job->update([
-            'status'          => 'ACTIVE',
+            'status'          => $restoreStatus,
             'deleted_by'      => null,
             'deleted_by_role' => null,
             'updated_by'      => 'Restored by ' . auth()->user()->name,
             'updated_by_role' => 'admin',
         ]);
 
-        // ── AUDIT LOG ────────────────────────────────────────────────────────
         $this->writeAuditLog(
             action:      'updated',
-            description: "Admin restored job: \"{$this->restoreJobTitle}\" (ID {$job->id})",
+            description: "Admin restored job: \"{$this->restoreJobTitle}\" (ID {$job->id}) → {$restoreStatus}",
             severity:    'info',
             subject:     $this->restoreJobTitle,
             oldValues:   ['status' => $oldStatus],
-            newValues:   ['status' => 'ACTIVE', 'restored_by' => auth()->user()->name],
+            newValues:   ['status' => $restoreStatus, 'restored_by' => auth()->user()->name],
         );
-        // ────────────────────────────────────────────────────────────────────
 
-        $this->dispatch('flash-message', type: 'success', message: "'{$this->restoreJobTitle}' has been restored.");
+        $msg = $restoreStatus === 'INACTIVE'
+            ? "'{$this->restoreJobTitle}' restored as Inactive — deadline has passed. Please update the deadline to activate it."
+            : "'{$this->restoreJobTitle}' has been restored and is now Active.";
+
+        $this->dispatch('flash-message', type: $restoreStatus === 'INACTIVE' ? 'warning' : 'success', message: $msg);
         $this->showRestoreModal = false;
         $this->restoreJobId    = null;
         $this->restoreJobTitle = '';
@@ -913,26 +910,9 @@ new class extends Component {
 
 .tbl-load { opacity:.4; pointer-events:none; transition:opacity .2s; }
 
-.tbl-row { transition:background .1s; background:#fff; }
-.tbl-row:hover { background:#faf5fd; }
-
-.tbl-row-del { background:#fee2e2 !important; }
-.tbl-row-del:hover { background:#fecaca !important; }
-.tbl-row-del td { color:#991b1b !important; }
-.tbl-row-del .job-title-cell { color:#991b1b !important; text-decoration:line-through; font-weight:600; }
-.tbl-row-del .company-cell { color:#991b1b !important; }
-.tbl-row-del .org-info-name { color:#991b1b !important; }
-.tbl-row-del .org-info-college { color:#dc2626 !important; }
-.tbl-row-del .emp-type-pill { background:#fee2e2 !important; color:#991b1b !important; border-color:#fca5a5 !important; }
-.tbl-row-del .deadline-cell { color:#991b1b !important; }
-
-.tbl-row-orange-bg { background:#fff7ed !important; }
-.tbl-row-orange-bg:hover { background:#fef3c7 !important; }
-.tbl-row-orange-bg td { color:#92400e !important; }
-.tbl-row-orange-bg .job-title-cell { color:#92400e !important; }
-.tbl-row-orange-bg .company-cell { color:#92400e !important; }
-.tbl-row-orange-bg .deadline-cell { color:#92400e !important; font-weight:600; }
-.tbl-row-orange-bg .emp-type-pill { background:#fed7aa !important; color:#92400e !important; border-color:#fdba74 !important; }
+/* Uniform white rows — no background color differences */
+.tbl-row { background:#fff; transition:background .1s; }
+.tbl-row:hover { background:#fafafa; }
 </style>
 
 {{-- FLASH TOAST --}}
@@ -994,7 +974,6 @@ new class extends Component {
 
         {{-- FILTER BAR --}}
         <div class="px-4 sm:px-6 py-3 border-b border-gray-200 bg-gray-50 flex flex-wrap gap-2 items-center">
-            {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -1007,7 +986,6 @@ new class extends Component {
                        autocomplete="off" maxlength="100">
             </div>
 
-            {{-- Status --}}
             <select wire:model.live="filterStatus"
                     class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition">
                 <option value="">All Statuses</option>
@@ -1016,7 +994,6 @@ new class extends Component {
                 <option value="DELETED">Deleted</option>
             </select>
 
-            {{-- Employment Type --}}
             <select wire:model.live="filterType"
                     class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition">
                 <option value="">All Employment Types</option>
@@ -1025,7 +1002,6 @@ new class extends Component {
                 @endforeach
             </select>
 
-            {{-- Sort --}}
             <select wire:model.live="filterSort"
                     class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-100 transition">
                 <option value="recent">Recent First</option>
@@ -1064,30 +1040,28 @@ new class extends Component {
                             $isDel      = $isOrgDel || $isAdminDel;
                             $dl         = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
                             $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
-                            $isInactive = $job->status === 'INACTIVE';
-                            $shouldBeOrange  = $isDeadlinePassed || $isInactive;
-                            $organizerName   = $job->organizer?->name ?? null;
-                            $organizerCollege= $job->_organizerCollege ?? null;
+                            $organizerName    = $job->organizer?->name ?? null;
+                            $organizerCollege = $job->_organizerCollege ?? null;
                         @endphp
-                        <tr class="{{ $isDel ? 'tbl-row-del' : ($shouldBeOrange ? 'tbl-row-orange-bg' : 'tbl-row') }}">
-                            {{-- Job Title --}}
+                        <tr class="tbl-row">
+                            {{-- Job Title — pure black always --}}
                             <td class="px-4 sm:px-5 py-3 max-w-[170px] sm:max-w-[210px]">
-                                <p class="font-semibold text-sm truncate job-title-cell {{ $isDel ? '' : 'text-gray-900' }}">
+                                <p class="font-semibold text-sm truncate text-gray-900 {{ $isDel ? 'line-through' : '' }}">
                                     {{ $job->job_title }}
                                 </p>
                             </td>
-                            {{-- Organization --}}
+                            {{-- Organization — pure black always --}}
                             <td class="px-4 sm:px-5 py-3 max-w-[155px]">
-                                <p class="font-medium text-sm truncate company-cell {{ $isDel ? '' : 'text-gray-700' }}">
+                                <p class="font-medium text-sm truncate text-gray-900">
                                     {{ $job->company_name }}
                                 </p>
                             </td>
                             {{-- Organizer --}}
                             <td class="px-4 sm:px-5 py-3 hidden lg:table-cell min-w-[160px]">
                                 @if($organizerName)
-                                    <div class="text-sm font-bold text-gray-900 line-clamp-1 org-info-name">{{ $organizerName }}</div>
+                                    <div class="text-sm font-bold text-gray-900 line-clamp-1">{{ $organizerName }}</div>
                                     @if($organizerCollege)
-                                        <div class="text-xs font-semibold text-[#7a3f91] mt-0.5 flex items-center gap-1 org-info-college">
+                                        <div class="text-xs font-semibold text-[#7a3f91] mt-0.5 flex items-center gap-1">
                                             <i class="fas fa-building-columns" style="font-size:8px;"></i>
                                             {{ $organizerCollege }}
                                         </div>
@@ -1100,15 +1074,18 @@ new class extends Component {
                             </td>
                             {{-- Employment type --}}
                             <td class="px-4 sm:px-5 py-3 hidden md:table-cell">
-                                <span class="emp-type-pill inline-block px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-full text-xs font-semibold">
+                                <span class="inline-block px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-full text-xs font-semibold">
                                     {{ $job->employment_type }}
                                 </span>
                             </td>
-                            {{-- Deadline --}}
+                            {{-- Deadline — pure black always --}}
                             <td class="px-4 sm:px-5 py-3 hidden xl:table-cell whitespace-nowrap">
-                                <span class="deadline-cell text-sm font-medium {{ $isDel ? '' : 'text-gray-700' }}">
+                                <span class="text-sm font-medium text-gray-900">
                                     {{ $dl->format('M d, Y') }}
                                 </span>
+                                @if($isDeadlinePassed && !$isDel)
+                                    <span class="block text-xs text-red-500 font-semibold mt-0.5">Expired</span>
+                                @endif
                             </td>
                             {{-- Status --}}
                             <td class="px-4 sm:px-5 py-3 text-center whitespace-nowrap">
@@ -1635,6 +1612,16 @@ new class extends Component {
                 <i class="fas fa-pen-to-square text-sm"></i> Edit Job Posting
             </h2>
         </div>
+        {{-- Hint banner when deadline is expired --}}
+        @php
+            $editJobDeadlinePassed = $editDeadline && \Carbon\Carbon::createFromFormat('Y-m-d', $editDeadline, 'Asia/Manila')->endOfDay() < now('Asia/Manila');
+        @endphp
+        @if($editJobDeadlinePassed)
+        <div class="bg-amber-50 border-b border-amber-200 px-6 sm:px-7 py-3 flex-shrink-0 flex items-center gap-2">
+            <i class="fas fa-triangle-exclamation text-amber-500 text-sm flex-shrink-0"></i>
+            <p class="text-xs text-amber-800 font-semibold">This job's deadline has already passed. Update the deadline to a future date to re-activate it.</p>
+        </div>
+        @endif
         @if(count($editErrors))
         <div class="bg-red-50 border-b border-red-200 px-6 sm:px-7 py-3 flex-shrink-0">
             <p class="font-bold text-red-800 text-xs mb-1.5 flex items-center gap-1.5">
@@ -1815,7 +1802,7 @@ new class extends Component {
             <p class="font-extrabold text-orange-700 text-sm mb-4">"{{ $restoreJobTitle }}"</p>
             <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-5 text-xs text-blue-800 flex items-start gap-2">
                 <i class="fas fa-info-circle text-blue-500 mt-0.5 shrink-0"></i>
-                <span>The job will be set back to <strong>ACTIVE</strong> and visible to students again.</span>
+                <span>The job will be restored. If its deadline has passed it will be set to <strong>Inactive</strong> — update the deadline to re-activate it.</span>
             </div>
             <div class="flex gap-3">
                 <button wire:click="cancelRestore" class="flex-1 inline-flex items-center justify-center gap-1 font-bold px-4 py-2.5 rounded-xl text-sm bg-white text-gray-600 border border-gray-300 hover:bg-gray-100 transition cursor-pointer">Cancel</button>

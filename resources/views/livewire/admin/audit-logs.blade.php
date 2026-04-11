@@ -60,7 +60,7 @@ new #[Layout('app')] class extends Component {
             'user_email'    => $log->user_email,
             'user_role'     => strtoupper($log->user_role ?? 'SYSTEM'),
             'subject_label' => $log->subject_label,
-            'description'   => $log->description,
+            'description'   => preg_replace('/\s*\(ID\s+\d+\)/i', '', $log->description),
             'old_values'    => $log->old_values,
             'new_values'    => $log->new_values,
             'ip_address'    => $log->ip_address,
@@ -90,7 +90,6 @@ new #[Layout('app')] class extends Component {
             'flag_reason' => $wasFlagged ? null : 'Manually flagged by admin',
         ]);
 
-        // Bust the stats cache so flagged count refreshes immediately
         Cache::forget('audit_stats');
 
         if ($this->showModal && $this->selected && $this->selected['id'] === $id) {
@@ -101,18 +100,12 @@ new #[Layout('app')] class extends Component {
     public function with(): array
     {
         $query = AuditLog::query()
-            // job_posting module is now visible — organizer create/edit/delete
-            // actions are logged here so admins have full traceability.
             ->byModule($this->module   ?: null)
             ->byAction($this->action   ?: null)
             ->bySeverity($this->severity ?: null)
             ->byRole($this->role        ?: null)
             ->search($this->search      ?: null)
             ->when($this->flagged, fn ($q) => $q->flagged())
-
-            // ── Date filter ──────────────────────────────────────────────────
-            // Single date → exact match.  Both dates → inclusive range.
-            // ────────────────────────────────────────────────────────────────
             ->when($this->dateFrom && ! $this->dateTo, function ($q) {
                 $q->whereDate('created_at', $this->dateFrom);
             })
@@ -120,11 +113,8 @@ new #[Layout('app')] class extends Component {
                 $q->whereDate('created_at', '>=', $this->dateFrom)
                   ->whereDate('created_at', '<=', $this->dateTo);
             })
-
             ->orderByDesc('id');
 
-        // PERF: Cache stats for 60 s — was running 6 COUNT queries per render.
-        // Cache is busted immediately on toggleFlag() above and on any job action.
         $stats = Cache::remember('audit_stats', 60, fn() => AuditLog::stats());
 
         return [
@@ -160,14 +150,6 @@ new #[Layout('app')] class extends Component {
 
 .tbl-row       { transition:background .1s; background:#fff }
 .tbl-row:hover { background:#faf5fd }
-
-.tbl-row-crit       { background:#fee2e2 !important }
-.tbl-row-crit:hover { background:#fecaca !important }
-.tbl-row-crit td    { color:#991b1b !important }
-
-.tbl-row-warn       { background:#fff7ed !important }
-.tbl-row-warn:hover { background:#fef3c7 !important }
-.tbl-row-warn td    { color:#92400e !important }
 
 [x-cloak] { display:none !important }
 </style>
@@ -322,7 +304,7 @@ new #[Layout('app')] class extends Component {
                            autocomplete="off" maxlength="100">
                 </div>
 
-                {{-- Module — includes job_posting so organizer activity is visible --}}
+                {{-- Module --}}
                 <select wire:model.live="module"
                         class="px-3 py-2 border border-gray-300 rounded-[10px] text-sm bg-white text-gray-700
                                focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
@@ -387,12 +369,11 @@ new #[Layout('app')] class extends Component {
                 </button>
             </div>
 
-            {{-- Row 2: Flagged toggle + date range aligned to same baseline --}}
+            {{-- Row 2 --}}
             <div class="flex flex-wrap gap-3 items-end justify-between">
                 <div class="flex items-end gap-3 flex-wrap">
 
-                    {{-- Flagged toggle — wrapped in flex-col with invisible spacer label
-                         so it sits at the same baseline as the From/To date inputs --}}
+                    {{-- Flagged toggle --}}
                     <div class="flex flex-col">
                         <span class="text-[.6rem] font-semibold uppercase tracking-[.07em] text-transparent mb-0.5 ml-0.5 select-none" aria-hidden="true">·</span>
                         <label class="flex items-center gap-2 cursor-pointer px-3 py-2 rounded-[10px] border transition"
@@ -476,12 +457,6 @@ new #[Layout('app')] class extends Component {
                         @php
                             $phtDate = $log->created_at->setTimezone('Asia/Manila');
 
-                            $rowClass = match($log->severity) {
-                                'critical' => 'tbl-row-crit',
-                                'warning'  => 'tbl-row-warn',
-                                default    => 'tbl-row',
-                            };
-
                             $actionBadge = match($log->action) {
                                 'login'          => 'bg-green-50 text-green-700 border-green-200',
                                 'logout'         => 'bg-gray-50 text-gray-600 border-gray-200',
@@ -502,12 +477,13 @@ new #[Layout('app')] class extends Component {
                                 default     => 'text-gray-500',
                             };
 
-                            $shortDesc = mb_strlen($log->description) > 55
-                                ? mb_substr($log->description, 0, 52) . '…'
-                                : $log->description;
+                            $cleanDesc = preg_replace('/\s*\(ID\s+\d+\)/i', '', $log->description);
+                            $shortDesc = mb_strlen($cleanDesc) > 55
+                                ? mb_substr($cleanDesc, 0, 52) . '…'
+                                : $cleanDesc;
                         @endphp
 
-                        <tr class="{{ $rowClass }}">
+                        <tr class="tbl-row">
                             <td class="px-4 sm:px-5 py-3">
                                 <div class="text-[.8rem] font-semibold text-gray-900">{{ $phtDate->format('M j, Y') }}</div>
                                 <div class="text-[.7rem] font-normal text-gray-500">{{ $phtDate->format('h:i A') }}</div>
@@ -557,7 +533,7 @@ new #[Layout('app')] class extends Component {
                                 </span>
                             </td>
 
-                            {{-- ACTION BUTTONS: both use identical sizing so they're always equal height/width --}}
+                            {{-- ACTION BUTTONS --}}
                             <td class="px-4 sm:px-5 py-3">
                                 <div class="flex items-center justify-center gap-2">
                                     <button wire:click="toggleFlag({{ $log->id }})"
@@ -654,18 +630,12 @@ new #[Layout('app')] class extends Component {
 {{-- ══════════════════════ DETAIL MODAL ══════════════════════ --}}
 @if($showModal && $selected)
 
-{{-- Helper: formats a single value for readable display --}}
 @php
-    /**
-     * Recursively flattens a mixed value to a human-readable string.
-     * Arrays become comma-separated; null/empty become an em-dash.
-     */
     function auditFormatValue(mixed $val): string {
         if (is_null($val) || $val === '')     return '—';
         if (is_bool($val))                    return $val ? 'Yes' : 'No';
         if (is_array($val))                   return implode(', ', array_map('auditFormatValue', $val));
         $str = (string) $val;
-        // Pretty-print ISO dates: 2026-04-06 12:30:00 → Apr 6, 2026 12:30 PM
         if (preg_match('/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/', $str)) {
             try {
                 return \Carbon\Carbon::parse($str)->setTimezone('Asia/Manila')->format('M j, Y · g:i A');
@@ -674,10 +644,6 @@ new #[Layout('app')] class extends Component {
         return $str;
     }
 
-    /**
-     * Converts a snake_case key to Title Case for display.
-     * e.g. "job_title" → "Job Title"
-     */
     function auditFormatKey(string $key): string {
         return ucwords(str_replace('_', ' ', $key));
     }
@@ -753,7 +719,6 @@ new #[Layout('app')] class extends Component {
             </div>
             @endif
 
-            {{-- ── Before / After — rendered as readable key-value pairs, never raw JSON ── --}}
             @if($selected['old_values'] || $selected['new_values'])
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
@@ -795,7 +760,6 @@ new #[Layout('app')] class extends Component {
 
             </div>
             @endif
-            {{-- ── /Before / After ─────────────────────────────────────────────────────── --}}
 
         </div>
 

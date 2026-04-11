@@ -209,6 +209,21 @@ class Alumni extends Model
     }
 
     /**
+     * Returns TRUE if an OTP has been issued and its 10-minute
+     * window has NOT yet expired.
+     *
+     * Used by the change-password wizard to block the alumni from
+     * navigating back to Step 2 (email) while a live OTP session
+     * is in progress — preventing email changes mid-verification.
+     */
+    public function isOtpStillActive(): bool
+    {
+        return $this->otp !== null
+            && $this->otp_expires_at !== null
+            && now()->lt($this->otp_expires_at);
+    }
+
+    /**
      * Wipe OTP columns after a successful verification.
      */
     public function clearOtp(): void
