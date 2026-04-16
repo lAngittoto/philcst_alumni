@@ -47,6 +47,10 @@ class User extends Authenticatable
     {
         return $this->role === 'organizer';
     }
+    public function isRegistrar(): bool
+   {
+       return $this->role === 'registrar';
+   }
 
     // ─────────────────────────────────────────────────────
     // Relationships

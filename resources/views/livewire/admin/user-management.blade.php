@@ -1,5 +1,6 @@
 <?php
 
+
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -9,9 +10,11 @@ use App\Models\Alumni;
 use App\Models\Course;
 use App\Models\Organizer;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -20,18 +23,23 @@ new class extends Component {
 
     protected function queryString(): array { return []; }
 
+    // ── tabs / modal ──────────────────────────────────────────────
     public string $activeTab   = 'alumni';
     public string $activeModal = '';
 
+    // ── alumni filters ────────────────────────────────────────────
     public string $alumniSearch = '';
     public string $alumniBatch  = '';
     public string $alumniCourse = '';
     public string $alumniSort   = 'recent';
+    public string $alumniStatus = '';   // filter by status PENDING|VERIFIED
 
+    // ── organiser filters ─────────────────────────────────────────
     public string $orgSearch  = '';
     public string $orgCollege = '';
     public string $orgSort    = 'recent';
 
+    // ── register alumni ───────────────────────────────────────────
     public string $regFirstName      = '';
     public string $regMiddleInitial  = '';
     public string $regLastName       = '';
@@ -44,6 +52,7 @@ new class extends Component {
     public array  $alumniErrors      = [];
     public string $alumniSuccess     = '';
 
+    // ── register organiser ────────────────────────────────────────
     public string $orgFirstName         = '';
     public string $orgMiddleInitial     = '';
     public string $orgLastName          = '';
@@ -57,6 +66,7 @@ new class extends Component {
     public array  $organizerErrors      = [];
     public string $organizerSuccess     = '';
 
+    // ── manage courses ────────────────────────────────────────────
     public array   $coursesList      = [];
     public string  $courseCode       = '';
     public string  $courseName       = '';
@@ -68,6 +78,7 @@ new class extends Component {
     public string  $deleteCourseName = '';
     public bool    $deletingCourse   = false;
 
+    // ── manage colleges ───────────────────────────────────────────
     public array   $orgCoursesList         = [];
     public string  $orgNewCollegeName      = '';
     public ?string $orgAddingToCollege     = null;
@@ -81,10 +92,12 @@ new class extends Component {
     public ?string $orgRenamingCollege     = null;
     public string  $orgRenameCollegeName   = '';
 
+    // ── organiser toggle ──────────────────────────────────────────
     public ?int   $pendingToggleId     = null;
     public string $pendingToggleAction = '';
     public string $pendingToggleName   = '';
 
+    // ── import ────────────────────────────────────────────────────
     public        $importFile           = null;
     public bool   $importingFile        = false;
     public string $importStatus         = '';
@@ -96,7 +109,14 @@ new class extends Component {
     public array  $importErrors         = [];
     public array  $importDuplicates     = [];
     public string $importStep           = 'upload';
+    /**
+     * TASK 2 — import mode
+     *   'new'      => basic columns only
+     *   'complete' => basic + personal/family/address columns
+     */
+    public string $importMode = 'new';
 
+    // ── view / edit profile ───────────────────────────────────────
     public ?int   $viewingProfileId     = null;
     public string $viewingProfileType   = 'alumni';
     public        $viewingProfile       = null;
@@ -105,6 +125,39 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
+    // ─────────────────────────────────────────────────────────────
+    //  BOOT / MOUNT
+    // ─────────────────────────────────────────────────────────────
+    public function mount(): void
+    {
+        $this->coursesList = Course::orderByDesc('created_at')->get()->toArray();
+        $this->regYear     = (string) date('Y');
+        $this->loadOrgCourses();
+
+        if (session()->has('success'))
+            $this->dispatch('showFlash', type: 'success', message: session()->pull('success'));
+        if (session()->has('error'))
+            $this->dispatch('showFlash', type: 'error',   message: session()->pull('error'));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  HELPERS — password / temp credential
+    // ─────────────────────────────────────────────────────────────
+    /**
+     * Alumni temp password = <paddedId>_<Xx> where Xx = first-2 letters of last name (ucfirst).
+     *
+     * STATUS RULE:
+     *   PENDING  → password_changed_at IS NULL  (never finished setup wizard)
+     *   VERIFIED → password_changed_at IS NOT NULL (wizard completed, password changed)
+     *
+     * The setup wizard (alumni-account-setup.blade.php) sets password_changed_at
+     * via DB::table('alumni')->update(['password_changed_at' => $now, 'status' => 'VERIFIED'])
+     * when the OTP is verified and the new password/email are saved.
+     *
+     * Admin importing alumni: always PENDING (password_changed_at = null) regardless
+     * of how much profile data is supplied, because the alumni has not yet logged in
+     * and changed their temp password through the wizard.
+     */
     private function generateTempPassword(string $studentId, string $lastName): string
     {
         $raw  = substr(trim($lastName), 0, 2);
@@ -112,89 +165,136 @@ new class extends Component {
         return $studentId . '_' . $part;
     }
 
+    /**
+     * Derive the display status for an alumni row.
+     * Source of truth: password_changed_at column.
+     *   null      → PENDING
+     *   not null  → VERIFIED
+     *
+     * The `status` varchar column on the alumni table mirrors this value
+     * and is kept in sync by the wizard's verifyOtp() method.
+     */
+    private function deriveAlumniStatus(?string $passwordChangedAt): string
+    {
+        return $passwordChangedAt !== null ? 'VERIFIED' : 'PENDING';
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  EVENT HANDLERS
+    // ─────────────────────────────────────────────────────────────
     #[On('showFlash')]
     public function handleShowFlash(string $type, string $message): void
     {
         $this->flash($type, $message);
     }
 
-    public function mount(): void
+    private function flash(string $type, string $msg): void
     {
-        $this->coursesList = Course::orderByDesc('created_at')->get()->toArray();
-        $this->regYear     = (string) date('Y');
-        $this->loadOrgCourses();
-
-        if (session()->has('success')) {
-            $this->dispatch('showFlash', type: 'success', message: session()->pull('success'));
-        }
-        if (session()->has('error')) {
-            $this->dispatch('showFlash', type: 'error', message: session()->pull('error'));
-        }
+        $this->dispatch('flash-message', type: $type, message: $msg);
     }
 
-    private function loadOrgCourses(): void
-    {
-        $grouped = [];
-        foreach (Course::orderByDesc('updated_at')->orderBy('code')->get() as $c) {
-            $college = $c->college ?? null;
-            if ($college) {
-                $grouped[$college][] = $c->toArray();
-            }
-        }
-        $this->orgCoursesList = $grouped;
-    }
-
+    // ─────────────────────────────────────────────────────────────
+    //  FILTER RESETTERS (with pagination)
+    // ─────────────────────────────────────────────────────────────
     public function updatingAlumniSearch() { $this->resetPage('alumniPage'); }
     public function updatingOrgSearch()    { $this->resetPage('orgPage'); }
     public function updatingAlumniBatch()  { $this->resetPage('alumniPage'); }
     public function updatingAlumniCourse() { $this->resetPage('alumniPage'); }
     public function updatingAlumniSort()   { $this->resetPage('alumniPage'); }
+    public function updatingAlumniStatus() { $this->resetPage('alumniPage'); }
     public function updatingOrgCollege()   { $this->resetPage('orgPage'); }
     public function updatingOrgSort()      { $this->resetPage('orgPage'); }
 
+    // ─────────────────────────────────────────────────────────────
+    //  COMPUTED — ALUMNI RECORDS
+    //
+    //  STATUS SOURCE OF TRUTH: password_changed_at column
+    //    null     → PENDING  (wizard not completed, temp password still active)
+    //    not null → VERIFIED (alumni changed password via setup wizard)
+    //
+    //  The status filter maps the UI selection back to this logic.
+    // ─────────────────────────────────────────────────────────────
     #[Computed]
     public function alumniRecords()
     {
-        $q = Alumni::query();
+        $q = Alumni::query()->select([
+            'id', 'user_id',
+            'first_name', 'middle_initial', 'last_name', 'suffix',
+            'student_id', 'course_code', 'course_name', 'batch',
+            'email', 'profile_photo', 'status', 'profile_completed',
+            'password_changed_at',
+            'created_at',
+        ]);
+
         if ($this->alumniSearch) {
+            $term = '%' . $this->alumniSearch . '%';
             $q->where(fn($s) => $s
-                ->where('name',        'like', "%{$this->alumniSearch}%")
-                ->orWhere('first_name', 'like', "%{$this->alumniSearch}%")
-                ->orWhere('last_name',  'like', "%{$this->alumniSearch}%")
-                ->orWhere('student_id', 'like', "%{$this->alumniSearch}%")
-                ->orWhere('course_code','like', "%{$this->alumniSearch}%")
-                ->orWhere('course_name','like', "%{$this->alumniSearch}%"));
+                ->where('first_name',  'like', $term)
+                ->orWhere('last_name',  'like', $term)
+                ->orWhere('student_id', 'like', $term)
+                ->orWhere('course_code','like', $term)
+                ->orWhere('course_name','like', $term));
         }
+
         if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
         if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
-        $q->when($this->alumniSort === 'oldest', fn($q) => $q->orderBy('created_at'), fn($q) => $q->orderByDesc('created_at'));
+
+        // Status filter uses password_changed_at as source of truth
+        if ($this->alumniStatus === 'VERIFIED') {
+            $q->whereNotNull('password_changed_at');
+        } elseif ($this->alumniStatus === 'PENDING') {
+            $q->whereNull('password_changed_at');
+        }
+
+        $q->when(
+            $this->alumniSort === 'oldest',
+            fn($q) => $q->orderBy('created_at'),
+            fn($q) => $q->orderByDesc('created_at')
+        );
+
         return $q->paginate(100, ['*'], 'alumniPage');
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  COMPUTED — ORGANISER RECORDS
+    // ─────────────────────────────────────────────────────────────
     #[Computed]
     public function organizerRecords()
     {
         $q = Organizer::withoutTrashed();
+
         if ($this->orgSearch) {
+            $term = '%' . $this->orgSearch . '%';
             $q->where(fn($s) => $s
-                ->where('name',      'like', "%{$this->orgSearch}%")
-                ->orWhere('email',     'like', "%{$this->orgSearch}%")
-                ->orWhere('id_number', 'like', "%{$this->orgSearch}%"));
+                ->where('first_name', 'like', $term)
+                ->orWhere('last_name',  'like', $term)
+                ->orWhere('email',      'like', $term)
+                ->orWhere('id_number',  'like', $term));
         }
+
         if ($this->orgCollege) $q->where('department', $this->orgCollege);
-        $q->when($this->orgSort === 'oldest', fn($q) => $q->orderBy('created_at'), fn($q) => $q->orderByDesc('created_at'));
+
+        $q->when(
+            $this->orgSort === 'oldest',
+            fn($q) => $q->orderBy('created_at'),
+            fn($q) => $q->orderByDesc('created_at')
+        );
+
         return $q->paginate(10, ['*'], 'orgPage');
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  COMPUTED — MISC LOOKUPS
+    // ─────────────────────────────────────────────────────────────
     #[Computed] public function courses()     { return Course::orderByDesc('created_at')->get(); }
     #[Computed] public function batches()     { return Alumni::distinct()->orderByDesc('batch')->pluck('batch'); }
-    #[Computed] public function orgColleges() { return Course::whereNotNull('college')->where('college', '!=', '')->distinct()->orderBy('college')->pluck('college'); }
+    #[Computed] public function orgColleges() { return Course::whereNotNull('college')->where('college','!=','')->distinct()->orderBy('college')->pluck('college'); }
 
     #[Computed]
     public function orgDepartmentsGrouped()
     {
         return Course::whereNotNull('college')
-            ->where('college', '!=', '')
+            ->where('college','!=','')
             ->orderBy('college')->orderBy('code')
             ->get()->groupBy('college');
     }
@@ -202,33 +302,37 @@ new class extends Component {
     #[Computed]
     public function allCoursesForAssign() { return Course::orderBy('code')->get(); }
 
+    /**
+     * TASK 3 — returns map of college → organiser full name for ALL ACTIVE organisers.
+     */
     #[Computed]
     public function occupiedColleges(): array
     {
         $result = [];
-        $organizers = Organizer::withoutTrashed()
+        Organizer::withoutTrashed()
             ->where('status', 'ACTIVE')
-            ->select('department', 'first_name', 'middle_initial', 'last_name', 'suffix')
-            ->get();
-
-        foreach ($organizers as $org) {
-            $dept        = $org->department;
-            $collegeName = Course::where('college', $dept)->exists()
-                ? $dept
-                : (Course::where('code', $dept)->value('college') ?? $dept);
-            if ($collegeName && !isset($result[$collegeName])) {
-                $result[$collegeName] = $org->getFullName();
-            }
-        }
+            ->select('department','first_name','middle_initial','last_name','suffix')
+            ->get()
+            ->each(function ($org) use (&$result) {
+                $collegeName = Course::where('college', $org->department)->exists()
+                    ? $org->department
+                    : (Course::where('code', $org->department)->value('college') ?? $org->department);
+                if ($collegeName && !isset($result[$collegeName])) {
+                    $result[$collegeName] = $org->getFullName();
+                }
+            });
         return $result;
     }
 
     #[Computed]
     public function totalColleges(): int
     {
-        return Course::whereNotNull('college')->where('college', '!=', '')->distinct('college')->count('college');
+        return Course::whereNotNull('college')->where('college','!=','')->distinct('college')->count('college');
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  UTILITY METHODS
+    // ─────────────────────────────────────────────────────────────
     public function getCollegeForCourse(string $code): string
     {
         return Course::where('college', $code)->exists()
@@ -247,73 +351,58 @@ new class extends Component {
         return asset('storage/alumni-photos/default.png');
     }
 
-    public function formatAlumniDisplayName(
-        string $firstName,
-        string $middleInitial,
-        string $lastName,
-        string $suffix
-    ): string {
-        $parts   = [];
-        $parts[] = trim($firstName);
-        if (trim($middleInitial) !== '') {
-            $parts[] = strtoupper(substr(trim($middleInitial), 0, 1)) . '.';
-        }
-        $parts[] = trim($lastName);
-        if (trim($suffix) !== '') {
-            $parts[] = trim($suffix);
-        }
+    public function formatAlumniDisplayName(string $f, string $m, string $l, string $s): string
+    {
+        $parts = [trim($f)];
+        if (trim($m) !== '') $parts[] = strtoupper(substr(trim($m), 0, 1)) . '.';
+        $parts[] = trim($l);
+        if (trim($s) !== '') $parts[] = trim($s);
         return implode(' ', array_filter($parts));
     }
 
     private function validateName(string $n): bool
     {
-        return preg_match('/^[a-zA-Z\s\-\.\']+$/', $n) === 1;
+        return (bool) preg_match('/^[a-zA-Z\s\-\.\']+$/', $n);
     }
 
     private function buildFullName(string $f, string $m, string $l, string $s): string
     {
-        $parts = [];
-        if (trim($f)) $parts[] = trim($f);
-        if (trim($m)) $parts[] = trim($m);
-        if (trim($l)) $parts[] = trim($l);
-        if (trim($s)) $parts[] = trim($s);
-        return implode(' ', $parts);
+        return implode(' ', array_filter(array_map('trim', [$f, $m, $l, $s])));
     }
 
-    private function alumniFullNameExists(string $firstName, string $middleInitial, string $lastName, string $suffix, ?int $exceptId = null): bool
+    // ── duplicate-name guards ─────────────────────────────────────
+    private function alumniFullNameExists(string $f, string $m, string $l, string $s, ?int $exceptId = null): bool
     {
-        $q = Alumni::whereRaw('LOWER(TRIM(first_name)) = ?', [strtolower(trim($firstName))])
-            ->whereRaw('LOWER(TRIM(last_name)) = ?', [strtolower(trim($lastName))])
-            ->whereRaw('LOWER(TRIM(COALESCE(middle_initial,""))) = ?', [strtolower(trim($middleInitial))])
-            ->whereRaw('LOWER(TRIM(COALESCE(suffix,""))) = ?', [strtolower(trim($suffix))]);
-        if ($exceptId) $q->where('id', '!=', $exceptId);
+        $q = Alumni::whereRaw('LOWER(TRIM(first_name))=?', [strtolower(trim($f))])
+                   ->whereRaw('LOWER(TRIM(last_name))=?', [strtolower(trim($l))])
+                   ->whereRaw('LOWER(TRIM(COALESCE(middle_initial,"")))=?', [strtolower(trim($m))])
+                   ->whereRaw('LOWER(TRIM(COALESCE(suffix,"")))=?', [strtolower(trim($s))]);
+        if ($exceptId) $q->where('id','!=',$exceptId);
         return $q->exists();
     }
 
-    private function organizerFullNameExists(string $firstName, string $middleInitial, string $lastName, string $suffix, ?int $exceptId = null): bool
+    private function organizerFullNameExists(string $f, string $m, string $l, string $s, ?int $exceptId = null): bool
     {
         $q = Organizer::withoutTrashed()
-            ->whereRaw('LOWER(TRIM(first_name)) = ?', [strtolower(trim($firstName))])
-            ->whereRaw('LOWER(TRIM(last_name)) = ?', [strtolower(trim($lastName))])
-            ->whereRaw('LOWER(TRIM(COALESCE(middle_initial,""))) = ?', [strtolower(trim($middleInitial))])
-            ->whereRaw('LOWER(TRIM(COALESCE(suffix,""))) = ?', [strtolower(trim($suffix))]);
-        if ($exceptId) $q->where('id', '!=', $exceptId);
+                      ->whereRaw('LOWER(TRIM(first_name))=?', [strtolower(trim($f))])
+                      ->whereRaw('LOWER(TRIM(last_name))=?', [strtolower(trim($l))])
+                      ->whereRaw('LOWER(TRIM(COALESCE(middle_initial,"")))=?', [strtolower(trim($m))])
+                      ->whereRaw('LOWER(TRIM(COALESCE(suffix,"")))=?', [strtolower(trim($s))]);
+        if ($exceptId) $q->where('id','!=',$exceptId);
         return $q->exists();
     }
 
-    private function flash(string $type, string $msg): void
-    {
-        $this->dispatch('flash-message', type: $type, message: $msg);
-    }
-
+    // ─────────────────────────────────────────────────────────────
+    //  TAB + MODAL CONTROL
+    // ─────────────────────────────────────────────────────────────
     public function switchTab(string $tab): void { $this->activeTab = $tab; }
 
     public function openModal(string $modal): void
     {
-        if ($modal === 'importModal') $this->resetImportState();
-        if ($modal === 'manageOrgCourses') { $this->loadOrgCourses(); $this->resetOrgCourseForm(); }
-        if ($modal === 'registerAlumni') { $this->alumniSuccess = ''; $this->alumniErrors = []; }
-        if ($modal === 'registerOrganizer') { $this->organizerSuccess = ''; $this->organizerErrors = []; }
+        if ($modal === 'importModal')        $this->resetImportState();
+        if ($modal === 'manageOrgCourses')   { $this->loadOrgCourses(); $this->resetOrgCourseForm(); }
+        if ($modal === 'registerAlumni')     { $this->alumniSuccess = ''; $this->alumniErrors = []; }
+        if ($modal === 'registerOrganizer')  { $this->organizerSuccess = ''; $this->organizerErrors = []; }
         $this->activeModal = $modal;
     }
 
@@ -332,7 +421,7 @@ new class extends Component {
 
     public function resetAlumniFilters(): void
     {
-        $this->alumniSearch = $this->alumniBatch = $this->alumniCourse = '';
+        $this->alumniSearch = $this->alumniBatch = $this->alumniCourse = $this->alumniStatus = '';
         $this->alumniSort   = 'recent';
         $this->resetPage('alumniPage');
     }
@@ -344,6 +433,9 @@ new class extends Component {
         $this->resetPage('orgPage');
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  IMPORT — TASK 2
+    // ─────────────────────────────────────────────────────────────
     public function resetImportState(): void
     {
         $this->importFile           = null;
@@ -357,6 +449,7 @@ new class extends Component {
         $this->importErrors         = [];
         $this->importDuplicates     = [];
         $this->importStep           = 'upload';
+        $this->importMode           = 'new';
     }
 
     public function cancelImport(): void
@@ -364,6 +457,14 @@ new class extends Component {
         $this->resetImportState();
         $this->activeModal = '';
         $this->flash('info', 'Import cancelled.');
+    }
+
+    /** Required columns per import mode */
+    private function requiredImportColumns(string $mode): array
+    {
+        $base = ['first_name', 'last_name', 'middle_initial', 'student_id', 'course_code', 'batch'];
+        // complete mode still only requires base columns; extra cols are optional but mapped if present
+        return $base;
     }
 
     public function processImportFile(): void
@@ -386,33 +487,39 @@ new class extends Component {
 
             $ext  = strtolower($this->importFile->getClientOriginalExtension());
             $rows = match(true) {
-                in_array($ext, ['xlsx', 'xls']) => $this->parseExcelFile($this->importFile->getRealPath()),
-                $ext === 'csv'                  => array_map('str_getcsv', file($this->importFile->getRealPath())),
-                default                         => throw new \Exception('File must be .csv or .xlsx/.xls.'),
+                in_array($ext, ['xlsx','xls']) => $this->parseExcelFile($this->importFile->getRealPath()),
+                $ext === 'csv'                 => array_map('str_getcsv', file($this->importFile->getRealPath())),
+                default                        => throw new \Exception('File must be .csv or .xlsx/.xls.'),
             };
 
             if (count($rows) < 2) throw new \Exception('File is empty or has no data rows.');
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            if (!in_array('first_name', $header, true) || !in_array('last_name', $header, true)) {
-                throw new \Exception('Missing required columns: "first_name" and "last_name" must both be present.');
-            }
-            foreach (['middle_initial', 'student_id', 'course_code', 'batch'] as $req) {
+            foreach ($this->requiredImportColumns($this->importMode) as $req) {
                 if (!in_array($req, $header, true))
                     throw new \Exception("Missing required column: \"{$req}\".");
             }
 
             $this->importTotal = count($rows) - 1;
 
-            $courseMap         = Course::pluck('name', 'code')->mapWithKeys(fn($n, $c) => [strtoupper($c) => $n])->toArray();
-            $existingAlumniIds = Alumni::pluck('student_id')->mapWithKeys(fn($id) => [$id => true])->toArray();
+            // ── pre-load lookup maps ──
+            $courseMap = Course::pluck('name', 'code')
+                               ->mapWithKeys(fn($n,$c) => [strtoupper($c) => $n])
+                               ->toArray();
 
-            $existingFullNames = Alumni::selectRaw('LOWER(TRIM(first_name)) as fn, LOWER(TRIM(COALESCE(middle_initial,""))) as mi, LOWER(TRIM(last_name)) as ln, LOWER(TRIM(COALESCE(suffix,""))) as sf')
-                ->get()
-                ->map(fn($a) => $a->fn . '|' . $a->mi . '|' . $a->ln . '|' . $a->sf)
-                ->flip()
-                ->toArray();
+            $existingAlumniIds = Alumni::pluck('student_id')
+                                       ->mapWithKeys(fn($id) => [$id => true])
+                                       ->toArray();
+
+            $existingFullNames = Alumni::selectRaw(
+                    'LOWER(TRIM(first_name)) as fn,
+                     LOWER(TRIM(COALESCE(middle_initial,""))) as mi,
+                     LOWER(TRIM(last_name)) as ln,
+                     LOWER(TRIM(COALESCE(suffix,""))) as sf'
+                )->get()
+                 ->map(fn($a) => $a->fn.'|'.$a->mi.'|'.$a->ln.'|'.$a->sf)
+                 ->flip()->toArray();
 
             $alumniJobs       = [];
             $seenIdsInFile    = [];
@@ -420,6 +527,7 @@ new class extends Component {
             $validationErrors = [];
             $duplicates       = [];
             $maxErrorsStored  = 200;
+            $isComplete       = ($this->importMode === 'complete');
 
             for ($i = 1; $i < count($rows); $i++) {
                 $this->importProgress = $i;
@@ -429,47 +537,37 @@ new class extends Component {
 
                 $row = array_combine($header, array_slice($rows[$i], 0, count($header)));
 
+                // ── base fields ──
                 $firstName     = trim($row['first_name']     ?? '');
                 $middleInitial = trim($row['middle_initial'] ?? '');
                 $lastName      = trim($row['last_name']      ?? '');
                 $suffix        = trim($row['suffix']         ?? '');
                 $fullName      = $this->buildFullName($firstName, $middleInitial, $lastName, $suffix);
+                $label         = 'Row ' . ($i + 1) . ($fullName ? " ({$fullName})" : '');
 
-                $rawId = rtrim(rtrim((string)($row['student_id'] ?? ''), '0'), '.');
-                $rawId = preg_replace('/\..*$/', '', $rawId);
-                $code  = strtoupper(trim($row['course_code'] ?? ''));
-                $year  = (string)(int)($row['batch'] ?? 0);
-                $label = "Row " . ($i + 1) . ($fullName ? " ({$fullName})" : '');
+                // ── name validation ──
+                if (!$firstName) { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: First name is empty."); continue; }
+                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $firstName)) { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: First name has invalid characters."); continue; }
+                if (!$lastName)  { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Last name is empty."); continue; }
+                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName))  { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Last name has invalid characters."); continue; }
 
-                if (!$firstName) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: First name is empty."); continue; }
-                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $firstName)) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: First name contains invalid characters."); continue; }
-                if (!$lastName) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Last name is empty."); continue; }
-                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName)) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Last name contains invalid characters."); continue; }
+                if ($middleInitial === '') { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Middle name is required."); continue; }
+                if (!preg_match('/^[a-zA-Z]+$/', $middleInitial)) { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Middle name must contain letters only."); continue; }
+                if (strlen($middleInitial) < 2) { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Middle name must be a full word (e.g. Santos, not S)."); continue; }
 
-                if ($middleInitial === '') {
-                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Middle name is required.");
-                    continue;
-                }
-                if (!preg_match('/^[a-zA-Z]+$/', $middleInitial)) {
-                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Middle name must contain letters only (no spaces or special characters).");
-                    continue;
-                }
-                if (strlen($middleInitial) < 2) {
-                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Middle name must be a full name, not just an initial (e.g. Santos, not S).");
-                    continue;
-                }
-
-                $nameKey = strtolower($firstName) . '|' . strtolower($middleInitial) . '|' . strtolower($lastName) . '|' . strtolower($suffix);
+                // ── duplicate name ──
+                $nameKey = strtolower($firstName).'|'.strtolower($middleInitial).'|'.strtolower($lastName).'|'.strtolower($suffix);
                 if (isset($existingFullNames[$nameKey]) || isset($seenNamesInFile[$nameKey])) {
                     $duplicates[] = "{$label}: Full name \"{$fullName}\" already registered.";
                     $this->importDuplicateCount++;
                     continue;
                 }
 
+                // ── student id ──
+                $rawId      = preg_replace('/\..*$/', '', rtrim(rtrim((string)($row['student_id'] ?? ''), '0'), '.'));
                 $rawIdClean = ltrim($rawId, '0') ?: '0';
                 if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int)$rawIdClean === 0) {
-                    $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Student ID \"{$rawId}\" is invalid (1–8 digits).");
-                    continue;
+                    $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Student ID \"{$rawId}\" is invalid (1–8 digits)."); continue;
                 }
                 $sid = str_pad($rawIdClean, 8, '0', STR_PAD_LEFT);
                 if (isset($existingAlumniIds[$sid]) || isset($seenIdsInFile[$sid])) {
@@ -478,22 +576,51 @@ new class extends Component {
                     continue;
                 }
 
-                if (!isset($courseMap[$code])) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Course code \"{$code}\" does not exist."); continue; }
+                // ── course / batch ──
+                $code = strtoupper(trim($row['course_code'] ?? ''));
+                if (!isset($courseMap[$code])) { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Course code \"{$code}\" does not exist."); continue; }
 
-                $batchYear = (int) $year;
-                if ($batchYear < 1000 || $batchYear > 9999) { $this->_addValidationError($validationErrors, $maxErrorsStored, "{$label}: Batch \"{$year}\" must be a 4-digit year."); continue; }
+                $batchYear = (int)($row['batch'] ?? 0);
+                if ($batchYear < 1000 || $batchYear > 9999) { $this->_addError($validationErrors, $maxErrorsStored, "{$label}: Batch \"{$batchYear}\" must be a 4-digit year."); continue; }
 
-                $alumniJobs[] = [
-                    'fullName'   => $fullName,
-                    'firstName'  => $firstName,
-                    'middleInit' => $middleInitial,
-                    'lastName'   => $lastName,
-                    'suffix'     => $suffix,
-                    'sid'        => $sid,
-                    'code'       => $code,
-                    'courseName' => $courseMap[$code],
-                    'batchYear'  => $batchYear,
-                ];
+                // ── TASK 2 — complete alumni extra fields ──
+                $extraFields = [];
+                if ($isComplete) {
+                    $extraFields = [
+                        'email'                => $this->sanitizeEmail($row['email'] ?? ''),
+                        'gender'               => $this->sanitizeText($row['gender'] ?? ''),
+                        'date_of_birth'        => $this->sanitizeDate($row['date_of_birth'] ?? ''),
+                        'place_of_birth'       => $this->sanitizeText($row['place_of_birth'] ?? ''),
+                        'citizenship'          => $this->sanitizeText($row['citizenship'] ?? ''),
+                        'civil_status'         => $this->sanitizeText($row['civil_status'] ?? ''),
+                        'blood_type'           => $this->sanitizeText($row['blood_type'] ?? ''),
+                        'contact_number'       => $this->sanitizeText($row['contact_number'] ?? ''),
+                        'father_name'          => $this->sanitizeText($row['father_name'] ?? ''),
+                        'mother_name'          => $this->sanitizeText($row['mother_name'] ?? ''),
+                        'spouse_name'          => $this->sanitizeText($row['spouse_name'] ?? ''),
+                        'address_no'           => $this->sanitizeText($row['address_no'] ?? ''),
+                        'address_street'       => $this->sanitizeText($row['address_street'] ?? ''),
+                        'address_barangay'     => $this->sanitizeText($row['address_barangay'] ?? ''),
+                        'address_municipality' => $this->sanitizeText($row['address_municipality'] ?? ''),
+                        'address_province'     => $this->sanitizeText($row['address_province'] ?? ''),
+                        'address_zip_code'     => $this->sanitizeText($row['address_zip_code'] ?? ''),
+                    ];
+
+                    // If email provided and already used, mark duplicate
+                    if (!empty($extraFields['email'])) {
+                        if (Alumni::where('email', $extraFields['email'])->exists() ||
+                            User::where('email', $extraFields['email'])->exists()) {
+                            $duplicates[] = "{$label}: Email \"{$extraFields['email']}\" already registered.";
+                            $this->importDuplicateCount++;
+                            continue;
+                        }
+                    }
+                }
+
+                $alumniJobs[] = compact(
+                    'fullName','firstName','middleInitial','lastName','suffix',
+                    'sid','code','batchYear','extraFields'
+                ) + ['courseName' => $courseMap[$code]];
 
                 $seenIdsInFile[$sid]       = true;
                 $seenNamesInFile[$nameKey] = true;
@@ -515,8 +642,11 @@ new class extends Component {
 
             foreach ($alumniJobs as $job) {
                 try {
+                    $hasRealEmail     = !empty($job['extraFields']['email'] ?? '');
+                    $placeholderEmail = $hasRealEmail
+                        ? $job['extraFields']['email']
+                        : ($job['sid'] . '@pending.local');
                     $tempPassword     = $this->generateTempPassword($job['sid'], $job['lastName']);
-                    $placeholderEmail = $job['sid'] . '@pending.local';
 
                     $user = User::create([
                         'name'     => $job['fullName'],
@@ -525,26 +655,63 @@ new class extends Component {
                         'password' => Hash::make($tempPassword),
                     ]);
 
-                    Alumni::create([
-                        'user_id'        => $user->id,
-                        'first_name'     => $job['firstName'],
-                        'middle_initial' => $job['middleInit'] ?: null,
-                        'last_name'      => $job['lastName'],
-                        'suffix'         => $job['suffix']    ?: null,
-                        'student_id'     => $job['sid'],
-                        'email'          => null,
-                        'course_code'    => $job['code'],
-                        'course_name'    => $job['courseName'],
-                        'batch'          => $job['batchYear'],
-                        'status'         => 'PENDING',
-                        'profile_photo'  => null,
-                    ]);
+                    /*
+                     * STATUS is ALWAYS 'PENDING' on import regardless of mode.
+                     * The alumni must log in and complete the setup wizard
+                     * (change their temp password) before they become VERIFIED.
+                     * password_changed_at = null means PENDING.
+                     */
+                    $baseData = [
+                        'user_id'            => $user->id,
+                        'first_name'         => $job['firstName'],
+                        'middle_initial'     => $job['middleInitial'] ?: null,
+                        'last_name'          => $job['lastName'],
+                        'suffix'             => $job['suffix']        ?: null,
+                        'student_id'         => $job['sid'],
+                        'email'              => null,        // only set after wizard completes
+                        'course_code'        => $job['code'],
+                        'course_name'        => $job['courseName'],
+                        'batch'              => $job['batchYear'],
+                        'status'             => 'PENDING',   // always PENDING on import
+                        'password_changed_at'=> null,        // null = PENDING (source of truth)
+                        'profile_photo'      => null,
+                        'profile_completed'  => $isComplete ? 1 : 0,
+                    ];
 
+                    if ($isComplete) {
+                        $extra = $job['extraFields'];
+                        $baseData = array_merge($baseData, [
+                            // NOTE: email stays null here — alumni must verify via wizard
+                            // The extra email from the spreadsheet is stored in the users table
+                            // as their login email so they can receive the OTP, but the
+                            // alumni.email column only gets the verified email after wizard.
+                            'gender'               => $extra['gender']             ?: null,
+                            'date_of_birth'        => $extra['date_of_birth']      ?: null,
+                            'place_of_birth'       => $extra['place_of_birth']     ?: null,
+                            'citizenship'          => $extra['citizenship']         ?: null,
+                            'civil_status'         => $extra['civil_status']        ?: null,
+                            'blood_type'           => $extra['blood_type']          ?: null,
+                            'contact_number'       => $extra['contact_number']      ?: null,
+                            'father_name'          => $extra['father_name']         ?: null,
+                            'mother_name'          => $extra['mother_name']         ?: null,
+                            'spouse_name'          => $extra['spouse_name']         ?: null,
+                            'address_no'           => $extra['address_no']          ?: null,
+                            'address_street'       => $extra['address_street']      ?: null,
+                            'address_barangay'     => $extra['address_barangay']    ?: null,
+                            'address_municipality' => $extra['address_municipality'] ?: null,
+                            'address_province'     => $extra['address_province']    ?: null,
+                            'address_zip_code'     => $extra['address_zip_code']    ?: null,
+                        ]);
+                        // Store the email in the users table so they can log in and receive OTP
+                        if ($hasRealEmail) $user->update(['email' => $extra['email']]);
+                    }
+
+                    Alumni::create($baseData);
                     $this->importSuccessCount++;
 
                 } catch (\Exception $e) {
-                    Log::error('Import row insert error: ' . $e->getMessage());
-                    $this->_addValidationError($this->importErrors, 200, "Student ID {$job['sid']}: Insert failed — " . $e->getMessage());
+                    Log::error('Import row error: ' . $e->getMessage());
+                    $this->_addError($this->importErrors, 200, "Student ID {$job['sid']}: " . $e->getMessage());
                     $this->importFailCount++;
                 }
             }
@@ -564,11 +731,31 @@ new class extends Component {
         }
     }
 
-    private function _addValidationError(array &$errors, int $max, string $msg): void
+    // ── sanitise helpers for complete-mode import ─────────────────
+    private function sanitizeText(string $val): string
+    {
+        return mb_substr(strip_tags(trim($val)), 0, 255);
+    }
+    private function sanitizeEmail(string $val): string
+    {
+        $val = filter_var(trim($val), FILTER_SANITIZE_EMAIL);
+        return filter_var($val, FILTER_VALIDATE_EMAIL) ? $val : '';
+    }
+    private function sanitizeDate(string $val): ?string
+    {
+        if (!$val) return null;
+        try {
+            return \Carbon\Carbon::parse($val)->format('Y-m-d');
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    private function _addError(array &$errors, int $max, string $msg): void
     {
         $this->importFailCount++;
-        if (count($errors) < $max) $errors[] = $msg;
-        elseif (count($errors) === $max) $errors[] = '… (additional errors truncated)';
+        if (count($errors) < $max)        $errors[] = $msg;
+        elseif (count($errors) === $max)  $errors[] = '… (additional errors truncated)';
     }
 
     private function parseExcelFile(string $path): array
@@ -599,6 +786,9 @@ new class extends Component {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  REGISTER ALUMNI (manual form)
+    // ─────────────────────────────────────────────────────────────
     public function registerAlumni(): void
     {
         $this->alumniErrors      = [];
@@ -611,75 +801,71 @@ new class extends Component {
             if (!$this->validateName(trim($this->regLastName)))
                 throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
 
-            $midTrimmed = trim($this->regMiddleInitial);
-            if ($midTrimmed !== '') {
-                if (!preg_match('/^[a-zA-Z]+$/', $midTrimmed))
-                    throw new \Exception('Middle name must contain letters only (no spaces or special characters).');
-                if (strlen($midTrimmed) < 2)
-                    throw new \Exception('Middle name must be a full name, not just an initial (e.g. Santos, not S).');
+            $mid = trim($this->regMiddleInitial);
+            if ($mid !== '') {
+                if (!preg_match('/^[a-zA-Z]+$/', $mid))
+                    throw new \Exception('Middle name must contain letters only.');
+                if (strlen($mid) < 2)
+                    throw new \Exception('Middle name must be a full word (e.g. Santos, not S).');
             }
 
             if (trim($this->regSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->regSuffix)))
                 throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
 
             if ($this->alumniFullNameExists(
-                trim($this->regFirstName),
-                trim($this->regMiddleInitial),
-                trim($this->regLastName),
-                trim($this->regSuffix)
-            )) {
-                $fullName = $this->buildFullName($this->regFirstName, $this->regMiddleInitial, $this->regLastName, $this->regSuffix);
-                throw new \Exception("An alumni with the full name \"{$fullName}\" already exists.");
-            }
+                trim($this->regFirstName), trim($this->regMiddleInitial),
+                trim($this->regLastName),  trim($this->regSuffix)
+            )) throw new \Exception("An alumni with that full name already exists.");
 
-            $fullName = $this->buildFullName($this->regFirstName, $this->regMiddleInitial, $this->regLastName, $this->regSuffix);
+            $fullName = $this->buildFullName(
+                $this->regFirstName, $this->regMiddleInitial,
+                $this->regLastName,  $this->regSuffix
+            );
 
             $this->validate([
-                'regFirstName'     => ['required', 'string', 'max:100'],
-                'regLastName'      => ['required', 'string', 'max:100'],
-                'regMiddleInitial' => ['nullable', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
-                'regSuffix'        => ['nullable', 'string', 'max:10'],
-                'regStudentId'     => ['required', 'string', 'regex:/^\d{1,8}$/', 'unique:alumni,student_id'],
-                'regCourseCode'    => ['required', 'string', 'exists:courses,code'],
-                'regYear'          => ['required', 'digits:4'],
-                'regPhoto'         => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+                'regFirstName'     => ['required','string','max:100'],
+                'regLastName'      => ['required','string','max:100'],
+                'regMiddleInitial' => ['nullable','string','min:2','max:50','regex:/^[a-zA-Z]+$/'],
+                'regSuffix'        => ['nullable','string','max:10'],
+                'regStudentId'     => ['required','string','regex:/^\d{1,8}$/','unique:alumni,student_id'],
+                'regCourseCode'    => ['required','string','exists:courses,code'],
+                'regYear'          => ['required','digits:4'],
+                'regPhoto'         => ['nullable','image','mimes:jpg,jpeg,png,webp','max:5120'],
             ], [
-                'regStudentId.unique'    => 'This Student ID is already registered.',
-                'regStudentId.regex'     => 'Student ID must be 1–8 digits (numbers only).',
-                'regCourseCode.exists'   => 'The selected course does not exist.',
-                'regYear.digits'         => 'Batch year must be exactly 4 digits (e.g. 2024).',
-                'regPhoto.max'           => 'Profile photo must not exceed 5MB.',
-                'regMiddleInitial.regex' => 'Middle name must contain letters only.',
-                'regMiddleInitial.min'   => 'Middle name must be a full name, not just an initial (e.g. Santos, not S).',
+                'regStudentId.unique'  => 'This Student ID is already registered.',
+                'regStudentId.regex'   => 'Student ID must be 1–8 digits.',
+                'regCourseCode.exists' => 'The selected course does not exist.',
+                'regYear.digits'       => 'Batch year must be exactly 4 digits.',
+                'regPhoto.max'         => 'Profile photo must not exceed 5 MB.',
             ]);
 
-            $paddedId         = str_pad($this->regStudentId, 8, '0', STR_PAD_LEFT);
-            $course           = Course::where('code', $this->regCourseCode)->firstOrFail();
-            $photoPath        = $this->regPhoto ? $this->storeAlumniPhoto($this->regPhoto) : null;
-
-            $tempPassword     = $this->generateTempPassword($paddedId, trim($this->regLastName));
-            $placeholderEmail = $paddedId . '@pending.local';
+            $paddedId  = str_pad($this->regStudentId, 8, '0', STR_PAD_LEFT);
+            $course    = Course::where('code', $this->regCourseCode)->firstOrFail();
+            $photoPath = $this->regPhoto ? $this->storeAlumniPhoto($this->regPhoto) : null;
+            $tmp       = $this->generateTempPassword($paddedId, trim($this->regLastName));
 
             $user = User::create([
                 'name'     => $fullName,
                 'role'     => 'alumni',
-                'email'    => $placeholderEmail,
-                'password' => Hash::make($tempPassword),
+                'email'    => $paddedId . '@pending.local',
+                'password' => Hash::make($tmp),
             ]);
 
             Alumni::create([
-                'user_id'        => $user->id,
-                'first_name'     => trim($this->regFirstName),
-                'middle_initial' => trim($this->regMiddleInitial) ?: null,
-                'last_name'      => trim($this->regLastName),
-                'suffix'         => trim($this->regSuffix) ?: null,
-                'student_id'     => $paddedId,
-                'email'          => null,
-                'course_code'    => $this->regCourseCode,
-                'course_name'    => $course->name,
-                'batch'          => (int) $this->regYear,
-                'status'         => 'PENDING',
-                'profile_photo'  => $photoPath,
+                'user_id'            => $user->id,
+                'first_name'         => trim($this->regFirstName),
+                'middle_initial'     => trim($this->regMiddleInitial) ?: null,
+                'last_name'          => trim($this->regLastName),
+                'suffix'             => trim($this->regSuffix)        ?: null,
+                'student_id'         => $paddedId,
+                'email'              => null,
+                'course_code'        => $this->regCourseCode,
+                'course_name'        => $course->name,
+                'batch'              => (int) $this->regYear,
+                'status'             => 'PENDING',   // always PENDING on register
+                'password_changed_at'=> null,        // null = PENDING (source of truth)
+                'profile_photo'      => $photoPath,
+                'profile_completed'  => 0,
             ]);
 
             $this->alumniSuccess = "Alumni '{$fullName}' registered successfully!";
@@ -688,7 +874,7 @@ new class extends Component {
         } catch (\Illuminate\Validation\ValidationException $e) {
             $this->alumniErrors = $e->errors();
         } catch (\Exception $e) {
-            Log::error('Alumni: ' . $e->getMessage());
+            Log::error('Alumni register: ' . $e->getMessage());
             $this->alumniErrors = ['general' => [$e->getMessage()]];
         } finally {
             $this->registeringAlumni = false;
@@ -699,11 +885,11 @@ new class extends Component {
     {
         if (!$p) return null;
         try {
-            $f = "alumni-" . Str::uuid() . "." . $p->getClientOriginalExtension();
+            $f = 'alumni-' . Str::uuid() . '.' . $p->getClientOriginalExtension();
             $r = $p->storeAs('alumni-photos', $f, 'public');
             return $r === false ? null : "alumni-photos/{$f}";
         } catch (\Exception $e) {
-            Log::error('Photo: ' . $e->getMessage());
+            Log::error('Photo store: ' . $e->getMessage());
             return null;
         }
     }
@@ -717,6 +903,9 @@ new class extends Component {
         $this->alumniErrors = [];
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  REGISTER ORGANISER
+    // ─────────────────────────────────────────────────────────────
     public function registerOrganizer(): void
     {
         $this->organizerErrors      = [];
@@ -729,60 +918,57 @@ new class extends Component {
             if (!$this->validateName(trim($this->orgLastName)))
                 throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
 
-            $orgMidTrimmed = trim($this->orgMiddleInitial);
-            if ($orgMidTrimmed !== '') {
-                if (!preg_match('/^[a-zA-Z]+$/', $orgMidTrimmed))
-                    throw new \Exception('Middle name must contain letters only (no spaces or special characters).');
-                if (strlen($orgMidTrimmed) < 2)
-                    throw new \Exception('Middle name must be a full name, not just an initial (e.g. Santos, not S).');
+            $mid = trim($this->orgMiddleInitial);
+            if ($mid !== '') {
+                if (!preg_match('/^[a-zA-Z]+$/', $mid))
+                    throw new \Exception('Middle name must contain letters only.');
+                if (strlen($mid) < 2)
+                    throw new \Exception('Middle name must be a full word (e.g. Santos, not S).');
             }
 
             if (trim($this->orgSuffix) !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', trim($this->orgSuffix)))
-                throw new \Exception('Suffix may only contain letters and periods (e.g. Jr. Sr. III)');
+                throw new \Exception('Suffix may only contain letters and periods.');
 
             if ($this->organizerFullNameExists(
-                trim($this->orgFirstName),
-                trim($this->orgMiddleInitial),
-                trim($this->orgLastName),
-                trim($this->orgSuffix)
-            )) {
-                $fullName = $this->buildFullName($this->orgFirstName, $this->orgMiddleInitial, $this->orgLastName, $this->orgSuffix);
-                throw new \Exception("An organizer with the full name \"{$fullName}\" already exists.");
-            }
+                trim($this->orgFirstName), trim($this->orgMiddleInitial),
+                trim($this->orgLastName),  trim($this->orgSuffix)
+            )) throw new \Exception("An organizer with that full name already exists.");
 
-            $fullName = $this->buildFullName($this->orgFirstName, $this->orgMiddleInitial, $this->orgLastName, $this->orgSuffix);
-            $college  = trim($this->orgCollegeSelect);
+            $fullName = $this->buildFullName(
+                $this->orgFirstName, $this->orgMiddleInitial,
+                $this->orgLastName,  $this->orgSuffix
+            );
+
+            $college = trim($this->orgCollegeSelect);
             if (!$college) throw new \Exception('Please select a college.');
 
+            // TASK 3 — block if college already has an ACTIVE organiser
             $occupied = $this->occupiedColleges();
-            if (isset($occupied[$college])) {
-                throw new \Exception("College \"{$college}\" already has an active organizer ({$occupied[$college]}). Only one organizer per college is allowed.");
-            }
+            if (isset($occupied[$college]))
+                throw new \Exception("College \"{$college}\" already has an active organizer ({$occupied[$college]}). Deactivate them first.");
 
             $this->orgDept = $college;
 
             $this->validate([
-                'orgFirstName'     => ['required', 'string', 'max:100'],
-                'orgLastName'      => ['required', 'string', 'max:100'],
-                'orgMiddleInitial' => ['nullable', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
-                'orgSuffix'        => ['nullable', 'string', 'max:10'],
-                'orgTeacherId'     => ['required', 'string', 'regex:/^\d{1,8}$/', 'unique:organizer,id_number'],
-                'orgEmail'         => ['required', 'email', 'unique:organizer,email', 'unique:users,email'],
-                'orgCollegeSelect' => ['required', 'string'],
-                'orgPhoto'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+                'orgFirstName'     => ['required','string','max:100'],
+                'orgLastName'      => ['required','string','max:100'],
+                'orgMiddleInitial' => ['nullable','string','min:2','max:50','regex:/^[a-zA-Z]+$/'],
+                'orgSuffix'        => ['nullable','string','max:10'],
+                'orgTeacherId'     => ['required','string','regex:/^\d{1,8}$/','unique:organizer,id_number'],
+                'orgEmail'         => ['required','email','max:255','unique:organizer,email','unique:users,email'],
+                'orgCollegeSelect' => ['required','string'],
+                'orgPhoto'         => ['nullable','image','mimes:jpeg,png,jpg,webp','max:5120'],
             ], [
                 'orgTeacherId.unique'       => 'This Teacher ID is already registered.',
-                'orgTeacherId.regex'        => 'Teacher ID must be 1–8 digits (numbers only).',
+                'orgTeacherId.regex'        => 'Teacher ID must be 1–8 digits.',
                 'orgEmail.unique'           => 'This email address is already taken.',
                 'orgCollegeSelect.required' => 'Please select a college.',
-                'orgPhoto.max'              => 'Profile photo must not exceed 5MB.',
-                'orgMiddleInitial.regex'    => 'Middle name must contain letters only.',
-                'orgMiddleInitial.min'      => 'Middle name must be a full name, not just an initial (e.g. Santos, not S).',
+                'orgPhoto.max'              => 'Profile photo must not exceed 5 MB.',
             ]);
 
             $paddedId  = str_pad($this->orgTeacherId, 8, '0', STR_PAD_LEFT);
             $photoPath = $this->orgPhoto ? $this->storeOrganizerPhoto($this->orgPhoto) : null;
-            $tmp       = Str::random(10);
+            $tmp       = Str::random(12);
 
             $user = User::create([
                 'name'     => $fullName,
@@ -796,7 +982,7 @@ new class extends Component {
                 'first_name'     => trim($this->orgFirstName),
                 'middle_initial' => trim($this->orgMiddleInitial) ?: null,
                 'last_name'      => trim($this->orgLastName),
-                'suffix'         => trim($this->orgSuffix) ?: null,
+                'suffix'         => trim($this->orgSuffix)        ?: null,
                 'email'          => $this->orgEmail,
                 'id_number'      => $paddedId,
                 'department'     => $college,
@@ -807,16 +993,16 @@ new class extends Component {
             try {
                 Mail::to($organizer->email)->send(new \App\Mail\OrganizerRegistered($organizer, $tmp));
             } catch (\Exception $e) {
-                Log::warning('Email: ' . $e->getMessage());
+                Log::warning('Organizer email failed: ' . $e->getMessage());
             }
 
-            $this->organizerSuccess = "Organizer '{$fullName}' registered successfully! Login credentials sent to {$organizer->email}.";
+            $this->organizerSuccess = "Organizer '{$fullName}' registered! Login credentials sent to {$organizer->email}.";
             $this->resetOrgForm();
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             $this->organizerErrors = $e->errors();
         } catch (\Exception $e) {
-            Log::error('Organizer: ' . $e->getMessage());
+            Log::error('Organizer register: ' . $e->getMessage());
             $this->organizerErrors = ['general' => [$e->getMessage()]];
         } finally {
             $this->registeringOrganizer = false;
@@ -827,7 +1013,7 @@ new class extends Component {
     {
         if (!$p) return null;
         try {
-            $f = "organizer-" . Str::uuid() . "." . $p->getClientOriginalExtension();
+            $f = 'organizer-' . Str::uuid() . '.' . $p->getClientOriginalExtension();
             $r = $p->storeAs('organizers', $f, 'public');
             return $r === false ? null : "organizers/{$f}";
         } catch (\Exception $e) {
@@ -844,6 +1030,9 @@ new class extends Component {
         $this->organizerErrors = [];
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  MANAGE COURSES
+    // ─────────────────────────────────────────────────────────────
     public function openEditCourse(int $id): void
     {
         try {
@@ -852,8 +1041,7 @@ new class extends Component {
             $this->courseCode      = $c->code;
             $this->courseName      = $c->name;
             $this->courseAlert     = '';
-            $this->courseAlertType = '';
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             $this->courseAlert     = 'Failed to load course.';
             $this->courseAlertType = 'error';
         }
@@ -887,18 +1075,18 @@ new class extends Component {
                 $oldCode = $course->code;
                 $oldName = $course->name;
                 $course->update(['code' => $code, 'name' => $name]);
-                if ($oldCode !== $code || $oldName !== $name) {
+                if ($oldCode !== $code || $oldName !== $name)
                     Alumni::where('course_code', $oldCode)->update(['course_code' => $code, 'course_name' => $name]);
-                }
             } else {
                 Course::create(['code' => $code, 'name' => $name]);
             }
             $this->coursesList     = Course::orderByDesc('created_at')->get()->toArray();
+            $msg                   = $this->editingCourseId ? "Course '{$code}' updated!" : "Course '{$code}' added!";
             $this->resetCourseForm();
-            $this->courseAlert     = $this->editingCourseId ? "Course '{$code}' updated!" : "Course '{$code}' added successfully!";
+            $this->courseAlert     = $msg;
             $this->courseAlertType = 'success';
         } catch (\Exception $e) {
-            $this->courseAlert     = str_contains($e->getMessage(), 'Duplicate') ? 'Course code already exists.' : 'Failed to save.';
+            $this->courseAlert     = str_contains($e->getMessage(),'Duplicate') ? 'Course code already exists.' : 'Failed to save.';
             $this->courseAlertType = 'error';
         } finally {
             $this->savingCourse = false;
@@ -912,7 +1100,7 @@ new class extends Component {
             $this->deleteCourseId   = $id;
             $this->deleteCourseName = $c->name;
             $this->activeModal      = 'deleteCourseConfirm';
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             $this->courseAlert     = 'Failed.';
             $this->courseAlertType = 'error';
         }
@@ -932,13 +1120,25 @@ new class extends Component {
             $this->courseAlert      = "Course '{$oldCode}' deleted!";
             $this->courseAlertType  = 'success';
             $this->activeModal      = 'manageCourses';
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             $this->courseAlert     = 'Failed to delete.';
             $this->courseAlertType = 'error';
             $this->activeModal     = 'manageCourses';
         } finally {
             $this->deletingCourse = false;
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  MANAGE COLLEGES
+    // ─────────────────────────────────────────────────────────────
+    private function loadOrgCourses(): void
+    {
+        $grouped = [];
+        foreach (Course::orderByDesc('updated_at')->orderBy('code')->get() as $c) {
+            if ($c->college) $grouped[$c->college][] = $c->toArray();
+        }
+        $this->orgCoursesList = $grouped;
     }
 
     public function resetOrgCourseForm(): void
@@ -958,13 +1158,12 @@ new class extends Component {
     public function addCollege(): void
     {
         $name = trim($this->orgNewCollegeName);
-        if (!$name) { $this->orgCourseAlert = 'College name is required.'; $this->orgCourseAlertType = 'error'; return; }
-        if (isset($this->orgCoursesList[$name])) { $this->orgCourseAlert = "College '{$name}' already exists."; $this->orgCourseAlertType = 'error'; return; }
+        if (!$name)                              { $this->orgCourseAlert = 'College name is required.';           $this->orgCourseAlertType = 'error'; return; }
+        if (isset($this->orgCoursesList[$name])) { $this->orgCourseAlert = "College '{$name}' already exists.";  $this->orgCourseAlertType = 'error'; return; }
         $this->orgAddingToCollege     = $name;
         $this->orgSelectedCourseCodes = [];
         $this->orgNewCollegeName      = '';
         $this->orgCourseAlert         = '';
-        $this->orgCourseAlertType     = '';
     }
 
     public function startEditingCollege(string $college): void
@@ -972,7 +1171,6 @@ new class extends Component {
         $this->orgAddingToCollege     = $college;
         $this->orgSelectedCourseCodes = Course::where('college', $college)->pluck('code')->toArray();
         $this->orgCourseAlert         = '';
-        $this->orgCourseAlertType     = '';
     }
 
     public function cancelAddingCourses(): void
@@ -981,7 +1179,6 @@ new class extends Component {
         $this->orgSelectedCourseCodes = [];
         $this->orgNewCollegeName      = '';
         $this->orgCourseAlert         = '';
-        $this->orgCourseAlertType     = '';
     }
 
     public function startRenamingCollege(string $college): void
@@ -989,7 +1186,6 @@ new class extends Component {
         $this->orgRenamingCollege   = $college;
         $this->orgRenameCollegeName = $college;
         $this->orgCourseAlert       = '';
-        $this->orgCourseAlertType   = '';
     }
 
     public function cancelRenamingCollege(): void
@@ -1000,22 +1196,22 @@ new class extends Component {
 
     public function renameCollege(): void
     {
-        $oldName = trim($this->orgRenamingCollege ?? '');
-        $newName = trim($this->orgRenameCollegeName);
-        if (!$newName) { $this->orgCourseAlert = 'New college name is required.'; $this->orgCourseAlertType = 'error'; return; }
-        if ($newName === $oldName) { $this->cancelRenamingCollege(); return; }
-        if (isset($this->orgCoursesList[$newName])) { $this->orgCourseAlert = "College \"{$newName}\" already exists."; $this->orgCourseAlertType = 'error'; return; }
+        $old = trim($this->orgRenamingCollege ?? '');
+        $new = trim($this->orgRenameCollegeName);
+        if (!$new)                              { $this->orgCourseAlert = 'New name is required.';           $this->orgCourseAlertType = 'error'; return; }
+        if ($new === $old)                      { $this->cancelRenamingCollege(); return; }
+        if (isset($this->orgCoursesList[$new])) { $this->orgCourseAlert = "College \"{$new}\" already exists."; $this->orgCourseAlertType = 'error'; return; }
 
         try {
-            Course::where('college', $oldName)->update(['college' => $newName]);
-            Organizer::where('department', $oldName)->update(['department' => $newName]);
+            Course::where('college', $old)->update(['college' => $new]);
+            Organizer::where('department', $old)->update(['department' => $new]);
             $this->cancelRenamingCollege();
             $this->loadOrgCourses();
             $this->coursesList        = Course::orderByDesc('created_at')->get()->toArray();
-            $this->orgCourseAlert     = "College renamed to \"{$newName}\" successfully!";
+            $this->orgCourseAlert     = "College renamed to \"{$new}\"!";
             $this->orgCourseAlertType = 'success';
         } catch (\Exception $e) {
-            $this->orgCourseAlert     = 'Failed to rename: ' . $e->getMessage();
+            $this->orgCourseAlert     = 'Failed: ' . $e->getMessage();
             $this->orgCourseAlertType = 'error';
         }
     }
@@ -1024,7 +1220,7 @@ new class extends Component {
     {
         $this->savingOrgCourse = true;
         $college = trim($this->orgAddingToCollege ?? '');
-        if (!$college) { $this->orgCourseAlert = 'College name missing.'; $this->orgCourseAlertType = 'error'; $this->savingOrgCourse = false; return; }
+        if (!$college)                            { $this->orgCourseAlert = 'College name missing.';       $this->orgCourseAlertType = 'error'; $this->savingOrgCourse = false; return; }
         if (empty($this->orgSelectedCourseCodes)) { $this->orgCourseAlert = 'Select at least one course.'; $this->orgCourseAlertType = 'error'; $this->savingOrgCourse = false; return; }
 
         try {
@@ -1035,7 +1231,7 @@ new class extends Component {
             $this->orgSelectedCourseCodes = [];
             $this->loadOrgCourses();
             $this->coursesList        = Course::orderByDesc('created_at')->get()->toArray();
-            $this->orgCourseAlert     = "College '{$college}' saved with {$count} department(s)!";
+            $this->orgCourseAlert     = "College '{$college}' saved with {$count} dept(s)!";
             $this->orgCourseAlertType = 'success';
         } catch (\Exception $e) {
             $this->orgCourseAlert     = 'Failed: ' . $e->getMessage();
@@ -1062,10 +1258,10 @@ new class extends Component {
             $this->deleteOrgCourseName  = '';
             $this->loadOrgCourses();
             $this->coursesList        = Course::orderByDesc('created_at')->get()->toArray();
-            $this->orgCourseAlert     = "College '{$deleted}' removed successfully!";
+            $this->orgCourseAlert     = "College '{$deleted}' removed!";
             $this->orgCourseAlertType = 'success';
             $this->activeModal        = 'manageOrgCourses';
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             $this->orgCourseAlert     = 'Failed to delete college.';
             $this->orgCourseAlertType = 'error';
             $this->activeModal        = 'manageOrgCourses';
@@ -1074,6 +1270,9 @@ new class extends Component {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  ORGANISER STATUS TOGGLE  — TASK 3
+    // ─────────────────────────────────────────────────────────────
     public function confirmToggleOrganizerStatus(int $id, string $action): void
     {
         try {
@@ -1082,7 +1281,7 @@ new class extends Component {
             $this->pendingToggleAction = $action;
             $this->pendingToggleName   = $organizer->getFullName();
             $this->activeModal         = 'toggleOrganizerConfirm';
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             $this->flash('error', 'Could not find organizer.');
         }
     }
@@ -1090,12 +1289,39 @@ new class extends Component {
     public function executeToggleOrganizerStatus(): void
     {
         if (!$this->pendingToggleId) return;
+
         try {
             $organizer = Organizer::findOrFail($this->pendingToggleId);
             $newStatus = $this->pendingToggleAction === 'deactivate' ? 'INACTIVE' : 'ACTIVE';
+
+            // TASK 3 — prevent activating if college already has another ACTIVE organiser
+            if ($newStatus === 'ACTIVE') {
+                $collegeName = Course::where('college', $organizer->department)->exists()
+                    ? $organizer->department
+                    : (Course::where('code', $organizer->department)->value('college') ?? $organizer->department);
+
+                $conflict = Organizer::withoutTrashed()
+                    ->where('status', 'ACTIVE')
+                    ->where('department', $organizer->department)
+                    ->where('id', '!=', $organizer->id)
+                    ->first();
+
+                if ($conflict) {
+                    $this->flash('error',
+                        "Cannot activate: college \"{$collegeName}\" already has an active organizer ({$conflict->getFullName()}). Deactivate them first."
+                    );
+                    $this->activeModal         = '';
+                    $this->pendingToggleId     = null;
+                    $this->pendingToggleAction = '';
+                    $this->pendingToggleName   = '';
+                    return;
+                }
+            }
+
             $organizer->update(['status' => $newStatus]);
             $verb = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
             $this->flash('success', "{$organizer->getFullName()} has been {$verb}.");
+
         } catch (\Exception $e) {
             $this->flash('error', 'Could not update status: ' . $e->getMessage());
         } finally {
@@ -1106,37 +1332,36 @@ new class extends Component {
         }
     }
 
-    // ── UPDATED: fetch ALL alumni fields including profile information ──
+    // ─────────────────────────────────────────────────────────────
+    //  VIEW PROFILE
+    // ─────────────────────────────────────────────────────────────
     public function viewProfile(int $id, string $type): void
     {
         try {
             $this->viewingProfileType = $type;
 
             if ($type === 'alumni') {
-                $alumni = Alumni::select([
-                    'id', 'user_id',
-                    'first_name', 'middle_initial', 'last_name', 'suffix',
-                    'student_id', 'course_code', 'course_name', 'batch',
-                    'email', 'profile_photo', 'status', 'profile_completed',
-                    // Personal details
-                    'gender', 'date_of_birth', 'place_of_birth',
-                    'citizenship', 'civil_status', 'blood_type', 'contact_number',
-                    // Family background
-                    'father_name', 'mother_name', 'spouse_name',
-                    // Address
-                    'address_no', 'address_street', 'address_barangay',
-                    'address_municipality', 'address_province', 'address_zip_code',
-                    'created_at', 'updated_at',
-                ])->findOrFail($id);
-                $this->viewingProfile = $alumni->toArray();
+                $this->viewingProfile = Alumni::select([
+                    'id','user_id',
+                    'first_name','middle_initial','last_name','suffix',
+                    'student_id','course_code','course_name','batch',
+                    'email','profile_photo','status','profile_completed',
+                    'password_changed_at',
+                    'gender','date_of_birth','place_of_birth',
+                    'citizenship','civil_status','blood_type','contact_number',
+                    'father_name','mother_name','spouse_name',
+                    'address_no','address_street','address_barangay',
+                    'address_municipality','address_province','address_zip_code',
+                    'created_at','updated_at',
+                ])->findOrFail($id)->toArray();
             } else {
                 $this->viewingProfile = Organizer::findOrFail($id)->toArray();
             }
 
             $this->viewingProfileId = $id;
             $this->activeModal      = 'viewProfile';
-        } catch (\Exception $e) {
-            $this->flash('error', 'Failed to load profile');
+        } catch (\Exception) {
+            $this->flash('error', 'Failed to load profile.');
         }
     }
 
@@ -1163,8 +1388,8 @@ new class extends Component {
             }
             $this->updatingProfilePhoto = null;
             $this->flash('success', 'Photo updated!');
-        } catch (\Exception $e) {
-            $this->flash('error', 'Failed to update photo');
+        } catch (\Exception) {
+            $this->flash('error', 'Failed to update photo.');
         } finally {
             $this->updatingProfile = false;
         }
@@ -1174,7 +1399,7 @@ new class extends Component {
 
 <div>
 
-{{-- FLASH TOAST --}}
+{{-- ══════════════════════ FLASH TOAST ══════════════════════ --}}
 <div x-data="{
         show:false, type:'success', msg:'', timer:null,
         display(t,m){ this.type=t; this.msg=m; this.show=true; clearTimeout(this.timer); this.timer=setTimeout(()=>this.show=false,8000); }
@@ -1214,7 +1439,7 @@ new class extends Component {
         </div>
         <div class="flex flex-wrap gap-2 shrink-0">
             <div @class(['flex flex-wrap gap-2'=>true,'hidden'=>$this->activeTab!=='alumni'])>
-                <button wire:click="openModal('registerAlumni')" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition shadow-md hover:shadow-lg hover:scale-100 active:scale-100">
+                <button wire:click="openModal('registerAlumni')" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition shadow-md">
                     <i class="fas fa-user-plus text-xs"></i><span>Register Alumni</span>
                 </button>
                 <button wire:click="openModal('importModal')" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-white border border-gray-300 text-gray-900 hover:bg-gray-50 transition">
@@ -1225,7 +1450,7 @@ new class extends Component {
                 </button>
             </div>
             <div @class(['flex flex-wrap gap-2'=>true,'hidden'=>$this->activeTab!=='organizers'])>
-                <button wire:click="openModal('registerOrganizer')" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition shadow-md hover:shadow-lg hover:scale-100 active:scale-100">
+                <button wire:click="openModal('registerOrganizer')" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition shadow-md">
                     <i class="fas fa-users-gear text-xs"></i><span class="hidden sm:inline">Register Organizer</span>
                 </button>
                 <button wire:click="openModal('manageOrgCourses')" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-xs sm:text-sm bg-white border border-gray-300 text-gray-900 hover:bg-gray-50 transition">
@@ -1238,20 +1463,23 @@ new class extends Component {
     {{-- TABS --}}
     <div class="flex gap-1 mb-4 bg-gray-200 p-1 rounded-xl w-fit">
         <button wire:click="switchTab('alumni')"
-                class="px-4 sm:px-5 py-2 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-200 flex items-center gap-1.5 {{ $this->activeTab==='alumni' ? 'bg-white text-[#7a3f91] border-b-2 border-[#7a3f91] shadow-sm' : 'bg-transparent text-gray-600 hover:bg-white/65' }}">
+                class="px-4 sm:px-5 py-2 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-200 flex items-center gap-1.5
+                       {{ $this->activeTab==='alumni' ? 'bg-white text-[#7a3f91] border-b-2 border-[#7a3f91] shadow-sm' : 'bg-transparent text-gray-600 hover:bg-white/65' }}">
             <i class="fas fa-graduation-cap text-xs"></i>Alumni
         </button>
         <button wire:click="switchTab('organizers')"
-                class="px-4 sm:px-5 py-2 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-200 flex items-center gap-1.5 {{ $this->activeTab==='organizers' ? 'bg-white text-[#7a3f91] border-b-2 border-[#7a3f91] shadow-sm' : 'bg-transparent text-gray-600 hover:bg-white/65' }}">
+                class="px-4 sm:px-5 py-2 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-200 flex items-center gap-1.5
+                       {{ $this->activeTab==='organizers' ? 'bg-white text-[#7a3f91] border-b-2 border-[#7a3f91] shadow-sm' : 'bg-transparent text-gray-600 hover:bg-white/65' }}">
             <i class="fas fa-users-gear text-xs"></i>Organizers
         </button>
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden" style="min-height:0;height:calc(100vh - 210px);">
 
-        {{-- ══════════════════════ ALUMNI TAB ══════════════════════ --}}
+        {{-- ══ ALUMNI TAB ══ --}}
         <div @class(['flex flex-col flex-1 min-h-0 overflow-hidden'=>true,'hidden'=>$this->activeTab!=='alumni'])>
 
+            {{-- Filters --}}
             <div class="px-3 sm:px-5 py-2.5 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center">
                 <div class="relative flex-1 min-w-[160px] max-w-xs"
                      x-data="{ query: @entangle('alumniSearch').live, timer: null, onInput(e){ clearTimeout(this.timer); this.timer=setTimeout(()=>{ this.query=e.target.value; },80); } }"
@@ -1261,15 +1489,21 @@ new class extends Component {
                            class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                            autocomplete="off" spellcheck="false">
                 </div>
-                <select wire:model.live="alumniBatch" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[95px] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                <select wire:model.live="alumniBatch" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[95px] focus:outline-none focus:border-[#7a3f91]">
                     <option value="">All Years</option>
                     @foreach($this->batches as $b)<option value="{{ $b }}">{{ $b }}</option>@endforeach
                 </select>
-                <select wire:model.live="alumniCourse" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                <select wire:model.live="alumniCourse" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91]">
                     <option value="">All Courses</option>
                     @foreach($this->courses as $c)<option value="{{ $c->code }}">{{ $c->code }}</option>@endforeach
                 </select>
-                <select wire:model.live="alumniSort" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                {{-- Status filter — PENDING = password_changed_at IS NULL, VERIFIED = NOT NULL --}}
+                <select wire:model.live="alumniStatus" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91]">
+                    <option value="">All Status</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="VERIFIED">Verified</option>
+                </select>
+                <select wire:model.live="alumniSort" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91]">
                     <option value="recent">Recent First</option>
                     <option value="oldest">Oldest First</option>
                 </select>
@@ -1278,13 +1512,14 @@ new class extends Component {
                 </button>
             </div>
 
+            {{-- Table --}}
             <div class="relative flex-1 min-h-0" x-data="{ showTop: false }">
                 <div id="alumni-scroll"
                      @scroll.passive="showTop = $event.target.scrollTop > 200"
                      class="h-full overflow-y-auto overflow-x-auto scroll-custom"
                      wire:loading.class="opacity-40 pointer-events-none"
-                     wire:target="alumniSearch,alumniBatch,alumniCourse,alumniSort,resetAlumniFilters">
-                    <table class="w-full border-collapse" style="min-width:700px;">
+                     wire:target="alumniSearch,alumniBatch,alumniCourse,alumniSort,alumniStatus,resetAlumniFilters">
+                    <table class="w-full border-collapse" style="min-width:720px;">
                         <thead>
                             <tr class="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                                 <th class="px-3 sm:px-5 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Name</th>
@@ -1298,20 +1533,22 @@ new class extends Component {
                         </thead>
                         <tbody class="divide-y divide-gray-100">
                             @forelse($this->alumniRecords as $item)
+                            {{--
+                                STATUS SOURCE OF TRUTH: password_changed_at
+                                null     = PENDING  (temp password still active)
+                                not null = VERIFIED (setup wizard completed)
+                            --}}
+                            @php $isVerified = $item->password_changed_at !== null; @endphp
                             <tr class="bg-white hover:bg-gray-50 transition">
                                 <td class="px-3 sm:px-5 py-3">
                                     <div class="flex items-center gap-2.5">
-                                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
-                                             alt="{{ $item->name }}"
+                                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                                              class="w-8 h-8 rounded-lg object-cover shrink-0 shadow-sm ring-1 ring-gray-100">
-                                        <span class="font-semibold text-gray-900 text-sm leading-snug">
-                                            {{ $this->formatAlumniDisplayName(
-                                                $item->first_name ?? '',
-                                                $item->middle_initial ?? '',
-                                                $item->last_name ?? '',
-                                                $item->suffix ?? ''
-                                            ) }}
-                                        </span>
+                                        <div>
+                                            <span class="font-semibold text-gray-900 text-sm leading-snug block">
+                                                {{ $this->formatAlumniDisplayName($item->first_name??'', $item->middle_initial??'', $item->last_name??'', $item->suffix??'') }}
+                                            </span>
+                                        </div>
                                     </div>
                                 </td>
                                 <td class="px-3 sm:px-5 py-3">
@@ -1323,8 +1560,9 @@ new class extends Component {
                                 <td class="px-3 sm:px-5 py-3 text-center">
                                     <span class="font-mono text-gray-800 text-xs font-bold">{{ $item->batch }}</span>
                                 </td>
+                                {{-- Status badge driven by password_changed_at --}}
                                 <td class="px-3 sm:px-5 py-3 text-center">
-                                    @if(!empty($item->email))
+                                    @if($isVerified)
                                         <span class="inline-block px-2.5 py-1 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-bold">VERIFIED</span>
                                     @else
                                         <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">PENDING</span>
@@ -1362,8 +1600,6 @@ new class extends Component {
                     </table>
                 </div>
                 <button x-show="showTop"
-                        x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-75" x-transition:enter-end="opacity-100 scale-100"
-                        x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-75"
                         @click="document.getElementById('alumni-scroll').scrollTo({top:0,behavior:'smooth'})"
                         class="absolute bottom-4 right-4 z-20 w-8 h-8 rounded-full flex items-center justify-center shadow-lg bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition"
                         style="display:none">
@@ -1371,6 +1607,7 @@ new class extends Component {
                 </button>
             </div>
 
+            {{-- Pagination --}}
             <div class="px-3 sm:px-5 py-3 border-t border-gray-200 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-[#2b0d3e]">
                 @php $total=$this->alumniRecords->total(); $pp=$this->alumniRecords->perPage(); $cp=$this->alumniRecords->currentPage(); $from=$total>0?($cp-1)*$pp+1:0; $to=min($cp*$pp,$total); @endphp
                 <p class="text-white text-xs sm:text-sm">Showing <strong>{{ $from }}–{{ $to }}</strong> of <strong>{{ $total }}</strong></p>
@@ -1390,7 +1627,7 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ══════════════════════ ORGANIZERS TAB ══════════════════════ --}}
+        {{-- ══ ORGANIZERS TAB ══ --}}
         <div @class(['flex flex-col flex-1 min-h-0 overflow-hidden'=>true,'hidden'=>$this->activeTab!=='organizers'])>
             <div class="px-3 sm:px-5 py-2.5 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-2 items-center">
                 <div class="relative flex-1 min-w-[160px] max-w-xs" wire:ignore
@@ -1401,11 +1638,11 @@ new class extends Component {
                            class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                            autocomplete="off" spellcheck="false">
                 </div>
-                <select wire:model.live="orgCollege" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[120px] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                <select wire:model.live="orgCollege" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[120px] focus:outline-none focus:border-[#7a3f91]">
                     <option value="">All Colleges</option>
                     @foreach($this->orgColleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
                 </select>
-                <select wire:model.live="orgSort" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                <select wire:model.live="orgSort" class="px-3 py-2 border border-gray-200 rounded-lg text-xs sm:text-sm bg-white text-gray-900 min-w-[110px] focus:outline-none focus:border-[#7a3f91]">
                     <option value="recent">Recent First</option>
                     <option value="oldest">Oldest First</option>
                 </select>
@@ -1439,12 +1676,7 @@ new class extends Component {
                                         <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->name }}"
                                              class="w-8 h-8 rounded-lg object-cover shrink-0 shadow-sm ring-1 ring-gray-100">
                                         <span class="font-semibold text-gray-900 text-sm">
-                                            {{ $this->formatAlumniDisplayName(
-                                                $item->first_name ?? '',
-                                                $item->middle_initial ?? '',
-                                                $item->last_name ?? '',
-                                                $item->suffix ?? ''
-                                            ) }}
+                                            {{ $this->formatAlumniDisplayName($item->first_name??'', $item->middle_initial??'', $item->last_name??'', $item->suffix??'') }}
                                         </span>
                                     </div>
                                 </td>
@@ -1453,15 +1685,15 @@ new class extends Component {
                                 <td class="px-3 sm:px-5 py-3">
                                     @php
                                         $dept        = $item->department;
-                                        $directMatch = \App\Models\Course::where('college', $dept)->exists();
-                                        $collegeName = $directMatch ? $dept : (\App\Models\Course::where('code', $dept)->value('college') ?? $dept);
-                                        $deptCodes   = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('code')->toArray();
+                                        $directMatch = \App\Models\Course::where('college',$dept)->exists();
+                                        $collegeName = $directMatch ? $dept : (\App\Models\Course::where('code',$dept)->value('college') ?? $dept);
+                                        $deptCodes   = \App\Models\Course::where('college',$collegeName)->orderBy('code')->pluck('code')->toArray();
                                     @endphp
                                     <span class="block font-semibold text-gray-900 text-xs leading-snug">{{ $collegeName }}</span>
                                     @if(count($deptCodes))
                                     <div class="flex flex-wrap gap-1 mt-1">
-                                        @foreach($deptCodes as $deptCode)
-                                            <span class="text-xs font-mono font-bold text-[#7a3f91]">{{ $deptCode }}</span>
+                                        @foreach($deptCodes as $dc)
+                                            <span class="text-xs font-mono font-bold text-[#7a3f91]">{{ $dc }}</span>
                                             @if(!$loop->last)<span class="text-gray-300 text-xs">·</span>@endif
                                         @endforeach
                                     </div>
@@ -1469,14 +1701,14 @@ new class extends Component {
                                 </td>
                                 <td class="px-3 sm:px-5 py-3 text-center">
                                     @php
-                                        $statusColor = match($item->status) {
-                                            'ACTIVE' => 'bg-green-50 text-green-700 border-green-200',
+                                        $sc = match($item->status) {
+                                            'ACTIVE'   => 'bg-green-50 text-green-700 border-green-200',
                                             'INACTIVE' => 'bg-amber-50 text-amber-700 border-amber-200',
-                                            'SUSPENDED' => 'bg-red-50 text-red-700 border-red-200',
-                                            default => 'bg-gray-50 text-gray-700 border-gray-200'
+                                            'SUSPENDED'=> 'bg-red-50 text-red-700 border-red-200',
+                                            default    => 'bg-gray-50 text-gray-700 border-gray-200'
                                         };
                                     @endphp
-                                    <span class="inline-block px-2.5 py-1 border rounded-full text-xs font-bold {{ $statusColor }}">{{ $item->status }}</span>
+                                    <span class="inline-block px-2.5 py-1 border rounded-full text-xs font-bold {{ $sc }}">{{ $item->status }}</span>
                                 </td>
                                 <td class="px-3 sm:px-5 py-3 text-center">
                                     <div class="flex items-center justify-center gap-1.5 flex-wrap">
@@ -1503,7 +1735,6 @@ new class extends Component {
                                             <i class="fas fa-users-gear text-xl text-gray-300"></i>
                                         </div>
                                         <p class="font-semibold text-gray-400 text-sm">No organizers found</p>
-                                        <p class="text-xs text-gray-400">Register an organizer to get started</p>
                                     </div>
                                 </td>
                             </tr>
@@ -1512,8 +1743,6 @@ new class extends Component {
                     </table>
                 </div>
                 <button x-show="showTop"
-                        x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-75" x-transition:enter-end="opacity-100 scale-100"
-                        x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-75"
                         @click="document.getElementById('org-scroll').scrollTo({top:0,behavior:'smooth'})"
                         class="absolute bottom-4 right-4 z-20 w-8 h-8 rounded-full flex items-center justify-center shadow-lg bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition"
                         style="display:none">
@@ -1534,7 +1763,7 @@ new class extends Component {
                     @if($this->organizerRecords->hasMorePages())
                         <button wire:click="nextPage('orgPage')" class="px-3 py-1.5 bg-[#7a3f91] hover:bg-[#5e2f72] text-white rounded-lg text-xs font-semibold transition">Next →</button>
                     @else
-                        <button disabled class="px-3 py-1.5 bg-white/10 text-white/40 rounded-lg text-xs font-semibold cursor-not-allowed">Next →</button>
+                        <button disabled class="px-3 py-1.5 bg-white/10 text-white/40 rounded-lg text-xs font-semibond cursor-not-allowed">Next →</button>
                     @endif
                 </div>
             </div>
@@ -1543,9 +1772,9 @@ new class extends Component {
     </div>
 </div>
 
-{{-- ═══════════════════════════ MODALS ═══════════════════════════ --}}
+{{-- ═══════════════════ MODALS ═══════════════════ --}}
 
-{{-- ── REGISTER ALUMNI ──────────────────────────────────────────── --}}
+{{-- ── REGISTER ALUMNI ──────────────────────────── --}}
 @if($activeModal==='registerAlumni')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
@@ -1560,6 +1789,7 @@ new class extends Component {
             <div class="flex-1">
                 <p class="font-bold text-sm text-green-900">Registration Successful!</p>
                 <p class="text-sm mt-0.5 text-green-800">{{ $alumniSuccess }}</p>
+                <p class="text-xs mt-1.5 text-green-700">Status will remain <strong>PENDING</strong> until the alumni logs in and completes the account setup wizard.</p>
             </div>
             <button wire:click="closeModal" class="bg-[#7a3f91] text-white px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 hover:bg-[#5e2f72] transition">Done</button>
         </div>
@@ -1604,10 +1834,10 @@ new class extends Component {
                         <p class="text-xs text-gray-500 mt-1">Last Name <span class="text-red-400">*</span></p>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-2 gap-3 mt-3">
+                <div class="grid grid-cols-2 gap-3 mt-3">
                     <div>
                         <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
-                        <p class="text-xs text-gray-500 mt-1">Middle Name <span class="text-gray-400">(full word, not just S)</span></p>
+                        <p class="text-xs text-gray-500 mt-1">Middle Name <span class="text-gray-400">(full word)</span></p>
                     </div>
                     <div>
                         <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr." maxlength="10" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
@@ -1636,6 +1866,15 @@ new class extends Component {
                 </div>
             </div>
 
+            {{-- Temp password hint --}}
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
+                <i class="fas fa-key text-amber-500 mt-0.5 text-sm shrink-0"></i>
+                <div>
+                    <p class="text-xs font-bold text-amber-900">Temporary Password</p>
+                    <p class="text-xs text-amber-800 mt-0.5">The alumni's initial password will be their <strong>Student ID + underscore + first 2 letters of last name</strong> (e.g. <code class="bg-amber-100 px-1 rounded font-mono">00012345_Sa</code>). Status stays <strong>PENDING</strong> until they complete the setup wizard.</p>
+                </div>
+            </div>
+
             <div class="flex gap-3 pt-4">
                 <button type="button" wire:click="closeModal" class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold bg-white border border-gray-300 text-gray-900 hover:bg-gray-50 transition">Cancel</button>
                 <button type="submit" wire:loading.attr="disabled" wire:target="registerAlumni"
@@ -1649,7 +1888,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── IMPORT ────────────────────────────────────────────────────── --}}
+{{-- ── IMPORT MODAL — TASK 2 ────────────────────── --}}
 @if($activeModal==='importModal')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.cancelImport()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
@@ -1657,23 +1896,75 @@ new class extends Component {
             <h2 class="text-white font-extrabold text-lg flex items-center gap-2"><i class="fas fa-file-import"></i> Import Alumni</h2>
             <button wire:click="cancelImport" class="text-white/60 hover:text-white text-xl transition"><i class="fas fa-xmark"></i></button>
         </div>
+
         <div class="p-5 sm:p-7 space-y-5 overflow-y-auto" style="max-height:calc(100vh - 180px);">
 
             @if($importStep==='upload')
+
+            {{-- TASK 2: Import Mode Selector --}}
+            <div class="grid grid-cols-2 gap-3">
+                <button type="button" wire:click="$set('importMode','new')"
+                        class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 text-center transition
+                               {{ $importMode==='new' ? 'border-[#7a3f91] bg-[#f5eef9]' : 'border-gray-200 hover:border-gray-300' }}">
+                    <i class="fas fa-user-plus text-2xl {{ $importMode==='new' ? 'text-[#7a3f91]' : 'text-gray-400' }}"></i>
+                    <div>
+                        <p class="font-bold text-sm {{ $importMode==='new' ? 'text-[#7a3f91]' : 'text-gray-700' }}">New Alumni</p>
+                        <p class="text-xs text-gray-500 mt-0.5">Basic info only</p>
+                    </div>
+                    @if($importMode==='new') <i class="fas fa-circle-check text-[#7a3f91] text-sm"></i> @endif
+                </button>
+                <button type="button" wire:click="$set('importMode','complete')"
+                        class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 text-center transition
+                               {{ $importMode==='complete' ? 'border-[#7a3f91] bg-[#f5eef9]' : 'border-gray-200 hover:border-gray-300' }}">
+                    <i class="fas fa-id-card text-2xl {{ $importMode==='complete' ? 'text-[#7a3f91]' : 'text-gray-400' }}"></i>
+                    <div>
+                        <p class="font-bold text-sm {{ $importMode==='complete' ? 'text-[#7a3f91]' : 'text-gray-700' }}">Complete Alumni Info</p>
+                        <p class="text-xs text-gray-500 mt-0.5">Full personal details</p>
+                    </div>
+                    @if($importMode==='complete') <i class="fas fa-circle-check text-[#7a3f91] text-sm"></i> @endif
+                </button>
+            </div>
+
+            {{-- Column guide --}}
+            @if($importMode==='new')
             <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-900">
-                <p class="font-bold mb-2"><i class="fas fa-circle-info mr-1.5"></i>Supported: CSV · Excel (.xlsx, .xls)</p>
-                <div class="flex flex-wrap gap-1 mb-1">
+                <p class="font-bold mb-2"><i class="fas fa-circle-info mr-1.5"></i>New Alumni — Required Columns</p>
+                <div class="flex flex-wrap gap-1 mb-1.5">
                     @foreach(['first_name','last_name','middle_initial','student_id','course_code','batch'] as $col)
                     <code class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
                     @endforeach
                 </div>
-                <p class="text-xs text-blue-700 mt-1">
-                    <strong>middle_initial</strong> = full middle name (e.g. <code class="bg-blue-100 px-1 rounded font-mono">SANTOS</code>, not just <code class="bg-blue-100 px-1 rounded font-mono">S</code>).
-                    Optional: <code class="bg-blue-100 px-1.5 py-0.5 rounded font-mono">suffix</code>
+                <p class="text-xs text-blue-700">
+                    <strong>middle_initial</strong> = full middle name (e.g. <code class="bg-blue-100 px-1 rounded font-mono">SANTOS</code>).
+                    Optional: <code class="bg-blue-100 px-1 rounded font-mono">suffix</code>
                 </p>
-                <p class="text-xs text-amber-700 mt-2 font-medium"><i class="fas fa-triangle-exclamation mr-1"></i>Duplicate full names and student IDs are automatically blocked.</p>
+                <p class="text-xs text-amber-700 mt-1.5 font-medium bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <i class="fas fa-clock mr-1"></i>All imported alumni will be <strong>PENDING</strong> until they log in and complete the account setup wizard (change temp password).
+                </p>
             </div>
-            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#f5eef9] transition" @click="document.getElementById('importFile').click()">
+            @else
+            <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900">
+                <p class="font-bold mb-2"><i class="fas fa-circle-info mr-1.5"></i>Complete Alumni Info — Required + Optional Columns</p>
+                <p class="text-xs text-emerald-700 font-semibold mb-1">Required:</p>
+                <div class="flex flex-wrap gap-1 mb-2">
+                    @foreach(['first_name','last_name','middle_initial','student_id','course_code','batch'] as $col)
+                    <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                    @endforeach
+                </div>
+                <p class="text-xs text-emerald-700 font-semibold mb-1">Optional (personal/family/address):</p>
+                <div class="flex flex-wrap gap-1 mb-2">
+                    @foreach(['email','gender','date_of_birth','place_of_birth','citizenship','civil_status','blood_type','contact_number','father_name','mother_name','spouse_name','address_no','address_street','address_barangay','address_municipality','address_province','address_zip_code','suffix'] as $col)
+                    <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                    @endforeach
+                </div>
+                <p class="text-xs text-amber-700 mt-1 font-medium bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <i class="fas fa-clock mr-1"></i>All imported alumni will be <strong>PENDING</strong> regardless of how much data is provided. Status becomes <strong>VERIFIED</strong> only when the alumni logs in and changes their temp password via the setup wizard.
+                </p>
+            </div>
+            @endif
+
+            {{-- File picker --}}
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#f5eef9] transition" @click="document.getElementById('importFileInput').click()">
                 @if($importFile)
                     <i class="fas fa-file-circle-check text-4xl text-green-500 block mb-2"></i>
                     <p class="text-green-700 font-semibold text-sm">{{ $importFile->getClientOriginalName() }}</p>
@@ -1683,8 +1974,9 @@ new class extends Component {
                     <p class="text-gray-700 font-semibold text-sm">Click to choose file</p>
                     <p class="text-gray-400 text-xs mt-0.5">CSV or Excel format</p>
                 @endif
-                <input type="file" id="importFile" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
+                <input type="file" id="importFileInput" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
             </div>
+
             <div class="flex gap-3">
                 <button type="button" wire:click="cancelImport" class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold bg-white border border-gray-300 text-gray-900 hover:bg-gray-50 transition">Cancel</button>
                 <button type="button" wire:click="processImportFile"
@@ -1702,7 +1994,7 @@ new class extends Component {
                 <div class="flex justify-between mb-2">
                     <p class="text-gray-800 font-semibold text-sm flex items-center gap-2">
                         <i class="fas fa-spinner animate-spin" style="color:#7a3f91;"></i>
-                        Validating rows… {{ $importProgress }}/{{ $importTotal }}
+                        Processing… {{ $importProgress }}/{{ $importTotal }}
                     </p>
                     <span class="text-xs text-gray-500 font-mono">{{ $importTotal>0?round(($importProgress/$importTotal)*100):0 }}%</span>
                 </div>
@@ -1737,7 +2029,7 @@ new class extends Component {
                     @if($hasNew)
                         <p class="font-bold text-green-900 text-sm">Import Complete</p>
                         <p class="text-xs mt-0.5 text-green-700">
-                            {{ $importSuccessCount }} record(s) imported
+                            {{ $importSuccessCount }} record(s) imported as <strong>{{ $importMode==='complete'?'Complete Alumni':'New Alumni' }}</strong> — all set to <strong>PENDING</strong>
                             @if($hasDups) · {{ $importDuplicateCount }} duplicate(s) skipped @endif
                             @if($hasErrors) · {{ $importFailCount }} error(s) @endif
                         </p>
@@ -1790,7 +2082,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── MANAGE COURSES ────────────────────────────────────────────── --}}
+{{-- ── MANAGE COURSES ───────────────────────────── --}}
 @if($activeModal==='manageCourses')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200 flex flex-col" style="max-height:92vh;">
@@ -1849,10 +2141,10 @@ new class extends Component {
                         </div>
                         <div class="flex gap-1.5 ml-3 shrink-0">
                             <button wire:click="openEditCourse({{ $c['id'] }})" class="bg-[#f5eef9] border border-[#d4aaeb] text-[#7a3f91] hover:bg-[#e9d5f3] px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition">
-                                <i class="fas fa-pencil text-xs"></i> <span class="hidden sm:inline">Edit</span>
+                                <i class="fas fa-pencil text-xs"></i><span class="hidden sm:inline">Edit</span>
                             </button>
                             <button wire:click="confirmDeleteCourse({{ $c['id'] }})" class="bg-white border border-red-100 text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition">
-                                <i class="fas fa-trash text-xs"></i> <span class="hidden sm:inline">Delete</span>
+                                <i class="fas fa-trash text-xs"></i><span class="hidden sm:inline">Delete</span>
                             </button>
                         </div>
                     </div>
@@ -1869,10 +2161,10 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── DELETE COURSE CONFIRM ─────────────────────────────────────── --}}
+{{-- ── DELETE COURSE CONFIRM ────────────────────── --}}
 @if($activeModal==='deleteCourseConfirm')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
         <div class="px-6 py-4 bg-red-50 border-b border-red-100 rounded-t-2xl">
             <h2 class="text-base font-extrabold text-red-900 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Delete Course</h2>
         </div>
@@ -1892,12 +2184,10 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── VIEW PROFILE ──────────────────────────────────────────────── --}}
+{{-- ── VIEW PROFILE ─────────────────────────────── --}}
 @if($activeModal==='viewProfile' && $viewingProfile)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
-
-        {{-- Modal Header --}}
         <div class="flex items-center justify-between px-6 py-4 bg-[#7a3f91] border-b border-[#5e2f72] rounded-t-2xl sticky top-0 z-10">
             <h2 class="text-white font-extrabold text-lg flex items-center gap-2">
                 <i class="fas {{ $viewingProfileType==='alumni'?'fa-graduation-cap':'fa-users-gear' }}"></i>
@@ -1909,93 +2199,92 @@ new class extends Component {
         <div class="p-5 sm:p-6 space-y-5 overflow-y-auto" style="max-height:84vh;">
 
             @if($viewingProfileType === 'alumni')
-
-                {{-- ══ ALUMNI: Updated Information Banner ══ --}}
                 @php
+                    /*
+                     * STATUS SOURCE OF TRUTH: password_changed_at
+                     * null     = PENDING  (wizard not completed, temp password still active)
+                     * not null = VERIFIED (alumni changed password via setup wizard)
+                     *
+                     * profile_completed only indicates whether personal info fields are filled —
+                     * it does NOT affect the PENDING/VERIFIED status.
+                     */
+                    $isVerified        = !empty($viewingProfile['password_changed_at']);
                     $isProfileComplete = !empty($viewingProfile['profile_completed']);
-                    $updatedAt = !empty($viewingProfile['updated_at'])
+                    $updatedAt         = !empty($viewingProfile['updated_at'])
                         ? \Carbon\Carbon::parse($viewingProfile['updated_at'])->timezone('Asia/Manila')->format('F j, Y \a\t g:i A')
+                        : null;
+                    $verifiedAt        = $isVerified
+                        ? \Carbon\Carbon::parse($viewingProfile['password_changed_at'])->timezone('Asia/Manila')->format('F j, Y \a\t g:i A')
                         : null;
                 @endphp
 
-                @if($isProfileComplete && $updatedAt)
+                {{-- Status banner — driven purely by password_changed_at --}}
+                @if($isVerified)
                 <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
                     <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
-                        <i class="fas fa-circle-check text-emerald-600 text-sm"></i>
+                        <i class="fas fa-shield-check text-emerald-600 text-sm"></i>
                     </div>
                     <div>
-                        <p class="font-bold text-emerald-900 text-sm">This Alumni's Updated Information</p>
-                        <p class="text-xs text-emerald-700 mt-0.5 flex items-center gap-1">
-                            <i class="fas fa-clock text-emerald-500 text-xs"></i>
-                            Last updated: <strong>{{ $updatedAt }}</strong>
-                        </p>
+                        <p class="font-bold text-emerald-900 text-sm">Account Verified</p>
+                        <p class="text-xs text-emerald-700 mt-0.5">This alumni completed the setup wizard and changed their password on {{ $verifiedAt }}.</p>
                     </div>
                 </div>
-                @elseif(!$isProfileComplete)
+                @else
                 <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
                     <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
-                        <i class="fas fa-triangle-exclamation text-amber-600 text-sm"></i>
+                        <i class="fas fa-clock text-amber-600 text-sm"></i>
                     </div>
                     <div>
-                        <p class="font-bold text-amber-900 text-sm">Profile Incomplete</p>
-                        <p class="text-xs text-amber-700 mt-0.5">This alumni has not yet completed their profile information.</p>
+                        <p class="font-bold text-amber-900 text-sm">Account Pending</p>
+                        <p class="text-xs text-amber-700 mt-0.5">This alumni has not yet logged in and changed their temporary password. Status will become VERIFIED after they complete the setup wizard.</p>
                     </div>
                 </div>
                 @endif
 
-                {{-- ══ Avatar + Quick Info ══ --}}
+                {{-- Avatar + Quick Info --}}
                 <div class="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
                     @if($updatingProfilePhoto)
                         <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" class="w-20 h-20 rounded-2xl object-cover shadow-lg ring-2 ring-[#7a3f91]/20 shrink-0">
                     @else
-                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo']??null) }}"
-                             alt="{{ $viewingProfile['first_name']??'' }}"
+                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo']??null) }}" alt="{{ $viewingProfile['first_name']??'' }}"
                              class="w-20 h-20 rounded-2xl object-cover shadow-lg ring-2 ring-gray-200 shrink-0">
                     @endif
                     <div class="flex-1 min-w-0">
                         <p class="text-base font-extrabold text-gray-900 leading-tight">
-                            {{ $this->formatAlumniDisplayName(
-                                $viewingProfile['first_name'] ?? '',
-                                $viewingProfile['middle_initial'] ?? '',
-                                $viewingProfile['last_name'] ?? '',
-                                $viewingProfile['suffix'] ?? ''
-                            ) }}
+                            {{ $this->formatAlumniDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
                         </p>
                         <p class="text-xs text-gray-500 mt-0.5 font-mono">ID: {{ $viewingProfile['student_id'] ?? '—' }}</p>
                         <div class="flex flex-wrap gap-1.5 mt-1.5">
                             <span class="inline-block px-2 py-0.5 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-bold">{{ $viewingProfile['course_code'] ?? '—' }}</span>
                             <span class="inline-block px-2 py-0.5 bg-gray-100 text-gray-700 border border-gray-200 rounded-full text-xs font-semibold">Batch {{ $viewingProfile['batch'] ?? '—' }}</span>
-                            @if(!empty($viewingProfile['email']))
-                                <span class="inline-block px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-bold">
-                                    <i class="fas fa-check text-[10px] mr-0.5"></i>VERIFIED
-                                </span>
+                            {{-- Status badge driven by password_changed_at --}}
+                            @if($isVerified)
+                                <span class="inline-block px-2 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-bold"><i class="fas fa-check text-[10px] mr-0.5"></i>VERIFIED</span>
                             @else
-                                <span class="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">PENDING</span>
+                                <span class="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold"><i class="fas fa-clock text-[10px] mr-0.5"></i>PENDING</span>
                             @endif
                         </div>
                     </div>
                 </div>
 
-                {{-- ══ SECTION 1: Student Record ══ --}}
+                {{-- Student Record --}}
                 <div class="rounded-xl border border-gray-200 overflow-hidden">
                     <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100" style="background:#f9f5ff;">
                         <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style="background:#7a3f91;">
                             <i class="fas fa-id-card text-white" style="font-size:10px;"></i>
                         </div>
                         <p class="font-bold text-gray-900 text-xs uppercase tracking-wide">Student Record</p>
-                        <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                            <i class="fas fa-lock text-xs"></i> Read-only
-                        </span>
+                        <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"><i class="fas fa-lock text-xs"></i> Read-only</span>
                     </div>
                     <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                         @foreach([
-                            ['First Name',    $viewingProfile['first_name']    ?? '—'],
-                            ['Middle Name',   $viewingProfile['middle_initial'] ?? '—'],
-                            ['Last Name',     trim(($viewingProfile['last_name']??'').' '.($viewingProfile['suffix']??'')) ?: '—'],
-                            ['Student ID',    $viewingProfile['student_id']    ?? '—'],
-                            ['Course Code',   $viewingProfile['course_code']   ?? '—'],
-                            ['Batch Year',    $viewingProfile['batch']         ?? '—'],
-                        ] as [$lbl, $val])
+                            ['First Name',  $viewingProfile['first_name']    ?? '—'],
+                            ['Middle Name', $viewingProfile['middle_initial'] ?? '—'],
+                            ['Last Name',   trim(($viewingProfile['last_name']??'').' '.($viewingProfile['suffix']??'')) ?: '—'],
+                            ['Student ID',  $viewingProfile['student_id']    ?? '—'],
+                            ['Course Code', $viewingProfile['course_code']   ?? '—'],
+                            ['Batch Year',  $viewingProfile['batch']         ?? '—'],
+                        ] as [$lbl,$val])
                         <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
                             <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
                             <p class="text-sm font-semibold text-gray-800 truncate">{{ $val }}</p>
@@ -2010,37 +2299,29 @@ new class extends Component {
                             @if(!empty($viewingProfile['email']))
                                 <p class="text-sm font-semibold text-gray-800">{{ $viewingProfile['email'] }}</p>
                             @else
-                                <p class="text-xs text-gray-400 italic">No email — alumni has not self-registered yet</p>
+                                <p class="text-xs text-gray-400 italic">No verified email — alumni has not completed setup wizard yet</p>
                             @endif
                         </div>
                     </div>
                 </div>
 
-                {{-- ══ SECTION 2: Personal Details ══ --}}
+                {{-- Personal Details --}}
                 <div class="rounded-xl border border-gray-200 overflow-hidden">
                     <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100 bg-blue-50">
-                        <div class="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-                            <i class="fas fa-person text-white" style="font-size:10px;"></i>
-                        </div>
+                        <div class="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center shrink-0"><i class="fas fa-person text-white" style="font-size:10px;"></i></div>
                         <p class="font-bold text-gray-900 text-xs uppercase tracking-wide">Personal Details</p>
-                        @if(!$isProfileComplete)
-                            <span class="ml-auto text-xs text-amber-600 font-semibold italic">Not yet filled</span>
-                        @endif
+                        @if(!$isProfileComplete)<span class="ml-auto text-xs text-amber-600 font-semibold italic">Not yet filled</span>@endif
                     </div>
                     <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                        @php
-                            $dob = !empty($viewingProfile['date_of_birth'])
-                                ? \Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y')
-                                : '—';
-                        @endphp
+                        @php $dob = !empty($viewingProfile['date_of_birth']) ? \Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y') : '—'; @endphp
                         @foreach([
-                            ['Gender',       $viewingProfile['gender']         ?? '—'],
+                            ['Gender',       $viewingProfile['gender']        ?? '—'],
                             ['Date of Birth', $dob],
-                            ['Civil Status',  $viewingProfile['civil_status']  ?? '—'],
-                            ['Place of Birth',$viewingProfile['place_of_birth']?? '—'],
-                            ['Citizenship',   $viewingProfile['citizenship']   ?? '—'],
-                            ['Blood Type',    $viewingProfile['blood_type']    ?: '—'],
-                        ] as [$lbl, $val])
+                            ['Civil Status',  $viewingProfile['civil_status'] ?? '—'],
+                            ['Place of Birth',$viewingProfile['place_of_birth']??'—'],
+                            ['Citizenship',   $viewingProfile['citizenship']  ?? '—'],
+                            ['Blood Type',    $viewingProfile['blood_type']   ?: '—'],
+                        ] as [$lbl,$val])
                         <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
                             <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
                             <p class="text-sm font-semibold text-gray-800">{{ $val }}</p>
@@ -2053,23 +2334,15 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ══ SECTION 3: Family Background ══ --}}
+                {{-- Family Background --}}
                 <div class="rounded-xl border border-gray-200 overflow-hidden">
                     <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100 bg-rose-50">
-                        <div class="w-6 h-6 rounded-lg bg-rose-500 flex items-center justify-center shrink-0">
-                            <i class="fas fa-people-roof text-white" style="font-size:10px;"></i>
-                        </div>
+                        <div class="w-6 h-6 rounded-lg bg-rose-500 flex items-center justify-center shrink-0"><i class="fas fa-people-roof text-white" style="font-size:10px;"></i></div>
                         <p class="font-bold text-gray-900 text-xs uppercase tracking-wide">Family Background</p>
-                        @if(!$isProfileComplete)
-                            <span class="ml-auto text-xs text-amber-600 font-semibold italic">Not yet filled</span>
-                        @endif
+                        @if(!$isProfileComplete)<span class="ml-auto text-xs text-amber-600 font-semibold italic">Not yet filled</span>@endif
                     </div>
                     <div class="p-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        @foreach([
-                            ["Father's Name", $viewingProfile['father_name'] ?: '—'],
-                            ["Mother's Name", $viewingProfile['mother_name'] ?: '—'],
-                            ['Spouse Name',   $viewingProfile['spouse_name'] ?: '—'],
-                        ] as [$lbl, $val])
+                        @foreach([["Father's Name",$viewingProfile['father_name']?:'—'],["Mother's Name",$viewingProfile['mother_name']?:'—'],['Spouse Name',$viewingProfile['spouse_name']?:'—']] as [$lbl,$val])
                         <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
                             <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
                             <p class="text-sm font-semibold text-gray-800">{{ $val }}</p>
@@ -2078,22 +2351,17 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ══ SECTION 4: Home Address ══ --}}
+                {{-- Home Address --}}
                 <div class="rounded-xl border border-gray-200 overflow-hidden">
                     <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100 bg-emerald-50">
-                        <div class="w-6 h-6 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
-                            <i class="fas fa-map-location-dot text-white" style="font-size:10px;"></i>
-                        </div>
+                        <div class="w-6 h-6 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0"><i class="fas fa-map-location-dot text-white" style="font-size:10px;"></i></div>
                         <p class="font-bold text-gray-900 text-xs uppercase tracking-wide">Home Address</p>
-                        @if(!$isProfileComplete)
-                            <span class="ml-auto text-xs text-amber-600 font-semibold italic">Not yet filled</span>
-                        @endif
+                        @if(!$isProfileComplete)<span class="ml-auto text-xs text-amber-600 font-semibold italic">Not yet filled</span>@endif
                     </div>
                     <div class="p-3 space-y-2">
-                        {{-- Full address line --}}
                         @php
                             $addrParts = array_filter([
-                                trim(($viewingProfile['address_no'] ?? '') . ' ' . ($viewingProfile['address_street'] ?? '')),
+                                trim(($viewingProfile['address_no']??'').' '.($viewingProfile['address_street']??'')),
                                 $viewingProfile['address_barangay']     ?? '',
                                 $viewingProfile['address_municipality'] ?? '',
                                 $viewingProfile['address_province']     ?? '',
@@ -2107,13 +2375,13 @@ new class extends Component {
                         </div>
                         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                             @foreach([
-                                ['House/Block No.',  $viewingProfile['address_no']           ?: '—'],
-                                ['Street',           $viewingProfile['address_street']        ?: '—'],
-                                ['Barangay',         $viewingProfile['address_barangay']      ?: '—'],
-                                ['Municipality/City',$viewingProfile['address_municipality']  ?: '—'],
-                                ['Province',         $viewingProfile['address_province']      ?: '—'],
-                                ['Zip Code',         $viewingProfile['address_zip_code']      ?: '—'],
-                            ] as [$lbl, $val])
+                                ['House/Block No.',$viewingProfile['address_no']           ?:'—'],
+                                ['Street',         $viewingProfile['address_street']        ?:'—'],
+                                ['Barangay',       $viewingProfile['address_barangay']      ?:'—'],
+                                ['City/Municipality',$viewingProfile['address_municipality']?:'—'],
+                                ['Province',       $viewingProfile['address_province']      ?:'—'],
+                                ['Zip Code',       $viewingProfile['address_zip_code']      ?:'—'],
+                            ] as [$lbl,$val])
                             <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
                                 <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
                                 <p class="text-sm font-semibold text-gray-800">{{ $val }}</p>
@@ -2124,23 +2392,17 @@ new class extends Component {
                 </div>
 
             @else
-                {{-- ══ ORGANIZER PROFILE (unchanged) ══ --}}
-                <div class="flex items-center gap-4">
+                {{-- ── ORGANIZER PROFILE ── --}}
+                <div class="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
                     @if($updatingProfilePhoto)
                         <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" class="w-20 h-20 rounded-2xl object-cover shadow-lg ring-2 ring-[#7a3f91]/20 shrink-0">
                     @else
-                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo']??null) }}"
-                             alt="{{ $viewingProfile['name']??'' }}"
+                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo']??null) }}" alt="{{ $viewingProfile['name']??'' }}"
                              class="w-20 h-20 rounded-2xl object-cover shadow-lg ring-2 ring-gray-100 shrink-0">
                     @endif
                     <div>
                         <p class="text-base font-bold text-gray-900 leading-tight">
-                            {{ $this->formatAlumniDisplayName(
-                                $viewingProfile['first_name'] ?? '',
-                                $viewingProfile['middle_initial'] ?? '',
-                                $viewingProfile['last_name'] ?? '',
-                                $viewingProfile['suffix'] ?? ''
-                            ) }}
+                            {{ $this->formatAlumniDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
                         </p>
                         <p class="text-gray-500 text-xs mt-0.5">{{ $viewingProfile['email'] }}</p>
                         @php $sc = match($viewingProfile['status']??'') { 'ACTIVE'=>'bg-green-50 text-green-700 border-green-200','INACTIVE'=>'bg-amber-50 text-amber-700 border-amber-200','SUSPENDED'=>'bg-red-50 text-red-700 border-red-200',default=>'bg-gray-50 text-gray-700 border-gray-200' }; @endphp
@@ -2150,22 +2412,12 @@ new class extends Component {
                 <div class="space-y-3">
                     <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Personal Information</h3>
                     <div class="grid grid-cols-2 gap-2.5">
+                        @foreach([['First Name',$viewingProfile['first_name']??'—'],['Last Name',$viewingProfile['last_name']??'—'],['Middle Name',$viewingProfile['middle_initial']??'—'],['Suffix',$viewingProfile['suffix']?:'—']] as [$lbl,$val])
                         <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">First Name</p>
-                            <p class="text-sm font-medium text-gray-700">{{ $viewingProfile['first_name'] ?? '—' }}</p>
+                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">{{ $lbl }}</p>
+                            <p class="text-sm font-medium text-gray-700">{{ $val }}</p>
                         </div>
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Last Name</p>
-                            <p class="text-sm font-medium text-gray-700">{{ $viewingProfile['last_name'] ?? '—' }}</p>
-                        </div>
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Middle Name</p>
-                            <p class="text-sm font-medium text-gray-700">{{ $viewingProfile['middle_initial'] ?? '—' }}</p>
-                        </div>
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Suffix</p>
-                            <p class="text-sm font-medium text-gray-700">{{ $viewingProfile['suffix'] ?: '—' }}</p>
-                        </div>
+                        @endforeach
                     </div>
                     <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider pt-2">Assignment</h3>
                     <div class="grid grid-cols-2 gap-2.5">
@@ -2173,7 +2425,7 @@ new class extends Component {
                             <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Teacher ID</p>
                             <p class="text-sm font-medium text-gray-700 font-mono">{{ $viewingProfile['id_number'] ?? '—' }}</p>
                         </div>
-                        <div class="col-span-1 bg-[#f5eef9] border border-[#d4aaeb] rounded-lg p-3">
+                        <div class="bg-[#f5eef9] border border-[#d4aaeb] rounded-lg p-3">
                             <p class="text-xs font-bold text-[#7a3f91] uppercase tracking-wide mb-1">College</p>
                             <p class="text-sm font-medium text-[#5e2f72]">{{ $this->getCollegeForCourse($viewingProfile['department']??'') }}</p>
                         </div>
@@ -2186,7 +2438,7 @@ new class extends Component {
                 </div>
             @endif
 
-            {{-- ══ Update Profile Photo (both types) ══ --}}
+            {{-- Update Photo --}}
             <div class="border-t border-gray-100 pt-4">
                 <p class="block text-xs font-bold text-gray-900 uppercase tracking-wide mb-2">Update Profile Photo</p>
                 <div class="border-2 border-dashed border-gray-300 rounded-lg p-5 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#f5eef9] transition" @click="document.getElementById('profilePhotoInput').click()">
@@ -2210,7 +2462,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── REGISTER ORGANIZER ────────────────────────────────────────── --}}
+{{-- ── REGISTER ORGANIZER ───────────────────────── --}}
 @if($activeModal==='registerOrganizer')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
@@ -2271,7 +2523,7 @@ new class extends Component {
                 <div class="grid grid-cols-2 gap-3 mt-3">
                     <div>
                         <input wire:model.defer="orgMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
-                        <p class="text-xs text-gray-500 mt-1">Middle Name <span class="text-gray-400">(full word, not just S)</span></p>
+                        <p class="text-xs text-gray-500 mt-1">Middle Name <span class="text-gray-400">(full word)</span></p>
                     </div>
                     <div>
                         <input wire:model.defer="orgSuffix" type="text" placeholder="e.g. Jr." maxlength="10" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
@@ -2301,17 +2553,17 @@ new class extends Component {
                     @php
                         $collegeDeptsMap  = [];
                         $occupiedColleges = $this->occupiedColleges();
-                        foreach ($this->orgDepartmentsGrouped as $collegeName => $depts) {
-                            $collegeDeptsMap[$collegeName] = $depts->pluck('code')->toArray();
+                        foreach ($this->orgDepartmentsGrouped as $cN => $depts) {
+                            $collegeDeptsMap[$cN] = $depts->pluck('code')->toArray();
                         }
                     @endphp
                     <div x-data="{ map: {{ Js::from($collegeDeptsMap) }}, get depts(){ return $wire.orgCollegeSelect?(this.map[$wire.orgCollegeSelect]??[]):[]; } }">
                         <select wire:model.live="orgCollegeSelect" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
                             <option value=""> Select College </option>
-                            @foreach($this->orgDepartmentsGrouped->keys() as $collegeName)
-                                @php $isOccupied = isset($occupiedColleges[$collegeName]); @endphp
-                                <option value="{{ $collegeName }}" {{ $isOccupied?'disabled':'' }}>
-                                    {{ $collegeName }}{{ $isOccupied?' — occupied by '.$occupiedColleges[$collegeName]:'' }}
+                            @foreach($this->orgDepartmentsGrouped->keys() as $cN)
+                                @php $isOccupied = isset($occupiedColleges[$cN]); @endphp
+                                <option value="{{ $cN }}" {{ $isOccupied?'disabled':'' }}>
+                                    {{ $cN }}{{ $isOccupied?' — occupied by '.$occupiedColleges[$cN]:'' }}
                                 </option>
                             @endforeach
                         </select>
@@ -2320,9 +2572,7 @@ new class extends Component {
                             @foreach($occupiedColleges as $oC => $oN)
                             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium">
                                 <i class="fas fa-lock text-xs text-red-400"></i>
-                                <strong>{{ $oC }}</strong>
-                                <span class="text-red-300">·</span>
-                                {{ $oN }}
+                                <strong>{{ $oC }}</strong><span class="text-red-300">·</span>{{ $oN }}
                             </span>
                             @endforeach
                         </div>
@@ -2351,7 +2601,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── MANAGE COLLEGES ───────────────────────────────────────────── --}}
+{{-- ── MANAGE COLLEGES ──────────────────────────── --}}
 @if($activeModal==='manageOrgCourses')
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200 flex flex-col" style="max-height:92vh;">
@@ -2374,12 +2624,12 @@ new class extends Component {
                 <h3 class="text-xs font-bold text-gray-900 uppercase tracking-wide mb-3 flex items-center gap-2"><i class="fas fa-plus-circle text-[#7a3f91]"></i> Add New College</h3>
                 <div class="flex gap-2">
                     <input wire:model.defer="orgNewCollegeName" type="text" placeholder="e.g. College of Computer Studies"
-                           class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10" @keydown.enter.prevent="$wire.addCollege()">
+                           class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
+                           @keydown.enter.prevent="$wire.addCollege()">
                     <button wire:click="addCollege" class="bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition flex items-center gap-1.5">
                         <i class="fas fa-plus text-xs"></i><span class="hidden sm:inline">Add College</span><span class="sm:hidden">Add</span>
                     </button>
                 </div>
-                <p class="text-xs text-gray-500 mt-2">After adding, assign which courses/departments belong to it.</p>
             </div>
             @endif
 
@@ -2392,7 +2642,8 @@ new class extends Component {
                 <p class="text-xs text-gray-600 mb-2">Current: <strong class="text-gray-800">{{ $orgRenamingCollege }}</strong></p>
                 <div class="flex gap-2">
                     <input wire:model.defer="orgRenameCollegeName" type="text" placeholder="New college name"
-                           class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10" @keydown.enter.prevent="$wire.renameCollege()">
+                           class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
+                           @keydown.enter.prevent="$wire.renameCollege()">
                     <button wire:click="cancelRenamingCollege" class="bg-white border border-gray-300 text-gray-900 px-3 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition">Cancel</button>
                     <button wire:click="renameCollege" wire:loading.attr="disabled" wire:target="renameCollege"
                             class="bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-1.5 whitespace-nowrap">
@@ -2433,13 +2684,9 @@ new class extends Component {
                                 <span class="font-bold text-gray-900 text-xs font-mono">{{ $c->code }}</span>
                                 <span class="text-gray-500 text-xs truncate">{{ $c->name }}</span>
                             </div>
-                            @if($isTaken)
-                            <p class="text-xs text-amber-700 mt-0.5"><i class="fas fa-lock mr-1"></i>Assigned to: <em>{{ $otherCollege }}</em></p>
-                            @endif
+                            @if($isTaken)<p class="text-xs text-amber-700 mt-0.5"><i class="fas fa-lock mr-1"></i>Assigned to: <em>{{ $otherCollege }}</em></p>@endif
                         </div>
-                        @if($isSelected && !$isTaken)
-                        <i class="fas fa-circle-check shrink-0 text-[#7a3f91]"></i>
-                        @endif
+                        @if($isSelected && !$isTaken)<i class="fas fa-circle-check shrink-0 text-[#7a3f91]"></i>@endif
                     </label>
                     @endforeach
                 </div>
@@ -2462,22 +2709,18 @@ new class extends Component {
 
             <div>
                 <h3 class="text-xs font-bold text-gray-900 uppercase tracking-wide mb-2 flex items-center gap-2">
-                    <i class="fas fa-list text-gray-400"></i>
-                    Colleges &amp; Departments
-                    <span class="ml-auto text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">
-                        {{ count($orgCoursesList) }} {{ count($orgCoursesList)===1?'college':'colleges' }}
-                    </span>
+                    <i class="fas fa-list text-gray-400"></i>Colleges &amp; Departments
+                    <span class="ml-auto text-xs font-bold text-gray-700 bg-gray-100 px-2 py-1 rounded-full border border-gray-200">{{ count($orgCoursesList) }}</span>
                 </h3>
                 @if(count($orgCoursesList)===0)
                 <div class="text-center py-8 border-2 border-dashed border-gray-100 rounded-xl">
                     <i class="fas fa-building-columns text-3xl text-gray-200 block mb-2"></i>
                     <p class="text-gray-400 font-semibold text-sm">No colleges yet</p>
-                    <p class="text-gray-300 text-xs mt-1">Add a college above to get started</p>
                 </div>
                 @else
                 <div class="space-y-2.5">
                     @foreach($orgCoursesList as $college => $departments)
-                    @php $collegeOccupied=$this->occupiedColleges(); $collegeOrg=$collegeOccupied[$college]??null; @endphp
+                    @php $collegeOcc=$this->occupiedColleges(); $collegeOrg=$collegeOcc[$college]??null; @endphp
                     <div class="border border-gray-200 rounded-xl overflow-hidden">
                         <div class="flex items-center justify-between px-4 py-3 bg-[#f5eef9]">
                             <div class="flex items-center gap-3">
@@ -2536,10 +2779,10 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── DELETE COLLEGE CONFIRM ────────────────────────────────────── --}}
+{{-- ── DELETE COLLEGE CONFIRM ───────────────────── --}}
 @if($activeModal==='deleteOrgCollegeConfirm')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
         <div class="px-6 py-4 bg-red-50 border-b border-red-100 rounded-t-2xl">
             <h2 class="text-base font-extrabold text-red-900 flex items-center gap-2"><i class="fas fa-triangle-exclamation"></i> Delete College</h2>
         </div>
@@ -2559,10 +2802,10 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── TOGGLE ORGANIZER STATUS ───────────────────────────────────── --}}
+{{-- ── TOGGLE ORGANIZER STATUS ──────────────────── --}}
 @if($activeModal==='toggleOrganizerConfirm')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto" @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm my-4 sm:my-8 animate-in fade-in zoom-in-95 duration-200">
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
         <div class="p-6">
             <div class="flex items-center gap-4 mb-4">
                 <div class="w-11 h-11 rounded-full flex items-center justify-center shrink-0 {{ $pendingToggleAction==='deactivate'?'bg-red-100':'bg-green-100' }}">
@@ -2573,13 +2816,21 @@ new class extends Component {
                     <p class="text-xs text-gray-500 mt-0.5">{{ $pendingToggleName }}</p>
                 </div>
             </div>
-            <p class="text-sm text-gray-600 mb-5">
+            <p class="text-sm text-gray-600 mb-1">
                 @if($pendingToggleAction==='deactivate')
                     This organizer will no longer be able to log in. You can reactivate them anytime.
                 @else
                     This organizer will regain login access.
                 @endif
             </p>
+            @if($pendingToggleAction==='activate')
+            <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                <i class="fas fa-triangle-exclamation mr-1"></i>
+                If this college already has another active organizer, activation will be blocked.
+            </p>
+            @else
+            <p class="mb-4"></p>
+            @endif
             <div class="flex gap-3">
                 <button wire:click="closeModal" class="flex-1 bg-white border border-gray-300 text-gray-900 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition">Cancel</button>
                 <button wire:click="executeToggleOrganizerStatus"

@@ -55,7 +55,7 @@
                 $sidebarLinks = [
                     ['route' => 'admin.dashboard',  'icon' => 'gauge-high',      'label' => 'Dashboard',           'pattern' => 'admin/dashboard*'],
                     ['route' => 'user.management',  'icon' => 'users-gear',      'label' => 'User Management',     'pattern' => 'user/management*'],
-                    ['url'   => '/employment',       'icon' => 'chart-line',      'label' => 'Employment Tracking', 'pattern' => 'employment*'],
+                    ['route'   => 'employment.tracking',       'icon' => 'chart-line',      'label' => 'Employment Tracking', 'pattern' => 'employment/tracking*'],
                     ['route'   => 'events',           'icon' => 'calendar-check',  'label' => 'Events',              'pattern' => 'events*'],
                     ['route'   => 'job.posts',             'icon' => 'briefcase',       'label' => 'Job Posts',   'pattern' => 'job/posts*'],
                     ['route' => 'admin.yearbook',    'icon' => 'book-open',       'label' => 'Yearbook',            'pattern' => 'yearbook*'],

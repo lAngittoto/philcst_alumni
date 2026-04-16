@@ -91,10 +91,10 @@
                         'pattern' => 'organizer/job/management*',
                     ],
                     [
-                        'route'   => 'organizer.employment',
+                        'route'   => 'organizer.alumni/employment',
                         'icon'    => 'chart-line',
                         'label'   => 'Employment Tracking',
-                        'pattern' => 'organizer/employment*',
+                        'pattern' => 'organizer/alumni/employment*',
                     ],
                     [
                         'route'   => 'organizer.reports',

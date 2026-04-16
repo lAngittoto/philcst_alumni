@@ -5,6 +5,11 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
+// ── Fix: prevent PHP max_execution_time fatal error ───────────────────────────
+// Place this RIGHT AFTER define('LARAVEL_START') so it applies to the full
+// request lifecycle including auth, middleware, and Livewire hydration.
+set_time_limit(120);
+
 // Determine if the application is in maintenance mode...
 if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
     require $maintenance;

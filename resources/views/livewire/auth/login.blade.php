@@ -41,7 +41,6 @@ new #[Layout('app')] class extends Component {
             }
 
             if ($user->role === 'alumni') {
-                // FIX: fresh direct query, never use cached relation
                 $alumni = Alumni::where('user_id', $user->id)->first();
 
                 if ($alumni && $alumni->needsAccountSetup()) {
@@ -51,9 +50,6 @@ new #[Layout('app')] class extends Component {
                     return;
                 }
 
-                // FIX: redirect to information first — middleware (Gate 2) will
-                // forward to dashboard automatically once profile is complete.
-                // This prevents a stale $user->alumni causing a loop.
                 if ($alumni && !$alumni->isProfileComplete()) {
                     $this->redirect(route('alumni.information'));
                     return;
@@ -65,9 +61,16 @@ new #[Layout('app')] class extends Component {
 
             if ($user->role === 'admin') {
                 $this->redirect(route('admin.dashboard'));
-            } else {
-                Auth::logout();
+                return;
             }
+
+            // ── FIX: Registrar redirect on mount ──────────────────────────────
+            if ($user->role === 'registrar') {
+                $this->redirect(route('registrar.dashboard'));
+                return;
+            }
+
+            Auth::logout();
         }
     }
 
@@ -197,8 +200,6 @@ new #[Layout('app')] class extends Component {
             $this->clearAttempts();
             session()->regenerate();
 
-            // ── Re-fetch fresh alumni record AFTER session regenerate ──────────
-            // FIX: direct query guarantees we never get a stale cached model.
             $alumni = Alumni::where('user_id', $user->id)->first();
 
             // GATE 1: needs wizard?
@@ -213,15 +214,12 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // GATE 2: needs profile? → send to information page directly.
-            // The middleware will handle forwarding to dashboard once the
-            // profile is complete so we never need to decide here.
+            // GATE 2: needs profile?
             if (!$alumni->isProfileComplete()) {
                 $this->redirectRoute('alumni.information', navigate: true);
                 return;
             }
 
-            // Both gates passed → dashboard
             $this->redirectRoute('alumni.dashboard', navigate: true);
             return;
         }
@@ -294,7 +292,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 5. Try ADMIN (username) login ──────────────────────────────────────
+        // ── 5. Try ADMIN / REGISTRAR (username) login ─────────────────────────
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
             RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
             $attempts = $this->recordFailedAttempt();
@@ -327,6 +325,23 @@ new #[Layout('app')] class extends Component {
 
         $user = Auth::user();
 
+        // ── FIX: Handle REGISTRAR role ────────────────────────────────────────
+        if ($user->role === 'registrar') {
+            $this->clearAttempts();
+            session()->regenerate();
+
+            AuditLog::logLogin([
+                'id'    => $user->id,
+                'name'  => $user->name,
+                'email' => $user->email,
+                'role'  => 'registrar',
+            ], true);
+
+            $this->redirectRoute('registrar.dashboard', navigate: true);
+            return;
+        }
+
+        // ── Handle ADMIN role ─────────────────────────────────────────────────
         if ($user->role !== 'admin') {
             Auth::logout();
             $this->password = '';
@@ -405,7 +420,7 @@ new #[Layout('app')] class extends Component {
             <div class="space-y-2">
                 <label class="text-xs font-bold uppercase tracking-widest text-[#2b0d3e] ml-1 flex items-center gap-2">
                     <i class="fa-solid fa-user text-[#7a3f91]"></i>
-                    Username / Teacher ID / Student ID
+                    Username
                 </label>
                 <input wire:model="name" type="text"
                        placeholder="Enter username, Teacher ID, or Student ID"

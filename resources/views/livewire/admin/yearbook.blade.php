@@ -86,6 +86,31 @@ new class extends Component {
         }
         return asset('storage/' . $path);
     }
+
+    public function formatAlumniName(string $fullName): string
+    {
+        $parts = explode(' ', trim($fullName));
+        
+        if (count($parts) == 1) {
+            return $parts[0];
+        }
+        
+        if (count($parts) == 2) {
+            return $parts[0] . ' ' . $parts[1];
+        }
+        
+        // For 3 or more names: First Name, Middle Initial(s), Last Name
+        $firstName = $parts[0];
+        $lastName = $parts[count($parts) - 1];
+        
+        // Get middle initials
+        $middleInitials = '';
+        for ($i = 1; $i < count($parts) - 1; $i++) {
+            $middleInitials .= strtoupper($parts[$i][0]) . '. ';
+        }
+        
+        return trim($firstName . ' ' . $middleInitials . $lastName);
+    }
 };
 ?>
 
@@ -223,9 +248,9 @@ new class extends Component {
                                     {{-- Card body --}}
                                     <div class="w-full pt-[46px] pb-[18px] px-3.5 flex flex-col items-center text-center flex-1">
 
-                                        {{-- Name --}}
+                                        {{-- Name (Formatted) --}}
                                         <p class="text-[0.9375rem] font-bold text-gray-900 leading-[1.35] mb-[7px] break-words w-full">
-                                            {{ $alumni->name }}
+                                            {{ $this->formatAlumniName($alumni->name) }}
                                         </p>
 
                                         {{-- Batch badge --}}
@@ -241,19 +266,6 @@ new class extends Component {
                                             {{ $alumni->course_name }}
                                         </p>
 
-                                        {{-- Quote placeholder --}}
-                                        <p class="text-[0.6875rem] text-gray-400 italic mb-3.5">"Coming soon..."</p>
-
-                                        {{-- View button --}}
-                                        <button class="inline-flex items-center justify-center gap-[5px] w-full mt-auto
-                                                       px-3.5 py-[7px]
-                                                       bg-white text-[#7a3f91]
-                                                       border-[1.5px] border-[#d4aaeb]
-                                                       rounded-[0.625rem] text-xs font-bold cursor-pointer
-                                                       transition-all duration-150
-                                                       hover:bg-[#f5eef9] hover:border-[#7a3f91] hover:shadow-[0_2px_8px_rgba(122,63,145,0.14)]">
-                                            <i class="fas fa-eye text-xs"></i> View Profile
-                                        </button>
                                     </div>
 
                                 </div>
@@ -346,4 +358,3 @@ new class extends Component {
     </div>{{-- end page content --}}
 
 </div>{{-- end root --}}
-

@@ -2,7 +2,6 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\Locked;
 use App\Models\Alumni;
 use App\Models\Organizer;
 use App\Models\Course;
@@ -31,14 +30,28 @@ new class extends Component {
     {
         return Cache::remember('admin_dashboard_stats', 60, function () {
             $totalAlumni      = Alumni::count();
-            $verifiedAlumni   = Alumni::where('status', 'VERIFIED')->count();
+            
+            // ── FIXED: Separate PENDING and VERIFIED alumni ──
+            // SOURCE OF TRUTH: password_changed_at column
+            $verifiedAlumni   = Alumni::whereNotNull('password_changed_at')->count();
+            $pendingAlumni    = Alumni::whereNull('password_changed_at')->count();
+            
             $totalOrganizers  = Organizer::withoutTrashed()->count();
             $activeOrganizers = Organizer::withoutTrashed()->where('status', 'ACTIVE')->count();
             $totalCourses     = Course::count();
             $totalColleges    = Course::whereNotNull('college')->where('college', '!=', '')->distinct('college')->count('college');
-            $activeJobs       = JobPosting::where('status', 'ACTIVE')->count();
-            $totalEvents      = AdminEvent::withoutTrashed()->count();
-            $pendingEvents    = AdminEvent::withoutTrashed()->where('status', 'PENDING')->count();
+            
+            // ── FIXED: Only count ACTIVE and INACTIVE jobs ──
+            $activeJobs       = JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])->count();
+            
+            // ── FIXED: Filter out ORGANIZER_DELETED and soft-deleted events, only count ACTIVE & INACTIVE ──
+            $totalEvents      = AdminEvent::withoutTrashed()
+                                          ->whereIn('status', ['ACTIVE', 'INACTIVE', 'APPROVED'])
+                                          ->count();
+            $pendingEvents    = AdminEvent::withoutTrashed()
+                                          ->where('status', 'PENDING')
+                                          ->count();
+            
             $thisMonth = Alumni::whereMonth('created_at', now()->month)
                                ->whereYear('created_at', now()->year)->count();
             $lastMonth = Alumni::whereMonth('created_at', now()->subMonth()->month)
@@ -46,8 +59,9 @@ new class extends Component {
             $growth = $lastMonth > 0
                 ? round((($thisMonth - $lastMonth) / $lastMonth) * 100, 1)
                 : ($thisMonth > 0 ? 100 : 0);
+            
             return compact(
-                'totalAlumni', 'verifiedAlumni',
+                'totalAlumni', 'verifiedAlumni', 'pendingAlumni',
                 'totalOrganizers', 'activeOrganizers',
                 'totalCourses', 'totalColleges',
                 'activeJobs', 'totalEvents', 'pendingEvents',
@@ -133,21 +147,31 @@ new class extends Component {
                    'email', 'department', 'profile_photo', 'created_at']);
     }
 
+    // ── FIXED: Show ACTIVE, INACTIVE, APPROVED events + ONGOING events ──
     #[Computed]
     public function recentEvents()
     {
+        $now = now('Asia/Manila');
+        
         return AdminEvent::withoutTrashed()
             ->with('organizer:id,first_name,last_name')
-            ->orderByDesc('created_at')
+            ->whereIn('status', ['ACTIVE', 'INACTIVE', 'APPROVED'])
+            ->where(function ($query) use ($now) {
+                // Show ongoing events (event_date is today or in the future)
+                $query->whereDate('event_date', '>=', $now->toDateString());
+            })
+            ->orderByDesc('event_date') // Show soonest events first
             ->limit(5)
             ->get(['id', 'title', 'event_date', 'status', 'venue',
                    'organizer_id', 'target_participants', 'created_at']);
     }
 
+    // ── FIXED: Only show ACTIVE and INACTIVE jobs ──
     #[Computed]
     public function recentJobs()
     {
-        return JobPosting::orderByDesc('created_at')
+        return JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])
+            ->orderByDesc('created_at')
             ->limit(5)
             ->get(['id', 'job_title', 'company_name', 'status',
                    'employment_type', 'deadline', 'created_at']);
@@ -319,33 +343,47 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ── STAT CARDS ── --}}
+    {{-- ── STAT CARDS — Enhanced Analytics ── --}}
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
 
-        {{-- Verified Alumni --}}
+        {{-- Alumni Status Breakdown Card --}}
         <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm
                     hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200
-                    fade-up fade-up-2">
+                    fade-up fade-up-1">
             <div class="flex items-start justify-between mb-3">
-                <div class="w-[42px] h-[42px] rounded-[11px] bg-green-50 flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-circle-check text-green-600 text-[17px]"></i>
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-blue-50 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-users text-blue-600 text-[17px]"></i>
                 </div>
-                @php $vp = $this->stats['totalAlumni'] > 0
-                    ? round(($this->stats['verifiedAlumni'] / $this->stats['totalAlumni']) * 100) : 0; @endphp
-                <span class="text-[.65rem] font-semibold px-2 py-0.5 rounded-full
-                             bg-green-50 text-green-700 border border-green-200">{{ $vp }}%</span>
             </div>
             <div class="text-[2rem] font-semibold leading-none text-gray-900 tracking-tight">
-                {{ number_format($this->stats['verifiedAlumni']) }}
+                {{ number_format($this->stats['totalAlumni']) }}
             </div>
-            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Verified</div>
-            <div class="text-[.72rem] font-normal text-gray-600 mt-[3px]">of total alumni</div>
+            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-gray-500 mt-2">Total Alumni</div>
+            <div class="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-gray-600 font-medium flex items-center gap-1.5">
+                        <i class="fas fa-circle-check text-green-500 text-[10px]"></i>Verified
+                    </span>
+                    <span class="font-bold text-green-700">{{ number_format($this->stats['verifiedAlumni']) }}</span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-gray-600 font-medium flex items-center gap-1.5">
+                        <i class="fas fa-clock text-amber-500 text-[10px]"></i>Pending
+                    </span>
+                    <span class="font-bold text-amber-700">{{ number_format($this->stats['pendingAlumni']) }}</span>
+                </div>
+            </div>
+            <div class="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                @php $verPct = $this->stats['totalAlumni'] > 0 ? round(($this->stats['verifiedAlumni'] / $this->stats['totalAlumni']) * 100) : 0; @endphp
+                <div class="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full" style="width: {{ $verPct }}%"></div>
+            </div>
+            <p class="text-[.65rem] text-gray-400 mt-1.5">{{ $verPct }}% verified · {{ 100-$verPct }}% pending</p>
         </div>
 
         {{-- Events Total --}}
         <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm
                     hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200
-                    fade-up fade-up-3">
+                    fade-up fade-up-2">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-[42px] h-[42px] rounded-[11px] bg-amber-50 flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-calendar-days text-amber-600 text-[17px]"></i>
@@ -367,13 +405,13 @@ new class extends Component {
         {{-- Organizers --}}
         <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm
                     hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200
-                    fade-up fade-up-4">
+                    fade-up fade-up-3">
             <div class="flex items-start justify-between mb-3">
-                <div class="w-[42px] h-[42px] rounded-[11px] bg-blue-50 flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-users-gear text-blue-600 text-[17px]"></i>
+                <div class="w-[42px] h-[42px] rounded-[11px] bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-users-gear text-emerald-600 text-[17px]"></i>
                 </div>
                 <span class="text-[.65rem] font-semibold px-2 py-0.5 rounded-full
-                             bg-blue-50 text-blue-700 border border-blue-200">
+                             bg-green-50 text-green-700 border border-green-200">
                     {{ $this->stats['activeOrganizers'] }} active
                 </span>
             </div>
@@ -389,7 +427,7 @@ new class extends Component {
         {{-- Courses --}}
         <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm
                     hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200
-                    fade-up fade-up-5">
+                    fade-up fade-up-4">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-[42px] h-[42px] rounded-[11px] bg-teal-50 flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-book-open text-teal-600 text-[17px]"></i>
@@ -407,7 +445,7 @@ new class extends Component {
         {{-- Active Jobs --}}
         <div class="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm
                     hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200
-                    fade-up fade-up-6">
+                    fade-up fade-up-5">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-[42px] h-[42px] rounded-[11px] bg-rose-50 flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-briefcase text-rose-600 text-[17px]"></i>
@@ -701,7 +739,7 @@ new class extends Component {
                                 {{ strtoupper(substr($org->first_name, 0, 1)) }}
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-[.75rem] font-semibold text-gray-900 truncate leading-none">{{ $org->name }}</p>
+                                <p class="text-[.75rem] font-semibold text-gray-900 truncate leading-none">{{ $org->first_name }} {{ $org->last_name }}</p>
                                 <p class="text-[.68rem] font-normal text-gray-500 mt-[3px] truncate">{{ $org->department }}</p>
                             </div>
                         </div>
@@ -722,7 +760,7 @@ new class extends Component {
             <div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                 <div class="flex items-center gap-[7px] text-[.75rem] font-semibold uppercase tracking-[.08em] text-gray-800">
                     <span class="w-[5px] h-[5px] rounded-full bg-[#7a3f91] flex-shrink-0"></span>
-                    Recent Events
+                    Recent &amp; Ongoing Events
                 </div>
             </div>
 
@@ -731,12 +769,15 @@ new class extends Component {
                 @foreach($this->recentEvents as $event)
                 @php
                     $eBadge = match($event->status) {
-                        'APPROVED'          => ['bg-green-50 text-green-700 border-green-200',   'Approved'],
-                        'PENDING'           => ['bg-amber-50 text-amber-700 border-yellow-300',  'Pending'],
+                        'ACTIVE'            => ['bg-green-50 text-green-700 border-green-200',   'Active'],
+                        'INACTIVE'          => ['bg-amber-50 text-amber-700 border-yellow-300',  'Inactive'],
+                        'PENDING'           => ['bg-blue-50 text-blue-700 border-blue-300',      'Pending'],
+                        'APPROVED'          => ['bg-blue-50 text-blue-700 border-blue-300',      'Approved'],
                         'REJECTED'          => ['bg-red-50 text-red-700 border-red-300',         'Rejected'],
-                        'ORGANIZER_DELETED' => ['bg-red-50 text-red-800 border-red-300',         'Deleted'],
                         default             => ['bg-amber-50 text-amber-700 border-yellow-300',  $event->status],
                     };
+                    $eventDate = \Carbon\Carbon::parse($event->event_date)->setTimezone('Asia/Manila');
+                    $isUpcoming = $eventDate->isToday() || $eventDate->isFuture();
                 @endphp
                 <a href="{{ route('events') }}"
                    class="flex items-start gap-3 px-5 py-2.5 border-b border-gray-50 last:border-b-0
@@ -750,7 +791,12 @@ new class extends Component {
                             @if($event->venue)
                                 <i class="fas fa-location-dot mr-1"></i>{{ $event->venue }} &nbsp;·&nbsp;
                             @endif
-                            {{ $event->created_at->setTimezone('Asia/Manila')->diffForHumans() }}
+                            <strong class="text-gray-700">{{ $eventDate->format('M d, Y') }}</strong>
+                            @if($isUpcoming && !$eventDate->isToday())
+                                &nbsp;·&nbsp; <span class="text-blue-600 font-semibold">Upcoming</span>
+                            @elseif($eventDate->isToday())
+                                &nbsp;·&nbsp; <span class="text-green-600 font-semibold">Today</span>
+                            @endif
                         </p>
                     </div>
                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full
@@ -763,7 +809,7 @@ new class extends Component {
             @else
             <div class="py-10 text-center">
                 <i class="fas fa-calendar text-2xl text-gray-200 block mb-2"></i>
-                <p class="text-[.825rem] font-normal text-gray-500">No events yet.</p>
+                <p class="text-[.825rem] font-normal text-gray-500">No upcoming events yet.</p>
             </div>
             @endif
 
@@ -793,7 +839,6 @@ new class extends Component {
                     $jBadge = match($job->status) {
                         'ACTIVE'            => ['bg-green-50 text-green-700 border-green-200',  'Active'],
                         'INACTIVE'          => ['bg-amber-50 text-amber-700 border-yellow-300', 'Inactive'],
-                        'ORGANIZER_DELETED' => ['bg-red-50 text-red-800 border-red-300',        'Deleted'],
                         default             => ['bg-amber-50 text-amber-700 border-yellow-300', $job->status],
                     };
                     $dl    = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');

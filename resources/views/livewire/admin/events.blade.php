@@ -909,7 +909,10 @@ new class extends Component {
                                     </button>
 
                                     @if($isCompleted)
-                                        {{-- Completed: View only — no other actions --}}
+                                        <button wire:click="confirmDelete({{ $event->id }})"
+                                                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
+                                            <i class="fas fa-trash text-[10px]"></i><span>Delete</span>
+                                        </button>
 
                                     @elseif($isApproved)
                                         {{-- Approved: View only — no edit --}}
@@ -1381,7 +1384,7 @@ new class extends Component {
             <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-300 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
 
             @if($isCompleted)
-                {{-- Completed: Close only --}}
+                <button wire:click="confirmDelete({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-trash text-xs"></i> Delete</button>
             @elseif($isApproved)
                 {{-- Approved: View only --}}
             @elseif($isOrgDeleted)

@@ -10,6 +10,8 @@
  *  - AuditLog::create() calls on all job actions
  *  - Direct Eloquent instead of controller autoloads (Windows ClassLoader fix)
  *  - writeAuditLog() helper — non-blocking
+ *  - ADMIN_DELETED jobs completely hidden from view
+ *  - DELETED filter shows only ORGANIZER_DELETED jobs
  */
 
 use Livewire\Volt\Component;
@@ -234,11 +236,13 @@ new class extends Component {
             ]);
 
         if ($this->filterStatus === 'DELETED') {
-            $q->whereIn('status', ['ORGANIZER_DELETED', 'ADMIN_DELETED']);
+            // Only show ORGANIZER_DELETED jobs in DELETED filter
+            $q->where('status', 'ORGANIZER_DELETED');
         } elseif ($this->filterStatus !== '') {
             $q->where('status', $this->filterStatus);
         } else {
-            $q->whereIn('status', ['ACTIVE', 'INACTIVE', 'ORGANIZER_DELETED', 'ADMIN_DELETED']);
+            // Main view: show ACTIVE and INACTIVE only (ADMIN_DELETED completely hidden)
+            $q->whereIn('status', ['ACTIVE', 'INACTIVE', 'ORGANIZER_DELETED']);
         }
 
         if ($this->search !== '') {
@@ -991,7 +995,7 @@ new class extends Component {
                 <option value="">All Statuses</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
-                <option value="DELETED">Deleted</option>
+                <option value="DELETED">Deleted by organizer</option>
             </select>
 
             <select wire:model.live="filterType"
@@ -1036,8 +1040,7 @@ new class extends Component {
                         @forelse($this->jobPostings as $job)
                         @php
                             $isOrgDel   = $job->status === 'ORGANIZER_DELETED';
-                            $isAdminDel = $job->status === 'ADMIN_DELETED';
-                            $isDel      = $isOrgDel || $isAdminDel;
+                            $isDel      = $isOrgDel;
                             $dl         = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
                             $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
                             $organizerName    = $job->organizer?->name ?? null;
@@ -1147,7 +1150,7 @@ new class extends Component {
                                         {{ $filterStatus === 'DELETED' ? 'No deleted job postings' : 'No job postings found' }}
                                     </p>
                                     <p class="text-xs text-gray-400">
-                                        @if($filterStatus === 'DELETED') All deleted jobs will appear here.
+                                        @if($filterStatus === 'DELETED') Jobs deleted by organizers will appear here.
                                         @elseif($search||$filterStatus||$filterType) Try adjusting your filters.
                                         @else No postings yet. Click <strong>Post a Job</strong> to create one.
                                         @endif
@@ -1431,8 +1434,7 @@ new class extends Component {
 @php
     $job        = $this->viewingJob;
     $isOrgDel   = $job->status === 'ORGANIZER_DELETED';
-    $isAdminDel = $job->status === 'ADMIN_DELETED';
-    $isDel      = $isOrgDel || $isAdminDel;
+    $isDel      = $isOrgDel;
     $dl         = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
     $isExp      = now('Asia/Manila')->gt($dl);
     $createdPH  = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
@@ -1464,7 +1466,7 @@ new class extends Component {
                     <i class="fas fa-trash text-red-500 text-sm"></i>
                 </div>
                 <div>
-                    <p class="text-sm font-bold text-red-800">{{ $isAdminDel ? 'Permanently Deleted' : 'Deleted by Organizer' }}</p>
+                    <p class="text-sm font-bold text-red-800">Deleted by Organizer</p>
                     <p class="text-xs text-red-600 mt-0.5">{{ $job->deleted_by ?? 'Unknown' }} · {{ $updatedPH->format('M d, Y') }}</p>
                 </div>
             </div>
