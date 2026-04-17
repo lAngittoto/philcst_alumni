@@ -58,13 +58,26 @@ new class extends Component {
 
     public bool $showNoAlumniModal = false;
 
+    // ── Share Modal ───────────────────────────────────────────────────────────
+    public bool   $showShareModal        = false;
+    public ?int   $shareEventId          = null;
+    public string $shareEventTitle       = '';
+    public string $shareEventDate        = '';
+    public string $shareEventTime        = '';
+    public string $shareEventEndTime     = '';
+    public string $shareEventVenue       = '';
+    public string $shareEventVenueAddr   = '';
+    public string $shareEventDescription = '';
+    public string $shareEventPhotoUrl    = '';
+    public string $shareEventTarget      = '';
+    public string $shareEventStatus      = '';
+    // ─────────────────────────────────────────────────────────────────────────
+
     // ─────────────────────────────────────────────────────────────────────────
     // MOUNT
     // ─────────────────────────────────────────────────────────────────────────
     public function mount(): void
     {
-        // TASK 4: Extend execution time — set_time_limit() resets the timer
-        // from this point, giving the request a full 10 minutes from here.
         set_time_limit(600);
 
         $user = Auth::user();
@@ -74,9 +87,6 @@ new class extends Component {
 
         $orgId = $user->organizer->id;
 
-        // TASK 4: Cache-throttle auto-ops so they run at most every 5 minutes
-        // per organizer instead of on every single page load/request.
-        // This prevents DB timeout on the CSRF/middleware layer.
         $throttleKey = "auto_event_ops_{$orgId}";
         if (!Cache::has($throttleKey)) {
             Cache::put($throttleKey, true, now()->addMinutes(5));
@@ -86,7 +96,7 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AUTO-REJECT LOGIC — PENDING events whose event date has passed
+    // AUTO-REJECT LOGIC
     // ─────────────────────────────────────────────────────────────────────────
     private function autoRejectExpiredPendingEvents(): void
     {
@@ -309,7 +319,6 @@ new class extends Component {
         $this->formErrors = [];
         $errors = [];
 
-        // Sanitize
         $this->title          = strip_tags(trim($this->title));
         $this->description    = strip_tags(trim($this->description));
         $this->venue          = strip_tags(trim($this->venue));
@@ -323,7 +332,6 @@ new class extends Component {
         }
 
         if (!trim($this->title))       $errors['title']       = 'Event title is required.';
-        // TASK 2: Description is now required
         if (!trim($this->description)) $errors['description'] = 'Event description is required.';
         if (!trim($this->event_date))  $errors['event_date']  = 'Event date is required.';
         if (!trim($this->venue))       $errors['venue']       = 'Venue / Location is required.';
@@ -338,7 +346,6 @@ new class extends Component {
             }
         }
 
-        // ── PAST DATE VALIDATION ────────────────────────────────────────────
         if (!isset($errors['event_date']) && !isset($errors['start_time'])
             && trim($this->event_date) && trim($this->start_time)) {
             try {
@@ -354,7 +361,6 @@ new class extends Component {
                 // already caught by start_time validation above
             }
         }
-        // ───────────────────────────────────────────────────────────────────
 
         if (trim($this->end_time)) {
             try {
@@ -379,8 +385,6 @@ new class extends Component {
             }
         }
 
-        // TASK 2: Duplicate check — title only (case-insensitive), no date constraint.
-        // "Q" and "q" are the same title — block regardless of different dates.
         if (!isset($errors['title']) && trim($this->title)) {
             $dupQuery = OrganizerEvent::where('organizer_id', $this->organizerId)
                 ->whereRaw('LOWER(title) = ?', [strtolower(trim($this->title))])
@@ -448,7 +452,6 @@ new class extends Component {
             $event = OrganizerEvent::where('id', $this->editingEventId)
                 ->where('organizer_id', $this->organizerId)->firstOrFail();
 
-            // TASK 3: Capture before-state for audit log
             $oldValues = [
                 'title'               => $event->title,
                 'description'         => $event->description,
@@ -473,7 +476,6 @@ new class extends Component {
                 $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
             }
 
-            // TASK 3: Audit log — event updated
             try {
                 AuditLog::create([
                     'user_id'       => Auth::id(),
@@ -497,15 +499,12 @@ new class extends Component {
                     'user_agent'    => request()->userAgent(),
                     'severity'      => 'info',
                 ]);
-            } catch (\Throwable) {
-                // Silently swallow — never break the main operation
-            }
+            } catch (\Throwable) {}
 
             $this->dispatch('flash-message', type: 'success', message: 'Event updated successfully!');
         } else {
             $ctrl->createEvent($data, $photo ?: null);
 
-            // TASK 3: Audit log — event created
             try {
                 AuditLog::create([
                     'user_id'       => Auth::id(),
@@ -527,9 +526,7 @@ new class extends Component {
                     'user_agent'    => request()->userAgent(),
                     'severity'      => 'info',
                 ]);
-            } catch (\Throwable) {
-                // Silently swallow — never break the main operation
-            }
+            } catch (\Throwable) {}
 
             $this->dispatch('flash-message', type: 'success', message: 'Event submitted for admin review!');
         }
@@ -562,7 +559,6 @@ new class extends Component {
             $event = OrganizerEvent::where('id', $this->deleteEventId)
                 ->where('organizer_id', $this->organizerId)->firstOrFail();
 
-            // TASK 3: Audit log — capture state BEFORE deletion
             try {
                 AuditLog::create([
                     'user_id'       => Auth::id(),
@@ -585,9 +581,7 @@ new class extends Component {
                     'user_agent'    => request()->userAgent(),
                     'severity'      => 'warning',
                 ]);
-            } catch (\Throwable) {
-                // Silently swallow — never block deletion
-            }
+            } catch (\Throwable) {}
 
             app(OrganizerEventController::class)->deleteEvent($this->deleteEventId);
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteEventTitle}' deleted.");
@@ -604,6 +598,72 @@ new class extends Component {
         $this->deleteEventId    = null;
         $this->deleteEventTitle = '';
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SHARE MODAL METHODS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Only APPROVED or COMPLETED events can be shared.
+     */
+    public function openShareModal(int $id): void
+    {
+        $event = OrganizerEvent::where('id', $id)
+            ->where('organizer_id', $this->organizerId)
+            ->firstOrFail();
+
+        if (!in_array($event->status, ['APPROVED', 'COMPLETED'], true)) {
+            $this->dispatch('flash-message', type: 'error', message: 'Only approved or completed events can be shared.');
+            return;
+        }
+
+        $this->shareEventId          = $id;
+        $this->shareEventTitle       = $event->title;
+        $this->shareEventDate        = $event->event_date->setTimezone('Asia/Manila')->format('F d, Y');
+        $this->shareEventTime        = $event->event_date->setTimezone('Asia/Manila')->format('g:i A');
+        $this->shareEventEndTime     = $event->event_end_date?->setTimezone('Asia/Manila')->format('g:i A') ?? '';
+        $this->shareEventVenue       = $event->venue;
+        $this->shareEventVenueAddr   = $event->venue_address ?? '';
+        $this->shareEventDescription = $event->description ?? '';
+        $this->shareEventPhotoUrl    = $event->photo_url;
+        $this->shareEventTarget      = $event->target_participants ?? '';
+        $this->shareEventStatus      = $event->status;
+
+        $this->showShareModal = true;
+        $this->showViewModal  = false;
+    }
+
+    public function closeShareModal(): void
+    {
+        $this->showShareModal        = false;
+        $this->shareEventId          = null;
+        $this->shareEventTitle       = '';
+        $this->shareEventDate        = '';
+        $this->shareEventTime        = '';
+        $this->shareEventEndTime     = '';
+        $this->shareEventVenue       = '';
+        $this->shareEventVenueAddr   = '';
+        $this->shareEventDescription = '';
+        $this->shareEventPhotoUrl    = '';
+        $this->shareEventTarget      = '';
+        $this->shareEventStatus      = '';
+    }
+
+    /**
+     * Base events listing URL used for sharing.
+     */
+    public function eventsBaseUrl(): string
+    {
+        $base = rtrim(config('app.url'), '/');
+        try {
+            $path = route('events.index', [], false);
+        } catch (\Throwable) {
+            $path = '/events';
+        }
+        return $base . $path;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     private function resetFormFields(): void
     {
@@ -732,7 +792,7 @@ new class extends Component {
                  style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;"
                  wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,filterStatus,filterSort,resetFilters,previousPage,nextPage,executeDelete">
-                <table class="w-full border-collapse min-w-[640px]">
+                <table class="w-full border-collapse min-w-[700px]">
                     <thead>
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Event</th>
@@ -752,6 +812,7 @@ new class extends Component {
                             $isDeleted      = $event->status === 'ORGANIZER_DELETED';
                             $isCompleted    = $event->status === 'COMPLETED';
                             $isApproved     = $event->status === 'APPROVED';
+                            $canShare       = $isApproved || $isCompleted;
                         @endphp
 
                         <tr class="
@@ -840,9 +901,17 @@ new class extends Component {
 
                             <td class="px-4 sm:px-5 py-3.5 text-center">
                                 <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                                    {{-- VIEW --}}
                                     <button wire:click="viewEvent({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
                                         <i class="fas fa-eye text-[10px]"></i><span class="hidden sm:inline">View</span>
                                     </button>
+                                    {{-- SHARE — only for APPROVED or COMPLETED --}}
+                                    @if($canShare)
+                                    <button wire:click="openShareModal({{ $event->id }})" title="Share on Facebook" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 hover:bg-sky-100 rounded-lg transition">
+                                        <i class="fas fa-share-nodes text-[10px]"></i><span class="hidden sm:inline">Share</span>
+                                    </button>
+                                    @endif
+                                    {{-- EDIT / DELETE — only for non-deleted, non-completed, non-approved --}}
                                     @if(!$isDeleted && !$isCompleted && !$isApproved)
                                     <button wire:click="openEditModal({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition">
                                         <i class="fas fa-pen-to-square text-[10px]"></i><span class="hidden sm:inline">Edit</span>
@@ -1005,7 +1074,6 @@ new class extends Component {
                         @if(isset($formErrors['title']))<p class="mt-1.5 text-xs text-red-600 flex items-start gap-1.5"><i class="fas fa-circle-exclamation mt-0.5 flex-shrink-0"></i><span>{{ $formErrors['title'] }}</span></p>@endif
                     </div>
 
-                    {{-- TASK 2: Description is now required --}}
                     <div>
                         <label class="block text-xs font-bold text-gray-600 uppercase tracking-wide mb-1.5">Description <span class="text-red-500">*</span></label>
                         <textarea wire:model.defer="description" rows="3" placeholder="Describe the event, agenda, highlights…"
@@ -1180,6 +1248,7 @@ new class extends Component {
     $totalRsvp   = $ev->confirmed_count + $ev->declined_count + $ev->tentative_count;
     $isCompleted = $ev->status === 'COMPLETED';
     $isApproved  = $ev->status === 'APPROVED';
+    $canShare    = $isApproved || $isCompleted;
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm" @keydown.escape.window="$wire.closeViewModal()">
     <div class="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[95vh] sm:max-h-[92vh] overflow-hidden relative"
@@ -1277,6 +1346,10 @@ new class extends Component {
 
         <div class="px-5 sm:px-8 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
             <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
+            {{-- Share button — APPROVED or COMPLETED only --}}
+            @if($canShare)
+            <button wire:click="openShareModal({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-sky-700 border border-sky-200 bg-sky-50 hover:bg-white hover:border-sky-400 rounded-xl transition"><i class="fas fa-share-nodes text-xs"></i> Share</button>
+            @endif
             @if(!$isCompleted && !$isApproved && $ev->status !== 'ORGANIZER_DELETED')
             <button wire:click="confirmDelete({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-trash text-xs"></i> Delete</button>
             <button wire:click="openEditModal({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 rounded-xl transition"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
@@ -1307,5 +1380,257 @@ new class extends Component {
     </div>
 </div>
 @endif
+
+{{-- ════════════════════════════════════════════════════════════════════════════
+     SHARE MODAL — Event Organizer
+     ─────────────────────────────────────────────────────────────────────────
+     • Only shows for APPROVED or COMPLETED events
+     • Shows the actual event photo in the preview card
+     • Copies full event text to clipboard then opens Facebook sharer
+     • Copy Link copies the base events page URL (no event ID)
+     • FB pre-filled text is not supported by Facebook — clipboard workaround
+════════════════════════════════════════════════════════════════════════════ --}}
+@if($showShareModal)
+@php
+    $shareBaseUrl = $this->eventsBaseUrl(); // e.g. https://alumniphilcst.com/events
+    $shareHost    = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+    $fbShareUrl   = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
+
+    // Build full post text for clipboard
+    $fbLines   = [];
+    $fbLines[] = "📅 Event: {$shareEventTitle}";
+    $fbLines[] = "🗓️ Date: {$shareEventDate}";
+    $timeStr   = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
+    $fbLines[] = "🕐 Time: {$timeStr}";
+    $fbLines[] = "📍 Venue: {$shareEventVenue}" . ($shareEventVenueAddr ? ", {$shareEventVenueAddr}" : '');
+    if ($shareEventTarget)      $fbLines[] = "🎓 For: {$shareEventTarget}";
+    if ($shareEventDescription) {
+        $descPreview = mb_strlen($shareEventDescription) > 200
+            ? mb_substr($shareEventDescription, 0, 200) . '…'
+            : $shareEventDescription;
+        $fbLines[] = '';
+        $fbLines[] = $descPreview;
+    }
+    $fbLines[] = '';
+    $fbLines[] = "See more details on the PHILCST Alumni Portal 👇";
+    $fbLines[] = $shareBaseUrl;
+    $fbPostText = implode("\n", $fbLines);
+
+    // Short description for preview
+    $previewDesc = mb_strlen($shareEventDescription) > 120
+        ? mb_substr($shareEventDescription, 0, 120) . '…'
+        : $shareEventDescription;
+
+    $timeDisplay = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
+    $isCompleted = $shareEventStatus === 'COMPLETED';
+@endphp
+
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+     @keydown.escape.window="$wire.closeShareModal()"
+     x-data="{
+         copied:   false,
+         fbCopied: false,
+         fbText:   {{ json_encode($fbPostText) }},
+         baseUrl:  {{ json_encode($shareBaseUrl) }},
+         fbUrl:    {{ json_encode($fbShareUrl) }},
+
+         shareOnFacebook() {
+             navigator.clipboard.writeText(this.fbText).then(() => {
+                 this.fbCopied = true;
+                 setTimeout(() => this.fbCopied = false, 7000);
+             }).catch(() => {
+                 // clipboard denied — still open FB
+             });
+             const w = 620, h = 520;
+             const left = Math.round((screen.width  - w) / 2);
+             const top  = Math.round((screen.height - h) / 2);
+             window.open(
+                 this.fbUrl, 'fb_share',
+                 'width='+w+',height='+h+',left='+left+',top='+top
+                 +',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1'
+             );
+         },
+
+         copyLinkFn() {
+             navigator.clipboard.writeText(this.baseUrl).then(() => {
+                 this.copied = true;
+                 setTimeout(() => this.copied = false, 2500);
+             });
+         }
+     }"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100">
+
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+
+        {{-- ── Header ──────────────────────────────────────────────────────── --}}
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 class="text-base font-extrabold text-gray-800 flex items-center gap-2">
+                <i class="fas fa-share-nodes text-sky-600"></i> Share Event
+            </h2>
+            <button wire:click="closeShareModal" type="button"
+                    class="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
+                <i class="fas fa-xmark text-sm"></i>
+            </button>
+        </div>
+
+        <div class="px-6 pt-5 pb-5 space-y-4">
+
+            {{-- ── FB clipboard success banner ──────────────────────────── --}}
+            <div x-show="fbCopied" x-cloak
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 -translate-y-2"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 class="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-start gap-3">
+                <div class="w-7 h-7 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <i class="fas fa-check text-emerald-600 text-xs"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-extrabold text-emerald-800">Event text copied to clipboard!</p>
+                    <p class="text-xs text-emerald-700 mt-0.5 leading-snug">
+                        Sa Facebook popup, i-click ang text box tapos
+                        <strong>i-paste (Ctrl+V / ⌘V)</strong> — tapos na, ready to post!
+                    </p>
+                </div>
+            </div>
+
+            {{-- ── Section label ──────────────────────────────────────────── --}}
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
+                Preview — What people will see
+            </p>
+
+            {{-- ── Event preview card ─────────────────────────────────────── --}}
+            <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+
+                {{-- Event photo --}}
+                <div class="relative">
+                    <img src="{{ $shareEventPhotoUrl }}"
+                         alt="{{ $shareEventTitle }}"
+                         class="w-full h-36 object-cover {{ $isCompleted ? 'brightness-90' : '' }}"
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                    {{-- Fallback if no photo --}}
+                    <div class="hidden w-full h-36 bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] items-center justify-center">
+                        <i class="fas fa-calendar-days text-white text-4xl opacity-60"></i>
+                    </div>
+                    {{-- Status badge over photo --}}
+                    <div class="absolute top-2 right-2">
+                        @if($isCompleted)
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-600 text-white rounded-full text-[10px] font-bold shadow">
+                                <i class="fas fa-circle-check text-[8px]"></i> Completed
+                            </span>
+                        @else
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-bold shadow">
+                                <i class="fas fa-circle-check text-[8px]"></i> Approved
+                            </span>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Event info --}}
+                <div class="px-4 py-3 bg-white">
+                    <p class="font-extrabold text-gray-900 text-sm leading-tight mb-2">
+                        {{ $shareEventTitle }}
+                    </p>
+                    <div class="flex flex-wrap gap-1.5 mb-2">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-100">
+                            <i class="fas fa-calendar text-[8px]"></i>{{ $shareEventDate }}
+                        </span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                            <i class="fas fa-clock text-[8px]"></i>{{ $timeDisplay }}
+                        </span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-700">
+                            <i class="fas fa-location-dot text-[8px]"></i>{{ $shareEventVenue }}
+                        </span>
+                        @if($shareEventTarget)
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-100">
+                            <i class="fas fa-graduation-cap text-[8px]"></i>{{ $shareEventTarget }}
+                        </span>
+                        @endif
+                    </div>
+                    @if($previewDesc)
+                    <p class="text-xs text-gray-500 leading-relaxed line-clamp-2">{{ $previewDesc }}</p>
+                    @endif
+                </div>
+
+                {{-- OG card footer --}}
+                <div class="px-4 py-2 bg-[#f0f2f5] flex items-center gap-2">
+                    <i class="fas fa-globe text-gray-400 text-[10px]"></i>
+                    <span class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+                </div>
+            </div>
+            {{-- ── End preview card ──────────────────────────────────────── --}}
+
+            {{-- ── How it works hint ──────────────────────────────────────── --}}
+            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
+                <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+                <p class="text-xs text-blue-800 leading-snug">
+                    <strong>How it works:</strong> Click <em>Share on Facebook</em> —
+                    the full event details will be automatically copied,
+                    then Facebook will open. Just paste
+                    (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>)
+                    into your post, and you're done!
+                </p>
+            </div>
+
+            {{-- ── Share via label ─────────────────────────────────────── --}}
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest pt-1">Share via</p>
+
+            {{-- ── Facebook Share Button ──────────────────────────────── --}}
+            <button type="button"
+                    @click="shareOnFacebook()"
+                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl
+                           bg-[#1877F2] hover:bg-[#166fe5] active:bg-[#1464d8]
+                           text-white font-extrabold text-sm
+                           shadow hover:shadow-md
+                           transition-all duration-150 cursor-pointer group">
+                <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2">
+                        <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
+                    </svg>
+                </span>
+                <span class="flex-1 text-left">
+                    <span x-show="!fbCopied">Share on Facebook</span>
+                    <span x-show="fbCopied" x-cloak>
+                        <i class="fas fa-check mr-1"></i> Bukas na! I-paste ang text sa FB
+                    </span>
+                </span>
+                <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
+            </button>
+
+            {{-- ── Copy Link button (base URL) ────────────────────────── --}}
+            <button type="button"
+                    @click="copyLinkFn()"
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl
+                           border-2 border-gray-200 hover:border-gray-300
+                           bg-white hover:bg-gray-50 active:bg-gray-100
+                           text-gray-700 font-bold text-sm
+                           transition-all duration-150 cursor-pointer group">
+                <span class="w-8 h-8 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
+                    <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-xs"></i>
+                </span>
+                <div class="flex-1 text-left">
+                    <p :class="copied ? 'text-emerald-600' : 'text-gray-700'" class="font-bold text-sm"
+                       x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
+                    <p class="text-[10px] text-gray-400 font-mono mt-0.5">{{ $shareBaseUrl }}</p>
+                </div>
+            </button>
+
+            {{-- ── Footer note ─────────────────────────────────────────── --}}
+            <p class="text-[11px] text-gray-400 text-center leading-snug pb-1">
+                @if($isCompleted)
+                    <i class="fas fa-circle-check text-green-500 mr-1"></i>This event has been <strong class="text-gray-500">completed</strong> — share it as a recap!
+                @else
+                    <i class="fas fa-circle-check text-emerald-500 mr-1"></i>This event is <strong class="text-gray-500">approved & live</strong> — safe to share with alumni!
+                @endif
+            </p>
+        </div>
+    </div>
+</div>
+@endif
+{{-- END SHARE MODAL ══════════════════════════════════════════════════════════ --}}
 
 </div>

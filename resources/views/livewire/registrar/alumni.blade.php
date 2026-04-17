@@ -2,14 +2,13 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
-use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
-    use WithPagination, WithFileUploads;
+    use WithPagination;
 
     protected function queryString(): array { return []; }
 
@@ -20,10 +19,8 @@ new class extends Component {
     public string $alumniSort   = 'recent';
 
     // ── View profile ──────────────────────────────────────────────
-    public ?int   $viewingProfileId     = null;
-    public        $viewingProfile       = null;
-    public        $updatingProfilePhoto = null;
-    public bool   $updatingProfile      = false;
+    public ?int   $viewingProfileId = null;
+    public        $viewingProfile   = null;
 
     // ── Modal ─────────────────────────────────────────────────────
     public string $activeModal = '';
@@ -77,7 +74,7 @@ new class extends Component {
             fn($q) => $q->orderByDesc('created_at')
         );
 
-        return $q->paginate(100, ['*'], 'alumniPage');
+        return $q->paginate(200, ['*'], 'alumniPage');
     }
 
     #[Computed] public function courses() { return Course::orderBy('code')->get(); }
@@ -136,41 +133,11 @@ new class extends Component {
         }
     }
 
-    public function updateProfilePhoto(): void
-    {
-        if (!$this->updatingProfilePhoto || !$this->viewingProfileId) return;
-
-        $this->validate([
-            'updatingProfilePhoto' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
-        ]);
-
-        $this->updatingProfile = true;
-        try {
-            $a = Alumni::findOrFail($this->viewingProfileId);
-            if ($a->profile_photo && !str_contains($a->profile_photo, 'default.png'))
-                Storage::disk('public')->delete($a->profile_photo);
-
-            $f = 'alumni-' . \Illuminate\Support\Str::uuid() . '.' . $this->updatingProfilePhoto->getClientOriginalExtension();
-            $this->updatingProfilePhoto->storeAs('alumni-photos', $f, 'public');
-            $p = "alumni-photos/{$f}";
-
-            $a->update(['profile_photo' => $p]);
-            $this->viewingProfile['profile_photo'] = $p;
-            $this->updatingProfilePhoto            = null;
-            $this->dispatch('flash-message', type: 'success', message: 'Photo updated successfully!');
-        } catch (\Exception) {
-            $this->dispatch('flash-message', type: 'error', message: 'Failed to update photo.');
-        } finally {
-            $this->updatingProfile = false;
-        }
-    }
-
     public function closeModal(): void
     {
-        $this->activeModal          = '';
-        $this->viewingProfileId     = null;
-        $this->viewingProfile       = null;
-        $this->updatingProfilePhoto = null;
+        $this->activeModal      = '';
+        $this->viewingProfileId = null;
+        $this->viewingProfile   = null;
     }
 };
 ?>
@@ -205,15 +172,15 @@ new class extends Component {
        }"></i>
     <div class="flex-1 min-w-0">
         <p class="font-bold text-xs text-gray-900" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
-        <p class="text-xs mt-0.5 text-gray-500 leading-snug break-words" x-text="msg"></p>
+        <p class="text-xs mt-0.5 text-gray-600 leading-snug break-words" x-text="msg"></p>
     </div>
-    <button @click="show=false" class="text-gray-300 hover:text-gray-500 transition shrink-0 mt-0.5">
+    <button @click="show=false" class="text-gray-400 hover:text-gray-600 transition shrink-0 mt-0.5">
         <i class="fas fa-xmark text-xs"></i>
     </button>
 </div>
 
 {{-- ══ PAGE ══════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-4 max-w-screen-2xl mx-auto" style="min-height:100vh; background:#f7f3fe;">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-4 max-w-screen-2xl mx-auto" style="min-height:90vh;">
 
     {{-- Header --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -224,21 +191,8 @@ new class extends Component {
             </div>
             <div>
                 <h1 class="text-lg sm:text-xl font-extrabold text-gray-900 leading-tight">Alumni Records</h1>
-                <p class="text-gray-400 text-xs">View and manage alumni accounts</p>
+                <p class="text-gray-500 text-xs">View and manage alumni accounts</p>
             </div>
-        </div>
-        <div class="flex items-center gap-2 self-start sm:self-auto">
-            <a href="{{ route('registrar.alumni.register') }}" wire:navigate
-               class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-md transition hover:opacity-90 active:scale-95"
-               style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
-                <i class="fas fa-user-plus text-xs"></i>
-                <span class="hidden sm:inline">Register</span>
-            </a>
-            <a href="{{ route('registrar.alumni.import') }}" wire:navigate
-               class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-[#7a3f91] border border-[#d4aaeb] shadow-sm transition hover:bg-[#f5eef9] active:scale-95">
-                <i class="fas fa-file-import text-xs"></i>
-                <span class="hidden sm:inline">Import</span>
-            </a>
         </div>
     </div>
 
@@ -247,22 +201,22 @@ new class extends Component {
          style="min-height:0; height:calc(100vh - 148px);">
 
         {{-- Filters --}}
-        <div class="px-3 sm:px-4 py-2.5 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
+        <div class="px-3 sm:px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex flex-wrap gap-2 items-center">
 
             {{-- Search --}}
             <div class="relative flex-1 min-w-[150px] max-w-xs"
                  x-data="{ query: @entangle('alumniSearch').live, timer: null,
                             onInput(e){ clearTimeout(this.timer); this.timer = setTimeout(() => { this.query = e.target.value; }, 120); } }"
                  wire:ignore>
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-300 text-xs pointer-events-none"></i>
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                 <input type="text" :value="query" @input="onInput($event)"
                        placeholder="Search name, ID, course…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                       class="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-xs bg-white text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" spellcheck="false">
             </div>
 
             <select wire:model.live="alumniBatch"
-                    class="px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 min-w-[90px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
+                    class="px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white text-gray-700 min-w-[90px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
                 <option value="">All Years</option>
                 @foreach($this->batches as $b)
                     <option value="{{ $b }}">{{ $b }}</option>
@@ -270,7 +224,7 @@ new class extends Component {
             </select>
 
             <select wire:model.live="alumniCourse"
-                    class="px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 min-w-[100px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
+                    class="px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white text-gray-700 min-w-[100px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
                 <option value="">All Courses</option>
                 @foreach($this->courses as $c)
                     <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -278,13 +232,13 @@ new class extends Component {
             </select>
 
             <select wire:model.live="alumniSort"
-                    class="px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 min-w-[110px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
+                    class="px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white text-gray-700 min-w-[110px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
                 <option value="recent">Newest First</option>
                 <option value="oldest">Oldest First</option>
             </select>
 
             <button wire:click="resetAlumniFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition active:scale-95">
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 transition active:scale-95">
                 <i class="fas fa-rotate-left text-xs"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
@@ -300,51 +254,51 @@ new class extends Component {
 
                 <table class="w-full border-collapse" style="min-width:720px;">
                     <thead>
-                        <tr class="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
-                            <th class="px-4 py-3 text-left text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">Name</th>
-                            <th class="px-4 py-3 text-left text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">Student ID</th>
-                            <th class="px-4 py-3 text-left text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">Course</th>
-                            <th class="px-4 py-3 text-center text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">Batch</th>
-                            <th class="px-4 py-3 text-left text-[10px] font-extrabold text-gray-400 uppercase tracking-widest hidden md:table-cell">Email</th>
-                            <th class="px-4 py-3 text-center text-[10px] font-extrabold text-gray-400 uppercase tracking-widest">Action</th>
+                        <tr class="bg-gray-100 border-b-2 border-gray-200 sticky top-0 z-10">
+                            <th class="px-4 py-3 text-left text-[11px] font-extrabold text-gray-600 uppercase tracking-widest">Name</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-extrabold text-gray-600 uppercase tracking-widest">Student ID</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-extrabold text-gray-600 uppercase tracking-widest">Course</th>
+                            <th class="px-4 py-3 text-center text-[11px] font-extrabold text-gray-600 uppercase tracking-widest">Batch</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-extrabold text-gray-600 uppercase tracking-widest hidden md:table-cell">Email</th>
+                            <th class="px-4 py-3 text-center text-[11px] font-extrabold text-gray-600 uppercase tracking-widest">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-50">
+                    <tbody class="divide-y divide-gray-100">
                         @forelse($this->alumniRecords as $item)
                         <tr class="bg-white hover:bg-[#faf7ff] transition-colors duration-100">
                             <td class="px-4 py-3">
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
                                          alt="{{ $item->first_name }}"
-                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-gray-100">
-                                    <span class="font-semibold text-gray-800 text-sm">
+                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-gray-200">
+                                    <span class="font-semibold text-gray-900 text-sm">
                                         {{ $this->formatDisplayName($item->first_name??'', $item->middle_initial??'', $item->last_name??'', $item->suffix??'') }}
                                     </span>
                                 </div>
                             </td>
                             <td class="px-4 py-3">
-                                <code class="font-mono text-gray-700 text-xs font-bold bg-gray-50 px-2 py-0.5 rounded">{{ $item->student_id }}</code>
+                                <code class="font-mono text-gray-800 text-xs font-bold bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{{ $item->student_id }}</code>
                             </td>
                             <td class="px-4 py-3">
                                 <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold"
-                                      style="background:#f5eef9;color:#7a3f91;border:1px solid #d4aaeb;">
+                                      style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
                                     {{ $item->course_code ?? '—' }}
                                 </span>
                             </td>
                             <td class="px-4 py-3 text-center">
-                                <span class="font-mono text-gray-600 text-xs font-bold">{{ $item->batch }}</span>
+                                <span class="font-mono text-gray-800 text-xs font-bold">{{ $item->batch }}</span>
                             </td>
                             <td class="px-4 py-3 hidden md:table-cell">
                                 @if(!empty($item->email))
-                                    <span class="text-gray-500 text-xs">{{ $item->email }}</span>
+                                    <span class="text-gray-700 text-xs">{{ $item->email }}</span>
                                 @else
-                                    <span class="text-gray-300 text-xs italic">—</span>
+                                    <span class="text-gray-400 text-xs italic">No email</span>
                                 @endif
                             </td>
                             <td class="px-4 py-3 text-center">
                                 <button wire:click="viewProfile({{ $item->id }})"
                                         class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition active:scale-95"
-                                        style="background:#f5eef9;color:#7a3f91;border:1px solid #d4aaeb;">
+                                        style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
                                     <i class="fas fa-eye text-xs"></i>
                                     <span class="hidden sm:inline">View</span>
                                 </button>
@@ -354,11 +308,11 @@ new class extends Component {
                         <tr>
                             <td colspan="6" class="py-24 text-center">
                                 <div class="flex flex-col items-center gap-3">
-                                    <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f5eef9;">
-                                        <i class="fas fa-users text-2xl" style="color:#d4aaeb;"></i>
+                                    <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
+                                        <i class="fas fa-users text-2xl" style="color:#c89de0;"></i>
                                     </div>
-                                    <p class="font-bold text-gray-400 text-sm">No alumni found</p>
-                                    <p class="text-xs text-gray-300">Try adjusting your filters</p>
+                                    <p class="font-bold text-gray-500 text-sm">No alumni found</p>
+                                    <p class="text-xs text-gray-400">Try adjusting your filters</p>
                                 </div>
                             </td>
                         </tr>
@@ -386,12 +340,12 @@ new class extends Component {
                 $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
                 $to    = min($cp * $pp, $total);
             @endphp
-            <p class="text-white/60 text-xs">
+            <p class="text-white/70 text-xs">
                 Showing <strong class="text-white">{{ $from }}–{{ $to }}</strong> of <strong class="text-white">{{ $total }}</strong> alumni
             </p>
             <div class="flex items-center gap-1.5">
                 @if($this->alumniRecords->onFirstPage())
-                    <button disabled class="px-3 py-1.5 rounded-lg text-xs font-bold text-white/25 bg-white/5 cursor-not-allowed">← Prev</button>
+                    <button disabled class="px-3 py-1.5 rounded-lg text-xs font-bold text-white/30 bg-white/5 cursor-not-allowed">← Prev</button>
                 @else
                     <button wire:click="previousPage('alumniPage')"
                             class="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-80 active:scale-95"
@@ -403,7 +357,7 @@ new class extends Component {
                             class="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-80 active:scale-95"
                             style="background:#7a3f91;">Next →</button>
                 @else
-                    <button disabled class="px-3 py-1.5 rounded-lg text-xs font-bold text-white/25 bg-white/5 cursor-not-allowed">Next →</button>
+                    <button disabled class="px-3 py-1.5 rounded-lg text-xs font-bold text-white/30 bg-white/5 cursor-not-allowed">Next →</button>
                 @endif
             </div>
         </div>
@@ -435,25 +389,20 @@ new class extends Component {
         <div class="p-5 sm:p-6 space-y-4 overflow-y-auto" style="max-height:82vh;">
 
             {{-- Avatar + Quick Info --}}
-            <div class="flex items-center gap-4 p-4 rounded-xl border border-gray-100 bg-gray-50">
-                @if($updatingProfilePhoto)
-                    <img src="{{ $updatingProfilePhoto->temporaryUrl() }}"
-                         class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shadow-md ring-2 ring-[#7a3f91]/30 shrink-0">
-                @else
-                    <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
-                         alt="{{ $viewingProfile['first_name'] ?? '' }}"
-                         class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shadow-md ring-2 ring-gray-200 shrink-0">
-                @endif
+            <div class="flex items-center gap-4 p-4 rounded-xl border border-gray-200 bg-gray-50">
+                <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
+                     alt="{{ $viewingProfile['first_name'] ?? '' }}"
+                     class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shadow-md ring-2 ring-gray-200 shrink-0">
                 <div class="flex-1 min-w-0">
                     <p class="text-base font-extrabold text-gray-900 leading-tight">
                         {{ $this->formatDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
                     </p>
-                    <p class="text-xs text-gray-400 font-mono mt-0.5">{{ $viewingProfile['student_id'] ?? '—' }}</p>
+                    <p class="text-xs text-gray-500 font-mono mt-0.5">{{ $viewingProfile['student_id'] ?? '—' }}</p>
                     <div class="flex flex-wrap gap-1.5 mt-2">
-                        <span class="px-2 py-0.5 rounded-full text-xs font-bold" style="background:#f5eef9;color:#7a3f91;border:1px solid #d4aaeb;">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-bold" style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
                             {{ $viewingProfile['course_code'] ?? '—' }}
                         </span>
-                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-700 border border-gray-300">
                             Batch {{ $viewingProfile['batch'] ?? '—' }}
                         </span>
                         <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -463,31 +412,49 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Student Record --}}
-            @include('partials.profile-section', [
-                'title'  => 'Student Record',
-                'icon'   => 'id-card',
-                'bg'     => '#f9f5ff',
-                'color'  => '#7a3f91',
-                'fields' => [
-                    ['First Name',   $viewingProfile['first_name']    ?? '—'],
-                    ['Middle Name',  $viewingProfile['middle_initial'] ?? '—'],
-                    ['Last Name',    trim(($viewingProfile['last_name']??'').' '.($viewingProfile['suffix']??'')) ?: '—'],
-                    ['Student ID',   $viewingProfile['student_id']    ?? '—'],
-                    ['Course Code',  $viewingProfile['course_code']   ?? '—'],
-                    ['Batch Year',   $viewingProfile['batch']         ?? '—'],
-                ],
-                'wide' => [
-                    ['Course Name',    $viewingProfile['course_name'] ?? '—'],
-                    ['Email Address',  $viewingProfile['email'] ?: 'No email on record'],
-                ],
-            ])
+            {{-- Student Record Section --}}
+            <div class="rounded-xl border border-gray-200 overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200"
+                     style="background:#f3eafc;">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
+                         style="background:#7a3f91;">
+                        <i class="fas fa-id-card text-white" style="font-size:10px;"></i>
+                    </div>
+                    <p class="font-bold text-gray-800 text-xs uppercase tracking-wide">Student Record</p>
+                </div>
+                <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    @foreach([
+                        ['First Name',  $viewingProfile['first_name']     ?? '—'],
+                        ['Middle Name', $viewingProfile['middle_initial']  ?? '—'],
+                        ['Last Name',   trim(($viewingProfile['last_name']??'').' '.($viewingProfile['suffix']??'')) ?: '—'],
+                        ['Student ID',  $viewingProfile['student_id']     ?? '—'],
+                        ['Course Code', $viewingProfile['course_code']    ?? '—'],
+                        ['Batch Year',  $viewingProfile['batch']          ?? '—'],
+                    ] as [$lbl, $val])
+                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
+                    </div>
+                    @endforeach
+                </div>
+                <div class="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    @foreach([
+                        ['Course Name',   $viewingProfile['course_name'] ?? '—'],
+                        ['Email Address', $viewingProfile['email'] ?: 'No email on record'],
+                    ] as [$lbl, $val])
+                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-xs font-semibold text-gray-900 break-words">{{ $val }}</p>
+                    </div>
+                    @endforeach
+                </div>
+            </div>
 
             {{-- Personal Details --}}
             @php $dob = !empty($viewingProfile['date_of_birth']) ? \Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y') : '—'; @endphp
-            <div class="rounded-xl border border-gray-100 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100 bg-blue-50">
-                    <div class="w-6 h-6 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+            <div class="rounded-xl border border-gray-200 overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-blue-50">
+                    <div class="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
                         <i class="fas fa-person text-white" style="font-size:10px;"></i>
                     </div>
                     <p class="font-bold text-gray-800 text-xs uppercase tracking-wide">Personal Details</p>
@@ -502,17 +469,17 @@ new class extends Component {
                         ['Blood Type',     $viewingProfile['blood_type']     ?: '—'],
                         ['Contact No.',    $viewingProfile['contact_number'] ?: '—'],
                     ] as [$lbl, $val])
-                    <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
-                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold text-gray-800">{{ $val }}</p>
+                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
                     </div>
                     @endforeach
                 </div>
             </div>
 
             {{-- Family --}}
-            <div class="rounded-xl border border-gray-100 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100 bg-rose-50">
+            <div class="rounded-xl border border-gray-200 overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-rose-50">
                     <div class="w-6 h-6 rounded-lg bg-rose-500 flex items-center justify-center shrink-0">
                         <i class="fas fa-people-roof text-white" style="font-size:10px;"></i>
                     </div>
@@ -524,17 +491,17 @@ new class extends Component {
                         ["Mother's Name", $viewingProfile['mother_name'] ?: '—'],
                         ['Spouse Name',   $viewingProfile['spouse_name'] ?: '—'],
                     ] as [$lbl, $val])
-                    <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
-                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold text-gray-800">{{ $val }}</p>
+                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
                     </div>
                     @endforeach
                 </div>
             </div>
 
             {{-- Address --}}
-            <div class="rounded-xl border border-gray-100 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-100 bg-emerald-50">
+            <div class="rounded-xl border border-gray-200 overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-emerald-50">
                     <div class="w-6 h-6 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
                         <i class="fas fa-map-location-dot text-white" style="font-size:10px;"></i>
                     </div>
@@ -551,51 +518,30 @@ new class extends Component {
                         ]);
                         $fullAddress = implode(', ', $addrParts) ?: '—';
                     @endphp
-                    <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-2.5">
-                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Full Address</p>
-                        <p class="text-xs font-semibold text-gray-800 leading-snug">{{ $fullAddress }}</p>
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">Full Address</p>
+                        <p class="text-xs font-semibold text-gray-900 leading-snug">{{ $fullAddress }}</p>
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         @foreach([
-                            ['House/Block No.',   $viewingProfile['address_no']            ?: '—'],
-                            ['Street',            $viewingProfile['address_street']         ?: '—'],
-                            ['Barangay',          $viewingProfile['address_barangay']       ?: '—'],
-                            ['City/Municipality', $viewingProfile['address_municipality']   ?: '—'],
-                            ['Province',          $viewingProfile['address_province']       ?: '—'],
-                            ['Zip Code',          $viewingProfile['address_zip_code']       ?: '—'],
+                            ['House/Block No.',   $viewingProfile['address_no']          ?: '—'],
+                            ['Street',            $viewingProfile['address_street']       ?: '—'],
+                            ['Barangay',          $viewingProfile['address_barangay']     ?: '—'],
+                            ['City/Municipality', $viewingProfile['address_municipality'] ?: '—'],
+                            ['Province',          $viewingProfile['address_province']     ?: '—'],
+                            ['Zip Code',          $viewingProfile['address_zip_code']     ?: '—'],
                         ] as [$lbl, $val])
-                        <div class="bg-gray-50 border border-gray-100 rounded-lg p-2.5">
-                            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-xs font-semibold text-gray-800">{{ $val }}</p>
+                        <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                            <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                            <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
                         </div>
                         @endforeach
                     </div>
                 </div>
             </div>
 
-            {{-- Update Photo --}}
-            <div class="border-t border-gray-100 pt-4">
-                <p class="text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">Update Profile Photo</p>
-                <div class="border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#faf5ff] transition"
-                     @click="document.getElementById('profilePhotoInput').click()">
-                    <i class="fas fa-camera text-2xl text-gray-300 block mb-1.5"></i>
-                    <p class="text-gray-600 font-semibold text-sm">{{ $updatingProfilePhoto ? 'Change Photo' : 'Click to Upload New Photo' }}</p>
-                    <p class="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP · max 5 MB</p>
-                    <input type="file" id="profilePhotoInput" wire:model="updatingProfilePhoto" accept="image/*" class="hidden">
-                </div>
-                @if($updatingProfilePhoto)
-                <button wire:click="updateProfilePhoto"
-                        wire:loading.attr="disabled" wire:target="updateProfilePhoto"
-                        class="w-full mt-3 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2 hover:opacity-90 active:scale-[.99]"
-                        style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
-                    <span wire:loading wire:target="updateProfilePhoto"><i class="fas fa-spinner animate-spin"></i> Saving…</span>
-                    <span wire:loading.remove wire:target="updateProfilePhoto"><i class="fas fa-floppy-disk"></i> Save Photo</span>
-                </button>
-                @endif
-            </div>
-
             <button wire:click="closeModal"
-                    class="w-full bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition active:scale-[.99]">
+                    class="w-full bg-white border border-gray-300 text-gray-800 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition active:scale-[.99]">
                 Close
             </button>
         </div>

@@ -7,6 +7,18 @@
  *  - saveEditJob preserves the current status, no auto-reactivation
  *  - Batch auto-inactive on deadline via SQL UPDATE (no dirty attr bug)
  *  - All create / edit / delete actions are written to the audit log
+ *  - Share to Facebook: copies full post text to clipboard THEN opens FB
+ *    (Facebook removed quote= support — clipboard+open is the fix)
+ *
+ * FIX v3:
+ *   1. Both "Share on Facebook" and "Copy Link" now use the BASE jobs URL
+ *      with NO job ID — e.g. https://alumniphilcst.com/jobs
+ *   2. FB share: copies full job text to clipboard, then opens FB sharer
+ *      with the base URL so FB renders the OG card for the jobs listing.
+ *   3. NOTE: Facebook intentionally removed pre-filled text support on
+ *      their sharer. The clipboard approach is the only clean workaround.
+ *   4. APP_URL in .env must be your real domain:
+ *        APP_URL=https://alumniphilcst.com
  */
 
 use Livewire\Volt\Component;
@@ -69,6 +81,20 @@ new class extends Component {
     public ?int   $deleteJobId     = null;
     public string $deleteJobTitle  = '';
 
+    // ── Share modal ───────────────────────────────────────────────────────────
+    public bool   $showShareModal   = false;
+    public ?int   $shareJobId       = null;
+    public string $shareJobTitle    = '';
+    public string $shareCompany     = '';
+    public string $shareEmpType     = '';
+    public string $shareLocation    = '';
+    public string $shareExpLevel    = '';
+    public string $shareSalary      = '';
+    public string $shareDeadline    = '';
+    public string $shareDescription = '';
+    public string $shareCollege     = '';
+    // ─────────────────────────────────────────────────────────────────────────
+
     private array $expLevelOrder = [
         'No Experience Required',
         'Entry Level (At Least 1 Year)',
@@ -113,10 +139,6 @@ new class extends Component {
     }
 
     // ── Audit logging helper ──────────────────────────────────────────────────
-    //
-    // Wrapped in try/catch so a logging failure NEVER breaks the main action.
-    // Logs are fire-and-forget; the user experience always wins.
-    //
     private function logAudit(
         string  $action,
         string  $subjectLabel,
@@ -142,8 +164,6 @@ new class extends Component {
                 'severity'      => $severity,
                 'is_flagged'    => false,
             ]);
-
-            // Bust the stats cache so the admin's counters refresh immediately
             Cache::forget('audit_stats');
         } catch (\Throwable) {
             // Silently swallow; logging must never cascade-fail to the UI
@@ -218,7 +238,6 @@ new class extends Component {
         $orgCollege = $this->organizerCollege;
         $today      = now('Asia/Manila')->startOfDay()->toDateString();
 
-        // Batch auto-inactive — single SQL UPDATE, no N+1, no dirty attr bug
         JobPosting::where(function ($q) use ($org, $orgCollege) {
                 $q->where('organizer_id', $org->id)
                   ->orWhere(function ($sub) use ($orgCollege) {
@@ -443,7 +462,6 @@ new class extends Component {
             'updated_by_role'  => 'organizer',
         ]);
 
-        // ── Audit log: job created ────────────────────────────────────────────
         $this->logAudit(
             action:       'created',
             subjectLabel: $job->job_title,
@@ -469,7 +487,6 @@ new class extends Component {
             ],
             severity: 'info'
         );
-        // ─────────────────────────────────────────────────────────────────────
 
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
@@ -498,9 +515,6 @@ new class extends Component {
         $this->guardAuth();
         $job = app(JobController::class)->getJob($id);
         $this->guardOwnership($job);
-
-        // Organizer can edit regardless of ACTIVE or INACTIVE status.
-        // Status is Admin-only — no restriction here.
 
         $this->editingJobId       = $id;
         $this->editJobTitle       = $job->job_title;
@@ -579,7 +593,6 @@ new class extends Component {
         $job = app(JobController::class)->getJob($this->editingJobId);
         $this->guardOwnership($job);
 
-        // Capture before-state for the audit diff
         $before = [
             'job_title'        => $job->job_title,
             'company_name'     => $job->company_name,
@@ -592,8 +605,6 @@ new class extends Component {
             'target_college'   => $job->target_college,
         ];
 
-        // STATUS IS PRESERVED — organizer edits never change the status.
-        // Only Admin can activate or deactivate a job.
         $job->update([
             'job_title'        => $this->sanitize($this->editJobTitle),
             'company_name'     => $this->sanitize($this->editCompany),
@@ -610,7 +621,6 @@ new class extends Component {
             'updated_by_role'  => 'organizer',
         ]);
 
-        // ── Audit log: job updated ────────────────────────────────────────────
         $after = [
             'job_title'        => $this->sanitize($this->editJobTitle),
             'company_name'     => $this->sanitize($this->editCompany),
@@ -636,7 +646,6 @@ new class extends Component {
             newValues: $after,
             severity:  'info'
         );
-        // ─────────────────────────────────────────────────────────────────────
 
         $this->dispatch('flash-message', type: 'success', message: 'Job posting updated successfully.');
         $this->showEditModal = false;
@@ -674,7 +683,6 @@ new class extends Component {
             $job = JobPosting::findOrFail($this->deleteJobId);
             $this->guardOwnership($job);
 
-            // Snapshot before soft-delete for the audit trail
             $snapshot = [
                 'job_title'       => $job->job_title,
                 'company_name'    => $job->company_name,
@@ -690,7 +698,6 @@ new class extends Component {
                 'deleted_by_role' => 'organizer',
             ]);
 
-            // ── Audit log: job deleted ────────────────────────────────────────
             $this->logAudit(
                 action:       'deleted',
                 subjectLabel: $snapshot['job_title'],
@@ -704,7 +711,6 @@ new class extends Component {
                 newValues: ['status' => 'ORGANIZER_DELETED'],
                 severity:  'warning'
             );
-            // ─────────────────────────────────────────────────────────────────
 
             $this->dispatch('flash-message', type: 'success', message: "'{$this->deleteJobTitle}' has been deleted.");
         }
@@ -720,6 +726,56 @@ new class extends Component {
         $this->deleteJobId     = null;
         $this->deleteJobTitle  = '';
     }
+
+    // ── Share modal ───────────────────────────────────────────────────────────
+
+    public function openShareModal(int $id): void
+    {
+        $this->guardAuth();
+        $job = JobPosting::findOrFail($id);
+        $this->shareJobId       = $id;
+        $this->shareJobTitle    = $job->job_title;
+        $this->shareCompany     = $job->company_name;
+        $this->shareEmpType     = $job->employment_type;
+        $this->shareLocation    = $job->location ?? '';
+        $this->shareExpLevel    = $job->experience_level ?? '';
+        $this->shareSalary      = $job->salary ?? '';
+        $this->shareDeadline    = $job->deadline ?? '';
+        $this->shareDescription = $job->description ?? '';
+        $this->shareCollege     = $job->target_college ?? '';
+        $this->showShareModal   = true;
+    }
+
+    public function closeShareModal(): void
+    {
+        $this->showShareModal   = false;
+        $this->shareJobId       = null;
+        $this->shareJobTitle    = '';
+        $this->shareCompany     = '';
+        $this->shareEmpType     = '';
+        $this->shareLocation    = '';
+        $this->shareExpLevel    = '';
+        $this->shareSalary      = '';
+        $this->shareDeadline    = '';
+        $this->shareDescription = '';
+        $this->shareCollege     = '';
+    }
+
+    /**
+     * Base jobs listing URL — used for BOTH Share on Facebook and Copy Link.
+     * No job ID, just https://alumniphilcst.com/jobs
+     */
+    public function jobsBaseUrl(): string
+    {
+        $base = rtrim(config('app.url'), '/');
+        try {
+            $path = route('jobs.index', [], false);
+        } catch (\Throwable) {
+            $path = '/jobs';
+        }
+        return $base . $path;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 };
 ?>
 
@@ -903,24 +959,29 @@ new class extends Component {
                                     <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">Inactive</span>
                                 @endif
                             </td>
-                            {{--
-                                RULE: Organizer can Edit and Delete their own posts (ACTIVE or INACTIVE).
-                                Status toggle is Admin-only — organizer has no activate/deactivate button.
-                                Admin-posted jobs: View only.
-                            --}}
                             <td class="px-4 sm:px-5 py-3.5 text-center">
                                 <div class="flex items-center justify-center gap-1.5 flex-wrap">
+                                    {{-- VIEW --}}
                                     <button wire:click="viewJob({{ $job->id }})"
                                             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 border border-purple-300 hover:bg-white hover:border-purple-500 transition cursor-pointer">
                                         <i class="fas fa-eye text-xs"></i>
                                         <span class="hidden sm:inline">View</span>
                                     </button>
+                                    {{-- SHARE --}}
+                                    <button wire:click="openShareModal({{ $job->id }})"
+                                            title="Share this job"
+                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                                        <i class="fas fa-share-nodes text-xs"></i>
+                                        <span class="hidden sm:inline">Share</span>
+                                    </button>
                                     @if(!$isAdminPosted)
+                                        {{-- EDIT --}}
                                         <button wire:click="openEditModal({{ $job->id }})"
                                                 class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300 hover:bg-white hover:border-blue-500 transition cursor-pointer">
                                             <i class="fas fa-pen-to-square text-xs"></i>
                                             <span class="hidden sm:inline">Edit</span>
                                         </button>
+                                        {{-- DELETE --}}
                                         <button wire:click="confirmDelete({{ $job->id }})"
                                                 class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-100 text-red-700 border border-red-300 hover:bg-white hover:border-red-500 transition cursor-pointer">
                                             <i class="fas fa-trash text-xs"></i>
@@ -1250,6 +1311,10 @@ new class extends Component {
         </div>
         <div class="px-8 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-2">
             <button wire:click="closeViewModal" type="button" class="px-4 py-2.5 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-bold hover:bg-gray-50 transition cursor-pointer"><i class="fas fa-xmark text-xs mr-1"></i> Close</button>
+            <button wire:click="openShareModal({{ $job->id }})" type="button"
+                    class="px-4 py-2.5 bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-sm font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                <i class="fas fa-share-nodes text-xs mr-1"></i> Share
+            </button>
             @if(!$isAdminPosted)
                 <button wire:click="confirmDelete({{ $job->id }})" type="button" class="px-4 py-2.5 bg-red-100 text-red-700 border border-red-300 rounded-lg text-sm font-bold hover:bg-white hover:border-red-500 transition cursor-pointer"><i class="fas fa-trash text-xs mr-1"></i> Delete</button>
                 <button wire:click="openEditModal({{ $job->id }})" type="button" class="px-4 py-2.5 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg text-sm font-bold hover:bg-white hover:border-blue-500 transition cursor-pointer"><i class="fas fa-pen-to-square text-xs mr-1"></i> Edit</button>
@@ -1269,7 +1334,6 @@ new class extends Component {
         <div class="flex items-center px-7 py-5 bg-[#7a3f91] flex-shrink-0">
             <h2 class="text-xl font-extrabold text-white flex items-center gap-3"><i class="fas fa-pen-to-square"></i> Edit Job Posting</h2>
         </div>
-        {{-- Status notice for inactive jobs --}}
         @php $editingJob = $editingJobId ? \App\Models\JobPosting::find($editingJobId) : null; @endphp
         @if($editingJob && $editingJob->status === 'INACTIVE')
         <div class="bg-amber-50 border-b border-amber-200 px-7 py-3 flex-shrink-0 flex items-center gap-3">
@@ -1402,5 +1466,261 @@ new class extends Component {
     </div>
 </div>
 @endif
+
+{{-- ═══════════════════════════════════════════════════════════════════════════
+     SHARE MODAL v3
+     ─────────────────────────────────────────────────────────────────────────
+     CHANGES FROM v2:
+       • Both FB sharer URL and Copy Link now use the BASE jobs URL (no ID).
+         → https://alumniphilcst.com/jobs  (never /jobs/22 or any number)
+       • jobPublicUrl() method removed — only jobsBaseUrl() is used.
+       • FB pre-filled text is technically impossible (Facebook blocked it).
+         The clipboard approach remains the cleanest available workaround.
+     ─────────────────────────────────────────────────────────────────────────
+     ⚠️  Make sure APP_URL in .env = your real domain:
+           APP_URL=https://alumniphilcst.com
+═══════════════════════════════════════════════════════════════════════════ --}}
+@if($showShareModal)
+@php
+    // ── Single base URL for everything — NO job ID ────────────────────────────
+    $shareBaseUrl  = $this->jobsBaseUrl();  // e.g. https://alumniphilcst.com/jobs
+
+    // ── Deadline formatted ────────────────────────────────────────────────────
+    $shareDlFormatted = $shareDeadline
+        ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
+        : '';
+
+    // ── Description preview (max 120 chars) ───────────────────────────────────
+    $shareDescPreview = mb_strlen($shareDescription) > 120
+        ? mb_substr($shareDescription, 0, 120) . '…'
+        : $shareDescription;
+
+    // ── Full post text — copied to clipboard when FB button is clicked ─────────
+    // Facebook no longer supports quote= so we copy it ourselves first.
+    $fbPostLines   = [];
+    $fbPostLines[] = "🎯 Job Opening: {$shareJobTitle}";
+    $fbPostLines[] = "🏢 {$shareCompany}";
+    if ($shareLocation)    $fbPostLines[] = "📍 {$shareLocation}";
+    if ($shareEmpType)     $fbPostLines[] = "💼 {$shareEmpType}";
+    if ($shareExpLevel)    $fbPostLines[] = "📊 {$shareExpLevel}";
+    if ($shareSalary)      $fbPostLines[] = "💰 {$shareSalary}";
+    if ($shareDlFormatted) $fbPostLines[] = "📅 Deadline: {$shareDlFormatted}";
+    if ($shareCollege)     $fbPostLines[] = "🏫 For: {$shareCollege}";
+    $fbPostLines[] = '';
+    $fbPostLines[] = "Apply now through the PHILCST Alumni Portal 👇";
+    $fbPostLines[] = $shareBaseUrl;
+    $fbPostText    = implode("\n", $fbPostLines);
+
+    // ── FB sharer URL — uses base URL (no job ID) ─────────────────────────────
+    $fbShareUrl    = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
+
+    // ── Hostname for OG card footer display ───────────────────────────────────
+    $shareHost     = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+@endphp
+
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+     wire:keydown.escape="closeShareModal"
+     x-data="{
+         copied:   false,
+         fbCopied: false,
+         fbText:   {{ json_encode($fbPostText) }},
+         baseUrl:  {{ json_encode($shareBaseUrl) }},
+         fbUrl:    {{ json_encode($fbShareUrl) }},
+
+         shareOnFacebook() {
+             // Step 1 — copy full job text to clipboard so user can paste it in FB
+             navigator.clipboard.writeText(this.fbText).then(() => {
+                 this.fbCopied = true;
+                 setTimeout(() => this.fbCopied = false, 6000);
+             }).catch(() => {
+                 // clipboard permission denied — still open FB, just without pre-copy
+             });
+             // Step 2 — open Facebook sharer popup with the base jobs URL
+             const w = 620, h = 520;
+             const left = Math.round((screen.width  - w) / 2);
+             const top  = Math.round((screen.height - h) / 2);
+             window.open(
+                 this.fbUrl, 'fb_share',
+                 'width='+w+',height='+h+',left='+left+',top='+top
+                 +',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1'
+             );
+         },
+
+         copyLinkFn() {
+             navigator.clipboard.writeText(this.baseUrl).then(() => {
+                 this.copied = true;
+                 setTimeout(() => this.copied = false, 2500);
+             });
+         }
+     }"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100">
+
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+
+        {{-- ── Modal header ──────────────────────────────────────────────── --}}
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 class="text-base font-extrabold text-gray-800 flex items-center gap-2">
+                <i class="fas fa-share-nodes text-sky-600"></i> Share Job Posting
+            </h2>
+            <button wire:click="closeShareModal" type="button"
+                    class="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
+                <i class="fas fa-xmark text-sm"></i>
+            </button>
+        </div>
+
+        <div class="px-6 pt-5 pb-5 space-y-4">
+
+            {{-- ── FB "text copied" success banner ─────────────────────── --}}
+            <div x-show="fbCopied" x-cloak
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 -translate-y-2"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 class="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-start gap-3">
+                <div class="w-7 h-7 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <i class="fas fa-check text-emerald-600 text-xs"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-extrabold text-emerald-800">Job text copied to clipboard!</p>
+                    <p class="text-xs text-emerald-700 mt-0.5 leading-snug">
+                        Sa Facebook popup, i-click ang text box tapos
+                        <strong>i-paste (Ctrl+V / ⌘V)</strong> — tapos na, ready to post!
+                    </p>
+                </div>
+            </div>
+
+            {{-- ── Label ─────────────────────────────────────────────────── --}}
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
+                Preview — What people will see
+            </p>
+
+            {{-- ── Job preview card ─────────────────────────────────────── --}}
+            <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+
+                <div class="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
+                    <div class="w-14 h-14 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] flex items-center justify-center flex-shrink-0 shadow">
+                        <i class="fas fa-briefcase text-white text-xl"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-extrabold text-gray-900 text-sm leading-tight truncate">
+                            {{ $shareJobTitle }}
+                        </p>
+                        <p class="text-xs text-gray-700 mt-0.5 font-semibold">
+                            {{ $shareCompany }}
+                            @if($shareEmpType)
+                                &middot; <span class="text-purple-700">{{ $shareEmpType }}</span>
+                            @endif
+                        </p>
+                        <div class="flex flex-wrap gap-1 mt-1.5">
+                            @if($shareLocation)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700">
+                                    <i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}
+                                </span>
+                            @endif
+                            @if($shareExpLevel)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">
+                                    <i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}
+                                </span>
+                            @endif
+                            @if($shareSalary)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+                                    <i class="fas fa-money-bill-wave text-[8px]"></i>{{ $shareSalary }}
+                                </span>
+                            @endif
+                            @if($shareDlFormatted)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-600">
+                                    <i class="fas fa-calendar-xmark text-[8px]"></i>Deadline: {{ $shareDlFormatted }}
+                                </span>
+                            @endif
+                            @if($shareCollege)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
+                                    <i class="fas fa-building-columns text-[8px]"></i>{{ $shareCollege }}
+                                </span>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
+                @if($shareDescPreview)
+                <div class="px-4 py-2.5 bg-white border-b border-gray-100">
+                    <p class="text-xs text-gray-600 leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
+                </div>
+                @endif
+
+                <div class="px-4 py-2 bg-[#f0f2f5] flex items-center gap-2">
+                    <i class="fas fa-globe text-gray-400 text-[10px]"></i>
+                    <span class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+                </div>
+            </div>
+            {{-- ── End preview card ─────────────────────────────────────── --}}
+
+            {{-- ── How it works hint ──────────────────────────────────────── --}}
+            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
+                <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+<p class="text-xs text-blue-800 leading-snug">
+    <strong>How it works:</strong> Click on <em>Share on Facebook</em> — 
+    the full job text will be automatically copied, 
+    and then Facebook will open. Just paste 
+    (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>) 
+    into your post, and you're done!
+</p>
+            </div>
+
+            {{-- ── Share via label ─────────────────────────────────────── --}}
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest pt-1">Share via</p>
+
+            {{-- ── Facebook Share Button ──────────────────────────────── --}}
+            <button type="button"
+                    @click="shareOnFacebook()"
+                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl
+                           bg-[#1877F2] hover:bg-[#166fe5] active:bg-[#1464d8]
+                           text-white font-extrabold text-sm
+                           shadow hover:shadow-md
+                           transition-all duration-150 cursor-pointer group">
+                <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2">
+                        <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
+                    </svg>
+                </span>
+                <span class="flex-1 text-left">
+                    <span x-show="!fbCopied">Share on Facebook</span>
+                    <span x-show="fbCopied" x-cloak>
+                        <i class="fas fa-check mr-1"></i> Bukas na! I-paste ang text sa FB
+                    </span>
+                </span>
+                <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
+            </button>
+
+            {{-- ── Copy Link button (base URL, no job ID) ──────────────── --}}
+            <button type="button"
+                    @click="copyLinkFn()"
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl
+                           border-2 border-gray-200 hover:border-gray-300
+                           bg-white hover:bg-gray-50 active:bg-gray-100
+                           text-gray-700 font-bold text-sm
+                           transition-all duration-150 cursor-pointer group">
+                <span class="w-8 h-8 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
+                    <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-xs"></i>
+                </span>
+                <div class="flex-1 text-left">
+                    <p :class="copied ? 'text-emerald-600' : 'text-gray-700'" class="font-bold text-sm"
+                       x-text="copied ? '✓ Link copied!' : 'Copy Jobs Page Link'"></p>
+                    <p class="text-[10px] text-gray-400 font-mono mt-0.5">{{ $shareBaseUrl }}</p>
+                </div>
+            </button>
+
+            {{-- ── Footer note ─────────────────────────────────────────── --}}
+            <p class="text-[11px] text-gray-400 text-center leading-snug pb-1">
+                Make sure the posting is <strong class="text-gray-500">Active</strong> before sharing.
+            </p>
+        </div>
+    </div>
+</div>
+@endif
+{{-- END SHARE MODAL ══════════════════════════════════════════════════════════ --}}
 
 </div>

@@ -18,6 +18,15 @@ Route::get('/about', fn() => view('about'));
 Route::get('/showevents', fn() => view('showevents'));
 
 // ===================================
+// Public Job Detail Route (used for sharing)
+// Renders the alumni job-opportunities page; the ?job=ID query param
+// can be read by the Livewire component to pre-open the listing.
+// ===================================
+Route::get('/jobs/{id}', function ($id) {
+    return view('alumni.job-opportunities-wrapper', ['highlightJobId' => (int) $id]);
+})->name('jobs.show')->where('id', '[0-9]+');
+
+// ===================================
 // Auth Routes
 // ===================================
 Volt::route('/login', 'auth/login')->name('login');

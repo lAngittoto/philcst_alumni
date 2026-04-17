@@ -4,177 +4,157 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ config('app.name', 'Philcst') }} — Registrar Portal</title>
+    <title>{{ config('app.name', 'Philcst') }} - Registrar</title>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+
     @livewireStyles
-
-    <style>
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Sidebar transition */
-        #sidebar {
-            transition: transform 0.3s cubic-bezier(.4,0,.2,1);
-        }
-
-        /* Nav link hover shimmer */
-        .nav-link {
-            position: relative;
-            overflow: hidden;
-        }
-        .nav-link::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
-            transform: translateX(-100%);
-            transition: transform 0.4s;
-        }
-        .nav-link:hover::after { transform: translateX(100%); }
-    </style>
 </head>
-<body class="antialiased bg-[#f7f3fe]">
+<body class="antialiased">
 
-<div x-data="{ open: false }" class="flex h-screen overflow-hidden">
+<div x-data="{ open: false }" class="flex h-screen bg-gray-100 font-sans overflow-hidden">
 
-    {{-- ── Mobile Overlay ─────────────────────────────────────────── --}}
-    <div x-show="open"
-         x-transition:enter="transition-opacity duration-300"
-         x-transition:enter-start="opacity-0"
-         x-transition:enter-end="opacity-100"
-         x-transition:leave="transition-opacity duration-200"
-         x-transition:leave-start="opacity-100"
-         x-transition:leave-end="opacity-0"
-         @click="open = false"
-         class="fixed inset-0 z-40 bg-black/60 lg:hidden backdrop-blur-sm"
-         style="display:none">
+    {{-- Mobile Overlay --}}
+    <div 
+        x-show="open"
+        x-transition:enter="transition opacity-ease-out duration-300"
+        x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-100"
+        x-transition:leave="transition opacity-ease-in duration-300"
+        x-transition:leave-start="opacity-100"
+        x-transition:leave-end="opacity-0"
+        @click="open = false"
+        class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ── Sidebar ─────────────────────────────────────────────────── --}}
-    <aside id="sidebar"
-           :class="open ? 'translate-x-0' : '-translate-x-full'"
-           class="fixed inset-y-0 left-0 z-50 w-64 flex flex-col h-full overflow-hidden shadow-2xl
-                  lg:translate-x-0 lg:static lg:inset-auto lg:h-full lg:z-auto shrink-0"
-           style="background: linear-gradient(160deg, #1e0630 0%, #2b0d3e 50%, #1a0828 100%);">
+    {{-- Sidebar --}}
+    <aside 
+        :class="open ? 'translate-x-0' : '-translate-x-full'"
+        class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300 
+               shadow-2xl lg:translate-x-0 lg:static lg:inset-0 
+               flex flex-col h-full text-white overflow-hidden shrink-0"
+        style="background-color: #2b0d3e;">
 
         {{-- Logo --}}
-        <div class="flex items-center justify-between px-5 py-5 border-b border-white/10 shrink-0">
-            <div>
-                <div class="flex items-center gap-2 mb-0.5">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                         style="background: linear-gradient(135deg, #7a3f91, #9b59b6);">
-                        <i class="fas fa-graduation-cap text-white text-xs"></i>
-                    </div>
-                    <h1 class="text-lg font-black tracking-tight text-white">
-                        Registra<span class="text-[#9b6fbe] font-light">Portal</span>
-                    </h1>
-                </div>
-                <p class="text-[9px] uppercase tracking-[0.25em] text-white/30 font-bold pl-9">
+        <div class="flex items-center justify-between h-24 px-6 border-b border-white/10 shrink-0">
+            <div class="text-left">
+                <h1 class="text-2xl font-black tracking-tighter uppercase text-white leading-tight">
+                    Registrar<span class="font-light opacity-70 text-[#7a3f91]">Portal</span>
+                </h1>
+                <p class="text-[10px] uppercase tracking-[0.2em] opacity-50 text-white font-bold">
                     Records Management
                 </p>
             </div>
-            <button @click="open = false" class="lg:hidden text-white/50 hover:text-white transition p-1">
-                <i class="fas fa-xmark text-lg"></i>
+
+            <button @click="open = false" class="lg:hidden text-white/70 hover:text-white transition-colors">
+                <i class="fa-solid fa-circle-xmark text-2xl"></i>
             </button>
         </div>
 
         {{-- Nav --}}
-        <nav class="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
             @php
-                $navLinks = [
-                    ['route' => 'registrar.dashboard',              'icon' => 'gauge-high',     'label' => 'Dashboard'],
-                    ['route' => 'registrar.alumni',                 'icon' => 'users',           'label' => 'Alumni Records'],
-                    ['route' => 'registrar.alumni.register',        'icon' => 'user-plus',       'label' => 'Register Alumni'],
-                    ['route' => 'registrar.alumni.import',          'icon' => 'file-import',     'label' => 'Import Alumni'],
-                    ['route' => 'registrar.courses',                'icon' => 'book-open',       'label' => 'Courses'],
-                    ['route' => 'registrar.information-management', 'icon' => 'database',        'label' => 'Info Management'],
+                $sidebarLinks = [
+                    [
+                        'route' => 'registrar.dashboard',
+                        'icon' => 'gauge-high',
+                        'label' => 'Dashboard',
+                    ],
+                    [
+                        'route' => 'registrar.alumni',
+                        'icon' => 'users',
+                        'label' => 'Alumni Records',
+                    ],
+                    [
+                        'route' => 'registrar.alumni.register',
+                        'icon' => 'user-plus',
+                        'label' => 'Register Alumni',
+                    ],
+                    [
+                        'route' => 'registrar.alumni.import',
+                        'icon' => 'file-import',
+                        'label' => 'Import Alumni',
+                    ],
+                    [
+                        'route' => 'registrar.courses',
+                        'icon' => 'book-open',
+                        'label' => 'Courses',
+                    ],
+                    [
+                        'route' => 'registrar.information-management',
+                        'icon' => 'database',
+                        'label' => 'Info Management',
+                    ],
                 ];
+
+                $currentRoute = request()->route()?->getName();
             @endphp
 
-            @foreach($navLinks as $link)
+            @foreach($sidebarLinks as $link)
                 @php
-                    /* Exact route-name match — only ONE can be active at a time */
-                    $isActive = request()->routeIs($link['route']);
+                    $url = route($link['route']);
+                    $isActive = $currentRoute === $link['route'];
                 @endphp
-                <a href="{{ route($link['route']) }}"
+
+                <a href="{{ $url }}"
                    wire:navigate
-                   class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group
-                          {{ $isActive
-                              ? 'bg-white/15 shadow-inner shadow-white/5'
-                              : 'hover:bg-white/8 hover:translate-x-0.5' }}">
-
-                    <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200
-                                {{ $isActive ? 'shadow-lg' : 'bg-white/5 group-hover:bg-white/10' }}"
-                         style="{{ $isActive ? 'background: linear-gradient(135deg, #7a3f91, #9b59b6); box-shadow: 0 2px 8px rgba(122,63,145,0.4);' : '' }}">
-                        <i class="fas fa-{{ $link['icon'] }} text-xs
-                                  {{ $isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80' }}"></i>
+                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
+                          {{ $isActive ? 'bg-white/10 border border-white/20 shadow-lg' : 'hover:bg-white/5' }}">
+                    <div class="w-10 h-10 flex items-center justify-center rounded-lg bg-white/5 text-white mr-4 shrink-0 transition-transform duration-300 group-hover:scale-110">
+                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-80"></i>
                     </div>
-
-                    <span class="text-sm font-semibold leading-tight
-                                 {{ $isActive ? 'text-white' : 'text-white/55 group-hover:text-white/90' }}">
-                        {{ $link['label'] }}
-                    </span>
-
-                    @if($isActive)
-                        <div class="ml-auto w-1.5 h-1.5 rounded-full bg-[#9b6fbe] shrink-0"></div>
-                    @endif
+                    <span class="font-medium tracking-wide">{{ $link['label'] }}</span>
                 </a>
             @endforeach
         </nav>
 
-        {{-- User / Logout --}}
-        <div class="p-3 border-t border-white/10 shrink-0">
-            <div class="flex items-center gap-2.5 px-3 py-2 mb-2">
-                <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-white/10">
-                    <i class="fas fa-user-tie text-white/60 text-xs"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="text-xs font-bold text-white/80 truncate">{{ auth()->user()->name ?? 'Registrar' }}</p>
-                    <p class="text-[10px] text-white/35">Registrar</p>
-                </div>
-            </div>
+        {{-- Logout --}}
+        <div class="p-4 mt-auto border-t border-white/10 shrink-0">
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
-                <button type="submit"
-                        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest text-white/80 hover:text-white border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all duration-200">
-                    <i class="fas fa-right-from-bracket text-xs"></i>
-                    Logout
+                <button type="submit" 
+                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
+                        style="background-color: #7a3f91;">
+                    <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
             </form>
         </div>
     </aside>
 
-    {{-- ── Main ────────────────────────────────────────────────────── --}}
+    {{-- Main --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-
-        {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-4 py-3.5 bg-white border-b border-gray-200 lg:hidden shrink-0 z-30 shadow-sm">
-            <button @click="open = !open"
-                    class="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-100 transition text-[#2b0d3e]">
-                <i class="fas fa-bars text-base"></i>
-            </button>
-            <div class="flex items-center gap-2">
-                <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                     style="background: linear-gradient(135deg, #7a3f91, #9b59b6);">
-                    <i class="fas fa-graduation-cap text-white text-[10px]"></i>
+        
+        {{-- Mobile Top Bar --}}
+        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 lg:hidden shrink-0 z-30">
+            <button @click="open = !open" class="text-[#2b0d3e] focus:outline-none p-2 rounded-lg hover:bg-gray-100 transition-colors">
+                <div class="w-6 h-5 relative flex flex-col justify-between">
+                    <span :class="open ? 'rotate-45 translate-y-2' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300 origin-center"></span>
+                    <span :class="open ? 'opacity-0' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300"></span>
+                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300 origin-center"></span>
                 </div>
-                <span class="text-sm font-black text-[#2b0d3e]">RegistraPortal</span>
-            </div>
-            <div class="w-9"></div>
+            </button>
+            <h2 class="text-lg font-bold text-[#2b0d3e]">Registrar Panel</h2>
+            <div class="w-10"></div>
         </header>
 
         {{-- Page Content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar min-h-0" style="background:#f7f3fe;">
-            @yield('content')
+        <div class="flex-1 overflow-y-auto min-h-0 bg-gray-100 p-4 lg:p-8 no-scrollbar">
+            <div class="container mx-auto">
+                @yield('content')
+            </div>
         </div>
     </main>
 
 </div>
 
 @livewireScripts
+
+<style>
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
+
 </body>
 </html>
