@@ -29,6 +29,7 @@ class Alumni extends Model
         'course_code',
         'course_name',
         'batch',
+        'year_level',
         'status',
         'profile_photo',
 
@@ -37,23 +38,32 @@ class Alumni extends Model
         'otp_expires_at',
         'password_changed_at',
 
-        // ── Personal profile ──────────────────────────────────────────────────
+        // ── Personal profile (NEW fields — aligned with migration) ────────────
         'gender',
         'date_of_birth',
-        'place_of_birth',
-        'citizenship',
-        'civil_status',
-        'blood_type',
         'contact_number',
-        'father_name',
-        'mother_name',
-        'spouse_name',
-        'address_no',
+
+        // ── Father's name (split) ─────────────────────────────────────────────
+        'father_last_name',
+        'father_given_name',
+        'father_middle_name',
+
+        // ── Mother's maiden name (split) ──────────────────────────────────────
+        'mother_last_name',
+        'mother_given_name',
+        'mother_middle_name',
+
+        // ── DSWD / Disability ─────────────────────────────────────────────────
+        'dswd_household_no',
+        'disability',
+
+        // ── Address ───────────────────────────────────────────────────────────
         'address_street',
         'address_barangay',
         'address_municipality',
         'address_province',
-        'address_zip_code',
+
+        // ── Status ────────────────────────────────────────────────────────────
         'profile_completed',
     ];
 
@@ -120,18 +130,13 @@ class Alumni extends Model
 
     /**
      * TRUE = alumni has NOT yet completed the first-login wizard.
-     * Uses password_changed_at as the definitive flag:
-     *   NULL   → wizard not done → redirect to wizard
-     *   Filled → wizard done     → proceed to Gate 2
+     * password_changed_at NULL = wizard not done → must go to wizard first.
      */
     public function needsAccountSetup(): bool
     {
         return $this->password_changed_at === null;
     }
 
-    /**
-     * Stamp the wizard as complete.
-     */
     public function markPasswordChanged(): void
     {
         $this->update(['password_changed_at' => now()]);
@@ -142,43 +147,35 @@ class Alumni extends Model
     // ─────────────────────────────────────────────────────
 
     /**
-     * TRUE = alumni has filled all required profile fields.
+     * TRUE = all required profile fields are filled.
      *
-     * FIX: Removed `$this->profile_completed === true` as a prerequisite.
-     * The old code had a chicken-and-egg problem:
-     *   - isProfileComplete() required profile_completed === true
-     *   - but profile_completed was only set to true if isProfileComplete() returned true
-     *   - so profile_completed could NEVER become true
+     * IMPORTANT: This now checks the NEW split fields from the migration.
+     * Old fields (father_name, mother_name, place_of_birth, etc.) were
+     * dropped — do NOT reference them here.
      *
-     * Now we check only the actual data fields. The profile_completed boolean
-     * flag is still stored in the DB as a convenience cache (set by the
-     * controller after saving), but it is NOT the source of truth here.
+     * The profile_completed boolean in the DB is the cached result of this
+     * check. The middleware uses profile_completed directly for performance,
+     * but this method is the source of truth for what "complete" means.
      */
     public function isProfileComplete(): bool
     {
         return !empty($this->gender)
             && !empty($this->date_of_birth)
-            && !empty($this->place_of_birth)
-            && !empty($this->citizenship)
-            && !empty($this->civil_status)
             && !empty($this->contact_number)
-            && !empty($this->father_name)
-            && !empty($this->mother_name)
+            && !empty($this->father_last_name)
+            && !empty($this->father_given_name)
+            && !empty($this->mother_last_name)
+            && !empty($this->mother_given_name)
             && !empty($this->address_street)
             && !empty($this->address_barangay)
             && !empty($this->address_municipality)
-            && !empty($this->address_province)
-            && !empty($this->address_zip_code);
+            && !empty($this->address_province);
     }
 
     // ─────────────────────────────────────────────────────
     // OTP Helpers
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Generate a 6-digit OTP, persist its hash + expiry, and
-     * return the plain-text code so the caller can e-mail it.
-     */
     public function generateOtp(): string
     {
         $plain = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
@@ -191,10 +188,6 @@ class Alumni extends Model
         return $plain;
     }
 
-    /**
-     * Validate a submitted OTP against the stored hash.
-     * Returns FALSE if expired, null, or hash mismatch.
-     */
     public function isOtpValid(string $plain): bool
     {
         if (!$this->otp || !$this->otp_expires_at) {
@@ -208,14 +201,6 @@ class Alumni extends Model
         return Hash::check($plain, $this->otp);
     }
 
-    /**
-     * Returns TRUE if an OTP has been issued and its 10-minute
-     * window has NOT yet expired.
-     *
-     * Used by the change-password wizard to block the alumni from
-     * navigating back to Step 2 (email) while a live OTP session
-     * is in progress — preventing email changes mid-verification.
-     */
     public function isOtpStillActive(): bool
     {
         return $this->otp !== null
@@ -223,9 +208,6 @@ class Alumni extends Model
             && now()->lt($this->otp_expires_at);
     }
 
-    /**
-     * Wipe OTP columns after a successful verification.
-     */
     public function clearOtp(): void
     {
         $this->update([
@@ -238,10 +220,6 @@ class Alumni extends Model
     // Password Helpers
     // ─────────────────────────────────────────────────────
 
-    /**
-     * Returns the plain-text temporary password for this alumni.
-     * Format: {student_id}_{Xx}   e.g. "00037801_De"
-     */
     public function getPlainTempPassword(): string
     {
         $suffix = substr(trim($this->last_name), 0, 2);
@@ -249,9 +227,6 @@ class Alumni extends Model
         return $this->student_id . '_' . $suffix;
     }
 
-    /**
-     * Returns true if the alumni's User still holds the temp password.
-     */
     public function hasTemporaryPassword(): bool
     {
         $user = $this->user;

@@ -11,27 +11,30 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * EnsureAlumniOnboarded
  *
- * Combines two sequential gates for alumni users:
+ * GATE 1 — Account setup (password wizard)
+ *   needsAccountSetup() true  → must complete wizard first
+ *   needsAccountSetup() false → proceeds to Gate 2
  *
- * GATE 1 — Account setup (password + email wizard)
- *   needsAccountSetup() → true  : must complete wizard first
- *   needsAccountSetup() → false : proceeds to Gate 2
+ * GATE 2 — Profile completion
+ *   profile_completed false → must fill alumni.information
+ *   profile_completed true  → allowed through
  *
- * GATE 2 — Profile completion (personal information form)
- *   isProfileComplete() → false : must fill up alumni.information
- *   isProfileComplete() → true  : allowed through to all routes
+ * KEY FIX:
+ *   Gate 1 NO LONGER has a Livewire/wire:navigate bypass.
+ *   wire:navigate sends an X-Livewire header which was previously
+ *   treated as a safe Livewire AJAX call — allowing alumni to
+ *   skip the password wizard entirely by clicking sidebar links.
+ *   Gate 1 now blocks ALL requests (including wire:navigate) until
+ *   the wizard is complete.
  *
- * FIX SUMMARY:
- *  - Always load alumni via direct DB query (never $user->alumni cached relation)
- *  - Gate 1 wizard routes: only the wizard pages are allowed while setup is pending
- *  - Gate 2 profile routes: information page is accessible while profile is incomplete
- *  - Neither gate logs the user out — only redirects
+ *   Gate 2 keeps the Livewire bypass so the information page's
+ *   own Livewire component can function while the form is open.
  */
 class EnsureAlumniOnboarded
 {
     /**
-     * Routes allowed while account setup (Gate 1) is still incomplete.
-     * ONLY the wizard itself and its POST endpoints go here.
+     * Routes allowed while account setup (Gate 1) is incomplete.
+     * ONLY wizard pages and their POST/AJAX endpoints go here.
      */
     protected array $wizardRoutes = [
         'login',
@@ -44,9 +47,8 @@ class EnsureAlumniOnboarded
     ];
 
     /**
-     * Routes allowed while profile (Gate 2) is still incomplete.
-     * Must include both the GET and PUT for the information page to
-     * prevent a redirect loop.
+     * Routes allowed while profile (Gate 2) is incomplete.
+     * Includes both GET and Livewire update endpoints.
      */
     protected array $profileRoutes = [
         'alumni.information',
@@ -57,18 +59,14 @@ class EnsureAlumniOnboarded
     {
         $user = auth()->user();
 
-        // ── Not authenticated or not an alumni → pass through ─────────────────
+        // Not authenticated or not an alumni → pass through
         if (!$user || $user->role !== 'alumni') {
             return $next($request);
         }
 
-        // ── FIX: Always use a fresh direct DB query ───────────────────────────
-        // $user->alumni uses the Eloquent cached relation which can return a
-        // stale instance (e.g., password_changed_at still null after the wizard
-        // just set it). A direct query always reads the current DB state.
+        // Always use a fresh DB query — never the cached Eloquent relation
         $alumni = Alumni::where('user_id', $user->id)->first();
 
-        // ── No alumni record → let downstream handle it ───────────────────────
         if (!$alumni) {
             Log::warning("EnsureAlumniOnboarded: No alumni record for user #{$user->id}");
             return $next($request);
@@ -77,11 +75,12 @@ class EnsureAlumniOnboarded
         $routeName = $request->route()?->getName();
 
         // ══════════════════════════════════════════════════════════════════════
-        // GATE 1 — Account setup (wizard)
+        // GATE 1 — Account Setup (wizard must be completed first)
         // ══════════════════════════════════════════════════════════════════════
         if ($alumni->needsAccountSetup()) {
-            // Livewire AJAX must always pass — the wizard page uses it internally
-            if ($this->isLivewireRequest($request)) {
+
+            // Always allow logout so alumni is never completely trapped
+            if ($routeName === 'logout') {
                 return $next($request);
             }
 
@@ -92,32 +91,42 @@ class EnsureAlumniOnboarded
                 return $next($request);
             }
 
-            // Everything else (including alumni.information) is blocked until
-            // the account setup wizard is completed.
-            Log::info("EnsureAlumniOnboarded: PENDING alumni #{$alumni->id} blocked from '{$routeName}', redirecting to wizard.");
+            // ── CRITICAL FIX ──────────────────────────────────────────────────
+            // NO Livewire bypass here. wire:navigate sends X-Livewire headers
+            // which the old code treated as safe, letting alumni skip the wizard
+            // by clicking sidebar links. Gate 1 must block EVERYTHING else,
+            // including wire:navigate and all Livewire AJAX calls from
+            // non-wizard pages.
+            // ─────────────────────────────────────────────────────────────────
+
             session()->put('alumni_requires_password_change', true);
+            Log::info("EnsureAlumniOnboarded: PENDING alumni #{$alumni->id} blocked from '{$routeName}', redirecting to wizard.");
+
+            // For wire:navigate / fetch requests, redirect normally —
+            // Livewire handles the redirect on the client side.
             return redirect()->route('alumni.change-password');
         }
 
-        // ── Setup is done — clean up any leftover wizard session keys ─────────
+        // Wizard is done — clean up any leftover wizard session keys
         $this->clearWizardSession();
 
         // ══════════════════════════════════════════════════════════════════════
-        // GATE 2 — Profile completion
+        // GATE 2 — Profile Completion
         // ══════════════════════════════════════════════════════════════════════
-        if (!$alumni->isProfileComplete()) {
-            // Livewire AJAX passes through to prevent breaking any Livewire
-            // components rendered on the information page itself.
+        if (!$alumni->profile_completed) {
+
+            // Allow Livewire AJAX so the information page's own component works
+            // (form saves, validation, etc. on the information page itself)
             if ($this->isLivewireRequest($request)) {
                 return $next($request);
             }
 
-            // Allow the information page routes (GET + PUT) to prevent a loop
+            // Allow the information page (GET + Livewire update)
             if ($routeName && in_array($routeName, $this->profileRoutes)) {
                 return $next($request);
             }
 
-            // Also allow logout so a user is never completely trapped
+            // Always allow logout
             if ($routeName === 'logout') {
                 return $next($request);
             }
@@ -128,7 +137,7 @@ class EnsureAlumniOnboarded
                 ->with('info', 'Please complete your profile information to access the portal.');
         }
 
-        // ── Both gates passed → allow through to any route ───────────────────
+        // Both gates passed → allow through
         return $next($request);
     }
 
@@ -136,6 +145,11 @@ class EnsureAlumniOnboarded
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Detect Livewire AJAX component update requests.
+     * NOTE: wire:navigate also sends X-Livewire headers — that is why
+     * we intentionally do NOT call this helper in Gate 1.
+     */
     private function isLivewireRequest(Request $request): bool
     {
         return $request->is('livewire/*')

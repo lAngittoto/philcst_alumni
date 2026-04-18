@@ -13,9 +13,20 @@
 </head>
 <body class="antialiased">
 
-<div x-data="{ open: false }" class="flex h-screen bg-gray-100 font-sans overflow-hidden">
+@php
+    $authAlumni       = auth()->user()?->alumni;
+    $profileCompleted = (bool)($authAlumni?->profile_completed ?? false);
+@endphp
 
-    {{-- Mobile overlay --}}
+<div
+    x-data="{
+        open:            false,
+        profileComplete: {{ $profileCompleted ? 'true' : 'false' }},
+    }"
+    x-on:profile-updated.window="profileComplete = $event.detail.completed"
+    class="flex h-screen bg-gray-100 font-sans overflow-hidden">
+
+    {{-- ── Mobile overlay ─────────────────────────────────────────────────── --}}
     <div
         x-show="open"
         x-transition:enter="transition opacity-ease-out duration-300"
@@ -28,7 +39,7 @@
         class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- Sidebar --}}
+    {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
     <aside
         :class="open ? 'translate-x-0' : '-translate-x-full'"
         class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
@@ -36,7 +47,7 @@
                flex flex-col h-full text-white overflow-hidden shrink-0"
         style="background-color: #2b0d3e;">
 
-        {{-- Sidebar Header --}}
+        {{-- Sidebar header --}}
         <div class="flex items-center justify-between h-24 px-6 border-b border-white/10 shrink-0">
             <div class="text-left">
                 <h1 class="text-2xl font-black tracking-tighter uppercase text-white leading-tight">
@@ -46,53 +57,61 @@
                     Graduate Network
                 </p>
             </div>
-
             <button @click="open = false" class="lg:hidden text-white/70 hover:text-white transition-colors">
                 <i class="fa-solid fa-circle-xmark text-2xl"></i>
             </button>
         </div>
 
-        {{-- Alumni Info Card --}}
-        @php
-            $alumni = auth()->user()?->alumni;
-        @endphp
-
-        @if($alumni)
+        {{-- Alumni info card --}}
+        @if($authAlumni)
         <div class="mx-4 mt-5 mb-1 rounded-xl p-4 border border-white/10" style="background-color: rgba(255,255,255,0.05);">
             <div class="flex items-center gap-3">
-                {{-- Avatar --}}
                 <div class="w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-lg"
                      style="background-color: #7a3f91;">
-                    @if($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png'))
-                        <img src="{{ $alumni->getProfilePhotoUrl() }}"
+                    @if($authAlumni->profile_photo && !str_contains($authAlumni->profile_photo, 'default.png'))
+                        <img src="{{ $authAlumni->getProfilePhotoUrl() }}"
                              class="w-10 h-10 rounded-full object-cover" alt="avatar">
                     @else
-                        {{ $alumni->getAvatarLetter() }}
+                        {{ $authAlumni->getAvatarLetter() }}
                     @endif
                 </div>
-
-                {{-- Name & batch --}}
                 <div class="min-w-0">
                     <p class="text-sm font-bold text-white truncate leading-tight">
-                        {{ $alumni->first_name }} {{ $alumni->last_name }}
+                        {{ $authAlumni->first_name }} {{ $authAlumni->last_name }}
                     </p>
                     <p class="text-[11px] text-white/50 truncate">
-                        {{ $alumni->course_code }} · Batch {{ $alumni->batch }}
+                        {{ $authAlumni->course_code }} · Batch {{ $authAlumni->batch }}
                     </p>
                 </div>
             </div>
 
-            {{-- Status badge --}}
-            <div class="mt-3">
-                @if($alumni->status === 'VERIFIED')
+            {{-- Profile completion badge --}}
+            <div class="mt-3 flex items-center gap-2 flex-wrap">
+                @if($authAlumni->status === 'VERIFIED')
                     <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-green-500/20 text-green-400">
                         <i class="fa-solid fa-circle-check text-[8px]"></i> Verified
                     </span>
-                @elseif($alumni->status === 'PENDING')
+                @elseif($authAlumni->status === 'PENDING')
                     <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400">
                         <i class="fa-solid fa-clock text-[8px]"></i> Pending
                     </span>
                 @endif
+
+                {{-- Profile status badge — reactive via Alpine --}}
+                <template x-if="!profileComplete">
+                    <a href="{{ route('alumni.information') }}"
+                       class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest
+                              px-2 py-1 rounded-full bg-amber-500/20 text-amber-300
+                              hover:bg-amber-500/30 transition-colors cursor-pointer">
+                        <i class="fa-solid fa-triangle-exclamation text-[8px]"></i>
+                        Update Profile to Unlock More Features
+                    </a>
+                </template>
+                <template x-if="profileComplete">
+                    <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300">
+                        <i class="fa-solid fa-circle-check text-[8px]"></i> Profile Complete
+                    </span>
+                </template>
             </div>
         </div>
         @endif
@@ -102,24 +121,43 @@
 
             @php
                 $sidebarLinks = [
-                    ['route' => 'alumni.dashboard',   'icon' => 'gauge-high',  'label' => 'Dashboard',  'pattern' => 'alumni/dashboard*'],
-                    ['route' => 'alumni.information', 'icon' => 'user-circle', 'label' => 'My Profile', 'pattern' => 'alumni/information*'],
-                    ['route' => 'job.opportunities',     'icon' => 'briefcase',   'label' => 'Job Board',  'pattern' => 'job/opportunities*'],
-                    ['route' => 'upcoming.events',   'icon' => 'calendar',    'label' => 'Events',     'pattern' => 'upcoming/events*'],
-                    // ['route' => 'alumni.yearbook', 'icon' => 'book-open',   'label' => 'Yearbook',   'pattern' => 'alumni/yearbook*'],
+                    [
+                        'route'   => 'alumni.dashboard',
+                        'icon'    => 'gauge-high',
+                        'label'   => 'Dashboard',
+                        'pattern' => 'alumni/dashboard*',
+                    ],
+                    [
+                        'route'   => 'alumni.information',
+                        'icon'    => 'user-circle',
+                        'label'   => 'My Profile',
+                        'pattern' => 'alumni/information*',
+                    ],
+                    [
+                        'route'   => 'job.opportunities',
+                        'icon'    => 'briefcase',
+                        'label'   => 'Job Board',
+                        'pattern' => 'job/opportunities*',
+                    ],
+                    [
+                        'route'   => 'upcoming.events',
+                        'icon'    => 'calendar',
+                        'label'   => 'Events',
+                        'pattern' => 'upcoming/events*',
+                    ],
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php
-                    $url      = isset($link['route']) ? route($link['route']) : $link['url'];
-                    $isActive = isset($link['pattern'])
-                        ? request()->is($link['pattern'])
-                        : request()->is(ltrim($link['url'] ?? '', '/'));
+                    $url      = route($link['route']);
+                    $isActive = request()->is($link['pattern']);
                 @endphp
+
                 <a href="{{ $url }}"
                    wire:navigate
-                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group {{ $isActive ? 'bg-white/10 border border-white/20 shadow-lg' : 'hover:bg-white/5' }}">
+                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group relative
+                          {{ $isActive ? 'bg-white/10 border border-white/20 shadow-lg' : 'hover:bg-white/5' }}">
                     <div class="w-10 h-10 flex items-center justify-center rounded-lg bg-white/5 text-white mr-4 shrink-0 transition-transform duration-300 group-hover:scale-110">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-80"></i>
                     </div>
@@ -142,23 +180,31 @@
         </div>
     </aside>
 
-    {{-- Main Content --}}
+    {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
         {{-- Mobile top bar --}}
         <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 lg:hidden shrink-0 z-30">
-            <button @click="open = !open" class="focus:outline-none p-2 rounded-lg hover:bg-gray-100 transition-colors" style="color: #2b0d3e;">
+            <button @click="open = !open"
+                    class="focus:outline-none p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    style="color: #2b0d3e;">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="open ? 'rotate-45 translate-y-2' : ''" class="w-full h-0.5 transition-all duration-300 origin-center" style="background-color: #2b0d3e;"></span>
-                    <span :class="open ? 'opacity-0' : ''" class="w-full h-0.5 transition-all duration-300" style="background-color: #2b0d3e;"></span>
-                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 transition-all duration-300 origin-center" style="background-color: #2b0d3e;"></span>
+                    <span :class="open ? 'rotate-45 translate-y-2' : ''"
+                          class="w-full h-0.5 transition-all duration-300 origin-center"
+                          style="background-color: #2b0d3e;"></span>
+                    <span :class="open ? 'opacity-0' : ''"
+                          class="w-full h-0.5 transition-all duration-300"
+                          style="background-color: #2b0d3e;"></span>
+                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
+                          class="w-full h-0.5 transition-all duration-300 origin-center"
+                          style="background-color: #2b0d3e;"></span>
                 </div>
             </button>
             <h2 class="text-lg font-bold" style="color: #2b0d3e;">Alumni Portal</h2>
             <div class="w-10"></div>
         </header>
 
-        {{-- Page Content --}}
+        {{-- Page content --}}
         <div class="flex-1 overflow-y-auto min-h-0 bg-gray-100 p-4 lg:p-8 no-scrollbar">
             <div class="container mx-auto">
                 @yield('content')
@@ -166,7 +212,7 @@
         </div>
     </main>
 
-</div>
+</div>{{-- /x-data shell --}}
 
 @livewireScripts
 

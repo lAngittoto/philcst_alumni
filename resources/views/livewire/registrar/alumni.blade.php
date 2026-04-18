@@ -1,3 +1,5 @@
+{{-- resources/views/livewire/registrar/alumni-records.blade.php --}}
+
 <?php
 
 use Livewire\Volt\Component;
@@ -115,20 +117,22 @@ new class extends Component {
             $this->viewingProfile = Alumni::select([
                 'id', 'user_id',
                 'first_name', 'middle_initial', 'last_name', 'suffix',
-                'student_id', 'course_code', 'course_name', 'batch',
+                'student_id', 'course_code', 'course_name', 'batch', 'year_level',
                 'email', 'profile_photo', 'status', 'profile_completed',
                 'password_changed_at',
-                'gender', 'date_of_birth', 'place_of_birth',
-                'citizenship', 'civil_status', 'blood_type', 'contact_number',
-                'father_name', 'mother_name', 'spouse_name',
-                'address_no', 'address_street', 'address_barangay',
-                'address_municipality', 'address_province', 'address_zip_code',
+                'gender', 'date_of_birth',
+                'contact_number',
+                'father_last_name', 'father_given_name', 'father_middle_name',
+                'mother_last_name',  'mother_given_name',  'mother_middle_name',
+                'dswd_household_no', 'disability',
+                'address_street', 'address_barangay',
+                'address_municipality', 'address_province',
                 'created_at', 'updated_at',
             ])->findOrFail($id)->toArray();
 
             $this->viewingProfileId = $id;
             $this->activeModal      = 'viewProfile';
-        } catch (\Exception) {
+        } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to load profile.');
         }
     }
@@ -271,29 +275,28 @@ new class extends Component {
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
                                          alt="{{ $item->first_name }}"
                                          class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-gray-200">
-                                    <span class="font-semibold text-gray-900 text-sm">
+                                    <span class="font-semibold text-gray-900 text-sm uppercase">
                                         {{ $this->formatDisplayName($item->first_name??'', $item->middle_initial??'', $item->last_name??'', $item->suffix??'') }}
                                     </span>
                                 </div>
                             </td>
                             <td class="px-4 py-3">
-                                <code class="font-mono text-gray-800 text-xs font-bold bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{{ $item->student_id }}</code>
+                                <code class="font-mono text-gray-800 text-xs font-bold bg-gray-100 px-2 py-0.5 rounded border border-gray-200 uppercase">{{ $item->student_id }}</code>
                             </td>
                             <td class="px-4 py-3">
-                                <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold"
+                                <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold uppercase"
                                       style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
                                     {{ $item->course_code ?? '—' }}
                                 </span>
                             </td>
                             <td class="px-4 py-3 text-center">
-                                <span class="font-mono text-gray-800 text-xs font-bold">{{ $item->batch }}</span>
+                                <span class="font-mono text-gray-800 text-xs font-bold uppercase">{{ $item->batch }}</span>
                             </td>
+                            {{-- Always show email, even @pending.local --}}
                             <td class="px-4 py-3 hidden md:table-cell">
-                                @if(!empty($item->email))
-                                    <span class="text-gray-700 text-xs">{{ $item->email }}</span>
-                                @else
-                                    <span class="text-gray-400 text-xs italic">No email</span>
-                                @endif
+                                <span class="text-gray-700 text-xs font-medium uppercase">
+                                    {{ strtoupper($item->email ?? '—') }}
+                                </span>
                             </td>
                             <td class="px-4 py-3 text-center">
                                 <button wire:click="viewProfile({{ $item->id }})"
@@ -366,6 +369,10 @@ new class extends Component {
 
 {{-- ══ VIEW PROFILE MODAL ════════════════════════════════════════════ --}}
 @if($activeModal === 'viewProfile' && $viewingProfile)
+@php
+    // Helper — uppercase shorthand used throughout the modal
+    $up = fn(?string $v): string => strtoupper(trim($v ?? ''));
+@endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
      style="background:rgba(27,6,46,0.55); backdrop-filter:blur(4px);"
      @keydown.escape.window="$wire.closeModal()">
@@ -394,64 +401,76 @@ new class extends Component {
                      alt="{{ $viewingProfile['first_name'] ?? '' }}"
                      class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shadow-md ring-2 ring-gray-200 shrink-0">
                 <div class="flex-1 min-w-0">
-                    <p class="text-base font-extrabold text-gray-900 leading-tight">
+                    <p class="text-base font-extrabold text-gray-900 leading-tight uppercase">
                         {{ $this->formatDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
                     </p>
-                    <p class="text-xs text-gray-500 font-mono mt-0.5">{{ $viewingProfile['student_id'] ?? '—' }}</p>
+                    <p class="text-xs text-gray-500 font-mono mt-0.5 uppercase">{{ $viewingProfile['student_id'] ?? '—' }}</p>
                     <div class="flex flex-wrap gap-1.5 mt-2">
-                        <span class="px-2 py-0.5 rounded-full text-xs font-bold" style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-bold uppercase" style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
                             {{ $viewingProfile['course_code'] ?? '—' }}
                         </span>
-                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-200 text-gray-700 border border-gray-300">
-                            Batch {{ $viewingProfile['batch'] ?? '—' }}
+                        <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-gray-200 text-gray-700 border border-gray-300">
+                            BATCH {{ $viewingProfile['batch'] ?? '—' }}
                         </span>
-                        <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <i class="fas fa-check text-[9px] mr-0.5"></i>VERIFIED
-                        </span>
+                        @if(!empty($viewingProfile['profile_completed']))
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <i class="fas fa-check text-[9px] mr-0.5"></i>PROFILE COMPLETE
+                            </span>
+                        @else
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <i class="fas fa-triangle-exclamation text-[9px] mr-0.5"></i>INCOMPLETE
+                            </span>
+                        @endif
                     </div>
                 </div>
             </div>
 
-            {{-- Student Record Section --}}
+            {{-- ── SECTION 1: Student Record ── --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200"
                      style="background:#f3eafc;">
-                    <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                         style="background:#7a3f91;">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style="background:#7a3f91;">
                         <i class="fas fa-id-card text-white" style="font-size:10px;"></i>
                     </div>
                     <p class="font-bold text-gray-800 text-xs uppercase tracking-wide">Student Record</p>
+                    <span class="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-500">
+                        <i class="fas fa-lock text-[9px]"></i> From School
+                    </span>
                 </div>
                 <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
                     @foreach([
-                        ['First Name',  $viewingProfile['first_name']     ?? '—'],
-                        ['Middle Name', $viewingProfile['middle_initial']  ?? '—'],
-                        ['Last Name',   trim(($viewingProfile['last_name']??'').' '.($viewingProfile['suffix']??'')) ?: '—'],
-                        ['Student ID',  $viewingProfile['student_id']     ?? '—'],
-                        ['Course Code', $viewingProfile['course_code']    ?? '—'],
-                        ['Batch Year',  $viewingProfile['batch']          ?? '—'],
+                        ['Last Name',   $up($viewingProfile['last_name'] ?? '') . (!empty($viewingProfile['suffix']) ? ', '.$up($viewingProfile['suffix']) : '')],
+                        ['Given Name',  $up($viewingProfile['first_name']     ?? '')],
+                        ['Middle Name', $up($viewingProfile['middle_initial'] ?? '')],
+                        ['Student ID',  $up($viewingProfile['student_id']     ?? '')],
+                        ['Course Code', $up($viewingProfile['course_code']    ?? '')],
+                        ['Batch Year',  $up($viewingProfile['batch']          ?? '')],
                     ] as [$lbl, $val])
                     <div class="bg-white border border-gray-200 rounded-lg p-2.5">
                         <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
+                        <p class="text-xs font-semibold text-gray-900">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
                 <div class="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     @foreach([
-                        ['Course Name',   $viewingProfile['course_name'] ?? '—'],
-                        ['Email Address', $viewingProfile['email'] ?: 'No email on record'],
+                        ['Course Name', $up($viewingProfile['course_name'] ?? '')],
+                        ['Year Level',  $up($viewingProfile['year_level']  ?? '')],
                     ] as [$lbl, $val])
                     <div class="bg-white border border-gray-200 rounded-lg p-2.5">
                         <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold text-gray-900 break-words">{{ $val }}</p>
+                        <p class="text-xs font-semibold text-gray-900 break-words">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
             </div>
 
-            {{-- Personal Details --}}
-            @php $dob = !empty($viewingProfile['date_of_birth']) ? \Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y') : '—'; @endphp
+            {{-- ── SECTION 2: Personal Details ── --}}
+            @php
+                $dob = !empty($viewingProfile['date_of_birth'])
+                    ? strtoupper(\Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y'))
+                    : '—';
+            @endphp
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-blue-50">
                     <div class="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
@@ -461,23 +480,22 @@ new class extends Component {
                 </div>
                 <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
                     @foreach([
-                        ['Gender',         $viewingProfile['gender']         ?? '—'],
-                        ['Date of Birth',  $dob],
-                        ['Civil Status',   $viewingProfile['civil_status']   ?? '—'],
-                        ['Place of Birth', $viewingProfile['place_of_birth'] ?? '—'],
-                        ['Citizenship',    $viewingProfile['citizenship']    ?? '—'],
-                        ['Blood Type',     $viewingProfile['blood_type']     ?: '—'],
-                        ['Contact No.',    $viewingProfile['contact_number'] ?: '—'],
+                        ['Gender',        $up($viewingProfile['gender']             ?? '')],
+                        ['Date of Birth', $dob],
+                        ['Contact No.',   $up($viewingProfile['contact_number']     ?? '')],
+                        ['Disability',    $up($viewingProfile['disability']         ?? '')],
+                        ['DSWD No.',      $up($viewingProfile['dswd_household_no']  ?? '')],
+                        ['Email Address', $up($viewingProfile['email']              ?? '')],
                     ] as [$lbl, $val])
                     <div class="bg-white border border-gray-200 rounded-lg p-2.5">
                         <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
+                        <p class="text-xs font-semibold text-gray-900 break-words">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
             </div>
 
-            {{-- Family --}}
+            {{-- ── SECTION 3: Family Background ── --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-rose-50">
                     <div class="w-6 h-6 rounded-lg bg-rose-500 flex items-center justify-center shrink-0">
@@ -485,36 +503,61 @@ new class extends Component {
                     </div>
                     <p class="font-bold text-gray-800 text-xs uppercase tracking-wide">Family Background</p>
                 </div>
-                <div class="p-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    @foreach([
-                        ["Father's Name", $viewingProfile['father_name'] ?: '—'],
-                        ["Mother's Name", $viewingProfile['mother_name'] ?: '—'],
-                        ['Spouse Name',   $viewingProfile['spouse_name'] ?: '—'],
-                    ] as [$lbl, $val])
-                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                        <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
+
+                {{-- Father --}}
+                <div class="px-3 pt-3">
+                    <p class="text-[10px] font-extrabold text-blue-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                        <i class="fas fa-person text-blue-400 text-[9px]"></i> Father's Name
+                    </p>
+                    <div class="grid grid-cols-3 gap-2 mb-3">
+                        @foreach([
+                            ['Last Name',   $up($viewingProfile['father_last_name']   ?? '')],
+                            ['Given Name',  $up($viewingProfile['father_given_name']  ?? '')],
+                            ['Middle Name', $up($viewingProfile['father_middle_name'] ?? '')],
+                        ] as [$lbl, $val])
+                        <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                            <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                            <p class="text-xs font-semibold text-gray-900">{{ $val ?: '—' }}</p>
+                        </div>
+                        @endforeach
                     </div>
-                    @endforeach
+                </div>
+
+                {{-- Mother --}}
+                <div class="px-3 pb-3">
+                    <p class="text-[10px] font-extrabold text-pink-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                        <i class="fas fa-person-dress text-pink-400 text-[9px]"></i> Mother's Maiden Name
+                    </p>
+                    <div class="grid grid-cols-3 gap-2">
+                        @foreach([
+                            ['Last Name',   $up($viewingProfile['mother_last_name']   ?? '')],
+                            ['Given Name',  $up($viewingProfile['mother_given_name']  ?? '')],
+                            ['Middle Name', $up($viewingProfile['mother_middle_name'] ?? '')],
+                        ] as [$lbl, $val])
+                        <div class="bg-white border border-gray-200 rounded-lg p-2.5">
+                            <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                            <p class="text-xs font-semibold text-gray-900">{{ $val ?: '—' }}</p>
+                        </div>
+                        @endforeach
+                    </div>
                 </div>
             </div>
 
-            {{-- Address --}}
+            {{-- ── SECTION 4: Permanent Address ── --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-emerald-50">
                     <div class="w-6 h-6 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
                         <i class="fas fa-map-location-dot text-white" style="font-size:10px;"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-xs uppercase tracking-wide">Home Address</p>
+                    <p class="font-bold text-gray-800 text-xs uppercase tracking-wide">Permanent Address</p>
                 </div>
                 <div class="p-3 space-y-2">
                     @php
-                        $addrParts   = array_filter([
-                            trim(($viewingProfile['address_no']??'').' '.($viewingProfile['address_street']??'')),
-                            $viewingProfile['address_barangay']     ?? '',
-                            $viewingProfile['address_municipality'] ?? '',
-                            $viewingProfile['address_province']     ?? '',
-                            $viewingProfile['address_zip_code']     ?? '',
+                        $addrParts = array_filter([
+                            $up($viewingProfile['address_street']       ?? ''),
+                            $up($viewingProfile['address_barangay']     ?? ''),
+                            $up($viewingProfile['address_municipality'] ?? ''),
+                            $up($viewingProfile['address_province']     ?? ''),
                         ]);
                         $fullAddress = implode(', ', $addrParts) ?: '—';
                     @endphp
@@ -522,24 +565,23 @@ new class extends Component {
                         <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">Full Address</p>
                         <p class="text-xs font-semibold text-gray-900 leading-snug">{{ $fullAddress }}</p>
                     </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div class="grid grid-cols-2 gap-2">
                         @foreach([
-                            ['House/Block No.',   $viewingProfile['address_no']          ?: '—'],
-                            ['Street',            $viewingProfile['address_street']       ?: '—'],
-                            ['Barangay',          $viewingProfile['address_barangay']     ?: '—'],
-                            ['City/Municipality', $viewingProfile['address_municipality'] ?: '—'],
-                            ['Province',          $viewingProfile['address_province']     ?: '—'],
-                            ['Zip Code',          $viewingProfile['address_zip_code']     ?: '—'],
+                            ['Street',            $up($viewingProfile['address_street']       ?? '')],
+                            ['Barangay',          $up($viewingProfile['address_barangay']     ?? '')],
+                            ['City/Municipality', $up($viewingProfile['address_municipality'] ?? '')],
+                            ['Province',          $up($viewingProfile['address_province']     ?? '')],
                         ] as [$lbl, $val])
                         <div class="bg-white border border-gray-200 rounded-lg p-2.5">
                             <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-xs font-semibold text-gray-900">{{ $val }}</p>
+                            <p class="text-xs font-semibold text-gray-900">{{ $val ?: '—' }}</p>
                         </div>
                         @endforeach
                     </div>
                 </div>
             </div>
 
+            {{-- Close Button --}}
             <button wire:click="closeModal"
                     class="w-full bg-white border border-gray-300 text-gray-800 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition active:scale-[.99]">
                 Close

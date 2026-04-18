@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 new #[Layout('app')] class extends Component {
 
@@ -73,7 +74,7 @@ new #[Layout('app')] class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Mount — DB-first: OTP in DB is the source of truth, not session
+    // Mount
     // ─────────────────────────────────────────────────────────────────────────
 
     public function mount(): void
@@ -92,7 +93,36 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        if (!$alumni->needsAccountSetup()) {
+        // ── GUARD: Must arrive via the login flow ─────────────────────────────
+        //
+        // The session key 'alumni_requires_password_change' is ONLY set by the
+        // login component after the alumni has entered their credentials.
+        // If it is absent, the alumni navigated here directly (e.g. typed the
+        // URL or used browser history) without logging in — so we log them out
+        // and send them back to the login page to re-enter their credentials.
+        //
+        // Exception: if the wizard is already in progress (alumni_password_reset_step
+        // is set), we let them continue — they have already authenticated this session.
+        //
+        $hasLoginFlag  = session()->has('alumni_requires_password_change');
+        $wizardStarted = session()->has('alumni_password_reset_step');
+
+        if (!$hasLoginFlag && !$wizardStarted) {
+            // Not from login and no wizard in progress — force re-authentication.
+            Auth::logout();
+            session()->invalidate();
+            session()->regenerateToken();
+            $this->redirect(route('login'));
+            return;
+        }
+
+        // ── Determine whether this alumni still needs onboarding ──────────────
+        $stillOnTempPassword = $alumni->hasTemporaryPassword();
+        $wizardIncomplete    = $alumni->needsAccountSetup();
+        $requiresOnboarding  = $wizardIncomplete || $stillOnTempPassword;
+
+        if (!$requiresOnboarding) {
+            // Wizard is genuinely complete — clean up and send to profile page
             session()->forget([
                 'alumni_requires_password_change',
                 'alumni_pending_email',
@@ -102,6 +132,16 @@ new #[Layout('app')] class extends Component {
             $this->clearWizardCache($alumni->id);
             $this->redirect(route('alumni.information'));
             return;
+        }
+
+        // ── Self-heal: DB flag inconsistent with actual password state ────────
+        if (!$wizardIncomplete && $stillOnTempPassword) {
+            DB::table('alumni')
+                ->where('id', $alumni->id)
+                ->update(['password_changed_at' => null]);
+            $alumni->password_changed_at = null;
+
+            Log::info("change-password mount: self-healed password_changed_at for alumni #{$alumni->id}");
         }
 
         session()->put('alumni_requires_password_change', true);
@@ -114,16 +154,11 @@ new #[Layout('app')] class extends Component {
         }
 
         // ── DB-FIRST: If OTP is still active in DB, force Step 4 ─────────────
-        // This is the primary fix: alumni cannot bypass Step 4 by logging out
-        // and back in. The active OTP in the DB overrides any session state.
-        // pending_email and pending_password are read from cache (keyed by
-        // alumni ID) — these survive session resets / re-logins.
         if ($alumni->isOtpStillActive()) {
             $cachedEmail    = cache()->get($this->cacheEmailKey($alumni->id));
             $cachedPassword = cache()->get($this->cachePasswordKey($alumni->id));
 
             if ($cachedEmail && $cachedPassword) {
-                // Restore session from cache so the rest of the wizard works
                 session()->put('alumni_pending_email',       $cachedEmail);
                 session()->put('alumni_pending_password',    $cachedPassword);
                 session()->put('alumni_password_reset_step', 'password_set');
@@ -132,14 +167,11 @@ new #[Layout('app')] class extends Component {
                 $this->otpSent   = true;
                 $this->otpLocked = cache()->has('alumni_otp_locked:' . $alumni->id);
 
-                // Restore countdown from localStorage (timer stored client-side)
                 $this->dispatch('otp-sent');
                 return;
             }
 
-            // OTP is active but cache is missing (very rare edge case —
-            // cache evicted while OTP is still valid). Clear the stale OTP
-            // so the alumni can start fresh from Step 1.
+            // OTP active but cache evicted — clear stale OTP and start fresh
             $alumni->clearOtp();
             cache()->forget('alumni_otp_attempts:' . $alumni->id);
             cache()->forget('alumni_otp_locked:'   . $alumni->id);
@@ -163,9 +195,33 @@ new #[Layout('app')] class extends Component {
         } else {
             $this->step = 1;
             session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
-            $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
-            if ($alumni) $this->clearWizardCache($alumni->id);
+            $this->clearWizardCache($alumni->id);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Back to Home — LOG OUT so alumni must re-enter credentials on next visit
+    //
+    // Kapag nag-click ang alumni ng "Back to Home", ini-invalidate natin ang
+    // session nila. Kaya sa susunod na pumunta sila sa login page, wala nang
+    // auto-redirect — kailangan nilang i-enter ulit ang kanilang credentials.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public function backToHome(): void
+    {
+        $user   = auth()->user();
+        $alumni = $user ? \App\Models\Alumni::where('user_id', $user->id)->first() : null;
+
+        // Clear wizard cache so no stale data remains
+        if ($alumni) {
+            $this->clearWizardCache($alumni->id);
+        }
+
+        Auth::logout();
+        session()->invalidate();
+        session()->regenerateToken();
+
+        $this->redirect('/');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -302,7 +358,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // Persist email in both session AND cache (cache survives re-logins)
         session()->put('alumni_pending_email', $this->email);
         session()->put('alumni_password_reset_step', 'email_set');
         cache()->put($this->cacheEmailKey($alumni->id), $this->email, now()->addHour());
@@ -416,7 +471,6 @@ new #[Layout('app')] class extends Component {
                 Log::warning("Alumni OTP mail failed for {$pendingEmail}: " . $e->getMessage());
             }
 
-            // Persist in session AND cache (15-min TTL matches OTP lifetime)
             session()->put('alumni_pending_password',    $this->password);
             session()->put('alumni_pending_email',       $pendingEmail);
             session()->put('alumni_password_reset_step', 'password_set');
@@ -470,7 +524,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // Read from session first, fall back to cache (survived re-login)
         $pendingEmail    = session('alumni_pending_email')
             ?? cache()->get($this->cacheEmailKey($alumni->id));
         $pendingPassword = session('alumni_pending_password')
@@ -550,7 +603,6 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // Clear everything — session + cache
             session()->forget([
                 'alumni_pending_email',
                 'alumni_pending_password',
@@ -577,7 +629,6 @@ new #[Layout('app')] class extends Component {
 
         $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
 
-        // Read from session first, fall back to cache
         $pendingEmail = session('alumni_pending_email')
             ?? ($alumni ? cache()->get($this->cacheEmailKey($alumni->id)) : null);
 
@@ -597,7 +648,6 @@ new #[Layout('app')] class extends Component {
                 Log::warning("Alumni resend OTP mail failed: " . $e->getMessage());
             }
 
-            // Refresh cache TTL to another 15 minutes on resend
             $pendingPassword = session('alumni_pending_password')
                 ?? cache()->get($this->cachePasswordKey($alumni->id));
 
@@ -628,14 +678,12 @@ new #[Layout('app')] class extends Component {
     {
         if ($this->step <= 1) return;
 
-        // Server-side guard: block back from Step 4 while OTP is active
         if ($this->step === 4) {
             $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
             if ($alumni && $alumni->isOtpStillActive()) {
                 $this->errorMessage = 'You cannot go back while a verification code is active. Please wait for the timer to expire, then request a new code.';
                 return;
             }
-            // OTP expired — clear it and wizard cache so alumni starts fresh
             if ($alumni) {
                 $alumni->clearOtp();
                 cache()->forget('alumni_otp_attempts:' . $alumni->id);
@@ -695,14 +743,23 @@ new #[Layout('app')] class extends Component {
     {{-- Overlay --}}
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm z-0"></div>
 
-    {{-- Back link --}}
-    <a href="/" wire:navigate
-       class="fixed top-6 left-6 z-50 flex items-center gap-2 text-white hover:text-purple-100 transition-all group text-sm">
+    {{-- Back link — calls backToHome() to log out before redirecting --}}
+    <button
+        wire:click="backToHome"
+        wire:loading.attr="disabled"
+        wire:target="backToHome"
+        class="fixed top-6 left-6 z-50 flex items-center gap-2 text-white hover:text-purple-100 transition-all group text-sm bg-transparent border-0 cursor-pointer"
+    >
         <div class="w-8 h-8 flex items-center justify-center rounded-full border border-white/50 group-hover:border-white group-hover:bg-white/20 transition-all">
-            <i class="fa-solid fa-arrow-left text-xs"></i>
+            <span wire:loading.remove wire:target="backToHome">
+                <i class="fa-solid fa-arrow-left text-xs"></i>
+            </span>
+            <span wire:loading wire:target="backToHome">
+                <i class="fa-solid fa-circle-notch fa-spin text-xs"></i>
+            </span>
         </div>
         <span class="font-medium tracking-wide hidden sm:inline">Back to Home</span>
-    </a>
+    </button>
 
     {{-- ═══════════════════════════════════════════════════════════════════════
          SUCCESS MODAL
@@ -899,8 +956,7 @@ new #[Layout('app')] class extends Component {
                             <label class="block text-sm font-semibold text-gray-800 mb-1">Student ID</label>
                             <input wire:model="student_id" type="text" autocomplete="off"
                                    {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                   >
+                                   class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
                         </div>
                         <div>
                             <label class="block text-sm font-semibold text-gray-800 mb-1">Course</label>
@@ -915,8 +971,7 @@ new #[Layout('app')] class extends Component {
                             <label class="block text-sm font-semibold text-gray-800 mb-1">Batch Year</label>
                             <input wire:model="batch" type="text" maxlength="4" autocomplete="off"
                                    {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                                   >
+                                   class="w-full px-3 py-2 text-sm border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
                         </div>
                     </div>
 

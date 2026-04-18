@@ -7,6 +7,7 @@ use App\Models\Course;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 new class extends Component {
     use WithFileUploads;
@@ -25,6 +26,10 @@ new class extends Component {
 
     public array  $importErrors         = [];
     public array  $importDuplicates     = [];
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
     private function generateTempPassword(string $paddedId, string $lastName): string
     {
@@ -82,6 +87,10 @@ new class extends Component {
         $this->importDuplicates     = [];
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Excel parser — reads active sheet rows into plain arrays
+    // ─────────────────────────────────────────────────────────────────────────
+
     private function parseExcel(string $path): array
     {
         try {
@@ -105,6 +114,11 @@ new class extends Component {
             throw new \Exception('Excel parse failed: ' . $e->getMessage());
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Main import — validates all rows first, then bulk-inserts in one
+    // transaction (minimises round-trips and avoids partial commits).
+    // ─────────────────────────────────────────────────────────────────────────
 
     public function processImport(): void
     {
@@ -137,7 +151,8 @@ new class extends Component {
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            // ── Required columns — note: Excel uses "middle_name", stored in DB as "middle_initial"
+            // ── Required columns ──────────────────────────────────────────────
+            // Note: Excel column is "middle_name"; stored in DB as "middle_initial"
             $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course_code', 'batch'];
             foreach ($required as $col) {
                 if (!in_array($col, $header, true))
@@ -147,48 +162,66 @@ new class extends Component {
             $this->importTotal = count($rows) - 1;
             $isComplete        = ($this->importMode === 'complete');
 
+            // ── Pre-load lookup maps once (avoid per-row queries) ─────────────
             $courseMap = Course::pluck('name', 'code')
                                ->mapWithKeys(fn($n, $c) => [strtoupper($c) => $n])
                                ->toArray();
 
-            $existingIds = Alumni::pluck('student_id')
-                                 ->mapWithKeys(fn($id) => [$id => true])
-                                 ->toArray();
+            // Existing student IDs → set
+            $existingIds = DB::table('alumni')
+                             ->pluck('student_id')
+                             ->flip()
+                             ->toArray();
 
-            $existingNames = Alumni::selectRaw(
-                    'LOWER(TRIM(first_name)) as fn,
-                     LOWER(TRIM(COALESCE(middle_initial,""))) as mi,
-                     LOWER(TRIM(last_name)) as ln,
-                     LOWER(TRIM(COALESCE(suffix,""))) as sf'
-                )->get()
-                 ->map(fn($a) => $a->fn . '|' . $a->mi . '|' . $a->ln . '|' . $a->sf)
-                 ->flip()->toArray();
+            // Existing names → set  (key = fn|mi|ln|sf)
+            $existingNames = DB::table('alumni')
+                               ->selectRaw("LOWER(TRIM(first_name)) as fn,
+                                            LOWER(TRIM(COALESCE(middle_initial,''))) as mi,
+                                            LOWER(TRIM(last_name)) as ln,
+                                            LOWER(TRIM(COALESCE(suffix,''))) as sf")
+                               ->get()
+                               ->map(fn($a) => $a->fn . '|' . $a->mi . '|' . $a->ln . '|' . $a->sf)
+                               ->flip()
+                               ->toArray();
 
+            // For complete mode: pre-load all existing emails in one query
+            $existingEmails = $isComplete
+                ? DB::table('alumni')
+                      ->whereNotNull('email')
+                      ->where('email', 'not like', '%@pending.local')
+                      ->pluck('email')
+                      ->flip()
+                      ->toArray()
+                  + DB::table('users')
+                      ->where('email', 'not like', '%@pending.local')
+                      ->pluck('email')
+                      ->flip()
+                      ->toArray()
+                : [];
+
+            // ── Validation pass ───────────────────────────────────────────────
             $jobs             = [];
             $seenIds          = [];
             $seenNames        = [];
+            $seenEmails       = [];
             $validationErrors = [];
             $duplicates       = [];
             $maxErrors        = 200;
 
             for ($i = 1; $i < count($rows); $i++) {
-                $this->importProgress = $i;
-
+                // Empty row guard
                 if (count(array_filter($rows[$i], fn($v) => trim((string) $v) !== '')) === 0) continue;
                 if (count($rows[$i]) < count($header)) continue;
 
                 $row       = array_combine($header, array_slice($rows[$i], 0, count($header)));
                 $firstName = trim($row['first_name']  ?? '');
-
-                // ── "middle_name" is the Excel column; stored in DB as "middle_initial"
-                $mid       = trim($row['middle_name'] ?? '');
-
+                $mid       = trim($row['middle_name'] ?? '');   // Excel col → DB: middle_initial
                 $lastName  = trim($row['last_name']   ?? '');
                 $suffix    = trim($row['suffix']      ?? '');
                 $fullName  = $this->buildFullName($firstName, $mid, $lastName, $suffix);
                 $label     = 'Row ' . ($i + 1) . ($fullName ? " ({$fullName})" : '');
 
-                // ── Name validation
+                // ── Name validation ───────────────────────────────────────────
                 if (!$firstName) {
                     $this->appendImportError($validationErrors, $maxErrors, "{$label}: First name is empty.");
                     continue;
@@ -218,7 +251,7 @@ new class extends Component {
                     continue;
                 }
 
-                // ── Duplicate name check
+                // ── Duplicate name ────────────────────────────────────────────
                 $nameKey = strtolower($firstName) . '|' . strtolower($mid) . '|' . strtolower($lastName) . '|' . strtolower($suffix);
                 if (isset($existingNames[$nameKey]) || isset($seenNames[$nameKey])) {
                     $duplicates[] = "{$label}: Full name \"{$fullName}\" already registered.";
@@ -226,7 +259,7 @@ new class extends Component {
                     continue;
                 }
 
-                // ── Student ID validation
+                // ── Student ID ────────────────────────────────────────────────
                 $rawId      = preg_replace('/\..*$/', '', rtrim(rtrim((string) ($row['student_id'] ?? ''), '0'), '.'));
                 $rawIdClean = ltrim($rawId, '0') ?: '0';
                 if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int) $rawIdClean === 0) {
@@ -240,53 +273,78 @@ new class extends Component {
                     continue;
                 }
 
-                // ── Course & batch validation
+                // ── Course & batch ────────────────────────────────────────────
                 $code = strtoupper(trim($row['course_code'] ?? ''));
                 if (!isset($courseMap[$code])) {
                     $this->appendImportError($validationErrors, $maxErrors, "{$label}: Course code \"{$code}\" does not exist.");
                     continue;
                 }
-
                 $batchYear = (int) ($row['batch'] ?? 0);
                 if ($batchYear < 1000 || $batchYear > 9999) {
                     $this->appendImportError($validationErrors, $maxErrors, "{$label}: Batch \"{$batchYear}\" must be a 4-digit year.");
                     continue;
                 }
 
-                // ── Extra fields (complete mode)
+                // ── Extra fields (complete mode) — aligned with current DB ────
+                // DB columns (after migration):
+                //   year_level, father_last_name, father_given_name, father_middle_name,
+                //   mother_last_name, mother_given_name, mother_middle_name,
+                //   dswd_household_no, disability
+                // Removed: father_name, mother_name, spouse_name
                 $extra = [];
                 if ($isComplete) {
                     $email = $this->sanitizeEmail($row['email'] ?? '');
+
                     if (!empty($email)) {
-                        if (Alumni::where('email', $email)->exists() || User::where('email', $email)->exists()) {
+                        if (isset($existingEmails[$email]) || isset($seenEmails[$email])) {
                             $duplicates[] = "{$label}: Email \"{$email}\" already registered.";
                             $this->importDuplicateCount++;
                             continue;
                         }
+                        $seenEmails[$email] = true;
                     }
+
                     $extra = [
-                        'email'                => $email,
-                        'gender'               => $this->sanitizeText($row['gender']               ?? ''),
-                        'date_of_birth'        => $this->sanitizeDate($row['date_of_birth']        ?? ''),
-                        'place_of_birth'       => $this->sanitizeText($row['place_of_birth']       ?? ''),
-                        'citizenship'          => $this->sanitizeText($row['citizenship']           ?? ''),
-                        'civil_status'         => $this->sanitizeText($row['civil_status']          ?? ''),
-                        'blood_type'           => $this->sanitizeText($row['blood_type']            ?? ''),
-                        'contact_number'       => $this->sanitizeText($row['contact_number']        ?? ''),
-                        'father_name'          => $this->sanitizeText($row['father_name']           ?? ''),
-                        'mother_name'          => $this->sanitizeText($row['mother_name']           ?? ''),
-                        'spouse_name'          => $this->sanitizeText($row['spouse_name']           ?? ''),
-                        'address_no'           => $this->sanitizeText($row['address_no']            ?? ''),
-                        'address_street'       => $this->sanitizeText($row['address_street']        ?? ''),
-                        'address_barangay'     => $this->sanitizeText($row['address_barangay']      ?? ''),
-                        'address_municipality' => $this->sanitizeText($row['address_municipality']  ?? ''),
-                        'address_province'     => $this->sanitizeText($row['address_province']      ?? ''),
-                        'address_zip_code'     => $this->sanitizeText($row['address_zip_code']      ?? ''),
+                        'email'               => $email,
+                        'gender'              => $this->sanitizeText($row['gender']              ?? ''),
+                        'date_of_birth'       => $this->sanitizeDate($row['date_of_birth']       ?? ''),
+                        'place_of_birth'      => $this->sanitizeText($row['place_of_birth']      ?? ''),
+                        'citizenship'         => $this->sanitizeText($row['citizenship']          ?? ''),
+                        'civil_status'        => $this->sanitizeText($row['civil_status']         ?? ''),
+                        'blood_type'          => $this->sanitizeText($row['blood_type']           ?? ''),
+                        'contact_number'      => $this->sanitizeText($row['contact_number']       ?? ''),
+                        // ── Parent names (split — aligned with DB migration) ──
+                        'year_level'          => $this->sanitizeText($row['year_level']           ?? ''),
+                        'father_last_name'    => $this->sanitizeText($row['father_last_name']     ?? ''),
+                        'father_given_name'   => $this->sanitizeText($row['father_given_name']    ?? ''),
+                        'father_middle_name'  => $this->sanitizeText($row['father_middle_name']   ?? ''),
+                        'mother_last_name'    => $this->sanitizeText($row['mother_last_name']     ?? ''),
+                        'mother_given_name'   => $this->sanitizeText($row['mother_given_name']    ?? ''),
+                        'mother_middle_name'  => $this->sanitizeText($row['mother_middle_name']   ?? ''),
+                        'dswd_household_no'   => $this->sanitizeText($row['dswd_household_no']    ?? ''),
+                        'disability'          => $this->sanitizeText($row['disability']           ?? ''),
+                        // ── Address ───────────────────────────────────────────
+                        'address_no'           => $this->sanitizeText($row['address_no']           ?? ''),
+                        'address_street'       => $this->sanitizeText($row['address_street']       ?? ''),
+                        'address_barangay'     => $this->sanitizeText($row['address_barangay']     ?? ''),
+                        'address_municipality' => $this->sanitizeText($row['address_municipality'] ?? ''),
+                        'address_province'     => $this->sanitizeText($row['address_province']     ?? ''),
+                        'address_zip_code'     => $this->sanitizeText($row['address_zip_code']     ?? ''),
                     ];
                 }
 
-                $jobs[] = compact('fullName', 'firstName', 'mid', 'lastName', 'suffix', 'sid', 'code', 'batchYear', 'extra')
-                        + ['courseName' => $courseMap[$code]];
+                $jobs[] = [
+                    'fullName'   => $fullName,
+                    'firstName'  => $firstName,
+                    'mid'        => $mid,
+                    'lastName'   => $lastName,
+                    'suffix'     => $suffix,
+                    'sid'        => $sid,
+                    'code'       => $code,
+                    'courseName' => $courseMap[$code],
+                    'batchYear'  => $batchYear,
+                    'extra'      => $extra,
+                ];
 
                 $seenIds[$sid]       = true;
                 $seenNames[$nameKey] = true;
@@ -294,7 +352,7 @@ new class extends Component {
 
             $this->importErrors     = $validationErrors;
             $this->importDuplicates = $duplicates;
-            $this->importFailCount  = count($validationErrors);
+            // importFailCount already incremented inside appendImportError
 
             if (empty($jobs)) {
                 $this->importStatus  = 'Done';
@@ -304,74 +362,137 @@ new class extends Component {
                 return;
             }
 
+            // ── Bulk insert pass ──────────────────────────────────────────────
+            // Strategy:
+            //   1. Prepare all user rows (plain arrays, bcrypt hashed).
+            //   2. Bulk-insert users in one statement per chunk.
+            //   3. Query back user IDs by login_email.
+            //   4. Bulk-insert alumni rows.
+            //   Everything happens in a single transaction → one commit.
+            // ─────────────────────────────────────────────────────────────────
+
             $this->importStatus = 'Importing…';
 
-            foreach ($jobs as $job) {
-                try {
-                    $hasEmail   = !empty($job['extra']['email'] ?? '');
-                    $loginEmail = $hasEmail ? $job['extra']['email'] : ($job['sid'] . '@pending.local');
-                    $tmpPass    = $this->generateTempPassword($job['sid'], $job['lastName']);
+            $now        = now()->toDateTimeString();
+            $chunkSize  = 500;          // rows per INSERT statement
+            $chunks     = array_chunk($jobs, $chunkSize);
+            $totalChunks = count($chunks);
 
-                    $user = User::create([
-                        'name'     => $job['fullName'],
-                        'role'     => 'alumni',
-                        'email'    => $loginEmail,
-                        'password' => Hash::make($tmpPass),
-                    ]);
+            DB::transaction(function () use ($chunks, $isComplete, $now, $totalChunks) {
+                foreach ($chunks as $chunkIdx => $chunk) {
+                    // ── 1. Prepare user rows ──────────────────────────────────
+                    $userRows  = [];
+                    $loginEmails = [];   // to look up inserted IDs
 
-                    // "mid" from Excel's "middle_name" column → stored in DB column "middle_initial"
-                    $data = [
-                        'user_id'             => $user->id,
-                        'first_name'          => $job['firstName'],
-                        'middle_initial'      => $job['mid']    ?: null,   // DB column = middle_initial
-                        'last_name'           => $job['lastName'],
-                        'suffix'              => $job['suffix'] ?: null,
-                        'student_id'          => $job['sid'],
-                        'email'               => $hasEmail ? $job['extra']['email'] : null,
-                        'course_code'         => $job['code'],
-                        'course_name'         => $job['courseName'],
-                        'batch'               => $job['batchYear'],
-                        'status'              => 'VERIFIED',
-                        'password_changed_at' => now(),
-                        'profile_photo'       => null,
-                        'profile_completed'   => $isComplete ? 1 : 0,
-                    ];
+                    foreach ($chunk as $job) {
+                        $hasEmail   = $isComplete && !empty($job['extra']['email'] ?? '');
+                        $loginEmail = $hasEmail
+                            ? $job['extra']['email']
+                            : ($job['sid'] . '@pending.local');
 
-                    if ($isComplete) {
-                        $e    = $job['extra'];
-                        $data = array_merge($data, [
-                            'gender'               => $e['gender']               ?: null,
-                            'date_of_birth'        => $e['date_of_birth']        ?: null,
-                            'place_of_birth'       => $e['place_of_birth']       ?: null,
-                            'citizenship'          => $e['citizenship']           ?: null,
-                            'civil_status'         => $e['civil_status']          ?: null,
-                            'blood_type'           => $e['blood_type']            ?: null,
-                            'contact_number'       => $e['contact_number']        ?: null,
-                            'father_name'          => $e['father_name']           ?: null,
-                            'mother_name'          => $e['mother_name']           ?: null,
-                            'spouse_name'          => $e['spouse_name']           ?: null,
-                            'address_no'           => $e['address_no']            ?: null,
-                            'address_street'       => $e['address_street']        ?: null,
-                            'address_barangay'     => $e['address_barangay']      ?: null,
-                            'address_municipality' => $e['address_municipality']  ?: null,
-                            'address_province'     => $e['address_province']      ?: null,
-                            'address_zip_code'     => $e['address_zip_code']      ?: null,
-                        ]);
+                        $tmpPass = $this->generateTempPassword($job['sid'], $job['lastName']);
+
+                        $userRows[]    = [
+                            'name'       => $job['fullName'],
+                            'role'       => 'alumni',
+                            'email'      => $loginEmail,
+                            'password'   => Hash::make($tmpPass),
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+                        $loginEmails[] = $loginEmail;
                     }
 
-                    Alumni::create($data);
-                    $this->importSuccessCount++;
+                    // ── 2. Bulk insert users ──────────────────────────────────
+                    DB::table('users')->insert($userRows);
 
-                } catch (\Exception $e) {
-                    Log::error('Import row error: ' . $e->getMessage());
-                    $this->appendImportError($this->importErrors, 200, "Student ID {$job['sid']}: " . $e->getMessage());
+                    // ── 3. Fetch back user IDs (keyed by email) ───────────────
+                    $userIdMap = DB::table('users')
+                        ->whereIn('email', $loginEmails)
+                        ->pluck('id', 'email')
+                        ->toArray();
+
+                    // ── 4. Prepare alumni rows ────────────────────────────────
+                    $alumniRows = [];
+                    foreach ($chunk as $job) {
+                        $hasEmail   = $isComplete && !empty($job['extra']['email'] ?? '');
+                        $loginEmail = $hasEmail
+                            ? $job['extra']['email']
+                            : ($job['sid'] . '@pending.local');
+
+                        $userId = $userIdMap[$loginEmail] ?? null;
+                        if (!$userId) continue;   // should never happen inside transaction
+
+                        $row = [
+                            'user_id'             => $userId,
+                            'first_name'          => $job['firstName'],
+                            'middle_initial'      => $job['mid']    ?: null,
+                            'last_name'           => $job['lastName'],
+                            'suffix'              => $job['suffix'] ?: null,
+                            'student_id'          => $job['sid'],
+                            'email'               => $hasEmail ? $job['extra']['email'] : null,
+                            'course_code'         => $job['code'],
+                            'course_name'         => $job['courseName'],
+                            'batch'               => $job['batchYear'],
+                            'status'              => 'VERIFIED',
+                            'password_changed_at' => $now,
+                            'profile_photo'       => null,
+                            'profile_completed'   => $isComplete ? 1 : 0,
+                            'created_at'          => $now,
+                            'updated_at'          => $now,
+                        ];
+
+                        if ($isComplete) {
+                            $e   = $job['extra'];
+                            $row = array_merge($row, [
+                                'gender'               => $e['gender']               ?: null,
+                                'date_of_birth'        => $e['date_of_birth']        ?: null,
+                                'place_of_birth'       => $e['place_of_birth']       ?: null,
+                                'citizenship'          => $e['citizenship']           ?: null,
+                                'civil_status'         => $e['civil_status']          ?: null,
+                                'blood_type'           => $e['blood_type']            ?: null,
+                                'contact_number'       => $e['contact_number']        ?: null,
+                                'year_level'           => $e['year_level']            ?: null,
+                                'father_last_name'     => $e['father_last_name']      ?: null,
+                                'father_given_name'    => $e['father_given_name']     ?: null,
+                                'father_middle_name'   => $e['father_middle_name']    ?: null,
+                                'mother_last_name'     => $e['mother_last_name']      ?: null,
+                                'mother_given_name'    => $e['mother_given_name']     ?: null,
+                                'mother_middle_name'   => $e['mother_middle_name']    ?: null,
+                                'dswd_household_no'    => $e['dswd_household_no']     ?: null,
+                                'disability'           => $e['disability']            ?: null,
+                                'address_no'           => $e['address_no']            ?: null,
+                                'address_street'       => $e['address_street']        ?: null,
+                                'address_barangay'     => $e['address_barangay']      ?: null,
+                                'address_municipality' => $e['address_municipality']  ?: null,
+                                'address_province'     => $e['address_province']      ?: null,
+                                'address_zip_code'     => $e['address_zip_code']      ?: null,
+                            ]);
+                        }
+
+                        $alumniRows[] = $row;
+                    }
+
+                    // ── 5. Bulk insert alumni ─────────────────────────────────
+                    if (!empty($alumniRows)) {
+                        DB::table('alumni')->insert($alumniRows);
+                        $this->importSuccessCount += count($alumniRows);
+                    }
+
+                    $this->importProgress = min(
+                        $this->importTotal,
+                        (int) round(($chunkIdx + 1) / $totalChunks * $this->importTotal)
+                    );
                 }
-            }
+            });
 
-            $this->importStatus  = 'Done';
-            $this->importStep    = 'done';
-            $this->importingFile = false;
-            $this->importFile    = null;
+            $this->importProgress = $this->importTotal;
+            $this->importStatus   = 'Done';
+            $this->importStep     = 'done';
+            $this->importingFile  = false;
+            $this->importFile     = null;
+
+            Log::info("Alumni import completed: {$this->importSuccessCount} inserted, {$this->importFailCount} errors, {$this->importDuplicateCount} duplicates.");
 
         } catch (\Exception $e) {
             Log::error('Import error: ' . $e->getMessage());
@@ -392,7 +513,7 @@ new class extends Component {
             <i class="fas fa-file-import text-white text-sm"></i>
         </div>
         <div>
-            <h1 class="text-lg sm:text-xl font-extrabold text-gray-900 leading-tight">Import Alumni</h1>
+            <h1 class="text-lg sm:text-xl font-extrabold text-gray-900 leading-tight">Import Students</h1>
         </div>
     </div>
 
@@ -420,8 +541,8 @@ new class extends Component {
                     <p class="text-xs font-bold text-gray-600 uppercase tracking-wide mb-3">Import Mode</p>
                     <div class="grid grid-cols-2 gap-3">
                         @foreach([
-                            ['new',      'user-plus', 'New Alumni',          'Basic info only'],
-                            ['complete', 'id-card',   'Complete Alumni Info', 'Full personal details'],
+                            ['new',      'user-plus', "Student's",            'Basic info only'],
+                            ['complete', 'id-card',   "Complete Student's Info", 'Full personal details'],
                         ] as [$mode, $icon, $label, $sub])
                         <button type="button" wire:click="$set('importMode','{{ $mode }}')"
                                 class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 text-center transition active:scale-[.98]
@@ -471,7 +592,16 @@ new class extends Component {
                     </div>
                     <p class="text-xs text-emerald-700 font-semibold mb-1">Optional / Extra:</p>
                     <div class="flex flex-wrap gap-1">
-                        @foreach(['suffix','email','gender','date_of_birth','place_of_birth','citizenship','civil_status','blood_type','contact_number','father_name','mother_name','spouse_name','address_no','address_street','address_barangay','address_municipality','address_province','address_zip_code'] as $col)
+                        @foreach([
+                            'suffix','email','gender','date_of_birth','place_of_birth',
+                            'citizenship','civil_status','blood_type','contact_number',
+                            'year_level',
+                            'father_last_name','father_given_name','father_middle_name',
+                            'mother_last_name','mother_given_name','mother_middle_name',
+                            'dswd_household_no','disability',
+                            'address_no','address_street','address_barangay',
+                            'address_municipality','address_province','address_zip_code',
+                        ] as $col)
                             <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
                         @endforeach
                     </div>
@@ -582,7 +712,7 @@ new class extends Component {
                             <p class="font-bold text-emerald-900">Import Complete</p>
                             <p class="text-xs text-emerald-700 mt-0.5">
                                 <strong>{{ $importSuccessCount }}</strong> record(s) imported as
-                                <strong>{{ $importMode === 'complete' ? 'Complete Alumni' : 'New Alumni' }}</strong> — all <strong>VERIFIED</strong>
+                                <strong>{{ $importMode === 'complete' ? "Complete Student's Info" : "Student's" }}</strong> — all <strong>VERIFIED</strong>
                                 @if($hasDups) · {{ $importDuplicateCount }} duplicate(s) skipped @endif
                                 @if($hasErrors) · {{ $importFailCount }} error(s) @endif
                             </p>
