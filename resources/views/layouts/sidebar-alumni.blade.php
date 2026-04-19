@@ -145,6 +145,18 @@
                         'label'   => 'Events',
                         'pattern' => 'upcoming/events*',
                     ],
+                    [
+                        'route'   => 'alumni.employment',
+                        'icon'    => 'calendar',
+                        'label'   => 'Employment',
+                        'pattern' => 'alumni/employment*',
+                    ],
+                    [
+                        'route'   => 'alumni.messenger',
+                        'icon'    => 'calendar',
+                        'label'   => 'Messenger',
+                        'pattern' => 'alumni/messenger*',
+                    ],
                 ];
             @endphp
 

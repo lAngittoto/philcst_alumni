@@ -31,6 +31,20 @@ new class extends Component {
     public string $alumniCollege = '';
     public array  $alumniCourses = [];
 
+    // ── Share modal ───────────────────────────────────────────────────────────
+    public bool   $showShareModal    = false;
+    public ?int   $shareEventId      = null;
+    public string $shareEventType    = '';
+    public string $shareEventTitle   = '';
+    public string $shareVenue        = '';
+    public string $shareDate         = '';
+    public string $shareTime         = '';
+    public string $shareEndTime      = '';
+    public string $shareDescription  = '';
+    public string $shareOrganizer    = '';
+    public string $shareTargetParts  = '';
+    public string $sharePhotoUrl     = '';
+
     public function mount(): void
     {
         set_time_limit(600);
@@ -170,8 +184,8 @@ new class extends Component {
         $allEvents = $adminEvents->concat($organizerEvents);
 
         $sorted = $allEvents->sortBy(function ($event) {
-            return $this->filterSort === 'oldest' 
-                ? $event->created_at 
+            return $this->filterSort === 'oldest'
+                ? $event->created_at
                 : $event->created_at->timestamp * -1;
         }, SORT_NUMERIC)->values();
 
@@ -292,24 +306,123 @@ new class extends Component {
                 ]
             );
 
-            $this->dispatch('flash-message', 
-                type: 'success', 
+            $this->dispatch('flash-message',
+                type: 'success',
                 message: "Your RSVP has been recorded as $response!"
             );
 
             $this->closeRsvpModal();
             $this->closeViewModal();
         } catch (\Exception $e) {
-            $this->dispatch('flash-message', 
-                type: 'error', 
+            $this->dispatch('flash-message',
+                type: 'error',
                 message: 'Failed to save RSVP. Please try again.'
             );
         }
     }
+
+    // ── Share ─────────────────────────────────────────────────────────────────
+
+    public function openShareModal(int $id, string $type): void
+    {
+        if ($type === 'ADMIN') {
+            $event = AdminEvent::withoutTrashed()->where('id', $id)->where('status', 'APPROVED')->first();
+        } else {
+            $event = OrganizerEvent::where('id', $id)->where('status', 'APPROVED')->first();
+        }
+
+        if (!$event) {
+            $this->dispatch('flash-message', type: 'error', message: 'Event not found.');
+            return;
+        }
+
+        $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
+                       (!$event->event_end_date && $event->event_date <= now('UTC'));
+
+        if ($isCompleted) {
+            $this->dispatch('flash-message', type: 'warning', message: 'This event can no longer be shared — it has already ended.');
+            return;
+        }
+
+        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
+        $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
+
+        $this->shareEventId     = $id;
+        $this->shareEventType   = $type;
+        $this->shareEventTitle  = $event->title;
+        $this->shareVenue       = $event->venue ?? '';
+        $this->shareDate        = $eventDatePH->format('F d, Y');
+        $this->shareTime        = $eventDatePH->format('g:i A');
+        $this->shareEndTime     = $eventEndPH ? $eventEndPH->format('g:i A') : '';
+        $this->shareDescription = $event->description ?? '';
+        $this->shareTargetParts = $event->target_participants ?? '';
+        $this->sharePhotoUrl    = $event->photo_url ?? '';
+
+        if ($type === 'ADMIN') {
+            $this->shareOrganizer = 'PHILCST Admin';
+        } else {
+            $this->shareOrganizer = $event->organizer?->name ?? 'Organizer';
+        }
+
+        $this->showShareModal = true;
+    }
+
+    public function closeShareModal(): void
+    {
+        $this->showShareModal   = false;
+        $this->shareEventId     = null;
+        $this->shareEventType   = '';
+        $this->shareEventTitle  = '';
+        $this->shareVenue       = '';
+        $this->shareDate        = '';
+        $this->shareTime        = '';
+        $this->shareEndTime     = '';
+        $this->shareDescription = '';
+        $this->shareOrganizer   = '';
+        $this->shareTargetParts = '';
+        $this->sharePhotoUrl    = '';
+    }
+
+    public function eventsBaseUrl(): string
+    {
+        $base = rtrim(config('app.url'), '/');
+        try {
+            $path = route('events.index', [], false);
+        } catch (\Throwable) {
+            $path = '/events';
+        }
+        return $base . $path;
+    }
+
 };
 ?>
 
 <div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+
+{{-- ── FLASH TOAST ─────────────────────────────────────────────────────────── --}}
+<div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
+     @flash-message.window="display($event.detail.type,$event.detail.message)"
+     x-show="show" x-cloak
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+     x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+     x-transition:leave="transition ease-in duration-200"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0 translate-x-8"
+     class="fixed top-5 right-4 sm:right-6 z-[100] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-xs sm:max-w-sm border w-full"
+     :class="{'bg-white border-emerald-300 text-emerald-800':type==='success','bg-white border-blue-300 text-blue-800':type==='info','bg-white border-amber-300 text-amber-800':type==='warning','bg-white border-red-300 text-red-800':type==='error'}"
+     style="display:none">
+    <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+         :class="{'bg-emerald-100':type==='success','bg-blue-100':type==='info','bg-amber-100':type==='warning','bg-red-100':type==='error'}">
+        <i class="fas text-sm" :class="{'fa-check text-emerald-600':type==='success','fa-info text-blue-600':type==='info','fa-triangle-exclamation text-amber-600':type==='warning','fa-exclamation text-red-600':type==='error'}"></i>
+    </div>
+    <div class="flex-1 min-w-0">
+        <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':type==='warning'?'Warning':'Error'"></p>
+        <p class="text-xs mt-0.5 opacity-80 leading-snug break-words" x-text="msg"></p>
+    </div>
+    <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
+</div>
+
 <style>
 @keyframes modalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
@@ -341,7 +454,7 @@ new class extends Component {
 
     <div class="space-y-5 flex-1 flex flex-col">
 
-        {{-- ══ PAGE HEADER — purple bg ══════════════════════════════════════ --}}
+        {{-- ══ PAGE HEADER ═══════════════════════════════════════════════════ --}}
         <div class="rounded-2xl overflow-hidden shadow-sm" style="background-color:#7a3f91;">
             <div class="px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
@@ -368,8 +481,6 @@ new class extends Component {
 
         {{-- ══ FILTER BAR ════════════════════════════════════════════════════ --}}
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-4 py-3 flex flex-wrap gap-2 items-center">
-
-            {{-- Search --}}
             <div class="relative flex-1 min-w-[180px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -382,7 +493,6 @@ new class extends Component {
                        autocomplete="off" maxlength="100">
             </div>
 
-            {{-- Status filter --}}
             <select wire:model.live="filterStatus"
                     class="filter-input px-3 py-2 rounded-xl text-sm bg-white text-gray-700">
                 <option value="">All Events</option>
@@ -390,14 +500,12 @@ new class extends Component {
                 <option value="completed">Completed</option>
             </select>
 
-            {{-- Sort --}}
             <select wire:model.live="filterSort"
                     class="filter-input px-3 py-2 rounded-xl text-sm bg-white text-gray-700">
                 <option value="recent">Newest First</option>
                 <option value="oldest">Oldest First</option>
             </select>
 
-            {{-- Reset --}}
             <button wire:click="resetFilters"
                     class="filter-input px-3 py-2 rounded-xl bg-white text-sm font-medium text-gray-600
                            hover:bg-gray-50 flex items-center gap-1.5 transition">
@@ -416,24 +524,25 @@ new class extends Component {
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 flex-1">
                     @foreach($this->events as $event)
                     @php
-                        $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) || 
+                        $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
                                        (!$event->event_end_date && $event->event_date <= now('UTC'));
                         $eventDate = $event->event_date->setTimezone('Asia/Manila');
                         $postedAgo = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila')->diffForHumans();
                     @endphp
 
-                    <div class="event-card bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col"
-                         wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')">
+                    <div class="event-card bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
 
-                        {{-- Event Image/Photo --}}
-                        <div class="w-full h-40 bg-gradient-to-br from-purple-200 to-purple-100 relative overflow-hidden flex-shrink-0">
+                        {{-- Event Image —— clicking the image area opens the view modal --}}
+                        <div class="w-full h-40 bg-gradient-to-br from-purple-200 to-purple-100 relative overflow-hidden flex-shrink-0"
+                             wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')">
                             <img src="{{ $event->photo_url }}" alt="{{ $event->title }}" class="w-full h-full object-cover">
                         </div>
 
                         <div class="p-4 flex flex-col flex-1 gap-3">
 
                             {{-- Date & Status --}}
-                            <div class="flex items-start justify-between gap-2">
+                            <div class="flex items-start justify-between gap-2"
+                                 wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')">
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-gray-500 truncate">{{ $eventDate->format('M d, Y') }}</p>
                                     <h3 class="text-sm font-extrabold text-gray-900 leading-snug mt-0.5 line-clamp-2">
@@ -455,14 +564,16 @@ new class extends Component {
 
                             {{-- Venue --}}
                             @if($event->venue)
-                            <div class="flex items-center gap-1.5 text-xs text-gray-500">
+                            <div class="flex items-center gap-1.5 text-xs text-gray-500"
+                                 wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')">
                                 <i class="fa-solid fa-location-dot text-gray-400 text-[10px]"></i>
                                 <span class="truncate">{{ $event->venue }}</span>
                             </div>
                             @endif
 
                             {{-- Organizer/Source --}}
-                            <div class="flex items-center gap-1.5 text-xs text-gray-500">
+                            <div class="flex items-center gap-1.5 text-xs text-gray-500"
+                                 wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')">
                                 <i class="fa-solid fa-{{ $event->event_source === 'ADMIN' ? 'shield-halved' : 'user-tie' }} text-gray-400 text-[10px]"></i>
                                 <span class="truncate">
                                     @if($event->event_source === 'ADMIN')
@@ -488,12 +599,23 @@ new class extends Component {
                                     <span class="text-[10px] text-gray-400">{{ $event->confirmed_count + $event->declined_count + $event->tentative_count }} total</span>
                                 </div>
 
-                                {{-- Click to view (right side) --}}
-                                <span class="card-view-hint inline-flex items-center gap-1.5 text-xs font-bold
-                                             px-3 py-1.5 rounded-lg text-white transition-colors"
-                                      style="background-color:#7a3f91;">
-                                    <i class="fa-solid fa-eye text-[10px]"></i> View
-                                </span>
+                                {{-- Action buttons (right side) --}}
+                                <div class="flex items-center gap-1.5">
+                                    @if(!$isCompleted)
+                                    <button type="button"
+                                            wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
+                                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                                        <i class="fas fa-share-nodes text-[10px]"></i>
+                                        <span class="hidden sm:inline">Share</span>
+                                    </button>
+                                    @endif
+                                    <button type="button"
+                                            wire:click.stop="viewEvent({{ $event->id }}, '{{ $event->event_source }}')"
+                                            class="card-view-hint inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg text-white cursor-pointer"
+                                            style="background-color:#7a3f91;">
+                                        <i class="fa-solid fa-eye text-[10px]"></i> View
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -512,7 +634,7 @@ new class extends Component {
                     @endphp
                     <p class="text-white text-xs sm:text-sm">
                         Showing <span class="font-bold">{{ $from }}–{{ $to }}</span>
-                        of <span class="font-bold">{{ $total }}</span> events
+                        of <span class="font-bold">{{ $total }}</span> event{{ $total !== 1 ? 's' : '' }}
                     </p>
                     <div class="flex items-center gap-1.5">
                         @if($this->events->onFirstPage())
@@ -569,13 +691,14 @@ new class extends Component {
 
     </div>
 
+
     {{-- ══ VIEW DETAILS MODAL ════════════════════════════════════════════════ --}}
     @if($showViewModal && $this->viewingEvent)
     @php
         $event = $this->viewingEvent;
         $eventDate = $event->event_date->setTimezone('Asia/Manila');
         $eventEndDate = $event->event_end_date?->setTimezone('Asia/Manila');
-        $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) || 
+        $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
                        (!$event->event_end_date && $event->event_date <= now('UTC'));
         $totalRsvp = $event->confirmed_count + $event->declined_count + $event->tentative_count;
         $alumniRsvp = $this->alumniRsvp;
@@ -584,20 +707,19 @@ new class extends Component {
          wire:keydown.escape.window="closeViewModal">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col m-in overflow-hidden relative">
 
-            {{-- Close X --}}
             <button wire:click="closeViewModal" type="button"
                     class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full
                            bg-white/25 hover:bg-white/40 transition text-white z-10">
                 <i class="fa-solid fa-xmark text-base"></i>
             </button>
 
-            {{-- ── Modal Header — Event Image ─────────────────────────────── --}}
+            {{-- Event Image --}}
             <div class="relative h-40 sm:h-56 flex-shrink-0 overflow-hidden"
                  style="background: linear-gradient(135deg, #7a3f91 0%, #5e2f72 100%);">
                 <img src="{{ $event->photo_url }}" alt="{{ $event->title }}" class="w-full h-full object-cover">
             </div>
 
-            {{-- ── Event Title & Meta ────────────────────────────────────── --}}
+            {{-- Event Title & Meta --}}
             <div class="px-6 py-5 border-b border-gray-100 flex-shrink-0"
                  style="background: linear-gradient(to bottom, #7a3f91 0%, #6a3080 100%);">
 
@@ -627,20 +749,20 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── Modal Body ──────────────────────────────────────────────── --}}
+            {{-- Modal Body --}}
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c">
 
                 {{-- Your RSVP Status --}}
                 @if($alumniRsvp)
+                @php
+                    $rsvpColor = match($alumniRsvp->response) {
+                        'CONFIRMED' => 'emerald',
+                        'DECLINED' => 'red',
+                        'TENTATIVE' => 'amber',
+                        default => 'gray'
+                    };
+                @endphp
                 <div class="px-6 py-4 border-b border-gray-100"
-                     @php
-                        $rsvpColor = match($alumniRsvp->response) {
-                            'CONFIRMED' => 'emerald',
-                            'DECLINED' => 'red',
-                            'TENTATIVE' => 'amber',
-                            default => 'gray'
-                        };
-                     @endphp
                      style="background-color: {{ match($rsvpColor) { 'emerald' => '#f0fdf4', 'red' => '#fef2f2', 'amber' => '#fffbeb', default => '#f9fafb' } }};">
                     <div class="flex items-center justify-between gap-3">
                         <div>
@@ -779,13 +901,18 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── Modal Footer ─────────────────────────────────────────────── --}}
+            {{-- Modal Footer --}}
             <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-3">
                 <button wire:click="closeViewModal" type="button"
                         class="px-5 py-2 rounded-xl text-sm font-bold text-gray-600 border border-gray-300 bg-white hover:bg-gray-50 transition">
                     <i class="fa-solid fa-xmark text-xs mr-1.5"></i> Close
                 </button>
                 @if(!$isCompleted)
+                <button type="button"
+                        wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
+                        class="px-4 py-2 bg-sky-100 text-sky-700 border border-sky-300 rounded-xl text-sm font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                    <i class="fas fa-share-nodes text-xs mr-1"></i> Share
+                </button>
                 <button type="button" wire:click="openRsvpModal"
                         class="px-5 py-2 rounded-xl text-sm font-bold text-white transition flex items-center gap-2"
                         style="background-color:#7a3f91;">
@@ -798,20 +925,19 @@ new class extends Component {
     </div>
     @endif
 
+
     {{-- ══ RSVP MODAL ════════════════════════════════════════════════════════ --}}
     @if($showRsvpModal)
     <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
          wire:keydown.escape.window="closeRsvpModal">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm m-in overflow-hidden relative">
 
-            {{-- Close X --}}
             <button wire:click="closeRsvpModal" type="button"
                     class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full
                            bg-gray-100 hover:bg-gray-200 transition text-gray-600">
                 <i class="fa-solid fa-xmark text-base"></i>
             </button>
 
-            {{-- ── Header ─────────────────────────────────────────────────── --}}
             <div class="px-6 py-5 border-b border-gray-100" style="background-color:#7a3f91;">
                 <h2 class="text-lg font-extrabold text-white flex items-center gap-2">
                     <i class="fa-solid fa-clipboard-check"></i> Confirm Your RSVP
@@ -819,13 +945,10 @@ new class extends Component {
                 <p class="text-sm text-white/75 mt-2">Let us know if you're attending this event</p>
             </div>
 
-            {{-- ── Body ────────────────────────────────────────────────────── --}}
             <div class="px-6 py-6 space-y-4">
 
-                {{-- RSVP Buttons --}}
                 <div class="space-y-3">
-                    {{-- Confirmed --}}
-                    <button type="button" wire:click="submitRsvp('CONFIRMED')" 
+                    <button type="button" wire:click="submitRsvp('CONFIRMED')"
                             wire:loading.attr="disabled"
                             class="w-full px-4 py-3 rounded-xl border-2 transition flex items-center gap-3
                                    {{ $rsvpResponse === 'CONFIRMED' ? 'border-emerald-500 bg-emerald-50' : 'border-emerald-200 hover:border-emerald-400 bg-white' }}">
@@ -837,8 +960,7 @@ new class extends Component {
                         <i class="fa-solid fa-chevron-right text-emerald-400 text-sm"></i>
                     </button>
 
-                    {{-- Tentative --}}
-                    <button type="button" wire:click="submitRsvp('TENTATIVE')" 
+                    <button type="button" wire:click="submitRsvp('TENTATIVE')"
                             wire:loading.attr="disabled"
                             class="w-full px-4 py-3 rounded-xl border-2 transition flex items-center gap-3
                                    {{ $rsvpResponse === 'TENTATIVE' ? 'border-amber-500 bg-amber-50' : 'border-amber-200 hover:border-amber-400 bg-white' }}">
@@ -850,8 +972,7 @@ new class extends Component {
                         <i class="fa-solid fa-chevron-right text-amber-400 text-sm"></i>
                     </button>
 
-                    {{-- Not Attending --}}
-                    <button type="button" wire:click="submitRsvp('DECLINED')" 
+                    <button type="button" wire:click="submitRsvp('DECLINED')"
                             wire:loading.attr="disabled"
                             class="w-full px-4 py-3 rounded-xl border-2 transition flex items-center gap-3
                                    {{ $rsvpResponse === 'DECLINED' ? 'border-red-500 bg-red-50' : 'border-red-200 hover:border-red-400 bg-white' }}">
@@ -864,12 +985,11 @@ new class extends Component {
                     </button>
                 </div>
 
-                {{-- Message (Optional) --}}
                 <div>
                     <label class="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2 block">
                         Message (Optional)
                     </label>
-                    <textarea wire:model="rsvpMessage" rows="2" 
+                    <textarea wire:model="rsvpMessage" rows="2"
                               placeholder="Add a personal note or question…"
                               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 transition resize-none"
                               maxlength="200"></textarea>
@@ -878,7 +998,6 @@ new class extends Component {
 
             </div>
 
-            {{-- ── Footer ─────────────────────────────────────────────────── --}}
             <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex gap-3">
                 <button wire:click="closeRsvpModal" type="button"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-gray-600 border border-gray-300 bg-white hover:bg-gray-50 transition">
@@ -889,5 +1008,250 @@ new class extends Component {
         </div>
     </div>
     @endif
+
+
+    {{-- ══ SHARE MODAL ════════════════════════════════════════════════════════ --}}
+    @if($showShareModal)
+    @php
+        $shareBaseUrl     = $this->eventsBaseUrl();
+        $shareDescPreview = mb_strlen($shareDescription) > 120
+            ? mb_substr($shareDescription, 0, 120) . '…'
+            : $shareDescription;
+
+        $timeStr = $shareTime . ($shareEndTime ? ' – ' . $shareEndTime : '');
+
+        $fbPostLines   = [];
+        $fbPostLines[] = "📅 Event: {$shareEventTitle}";
+        if ($shareDate)       $fbPostLines[] = "🗓️  {$shareDate}" . ($timeStr ? " · {$timeStr}" : '');
+        if ($shareVenue)      $fbPostLines[] = "📍 {$shareVenue}";
+        if ($shareOrganizer)  $fbPostLines[] = "🏫 Organized by: {$shareOrganizer}";
+        if ($shareTargetParts) $fbPostLines[] = "👥 Open for: {$shareTargetParts}";
+        $fbPostLines[] = '';
+        $fbPostLines[] = "See full details & RSVP on the PHILCST Alumni Portal 👇";
+        $fbPostLines[] = $shareBaseUrl;
+        if ($sharePhotoUrl) {
+            $fbPostLines[] = '';
+            $fbPostLines[] = "📸 Event cover: {$sharePhotoUrl}";
+        }
+        $fbPostText = implode("\n", $fbPostLines);
+
+        $fbShareUrl = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
+        $shareHost  = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+    @endphp
+
+    <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+         wire:keydown.escape="closeShareModal"
+         x-data="{
+             copied: false, fbCopied: false, messengerCopied: false,
+             fbText:  {{ json_encode($fbPostText) }},
+             baseUrl: {{ json_encode($shareBaseUrl) }},
+             fbUrl:   {{ json_encode($fbShareUrl) }},
+             photoUrl: {{ json_encode($sharePhotoUrl) }},
+             shareOnFacebook() {
+                 navigator.clipboard.writeText(this.fbText).then(() => {
+                     this.fbCopied = true; setTimeout(() => this.fbCopied = false, 6000);
+                 }).catch(() => {});
+                 const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+                 window.open(this.fbUrl,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             },
+             shareOnMessenger() {
+                 navigator.clipboard.writeText(this.fbText).then(() => {
+                     this.messengerCopied = true; setTimeout(() => this.messengerCopied = false, 6000);
+                 }).catch(() => {});
+                 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+                 if (isMobile) {
+                     window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
+                     setTimeout(() => window.open('https://www.messenger.com/','_blank'), 1500);
+                 } else {
+                     window.open('https://www.messenger.com/','_blank');
+                 }
+             },
+             copyLinkFn() {
+                 navigator.clipboard.writeText(this.baseUrl).then(() => {
+                     this.copied = true; setTimeout(() => this.copied = false, 2500);
+                 });
+             }
+         }"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100">
+
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0 scale-95"
+             x-transition:enter-end="opacity-100 scale-100">
+
+            {{-- Header --}}
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h2 class="text-base font-extrabold text-gray-800 flex items-center gap-2">
+                    <i class="fas fa-share-nodes text-sky-600"></i> Share Event
+                </h2>
+                <button wire:click="closeShareModal" type="button"
+                        class="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
+                    <i class="fas fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <div class="px-6 pt-5 pb-5 space-y-4">
+
+                {{-- FB copied banner --}}
+                <div x-show="fbCopied" x-cloak
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 -translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-start gap-3">
+                    <div class="w-7 h-7 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <i class="fas fa-check text-emerald-600 text-xs"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm font-extrabold text-emerald-800">Event text copied to clipboard!</p>
+                        <p class="text-xs text-emerald-700 mt-0.5 leading-snug">
+                            In the Facebook popup, click the text box then <strong>paste (Ctrl+V / ⌘V)</strong> — then you're ready to post!
+                        </p>
+                    </div>
+                </div>
+
+                {{-- Messenger copied banner --}}
+                <div x-show="messengerCopied" x-cloak
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 -translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-3">
+                    <div class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <i class="fas fa-check text-blue-600 text-xs"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm font-extrabold text-blue-800">Event text copied to clipboard!</p>
+                        <p class="text-xs text-blue-700 mt-0.5 leading-snug">
+                            Messenger is now open. Paste the text
+                            (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>)
+                            in a conversation or group chat to share!
+                        </p>
+                    </div>
+                </div>
+
+                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Preview — What recipients will see</p>
+
+                {{-- Preview card with event photo --}}
+                <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+
+                    {{-- Event cover photo --}}
+                    @if($sharePhotoUrl)
+                    <div class="w-full h-32 bg-gradient-to-br from-purple-200 to-purple-100 overflow-hidden">
+                        <img src="{{ $sharePhotoUrl }}" alt="{{ $shareEventTitle }}" class="w-full h-full object-cover">
+                    </div>
+                    @else
+                    <div class="w-full h-20 bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] flex items-center justify-center">
+                        <i class="fas fa-calendar-days text-white/50 text-3xl"></i>
+                    </div>
+                    @endif
+
+                    <div class="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] flex items-center justify-center flex-shrink-0 shadow">
+                            <i class="fas fa-calendar-check text-white text-sm"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-extrabold text-gray-900 text-sm leading-tight truncate">{{ $shareEventTitle }}</p>
+                            <p class="text-xs text-gray-700 mt-0.5 font-semibold">
+                                @if($shareOrganizer)<span class="text-purple-700">{{ $shareOrganizer }}</span>@endif
+                            </p>
+                            <div class="flex flex-wrap gap-1 mt-1.5">
+                                @if($shareDate)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">
+                                        <i class="fas fa-calendar text-[8px]"></i>{{ $shareDate }}
+                                    </span>
+                                @endif
+                                @if($shareTime)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700">
+                                        <i class="fas fa-clock text-[8px]"></i>{{ $shareTime }}{{ $shareEndTime ? ' – '.$shareEndTime : '' }}
+                                    </span>
+                                @endif
+                                @if($shareVenue)
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700">
+                                        <i class="fas fa-location-dot text-[8px]"></i>{{ $shareVenue }}
+                                    </span>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+
+                    @if($shareDescPreview)
+                    <div class="px-4 py-2.5 bg-white border-b border-gray-100">
+                        <p class="text-xs text-gray-600 leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
+                    </div>
+                    @endif
+
+                    <div class="px-4 py-2 bg-[#f0f2f5] flex items-center gap-2">
+                        <i class="fas fa-globe text-gray-400 text-[10px]"></i>
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+                    </div>
+                </div>
+
+                {{-- Info --}}
+                <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
+                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+                    <p class="text-xs text-blue-800 leading-snug">
+                        <strong>How it works:</strong> Click a share button — the full event text (including the cover photo link) is automatically copied to your clipboard and the platform opens.
+                        Just paste (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>) in your post or chat and you're done!
+                    </p>
+                </div>
+
+                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest pt-1">Share via</p>
+
+                {{-- Facebook --}}
+                <button type="button" @click="shareOnFacebook()"
+                        class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-extrabold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                    <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2">
+                            <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
+                        </svg>
+                    </span>
+                    <span class="flex-1 text-left">
+                        <span x-show="!fbCopied">Share on Facebook</span>
+                        <span x-show="fbCopied" x-cloak><i class="fas fa-check mr-1"></i> Facebook is open — paste the text!</span>
+                    </span>
+                    <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
+                </button>
+
+                {{-- Messenger --}}
+                <button type="button" @click="shareOnMessenger()"
+                        class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-extrabold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                    <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
+                            <defs><linearGradient id="mgr3" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
+                            <path fill="url(#mgr3)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
+                    </span>
+                    <span class="flex-1 text-left">
+                        <span x-show="!messengerCopied">Share on Messenger</span>
+                        <span x-show="messengerCopied" x-cloak><i class="fas fa-check mr-1"></i> Messenger is open — paste the text!</span>
+                    </span>
+                    <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
+                </button>
+                <p class="text-[10px] text-gray-400 text-center -mt-2">
+                    <i class="fas fa-users text-[9px] mr-1"></i>Works for private chats, group chats, and Messenger group pages.
+                </p>
+
+                {{-- Copy Link --}}
+                <button type="button" @click="copyLinkFn()"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-bold text-sm transition cursor-pointer group">
+                    <span class="w-8 h-8 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-xs"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p :class="copied ? 'text-emerald-600' : 'text-gray-700'" class="font-bold text-sm"
+                           x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
+                        <p class="text-[10px] text-gray-400 font-mono mt-0.5">{{ $shareBaseUrl }}</p>
+                    </div>
+                </button>
+
+                <p class="text-[11px] text-gray-400 text-center leading-snug pb-1">
+                    Sharing is disabled for events that have already ended.
+                </p>
+            </div>
+        </div>
+    </div>
+    @endif
+    {{-- END SHARE MODAL --}}
 
 </div>

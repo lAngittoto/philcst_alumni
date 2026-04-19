@@ -697,14 +697,14 @@ new class extends Component {
     x-transition:leave-start="opacity-100"
     x-transition:leave-end="opacity-0 translate-x-8"
     class="fixed top-5 right-4 sm:right-6 z-[100] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-xs sm:max-w-sm border w-full"
-    :class="{'bg-white border-emerald-300 text-emerald-800':type==='success','bg-white border-red-300 text-red-800':type==='error','bg-white border-blue-300 text-blue-800':type==='info'}"
+    :class="{'bg-white border-emerald-300 text-emerald-800':type==='success','bg-white border-red-300 text-red-800':type==='error','bg-white border-blue-300 text-blue-800':type==='info','bg-white border-amber-300 text-amber-800':type==='warning'}"
     style="display:none">
     <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-         :class="{'bg-emerald-100':type==='success','bg-red-100':type==='error','bg-blue-100':type==='info'}">
-        <i class="fas text-sm" :class="{'fa-check text-emerald-600':type==='success','fa-exclamation text-red-600':type==='error','fa-info text-blue-600':type==='info'}"></i>
+         :class="{'bg-emerald-100':type==='success','bg-red-100':type==='error','bg-blue-100':type==='info','bg-amber-100':type==='warning'}">
+        <i class="fas text-sm" :class="{'fa-check text-emerald-600':type==='success','fa-exclamation text-red-600':type==='error','fa-info text-blue-600':type==='info','fa-triangle-exclamation text-amber-600':type==='warning'}"></i>
     </div>
     <div class="flex-1 min-w-0">
-        <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
+        <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':type==='warning'?'Warning':'Error'"></p>
         <p class="text-xs mt-0.5 opacity-80 leading-snug break-words" x-text="msg"></p>
     </div>
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
@@ -905,12 +905,22 @@ new class extends Component {
                                     <button wire:click="viewEvent({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
                                         <i class="fas fa-eye text-[10px]"></i><span class="hidden sm:inline">View</span>
                                     </button>
-                                    {{-- SHARE — only for APPROVED or COMPLETED --}}
-                                    @if($canShare)
-                                    <button wire:click="openShareModal({{ $event->id }})" title="Share on Facebook" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 hover:bg-sky-100 rounded-lg transition">
-                                        <i class="fas fa-share-nodes text-[10px]"></i><span class="hidden sm:inline">Share</span>
-                                    </button>
+
+                                    {{-- SHARE — APPROVED: "Share", COMPLETED: "Share Highlights" --}}
+                                    @if($isApproved)
+                                        <button wire:click="openShareModal({{ $event->id }})"
+                                                title="Share on Facebook / Messenger"
+                                                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 hover:bg-sky-100 rounded-lg transition">
+                                            <i class="fas fa-share-nodes text-[10px]"></i><span class="hidden sm:inline">Share</span>
+                                        </button>
+                                    @elseif($isCompleted)
+                                        <button wire:click="openShareModal({{ $event->id }})"
+                                                title="Share event highlights"
+                                                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-green-700 bg-green-50 border border-green-300 hover:bg-green-100 rounded-lg transition">
+                                            <i class="fas fa-star text-[10px]"></i><span class="hidden sm:inline">Highlights</span>
+                                        </button>
                                     @endif
+
                                     {{-- EDIT / DELETE — only for non-deleted, non-completed, non-approved --}}
                                     @if(!$isDeleted && !$isCompleted && !$isApproved)
                                     <button wire:click="openEditModal({{ $event->id }})" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-600 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg transition">
@@ -1346,10 +1356,20 @@ new class extends Component {
 
         <div class="px-5 sm:px-8 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
             <button wire:click="closeViewModal" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 rounded-xl transition"><i class="fas fa-xmark text-xs"></i> Close</button>
-            {{-- Share button — APPROVED or COMPLETED only --}}
-            @if($canShare)
-            <button wire:click="openShareModal({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-sky-700 border border-sky-200 bg-sky-50 hover:bg-white hover:border-sky-400 rounded-xl transition"><i class="fas fa-share-nodes text-xs"></i> Share</button>
+
+            {{-- Share button — APPROVED: "Share", COMPLETED: "Share Highlights" --}}
+            @if($isApproved)
+                <button wire:click="openShareModal({{ $ev->id }})"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-sky-700 border border-sky-200 bg-sky-50 hover:bg-white hover:border-sky-400 rounded-xl transition">
+                    <i class="fas fa-share-nodes text-xs"></i> Share
+                </button>
+            @elseif($isCompleted)
+                <button wire:click="openShareModal({{ $ev->id }})"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-green-700 border border-green-300 bg-green-50 hover:bg-white hover:border-green-500 rounded-xl transition">
+                    <i class="fas fa-star text-xs"></i> Share Highlights
+                </button>
             @endif
+
             @if(!$isCompleted && !$isApproved && $ev->status !== 'ORGANIZER_DELETED')
             <button wire:click="confirmDelete({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition"><i class="fas fa-trash text-xs"></i> Delete</button>
             <button wire:click="openEditModal({{ $ev->id }})" class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 rounded-xl transition"><i class="fas fa-pen-to-square text-xs"></i> Edit</button>
@@ -1382,28 +1402,35 @@ new class extends Component {
 @endif
 
 {{-- ════════════════════════════════════════════════════════════════════════════
-     SHARE MODAL — Event Organizer
+     SHARE MODAL — Event Organizer v2
      ─────────────────────────────────────────────────────────────────────────
      • Only shows for APPROVED or COMPLETED events
+     • COMPLETED events show "Share Highlights" context in the modal
      • Shows the actual event photo in the preview card
-     • Copies full event text to clipboard then opens Facebook sharer
+     • Copies full event text to clipboard THEN opens FB / Messenger
+     • Messenger: native app on mobile (fb-messenger://), web on desktop
      • Copy Link copies the base events page URL (no event ID)
-     • FB pre-filled text is not supported by Facebook — clipboard workaround
 ════════════════════════════════════════════════════════════════════════════ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl = $this->eventsBaseUrl(); // e.g. https://alumniphilcst.com/events
     $shareHost    = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
     $fbShareUrl   = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
+    $isCompleted  = $shareEventStatus === 'COMPLETED';
 
     // Build full post text for clipboard
     $fbLines   = [];
-    $fbLines[] = "📅 Event: {$shareEventTitle}";
+    if ($isCompleted) {
+        $fbLines[] = "✨ Event Highlights: {$shareEventTitle}";
+        $fbLines[] = "🎉 Matagumpay na natapos ang aming event!";
+    } else {
+        $fbLines[] = "📅 Upcoming Event: {$shareEventTitle}";
+    }
     $fbLines[] = "🗓️ Date: {$shareEventDate}";
     $timeStr   = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
     $fbLines[] = "🕐 Time: {$timeStr}";
     $fbLines[] = "📍 Venue: {$shareEventVenue}" . ($shareEventVenueAddr ? ", {$shareEventVenueAddr}" : '');
-    if ($shareEventTarget)      $fbLines[] = "🎓 For: {$shareEventTarget}";
+    if ($shareEventTarget) $fbLines[] = "🎓 For: {$shareEventTarget}";
     if ($shareEventDescription) {
         $descPreview = mb_strlen($shareEventDescription) > 200
             ? mb_substr($shareEventDescription, 0, 200) . '…'
@@ -1412,35 +1439,38 @@ new class extends Component {
         $fbLines[] = $descPreview;
     }
     $fbLines[] = '';
-    $fbLines[] = "See more details on the PHILCST Alumni Portal 👇";
+    if ($isCompleted) {
+        $fbLines[] = "Salamat sa lahat ng dumalo! Makita ang iba pang events sa PHILCST Alumni Portal 👇";
+    } else {
+        $fbLines[] = "See more details on the PHILCST Alumni Portal 👇";
+    }
     $fbLines[] = $shareBaseUrl;
     $fbPostText = implode("\n", $fbLines);
 
-    // Short description for preview
+    // Short description for preview card
     $previewDesc = mb_strlen($shareEventDescription) > 120
         ? mb_substr($shareEventDescription, 0, 120) . '…'
         : $shareEventDescription;
 
     $timeDisplay = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
-    $isCompleted = $shareEventStatus === 'COMPLETED';
 @endphp
 
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeShareModal()"
      x-data="{
-         copied:   false,
-         fbCopied: false,
-         fbText:   {{ json_encode($fbPostText) }},
-         baseUrl:  {{ json_encode($shareBaseUrl) }},
-         fbUrl:    {{ json_encode($fbShareUrl) }},
+         copied:          false,
+         fbCopied:        false,
+         messengerCopied: false,
+         fbText:          {{ json_encode($fbPostText) }},
+         baseUrl:         {{ json_encode($shareBaseUrl) }},
+         fbUrl:           {{ json_encode($fbShareUrl) }},
 
+         // ── Share on Facebook ────────────────────────────────────────────────
          shareOnFacebook() {
              navigator.clipboard.writeText(this.fbText).then(() => {
                  this.fbCopied = true;
                  setTimeout(() => this.fbCopied = false, 7000);
-             }).catch(() => {
-                 // clipboard denied — still open FB
-             });
+             }).catch(() => {});
              const w = 620, h = 520;
              const left = Math.round((screen.width  - w) / 2);
              const top  = Math.round((screen.height - h) / 2);
@@ -1451,6 +1481,24 @@ new class extends Component {
              );
          },
 
+         // ── Share on Messenger ───────────────────────────────────────────────
+         shareOnMessenger() {
+             navigator.clipboard.writeText(this.fbText).then(() => {
+                 this.messengerCopied = true;
+                 setTimeout(() => this.messengerCopied = false, 7000);
+             }).catch(() => {});
+             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+             if (isMobile) {
+                 window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
+                 setTimeout(() => {
+                     window.open('https://www.messenger.com/', '_blank');
+                 }, 1500);
+             } else {
+                 window.open('https://www.messenger.com/', '_blank');
+             }
+         },
+
+         // ── Copy Link ────────────────────────────────────────────────────────
          copyLinkFn() {
              navigator.clipboard.writeText(this.baseUrl).then(() => {
                  this.copied = true;
@@ -1462,15 +1510,19 @@ new class extends Component {
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100">
 
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[92vh] flex flex-col"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100">
 
-        {{-- ── Header ──────────────────────────────────────────────────────── --}}
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        {{-- ── Modal header ──────────────────────────────────────────────────── --}}
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-base font-extrabold text-gray-800 flex items-center gap-2">
-                <i class="fas fa-share-nodes text-sky-600"></i> Share Event
+                @if($isCompleted)
+                    <i class="fas fa-star text-green-600"></i> Share Event Highlights
+                @else
+                    <i class="fas fa-share-nodes text-sky-600"></i> Share Event
+                @endif
             </h2>
             <button wire:click="closeShareModal" type="button"
                     class="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
@@ -1478,9 +1530,24 @@ new class extends Component {
             </button>
         </div>
 
-        <div class="px-6 pt-5 pb-5 space-y-4">
+        <div class="flex-1 overflow-y-auto px-6 pt-5 pb-5 space-y-4" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;">
 
-            {{-- ── FB clipboard success banner ──────────────────────────── --}}
+            {{-- ── Completed highlight context banner ──────────────────────── --}}
+            @if($isCompleted)
+            <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-start gap-3">
+                <div class="w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <i class="fas fa-circle-check text-green-600 text-xs"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-extrabold text-green-800">Event Completed!</p>
+                    <p class="text-xs text-green-700 mt-0.5 leading-snug">
+                        I-share ang highlights ng event na ito para makita ng lahat. Ang texto ay may kasamang recap na mensahe!
+                    </p>
+                </div>
+            </div>
+            @endif
+
+            {{-- ── FB "text copied" success banner ─────────────────────────── --}}
             <div x-show="fbCopied" x-cloak
                  x-transition:enter="transition ease-out duration-300"
                  x-transition:enter-start="opacity-0 -translate-y-2"
@@ -1490,7 +1557,7 @@ new class extends Component {
                     <i class="fas fa-check text-emerald-600 text-xs"></i>
                 </div>
                 <div>
-                    <p class="text-sm font-extrabold text-emerald-800">Event text copied to clipboard!</p>
+                    <p class="text-sm font-extrabold text-emerald-800">Event text copied!</p>
                     <p class="text-xs text-emerald-700 mt-0.5 leading-snug">
                         Sa Facebook popup, i-click ang text box tapos
                         <strong>i-paste (Ctrl+V / ⌘V)</strong> — tapos na, ready to post!
@@ -1498,29 +1565,48 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── Section label ──────────────────────────────────────────── --}}
+            {{-- ── Messenger "text copied" success banner ───────────────────── --}}
+            <div x-show="messengerCopied" x-cloak
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 -translate-y-2"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-3">
+                <div class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <i class="fas fa-check text-blue-600 text-xs"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-extrabold text-blue-800">Event text copied!</p>
+                    <p class="text-xs text-blue-700 mt-0.5 leading-snug">
+                        Bukas na ang Messenger. I-paste ang text
+                        (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>)
+                        sa GC o private message mo!
+                    </p>
+                </div>
+            </div>
+
+            {{-- ── Preview label ──────────────────────────────────────────────── --}}
             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
                 Preview — What people will see
             </p>
 
-            {{-- ── Event preview card ─────────────────────────────────────── --}}
+            {{-- ── Event preview card ─────────────────────────────────────────── --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
 
                 {{-- Event photo --}}
                 <div class="relative">
                     <img src="{{ $shareEventPhotoUrl }}"
                          alt="{{ $shareEventTitle }}"
-                         class="w-full h-36 object-cover {{ $isCompleted ? 'brightness-90' : '' }}"
+                         class="w-full h-40 object-cover {{ $isCompleted ? 'brightness-90' : '' }}"
                          onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-                    {{-- Fallback if no photo --}}
-                    <div class="hidden w-full h-36 bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] items-center justify-center">
+                    {{-- Fallback gradient if photo fails --}}
+                    <div class="hidden w-full h-40 bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] items-center justify-center">
                         <i class="fas fa-calendar-days text-white text-4xl opacity-60"></i>
                     </div>
                     {{-- Status badge over photo --}}
                     <div class="absolute top-2 right-2">
                         @if($isCompleted)
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-green-600 text-white rounded-full text-[10px] font-bold shadow">
-                                <i class="fas fa-circle-check text-[8px]"></i> Completed
+                                <i class="fas fa-star text-[8px]"></i> Highlights
                             </span>
                         @else
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-bold shadow">
@@ -1562,24 +1648,24 @@ new class extends Component {
                     <span class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
                 </div>
             </div>
-            {{-- ── End preview card ──────────────────────────────────────── --}}
+            {{-- ── End preview card ─────────────────────────────────────────── --}}
 
-            {{-- ── How it works hint ──────────────────────────────────────── --}}
+            {{-- ── How it works hint ────────────────────────────────────────── --}}
             <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
                 <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
                 <p class="text-xs text-blue-800 leading-snug">
-                    <strong>How it works:</strong> Click <em>Share on Facebook</em> —
-                    the full event details will be automatically copied,
-                    then Facebook will open. Just paste
+                    <strong>How it works:</strong> I-click ang share button —
+                    awtomatiko nang mako-kopya ang buong event text,
+                    tapos mag-o-open ang FB o Messenger. I-paste lang
                     (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>)
-                    into your post, and you're done!
+                    sa post o GC mo, tapos done!
                 </p>
             </div>
 
-            {{-- ── Share via label ─────────────────────────────────────── --}}
+            {{-- ── Share via label ───────────────────────────────────────────── --}}
             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest pt-1">Share via</p>
 
-            {{-- ── Facebook Share Button ──────────────────────────────── --}}
+            {{-- ── Facebook Share Button ─────────────────────────────────────── --}}
             <button type="button"
                     @click="shareOnFacebook()"
                     class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl
@@ -1601,7 +1687,43 @@ new class extends Component {
                 <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
             </button>
 
-            {{-- ── Copy Link button (base URL) ────────────────────────── --}}
+            {{-- ── Messenger Share Button ────────────────────────────────────── --}}
+            <button type="button"
+                    @click="shareOnMessenger()"
+                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl
+                           bg-gradient-to-r from-[#00B2FF] to-[#006AFF]
+                           hover:from-[#00a0e6] hover:to-[#005ee6]
+                           active:from-[#008ecc] active:to-[#0052cc]
+                           text-white font-extrabold text-sm
+                           shadow hover:shadow-md
+                           transition-all duration-150 cursor-pointer group">
+                <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    {{-- Official Messenger lightning-bolt icon (SVG) --}}
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
+                        <defs>
+                            <linearGradient id="mgr-ev" x1="0%" y1="100%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#00B2FF"/>
+                                <stop offset="100%" style="stop-color:#006AFF"/>
+                            </linearGradient>
+                        </defs>
+                        <path fill="url(#mgr-ev)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                    </svg>
+                </span>
+                <span class="flex-1 text-left">
+                    <span x-show="!messengerCopied">Share on Messenger</span>
+                    <span x-show="messengerCopied" x-cloak>
+                        <i class="fas fa-check mr-1"></i> Bukas na! I-paste sa Messenger
+                    </span>
+                </span>
+                <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
+            </button>
+            {{-- Messenger hint --}}
+            <p class="text-[10px] text-gray-400 text-center -mt-2">
+                <i class="fas fa-users text-[9px] mr-1"></i>
+                Works sa private chat, GC, at group pages ng Messenger.
+            </p>
+
+            {{-- ── Copy Link button ──────────────────────────────────────────── --}}
             <button type="button"
                     @click="copyLinkFn()"
                     class="w-full flex items-center gap-3 px-4 py-3 rounded-xl
@@ -1619,10 +1741,10 @@ new class extends Component {
                 </div>
             </button>
 
-            {{-- ── Footer note ─────────────────────────────────────────── --}}
+            {{-- ── Footer note ─────────────────────────────────────────────── --}}
             <p class="text-[11px] text-gray-400 text-center leading-snug pb-1">
                 @if($isCompleted)
-                    <i class="fas fa-circle-check text-green-500 mr-1"></i>This event has been <strong class="text-gray-500">completed</strong> — share it as a recap!
+                    <i class="fas fa-star text-green-500 mr-1"></i>Share this as an <strong class="text-gray-500">event recap</strong> para makita ng lahat ang naging tagumpay!
                 @else
                     <i class="fas fa-circle-check text-emerald-500 mr-1"></i>This event is <strong class="text-gray-500">approved & live</strong> — safe to share with alumni!
                 @endif

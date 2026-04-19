@@ -5,6 +5,7 @@ use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\AlumniPasswordChangeController;
 use App\Http\Controllers\AlumniInformationController;
 use App\Http\Controllers\CourseController;
+use App\Http\Controllers\MessengerController;
 use App\Http\Controllers\OrganizerController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -69,9 +70,15 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
     Route::put('/alumni/information', [AlumniInformationController::class, 'update'])->name('alumni.information.update');
 
     // ── Protected pages ───────────────────────────────────────────────────────
-    Route::view('/alumni/dashboard',   'alumni.dashboard-wrapper')         ->name('alumni.dashboard');
-    Route::view('/job/opportunities',  'alumni.job-opportunities-wrapper') ->name('job.opportunities');
-    Route::view('/upcoming/events',    'alumni.upcoming-events-wrapper')   ->name('upcoming.events');
+    Route::view('/alumni/dashboard',  'alumni.dashboard-wrapper')         ->name('alumni.dashboard');
+    Route::view('/alumni/employment', 'alumni.employment-wrapper')        ->name('alumni.employment');
+    Route::view('/alumni/messenger',  'alumni.messenger-wrapper')         ->name('alumni.messenger');
+    Route::view('/job/opportunities', 'alumni.job-opportunities-wrapper') ->name('job.opportunities');
+    Route::view('/upcoming/events',   'alumni.upcoming-events-wrapper')   ->name('upcoming.events');
+
+    // ── Messenger API ─────────────────────────────────────────────────────────
+    Route::post('/messenger/ping',              [MessengerController::class, 'ping'])        ->name('messenger.ping');
+    Route::get('/messenger/{roomId}/online',    [MessengerController::class, 'onlineCount']) ->name('messenger.online');
 });
 
 // ===================================

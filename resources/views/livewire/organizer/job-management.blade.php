@@ -9,15 +9,24 @@
  *  - All create / edit / delete actions are written to the audit log
  *  - Share to Facebook: copies full post text to clipboard THEN opens FB
  *    (Facebook removed quote= support — clipboard+open is the fix)
+ *  - Share to Messenger: copies full post text to clipboard THEN opens Messenger
  *
- * FIX v3:
- *   1. Both "Share on Facebook" and "Copy Link" now use the BASE jobs URL
- *      with NO job ID — e.g. https://alumniphilcst.com/jobs
- *   2. FB share: copies full job text to clipboard, then opens FB sharer
- *      with the base URL so FB renders the OG card for the jobs listing.
- *   3. NOTE: Facebook intentionally removed pre-filled text support on
- *      their sharer. The clipboard approach is the only clean workaround.
- *   4. APP_URL in .env must be your real domain:
+ * FIX v5:
+ *   + Added `qualifications` and `application_instructions` fields.
+ *     Both are REQUIRED on create and edit.
+ *     Displayed in View modal, included in share text, written to audit log.
+ *
+ * FIX v4:
+ *   1. Share button is now HIDDEN when the job deadline has already passed
+ *      — both in the table row and inside the View modal.
+ *   2. Added "Share on Messenger" button in the Share modal.
+ *      Mobile → opens fb-messenger:// URI. Desktop → opens messenger.com.
+ *   3. Edit / Delete buttons — only visible when the organizer owns the job
+ *      (organizer_id is NOT null). Admin-posted jobs show View + Share only.
+ *      (Share is additionally blocked if deadline is passed.)
+ *   4. Both FB and Messenger share use the BASE jobs URL with NO job ID:
+ *        https://alumniphilcst.com/jobs
+ *   5. APP_URL in .env must be your real domain:
  *        APP_URL=https://alumniphilcst.com
  */
 
@@ -41,42 +50,50 @@ new class extends Component {
     public string $filterType   = '';
     public string $filterSort   = 'recent';
 
-    public bool   $showPostModal      = false;
-    public string $postJobTitle       = '';
-    public string $postOrgCategory    = '';
-    public string $postPartnerName    = '';
-    public string $postPartnerType    = '';
-    public string $postCustomName     = '';
-    public string $postCustomType     = '';
-    public string $postLocation       = '';
-    public string $postEmpType        = '';
-    public string $postExpLevel       = '';
-    public string $postSalary         = '';
-    public string $postDeadline       = '';
-    public string $postDescription    = '';
-    public array  $postTargetColleges = [];
-    public array  $postErrors         = [];
+    // ── Post modal fields ─────────────────────────────────────────────────────
+    public bool   $showPostModal                    = false;
+    public string $postJobTitle                     = '';
+    public string $postOrgCategory                  = '';
+    public string $postPartnerName                  = '';
+    public string $postPartnerType                  = '';
+    public string $postCustomName                   = '';
+    public string $postCustomType                   = '';
+    public string $postLocation                     = '';
+    public string $postEmpType                      = '';
+    public string $postExpLevel                     = '';
+    public string $postSalary                       = '';
+    public string $postDeadline                     = '';
+    public string $postDescription                  = '';
+    public string $postQualifications               = '';   // ← NEW
+    public string $postApplicationInstructions      = '';   // ← NEW
+    public array  $postTargetColleges               = [];
+    public array  $postErrors                       = [];
 
     public string $philcstName     = '';
     public string $philcstLocation = '';
 
+    // ── View modal ────────────────────────────────────────────────────────────
     public bool $showViewModal = false;
     public ?int $viewingJobId  = null;
 
-    public bool   $showEditModal      = false;
-    public ?int   $editingJobId       = null;
-    public string $editJobTitle       = '';
-    public string $editCompany        = '';
-    public string $editCompanyType    = '';
-    public string $editLocation       = '';
-    public string $editEmpType        = '';
-    public string $editExpLevel       = '';
-    public string $editSalary         = '';
-    public string $editDeadline       = '';
-    public string $editDescription    = '';
-    public array  $editTargetColleges = [];
-    public array  $editErrors         = [];
+    // ── Edit modal fields ─────────────────────────────────────────────────────
+    public bool   $showEditModal                    = false;
+    public ?int   $editingJobId                     = null;
+    public string $editJobTitle                     = '';
+    public string $editCompany                      = '';
+    public string $editCompanyType                  = '';
+    public string $editLocation                     = '';
+    public string $editEmpType                      = '';
+    public string $editExpLevel                     = '';
+    public string $editSalary                       = '';
+    public string $editDeadline                     = '';
+    public string $editDescription                  = '';
+    public string $editQualifications               = '';   // ← NEW
+    public string $editApplicationInstructions      = '';   // ← NEW
+    public array  $editTargetColleges               = [];
+    public array  $editErrors                       = [];
 
+    // ── Delete modal ──────────────────────────────────────────────────────────
     public bool   $showDeleteModal = false;
     public ?int   $deleteJobId     = null;
     public string $deleteJobTitle  = '';
@@ -408,7 +425,9 @@ new class extends Component {
             }
         }
 
-        if (!trim($this->postDescription)) $errors['postDescription'] = 'Job description is required.';
+        if (!trim($this->postDescription))             $errors['postDescription']             = 'Job description is required.';
+        if (!trim($this->postQualifications))          $errors['postQualifications']          = 'Qualifications are required.';
+        if (!trim($this->postApplicationInstructions)) $errors['postApplicationInstructions'] = 'Application instructions are required.';
 
         if (empty($this->postTargetColleges)) {
             $errors['postTargetColleges'] = 'Your college has been auto-selected.';
@@ -446,20 +465,22 @@ new class extends Component {
         }
 
         $job = JobPosting::create([
-            'organizer_id'     => $org?->id,
-            'job_title'        => $this->sanitize($this->postJobTitle),
-            'company_name'     => $companyName,
-            'company_type'     => $companyType,
-            'location'         => $this->postOrgCategory === 'philcst' ? $this->philcstLocation : $this->sanitize($this->postLocation),
-            'employment_type'  => $this->sanitize($this->postEmpType),
-            'experience_level' => $this->sanitize($this->postExpLevel),
-            'salary'           => $this->sanitize($this->postSalary) ?: null,
-            'deadline'         => $this->postDeadline,
-            'description'      => $this->sanitize($this->postDescription),
-            'target_college'   => implode(',', $this->postTargetColleges) ?: null,
-            'status'           => 'ACTIVE',
-            'updated_by'       => auth()->user()->name,
-            'updated_by_role'  => 'organizer',
+            'organizer_id'             => $org?->id,
+            'job_title'                => $this->sanitize($this->postJobTitle),
+            'company_name'             => $companyName,
+            'company_type'             => $companyType,
+            'location'                 => $this->postOrgCategory === 'philcst' ? $this->philcstLocation : $this->sanitize($this->postLocation),
+            'employment_type'          => $this->sanitize($this->postEmpType),
+            'experience_level'         => $this->sanitize($this->postExpLevel),
+            'salary'                   => $this->sanitize($this->postSalary) ?: null,
+            'deadline'                 => $this->postDeadline,
+            'description'              => $this->sanitize($this->postDescription),
+            'qualifications'           => $this->sanitize($this->postQualifications),           // ← NEW
+            'application_instructions' => $this->sanitize($this->postApplicationInstructions), // ← NEW
+            'target_college'           => implode(',', $this->postTargetColleges) ?: null,
+            'status'                   => 'ACTIVE',
+            'updated_by'               => auth()->user()->name,
+            'updated_by_role'          => 'organizer',
         ]);
 
         $this->logAudit(
@@ -474,16 +495,18 @@ new class extends Component {
                 \Carbon\Carbon::parse($job->deadline)->format('M j, Y')
             ),
             newValues: [
-                'job_title'        => $job->job_title,
-                'company_name'     => $job->company_name,
-                'company_type'     => $job->company_type,
-                'location'         => $job->location,
-                'employment_type'  => $job->employment_type,
-                'experience_level' => $job->experience_level,
-                'salary'           => $job->salary ?? 'Not disclosed',
-                'deadline'         => $job->deadline,
-                'target_college'   => $job->target_college,
-                'status'           => $job->status,
+                'job_title'                => $job->job_title,
+                'company_name'             => $job->company_name,
+                'company_type'             => $job->company_type,
+                'location'                 => $job->location,
+                'employment_type'          => $job->employment_type,
+                'experience_level'         => $job->experience_level,
+                'salary'                   => $job->salary ?? 'Not disclosed',
+                'deadline'                 => $job->deadline,
+                'target_college'           => $job->target_college,
+                'qualifications'           => $job->qualifications,
+                'application_instructions' => $job->application_instructions,
+                'status'                   => $job->status,
             ],
             severity: 'info'
         );
@@ -499,6 +522,7 @@ new class extends Component {
         $this->postPartnerName = $this->postPartnerType = $this->postCustomName = $this->postCustomType = '';
         $this->postLocation = $this->postEmpType = $this->postExpLevel = $this->postSalary = '';
         $this->postDeadline = $this->postDescription = '';
+        $this->postQualifications = $this->postApplicationInstructions = '';   // ← NEW
         $this->postTargetColleges = [];
         $this->postErrors = [];
     }
@@ -516,17 +540,19 @@ new class extends Component {
         $job = app(JobController::class)->getJob($id);
         $this->guardOwnership($job);
 
-        $this->editingJobId       = $id;
-        $this->editJobTitle       = $job->job_title;
-        $this->editCompany        = $job->company_name;
-        $this->editCompanyType    = $job->company_type;
-        $this->editLocation       = $job->location ?? '';
-        $this->editEmpType        = $job->employment_type;
-        $this->editExpLevel       = $job->experience_level;
-        $this->editSalary         = $job->salary ?? '';
-        $this->editDeadline       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
-        $this->editDescription    = $job->description;
-        $this->editTargetColleges = !empty($job->target_college)
+        $this->editingJobId                = $id;
+        $this->editJobTitle                = $job->job_title;
+        $this->editCompany                 = $job->company_name;
+        $this->editCompanyType             = $job->company_type;
+        $this->editLocation                = $job->location ?? '';
+        $this->editEmpType                 = $job->employment_type;
+        $this->editExpLevel                = $job->experience_level;
+        $this->editSalary                  = $job->salary ?? '';
+        $this->editDeadline                = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
+        $this->editDescription             = $job->description;
+        $this->editQualifications          = $job->qualifications ?? '';           // ← NEW
+        $this->editApplicationInstructions = $job->application_instructions ?? ''; // ← NEW
+        $this->editTargetColleges          = !empty($job->target_college)
             ? explode(',', $job->target_college)
             : [$this->organizerCollege];
         $this->editErrors     = [];
@@ -560,7 +586,9 @@ new class extends Component {
             }
         }
 
-        if (!trim($this->editDescription)) $errors['editDescription'] = 'Job description is required.';
+        if (!trim($this->editDescription))             $errors['editDescription']             = 'Job description is required.';
+        if (!trim($this->editQualifications))          $errors['editQualifications']          = 'Qualifications are required.';
+        if (!trim($this->editApplicationInstructions)) $errors['editApplicationInstructions'] = 'Application instructions are required.';
 
         if (empty($this->editTargetColleges)) {
             $errors['editTargetColleges'] = 'Your college has been auto-selected.';
@@ -594,43 +622,49 @@ new class extends Component {
         $this->guardOwnership($job);
 
         $before = [
-            'job_title'        => $job->job_title,
-            'company_name'     => $job->company_name,
-            'company_type'     => $job->company_type,
-            'location'         => $job->location,
-            'employment_type'  => $job->employment_type,
-            'experience_level' => $job->experience_level,
-            'salary'           => $job->salary ?? 'Not disclosed',
-            'deadline'         => $job->deadline,
-            'target_college'   => $job->target_college,
+            'job_title'                => $job->job_title,
+            'company_name'             => $job->company_name,
+            'company_type'             => $job->company_type,
+            'location'                 => $job->location,
+            'employment_type'          => $job->employment_type,
+            'experience_level'         => $job->experience_level,
+            'salary'                   => $job->salary ?? 'Not disclosed',
+            'deadline'                 => $job->deadline,
+            'target_college'           => $job->target_college,
+            'qualifications'           => $job->qualifications,
+            'application_instructions' => $job->application_instructions,
         ];
 
         $job->update([
-            'job_title'        => $this->sanitize($this->editJobTitle),
-            'company_name'     => $this->sanitize($this->editCompany),
-            'company_type'     => $this->sanitize($this->editCompanyType),
-            'location'         => $this->sanitize($this->editLocation),
-            'employment_type'  => $this->sanitize($this->editEmpType),
-            'experience_level' => $this->sanitize($this->editExpLevel),
-            'salary'           => $this->sanitize($this->editSalary) ?: null,
-            'deadline'         => $this->editDeadline,
-            'description'      => $this->sanitize($this->editDescription),
-            'target_college'   => implode(',', $this->editTargetColleges) ?: null,
+            'job_title'                => $this->sanitize($this->editJobTitle),
+            'company_name'             => $this->sanitize($this->editCompany),
+            'company_type'             => $this->sanitize($this->editCompanyType),
+            'location'                 => $this->sanitize($this->editLocation),
+            'employment_type'          => $this->sanitize($this->editEmpType),
+            'experience_level'         => $this->sanitize($this->editExpLevel),
+            'salary'                   => $this->sanitize($this->editSalary) ?: null,
+            'deadline'                 => $this->editDeadline,
+            'description'              => $this->sanitize($this->editDescription),
+            'qualifications'           => $this->sanitize($this->editQualifications),           // ← NEW
+            'application_instructions' => $this->sanitize($this->editApplicationInstructions), // ← NEW
+            'target_college'           => implode(',', $this->editTargetColleges) ?: null,
             // 'status' intentionally omitted — preserved as-is, Admin controls this
-            'updated_by'       => auth()->user()->name,
-            'updated_by_role'  => 'organizer',
+            'updated_by'               => auth()->user()->name,
+            'updated_by_role'          => 'organizer',
         ]);
 
         $after = [
-            'job_title'        => $this->sanitize($this->editJobTitle),
-            'company_name'     => $this->sanitize($this->editCompany),
-            'company_type'     => $this->sanitize($this->editCompanyType),
-            'location'         => $this->sanitize($this->editLocation),
-            'employment_type'  => $this->sanitize($this->editEmpType),
-            'experience_level' => $this->sanitize($this->editExpLevel),
-            'salary'           => $this->sanitize($this->editSalary) ?: 'Not disclosed',
-            'deadline'         => $this->editDeadline,
-            'target_college'   => implode(',', $this->editTargetColleges) ?: null,
+            'job_title'                => $this->sanitize($this->editJobTitle),
+            'company_name'             => $this->sanitize($this->editCompany),
+            'company_type'             => $this->sanitize($this->editCompanyType),
+            'location'                 => $this->sanitize($this->editLocation),
+            'employment_type'          => $this->sanitize($this->editEmpType),
+            'experience_level'         => $this->sanitize($this->editExpLevel),
+            'salary'                   => $this->sanitize($this->editSalary) ?: 'Not disclosed',
+            'deadline'                 => $this->editDeadline,
+            'target_college'           => implode(',', $this->editTargetColleges) ?: null,
+            'qualifications'           => $this->sanitize($this->editQualifications),
+            'application_instructions' => $this->sanitize($this->editApplicationInstructions),
         ];
 
         $this->logAudit(
@@ -658,6 +692,7 @@ new class extends Component {
         $this->editJobTitle = $this->editCompany = $this->editCompanyType = '';
         $this->editLocation = $this->editEmpType = $this->editExpLevel    = '';
         $this->editSalary   = $this->editDeadline = $this->editDescription = '';
+        $this->editQualifications = $this->editApplicationInstructions = ''; // ← NEW
         $this->editTargetColleges = [];
         $this->editErrors = [];
     }
@@ -733,6 +768,17 @@ new class extends Component {
     {
         $this->guardAuth();
         $job = JobPosting::findOrFail($id);
+
+        // ── Block sharing if deadline has already passed ──────────────────────
+        $deadlinePassed = \Carbon\Carbon::parse($job->deadline)
+            ->setTimezone('Asia/Manila')->startOfDay()
+            ->lt(now('Asia/Manila')->startOfDay());
+
+        if ($deadlinePassed) {
+            $this->dispatch('flash-message', type: 'warning', message: 'Hindi na maaaring i-share ang job posting na ito — deadline na.');
+            return;
+        }
+
         $this->shareJobId       = $id;
         $this->shareJobTitle    = $job->job_title;
         $this->shareCompany     = $job->company_name;
@@ -762,8 +808,8 @@ new class extends Component {
     }
 
     /**
-     * Base jobs listing URL — used for BOTH Share on Facebook and Copy Link.
-     * No job ID, just https://alumniphilcst.com/jobs
+     * Base jobs listing URL — used for FB, Messenger, and Copy Link.
+     * No job ID: https://alumniphilcst.com/jobs
      */
     public function jobsBaseUrl(): string
     {
@@ -913,6 +959,7 @@ new class extends Component {
                             $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
                             $isInactive       = $job->status === 'INACTIVE';
                             $shouldBeOrange   = $isDeadlinePassed || $isInactive;
+                            $canShare         = !$isDeadlinePassed;
                         @endphp
                         <tr class="transition-colors {{ $shouldBeOrange ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-purple-50' }}">
                             <td class="px-4 sm:px-5 py-3.5 max-w-[160px] sm:max-w-[200px]">
@@ -961,27 +1008,34 @@ new class extends Component {
                             </td>
                             <td class="px-4 sm:px-5 py-3.5 text-center">
                                 <div class="flex items-center justify-center gap-1.5 flex-wrap">
-                                    {{-- VIEW --}}
+                                    {{-- VIEW — always visible --}}
                                     <button wire:click="viewJob({{ $job->id }})"
                                             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 border border-purple-300 hover:bg-white hover:border-purple-500 transition cursor-pointer">
                                         <i class="fas fa-eye text-xs"></i>
                                         <span class="hidden sm:inline">View</span>
                                     </button>
-                                    {{-- SHARE --}}
-                                    <button wire:click="openShareModal({{ $job->id }})"
-                                            title="Share this job"
-                                            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
-                                        <i class="fas fa-share-nodes text-xs"></i>
-                                        <span class="hidden sm:inline">Share</span>
-                                    </button>
+                                    {{-- SHARE — hidden when deadline passed --}}
+                                    @if($canShare)
+                                        <button wire:click="openShareModal({{ $job->id }})"
+                                                title="Share this job"
+                                                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                                            <i class="fas fa-share-nodes text-xs"></i>
+                                            <span class="hidden sm:inline">Share</span>
+                                        </button>
+                                    @else
+                                        <span title="Deadline passed — sharing disabled"
+                                              class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed select-none">
+                                            <i class="fas fa-share-nodes text-xs"></i>
+                                            <span class="hidden sm:inline">Share</span>
+                                        </span>
+                                    @endif
+                                    {{-- EDIT + DELETE — only when organizer owns the job --}}
                                     @if(!$isAdminPosted)
-                                        {{-- EDIT --}}
                                         <button wire:click="openEditModal({{ $job->id }})"
                                                 class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300 hover:bg-white hover:border-blue-500 transition cursor-pointer">
                                             <i class="fas fa-pen-to-square text-xs"></i>
                                             <span class="hidden sm:inline">Edit</span>
                                         </button>
-                                        {{-- DELETE --}}
                                         <button wire:click="confirmDelete({{ $job->id }})"
                                                 class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-100 text-red-700 border border-red-300 hover:bg-white hover:border-red-500 transition cursor-pointer">
                                             <i class="fas fa-trash text-xs"></i>
@@ -1049,7 +1103,9 @@ new class extends Component {
     </div>
 </div>
 
-{{-- POST MODAL --}}
+{{-- ═══════════════════════════════════════════════════════════════════════
+     POST MODAL
+═══════════════════════════════════════════════════════════════════════ --}}
 @if($showPostModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closePostModal">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden relative">
@@ -1066,12 +1122,15 @@ new class extends Component {
         </div>
         @endif
         <div class="flex-1 overflow-y-auto px-7 py-6 space-y-5">
+            {{-- Job Title --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Job Title <span class="text-red-500">*</span></label>
                 <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
                        class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postJobTitle'])?'border-red-400 bg-red-50':'' }}">
                 @if(isset($postErrors['postJobTitle']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
             </div>
+
+            {{-- Organization --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="bg-gray-50 px-5 py-3 border-b border-gray-200 flex items-center gap-2">
                     <i class="fas fa-building text-[#7a3f91] text-sm"></i>
@@ -1161,6 +1220,8 @@ new class extends Component {
                     @endif
                 </div>
             </div>
+
+            {{-- Employment Type + Experience Level --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Employment Type <span class="text-red-500">*</span></label>
@@ -1179,6 +1240,8 @@ new class extends Component {
                     @if(isset($postErrors['postExpLevel']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postExpLevel'] }}</p>@endif
                 </div>
             </div>
+
+            {{-- Salary + Deadline --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Salary <span class="text-gray-400 font-normal">(Optional)</span></label>
@@ -1191,6 +1254,8 @@ new class extends Component {
                     @if(isset($postErrors['postDeadline']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                 </div>
             </div>
+
+            {{-- Target College --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Target College <span class="text-red-500">*</span></label>
                 <div class="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
@@ -1202,11 +1267,39 @@ new class extends Component {
                     <p class="text-xs text-blue-700"><i class="fas fa-info-circle mr-1"></i>You can only post jobs for your own college's alumni.</p>
                 </div>
             </div>
+
+            {{-- Job Description --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Job Description <span class="text-red-500">*</span></label>
-                <textarea wire:model.defer="postDescription" rows="6" placeholder="Describe the role, responsibilities, qualifications&hellip;" maxlength="5000"
+                <textarea wire:model.defer="postDescription" rows="5" placeholder="Describe the role, responsibilities…" maxlength="5000"
                           class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postDescription'])?'border-red-400 bg-red-50':'' }}"></textarea>
                 @if(isset($postErrors['postDescription']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postDescription'] }}</p>@endif
+            </div>
+
+            {{-- ── Qualifications ── NEW ──────────────────────────────────────── --}}
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">
+                    <i class="fas fa-list-check text-[#7a3f91] mr-1"></i>Qualifications <span class="text-red-500">*</span>
+                </label>
+                <textarea wire:model.defer="postQualifications" rows="4"
+                          placeholder="e.g. Bachelor's degree in IT or related field&#10;At least 1 year of relevant experience&#10;Strong communication skills"
+                          maxlength="3000"
+                          class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postQualifications'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                <p class="text-gray-400 text-xs mt-1"><i class="fas fa-circle-info mr-1"></i>List required qualifications, one per line if preferred.</p>
+                @if(isset($postErrors['postQualifications']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postQualifications'] }}</p>@endif
+            </div>
+
+            {{-- ── Application Instructions ── NEW ───────────────────────────── --}}
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">
+                    <i class="fas fa-paper-plane text-[#7a3f91] mr-1"></i>Application Instructions <span class="text-red-500">*</span>
+                </label>
+                <textarea wire:model.defer="postApplicationInstructions" rows="4"
+                          placeholder="e.g. Send your resume and cover letter to hr@company.com&#10;Subject: Application – [Your Name] – [Position]&#10;Deadline: see above"
+                          maxlength="3000"
+                          class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postApplicationInstructions'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                <p class="text-gray-400 text-xs mt-1"><i class="fas fa-circle-info mr-1"></i>Explain how applicants should apply — email, walk-in, online form, etc.</p>
+                @if(isset($postErrors['postApplicationInstructions']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $postErrors['postApplicationInstructions'] }}</p>@endif
             </div>
         </div>
         <div class="px-7 py-5 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex gap-3">
@@ -1221,17 +1314,20 @@ new class extends Component {
 </div>
 @endif
 
-{{-- VIEW MODAL --}}
+{{-- ═══════════════════════════════════════════════════════════════════════
+     VIEW MODAL
+═══════════════════════════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingJob)
 @php
     $job            = $this->viewingJob;
     $dl             = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-    $isExp          = now('Asia/Manila')->gt($dl);
+    $isExp          = now('Asia/Manila')->startOfDay()->gt($dl->copy()->startOfDay());
     $createdPH      = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
     $viewDepts      = $job->target_college ? \App\Models\Course::whereIn('college', explode(',', $job->target_college))->orderBy('code')->pluck('code')->toArray() : [];
     $displayType    = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
     $isAdminPosted  = is_null($job->organizer_id);
     $isInactiveView = $job->status === 'INACTIVE';
+    $viewCanShare   = !$isExp;
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeViewModal">
     <div class="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[92vh] overflow-hidden relative">
@@ -1272,10 +1368,37 @@ new class extends Component {
             <p class="text-xs text-gray-500 mt-3">Posted {{ $createdPH->diffForHumans() }} &middot; by {{ $isAdminPosted ? 'Admin' : 'You' }}</p>
         </div>
         <div class="flex-1 overflow-y-auto">
+            {{-- Description --}}
             <div class="px-8 py-5 border-b border-gray-200">
-                <div class="text-sm font-bold text-gray-900 mb-3">Job Description</div>
+                <div class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <i class="fas fa-align-left text-[#7a3f91] text-xs"></i> Job Description
+                </div>
                 <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->description }}</div>
             </div>
+
+            {{-- ── Qualifications ── NEW ────────────────────────────────────── --}}
+            @if($job->qualifications)
+            <div class="px-8 py-5 border-b border-gray-200">
+                <div class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <i class="fas fa-list-check text-[#7a3f91] text-xs"></i> Qualifications
+                </div>
+                <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->qualifications }}</div>
+            </div>
+            @endif
+
+            {{-- ── Application Instructions ── NEW ─────────────────────────── --}}
+            @if($job->application_instructions)
+            <div class="px-8 py-5 border-b border-gray-200">
+                <div class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <i class="fas fa-paper-plane text-[#7a3f91] text-xs"></i> How to Apply
+                </div>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+                    <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->application_instructions }}</div>
+                </div>
+            </div>
+            @endif
+
+            {{-- Target Colleges --}}
             @if($job->target_college && count($viewDepts))
             <div class="px-8 py-5 border-b border-gray-200">
                 <div class="text-sm font-bold text-gray-900 mb-3">Target Colleges</div>
@@ -1287,6 +1410,8 @@ new class extends Component {
                 </div>
             </div>
             @endif
+
+            {{-- Posting Details --}}
             <div class="px-8 py-5">
                 <div class="text-xs font-bold text-gray-500 uppercase mb-3 tracking-wider">Posting Details</div>
                 <div class="border border-gray-200 rounded-lg overflow-hidden">
@@ -1309,24 +1434,45 @@ new class extends Component {
                 </div>
             </div>
         </div>
-        <div class="px-8 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-2">
-            <button wire:click="closeViewModal" type="button" class="px-4 py-2.5 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-bold hover:bg-gray-50 transition cursor-pointer"><i class="fas fa-xmark text-xs mr-1"></i> Close</button>
-            <button wire:click="openShareModal({{ $job->id }})" type="button"
-                    class="px-4 py-2.5 bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-sm font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
-                <i class="fas fa-share-nodes text-xs mr-1"></i> Share
+
+        {{-- Footer actions --}}
+        <div class="px-8 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-2 flex-wrap">
+            <button wire:click="closeViewModal" type="button" class="px-4 py-2.5 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-bold hover:bg-gray-50 transition cursor-pointer">
+                <i class="fas fa-xmark text-xs mr-1"></i> Close
             </button>
-            @if(!$isAdminPosted)
-                <button wire:click="confirmDelete({{ $job->id }})" type="button" class="px-4 py-2.5 bg-red-100 text-red-700 border border-red-300 rounded-lg text-sm font-bold hover:bg-white hover:border-red-500 transition cursor-pointer"><i class="fas fa-trash text-xs mr-1"></i> Delete</button>
-                <button wire:click="openEditModal({{ $job->id }})" type="button" class="px-4 py-2.5 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg text-sm font-bold hover:bg-white hover:border-blue-500 transition cursor-pointer"><i class="fas fa-pen-to-square text-xs mr-1"></i> Edit</button>
+            @if($viewCanShare)
+                <button wire:click="openShareModal({{ $job->id }})" type="button"
+                        class="px-4 py-2.5 bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-sm font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                    <i class="fas fa-share-nodes text-xs mr-1"></i> Share
+                </button>
             @else
-                <span class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-gray-500 bg-gray-100 rounded-lg border border-gray-200"><i class="fas fa-lock text-xs"></i> Posted by Admin</span>
+                <span class="px-4 py-2.5 bg-gray-100 text-gray-400 border border-gray-200 rounded-lg text-sm font-bold cursor-not-allowed select-none"
+                      title="Deadline passed — sharing disabled">
+                    <i class="fas fa-share-nodes text-xs mr-1"></i> Share
+                </span>
+            @endif
+            @if(!$isAdminPosted)
+                <button wire:click="confirmDelete({{ $job->id }})" type="button"
+                        class="px-4 py-2.5 bg-red-100 text-red-700 border border-red-300 rounded-lg text-sm font-bold hover:bg-white hover:border-red-500 transition cursor-pointer">
+                    <i class="fas fa-trash text-xs mr-1"></i> Delete
+                </button>
+                <button wire:click="openEditModal({{ $job->id }})" type="button"
+                        class="px-4 py-2.5 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg text-sm font-bold hover:bg-white hover:border-blue-500 transition cursor-pointer">
+                    <i class="fas fa-pen-to-square text-xs mr-1"></i> Edit
+                </button>
+            @else
+                <span class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-gray-500 bg-gray-100 rounded-lg border border-gray-200">
+                    <i class="fas fa-lock text-xs"></i> Posted by Admin
+                </span>
             @endif
         </div>
     </div>
 </div>
 @endif
 
-{{-- EDIT MODAL --}}
+{{-- ═══════════════════════════════════════════════════════════════════════
+     EDIT MODAL
+═══════════════════════════════════════════════════════════════════════ --}}
 @if($showEditModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeEditModal">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden relative">
@@ -1352,11 +1498,14 @@ new class extends Component {
         </div>
         @endif
         <div class="flex-1 overflow-y-auto px-7 py-6 space-y-5">
+            {{-- Job Title --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Job Title <span class="text-red-500">*</span></label>
                 <input wire:model.defer="editJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200" class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editJobTitle'])?'border-red-400 bg-red-50':'' }}">
                 @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
             </div>
+
+            {{-- Org Type + Company Name --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Organization Type <span class="text-red-500">*</span></label>
@@ -1373,11 +1522,15 @@ new class extends Component {
                     @if(isset($editErrors['editCompany']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editCompany'] }}</p>@endif
                 </div>
             </div>
+
+            {{-- Location --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Location <span class="text-red-500">*</span></label>
                 <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editLocation'])?'border-red-400 bg-red-50':'' }} {{ $editIsPhilcst?'bg-gray-100 text-gray-500 cursor-not-allowed':'' }}">
                 @if(isset($editErrors['editLocation']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editLocation'] }}</p>@endif
             </div>
+
+            {{-- Employment Type + Experience Level --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Employment Type <span class="text-red-500">*</span></label>
@@ -1396,6 +1549,8 @@ new class extends Component {
                     @if(isset($editErrors['editExpLevel']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editExpLevel'] }}</p>@endif
                 </div>
             </div>
+
+            {{-- Salary + Deadline --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Salary <span class="text-gray-400 font-normal">(Optional)</span></label>
@@ -1408,6 +1563,8 @@ new class extends Component {
                     <p class="text-[11px] text-amber-600 mt-1"><i class="fas fa-shield-halved mr-1"></i>Status is managed by Admin only.</p>
                 </div>
             </div>
+
+            {{-- Target College --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Target College <span class="text-red-500">*</span></label>
                 <div class="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
@@ -1419,10 +1576,36 @@ new class extends Component {
                     <p class="text-xs text-blue-700"><i class="fas fa-info-circle mr-1"></i>You can only post jobs for your own college's alumni.</p>
                 </div>
             </div>
+
+            {{-- Job Description --}}
             <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">Job Description <span class="text-red-500">*</span></label>
-                <textarea wire:model.defer="editDescription" rows="7" maxlength="5000" class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editDescription'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                <textarea wire:model.defer="editDescription" rows="5" maxlength="5000" class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editDescription'])?'border-red-400 bg-red-50':'' }}"></textarea>
                 @if(isset($editErrors['editDescription']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editDescription'] }}</p>@endif
+            </div>
+
+            {{-- ── Qualifications ── NEW ──────────────────────────────────────── --}}
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">
+                    <i class="fas fa-list-check text-[#7a3f91] mr-1"></i>Qualifications <span class="text-red-500">*</span>
+                </label>
+                <textarea wire:model.defer="editQualifications" rows="4"
+                          placeholder="e.g. Bachelor's degree in IT or related field&#10;At least 1 year of relevant experience"
+                          maxlength="3000"
+                          class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editQualifications'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                @if(isset($editErrors['editQualifications']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editQualifications'] }}</p>@endif
+            </div>
+
+            {{-- ── Application Instructions ── NEW ───────────────────────────── --}}
+            <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase mb-1.5 tracking-wider">
+                    <i class="fas fa-paper-plane text-[#7a3f91] mr-1"></i>Application Instructions <span class="text-red-500">*</span>
+                </label>
+                <textarea wire:model.defer="editApplicationInstructions" rows="4"
+                          placeholder="e.g. Send your resume to hr@company.com&#10;Subject: Application – [Position]"
+                          maxlength="3000"
+                          class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editApplicationInstructions'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 text-xs mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
             </div>
         </div>
         <div class="px-7 py-5 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex gap-3">
@@ -1437,7 +1620,9 @@ new class extends Component {
 </div>
 @endif
 
-{{-- DELETE MODAL --}}
+{{-- ═══════════════════════════════════════════════════════════════════════
+     DELETE MODAL
+═══════════════════════════════════════════════════════════════════════ --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="cancelDelete">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -1467,36 +1652,21 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     SHARE MODAL v3
-     ─────────────────────────────────────────────────────────────────────────
-     CHANGES FROM v2:
-       • Both FB sharer URL and Copy Link now use the BASE jobs URL (no ID).
-         → https://alumniphilcst.com/jobs  (never /jobs/22 or any number)
-       • jobPublicUrl() method removed — only jobsBaseUrl() is used.
-       • FB pre-filled text is technically impossible (Facebook blocked it).
-         The clipboard approach remains the cleanest available workaround.
-     ─────────────────────────────────────────────────────────────────────────
-     ⚠️  Make sure APP_URL in .env = your real domain:
-           APP_URL=https://alumniphilcst.com
-═══════════════════════════════════════════════════════════════════════════ --}}
+{{-- ═══════════════════════════════════════════════════════════════════════
+     SHARE MODAL v5
+═══════════════════════════════════════════════════════════════════════ --}}
 @if($showShareModal)
 @php
-    // ── Single base URL for everything — NO job ID ────────────────────────────
-    $shareBaseUrl  = $this->jobsBaseUrl();  // e.g. https://alumniphilcst.com/jobs
+    $shareBaseUrl  = $this->jobsBaseUrl();
 
-    // ── Deadline formatted ────────────────────────────────────────────────────
     $shareDlFormatted = $shareDeadline
         ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
         : '';
 
-    // ── Description preview (max 120 chars) ───────────────────────────────────
     $shareDescPreview = mb_strlen($shareDescription) > 120
         ? mb_substr($shareDescription, 0, 120) . '…'
         : $shareDescription;
 
-    // ── Full post text — copied to clipboard when FB button is clicked ─────────
-    // Facebook no longer supports quote= so we copy it ourselves first.
     $fbPostLines   = [];
     $fbPostLines[] = "🎯 Job Opening: {$shareJobTitle}";
     $fbPostLines[] = "🏢 {$shareCompany}";
@@ -1511,31 +1681,24 @@ new class extends Component {
     $fbPostLines[] = $shareBaseUrl;
     $fbPostText    = implode("\n", $fbPostLines);
 
-    // ── FB sharer URL — uses base URL (no job ID) ─────────────────────────────
     $fbShareUrl    = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
-
-    // ── Hostname for OG card footer display ───────────────────────────────────
     $shareHost     = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
 @endphp
 
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
      wire:keydown.escape="closeShareModal"
      x-data="{
-         copied:   false,
-         fbCopied: false,
-         fbText:   {{ json_encode($fbPostText) }},
-         baseUrl:  {{ json_encode($shareBaseUrl) }},
-         fbUrl:    {{ json_encode($fbShareUrl) }},
-
+         copied:          false,
+         fbCopied:        false,
+         messengerCopied: false,
+         fbText:          {{ json_encode($fbPostText) }},
+         baseUrl:         {{ json_encode($shareBaseUrl) }},
+         fbUrl:           {{ json_encode($fbShareUrl) }},
          shareOnFacebook() {
-             // Step 1 — copy full job text to clipboard so user can paste it in FB
              navigator.clipboard.writeText(this.fbText).then(() => {
                  this.fbCopied = true;
                  setTimeout(() => this.fbCopied = false, 6000);
-             }).catch(() => {
-                 // clipboard permission denied — still open FB, just without pre-copy
-             });
-             // Step 2 — open Facebook sharer popup with the base jobs URL
+             }).catch(() => {});
              const w = 620, h = 520;
              const left = Math.round((screen.width  - w) / 2);
              const top  = Math.round((screen.height - h) / 2);
@@ -1545,7 +1708,19 @@ new class extends Component {
                  +',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1'
              );
          },
-
+         shareOnMessenger() {
+             navigator.clipboard.writeText(this.fbText).then(() => {
+                 this.messengerCopied = true;
+                 setTimeout(() => this.messengerCopied = false, 6000);
+             }).catch(() => {});
+             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+             if (isMobile) {
+                 window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
+                 setTimeout(() => { window.open('https://www.messenger.com/', '_blank'); }, 1500);
+             } else {
+                 window.open('https://www.messenger.com/', '_blank');
+             }
+         },
          copyLinkFn() {
              navigator.clipboard.writeText(this.baseUrl).then(() => {
                  this.copied = true;
@@ -1562,7 +1737,6 @@ new class extends Component {
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100">
 
-        {{-- ── Modal header ──────────────────────────────────────────────── --}}
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
             <h2 class="text-base font-extrabold text-gray-800 flex items-center gap-2">
                 <i class="fas fa-share-nodes text-sky-600"></i> Share Job Posting
@@ -1575,7 +1749,7 @@ new class extends Component {
 
         <div class="px-6 pt-5 pb-5 space-y-4">
 
-            {{-- ── FB "text copied" success banner ─────────────────────── --}}
+            {{-- FB copied banner --}}
             <div x-show="fbCopied" x-cloak
                  x-transition:enter="transition ease-out duration-300"
                  x-transition:enter-start="opacity-0 -translate-y-2"
@@ -1585,7 +1759,7 @@ new class extends Component {
                     <i class="fas fa-check text-emerald-600 text-xs"></i>
                 </div>
                 <div>
-                    <p class="text-sm font-extrabold text-emerald-800">Job text copied to clipboard!</p>
+                    <p class="text-sm font-extrabold text-emerald-800">Job text copied!</p>
                     <p class="text-xs text-emerald-700 mt-0.5 leading-snug">
                         Sa Facebook popup, i-click ang text box tapos
                         <strong>i-paste (Ctrl+V / ⌘V)</strong> — tapos na, ready to post!
@@ -1593,94 +1767,76 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── Label ─────────────────────────────────────────────────── --}}
-            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
-                Preview — What people will see
-            </p>
+            {{-- Messenger copied banner --}}
+            <div x-show="messengerCopied" x-cloak
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 -translate-y-2"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-3">
+                <div class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <i class="fas fa-check text-blue-600 text-xs"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-extrabold text-blue-800">Job text copied!</p>
+                    <p class="text-xs text-blue-700 mt-0.5 leading-snug">
+                        Bukas na ang Messenger. I-paste ang text
+                        (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>)
+                        sa GC o private message mo!
+                    </p>
+                </div>
+            </div>
 
-            {{-- ── Job preview card ─────────────────────────────────────── --}}
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Preview — What people will see</p>
+
+            {{-- Preview card --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-
                 <div class="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
                     <div class="w-14 h-14 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] flex items-center justify-center flex-shrink-0 shadow">
                         <i class="fas fa-briefcase text-white text-xl"></i>
                     </div>
                     <div class="flex-1 min-w-0">
-                        <p class="font-extrabold text-gray-900 text-sm leading-tight truncate">
-                            {{ $shareJobTitle }}
-                        </p>
+                        <p class="font-extrabold text-gray-900 text-sm leading-tight truncate">{{ $shareJobTitle }}</p>
                         <p class="text-xs text-gray-700 mt-0.5 font-semibold">
                             {{ $shareCompany }}
-                            @if($shareEmpType)
-                                &middot; <span class="text-purple-700">{{ $shareEmpType }}</span>
-                            @endif
+                            @if($shareEmpType) &middot; <span class="text-purple-700">{{ $shareEmpType }}</span>@endif
                         </p>
                         <div class="flex flex-wrap gap-1 mt-1.5">
-                            @if($shareLocation)
-                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700">
-                                    <i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}
-                                </span>
-                            @endif
-                            @if($shareExpLevel)
-                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">
-                                    <i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}
-                                </span>
-                            @endif
-                            @if($shareSalary)
-                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700">
-                                    <i class="fas fa-money-bill-wave text-[8px]"></i>{{ $shareSalary }}
-                                </span>
-                            @endif
-                            @if($shareDlFormatted)
-                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-600">
-                                    <i class="fas fa-calendar-xmark text-[8px]"></i>Deadline: {{ $shareDlFormatted }}
-                                </span>
-                            @endif
-                            @if($shareCollege)
-                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700">
-                                    <i class="fas fa-building-columns text-[8px]"></i>{{ $shareCollege }}
-                                </span>
-                            @endif
+                            @if($shareLocation)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}</span>@endif
+                            @if($shareExpLevel)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700"><i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}</span>@endif
+                            @if($shareSalary)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700"><i class="fas fa-money-bill-wave text-[8px]"></i>{{ $shareSalary }}</span>@endif
+                            @if($shareDlFormatted)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-600"><i class="fas fa-calendar-xmark text-[8px]"></i>Deadline: {{ $shareDlFormatted }}</span>@endif
+                            @if($shareCollege)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700"><i class="fas fa-building-columns text-[8px]"></i>{{ $shareCollege }}</span>@endif
                         </div>
                     </div>
                 </div>
-
                 @if($shareDescPreview)
                 <div class="px-4 py-2.5 bg-white border-b border-gray-100">
                     <p class="text-xs text-gray-600 leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
                 </div>
                 @endif
-
                 <div class="px-4 py-2 bg-[#f0f2f5] flex items-center gap-2">
                     <i class="fas fa-globe text-gray-400 text-[10px]"></i>
                     <span class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
                 </div>
             </div>
-            {{-- ── End preview card ─────────────────────────────────────── --}}
 
-            {{-- ── How it works hint ──────────────────────────────────────── --}}
+            {{-- How it works --}}
             <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
                 <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
-<p class="text-xs text-blue-800 leading-snug">
-    <strong>How it works:</strong> Click on <em>Share on Facebook</em> — 
-    the full job text will be automatically copied, 
-    and then Facebook will open. Just paste 
-    (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>) 
-    into your post, and you're done!
-</p>
+                <p class="text-xs text-blue-800 leading-snug">
+                    <strong>How it works:</strong> I-click ang share button —
+                    awtomatiko nang mako-kopya ang buong job text,
+                    tapos mag-o-open ang FB o Messenger. I-paste lang
+                    (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>)
+                    sa post o GC mo, tapos done!
+                </p>
             </div>
 
-            {{-- ── Share via label ─────────────────────────────────────── --}}
             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest pt-1">Share via</p>
 
-            {{-- ── Facebook Share Button ──────────────────────────────── --}}
-            <button type="button"
-                    @click="shareOnFacebook()"
-                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl
-                           bg-[#1877F2] hover:bg-[#166fe5] active:bg-[#1464d8]
-                           text-white font-extrabold text-sm
-                           shadow hover:shadow-md
-                           transition-all duration-150 cursor-pointer group">
+            {{-- Facebook --}}
+            <button type="button" @click="shareOnFacebook()"
+                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] active:bg-[#1464d8] text-white font-extrabold text-sm shadow hover:shadow-md transition-all duration-150 cursor-pointer group">
                 <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2">
                         <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
@@ -1688,21 +1844,33 @@ new class extends Component {
                 </span>
                 <span class="flex-1 text-left">
                     <span x-show="!fbCopied">Share on Facebook</span>
-                    <span x-show="fbCopied" x-cloak>
-                        <i class="fas fa-check mr-1"></i> Bukas na! I-paste ang text sa FB
-                    </span>
+                    <span x-show="fbCopied" x-cloak><i class="fas fa-check mr-1"></i> Bukas na! I-paste ang text sa FB</span>
                 </span>
                 <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
             </button>
 
-            {{-- ── Copy Link button (base URL, no job ID) ──────────────── --}}
-            <button type="button"
-                    @click="copyLinkFn()"
-                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl
-                           border-2 border-gray-200 hover:border-gray-300
-                           bg-white hover:bg-gray-50 active:bg-gray-100
-                           text-gray-700 font-bold text-sm
-                           transition-all duration-150 cursor-pointer group">
+            {{-- Messenger --}}
+            <button type="button" @click="shareOnMessenger()"
+                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-extrabold text-sm shadow hover:shadow-md transition-all duration-150 cursor-pointer group">
+                <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
+                        <defs><linearGradient id="mgr" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
+                        <path fill="url(#mgr)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                    </svg>
+                </span>
+                <span class="flex-1 text-left">
+                    <span x-show="!messengerCopied">Share on Messenger</span>
+                    <span x-show="messengerCopied" x-cloak><i class="fas fa-check mr-1"></i> Bukas na! I-paste sa Messenger</span>
+                </span>
+                <i class="fas fa-arrow-up-right-from-square text-white/70 text-xs group-hover:text-white transition"></i>
+            </button>
+            <p class="text-[10px] text-gray-400 text-center -mt-2">
+                <i class="fas fa-users text-[9px] mr-1"></i>Works sa private chat, GC, at group pages ng Messenger.
+            </p>
+
+            {{-- Copy Link --}}
+            <button type="button" @click="copyLinkFn()"
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-bold text-sm transition-all duration-150 cursor-pointer group">
                 <span class="w-8 h-8 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
                     <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-xs"></i>
                 </span>
@@ -1713,9 +1881,9 @@ new class extends Component {
                 </div>
             </button>
 
-            {{-- ── Footer note ─────────────────────────────────────────── --}}
             <p class="text-[11px] text-gray-400 text-center leading-snug pb-1">
                 Make sure the posting is <strong class="text-gray-500">Active</strong> before sharing.
+                Sharing is disabled for expired postings.
             </p>
         </div>
     </div>

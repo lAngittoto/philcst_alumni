@@ -30,6 +30,8 @@ class JobPosting extends Model
         'updated_by_role',
         'deleted_by',
         'deleted_by_role',
+        'qualifications',
+        'application_instructions',
     ];
 
     protected $casts = [

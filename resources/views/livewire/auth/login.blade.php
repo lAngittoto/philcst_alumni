@@ -12,7 +12,7 @@ use App\Models\Organizer;
 use App\Models\Alumni;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\DB;   // ← ADDED: needed for self-heal update
+use Illuminate\Support\Facades\DB;
 
 new #[Layout('app')] class extends Component {
 
@@ -21,8 +21,6 @@ new #[Layout('app')] class extends Component {
 
     public string $name     = '';
     public string $password = '';
-
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     public function mount(): void
     {
@@ -44,13 +42,7 @@ new #[Layout('app')] class extends Component {
             if ($user->role === 'alumni') {
                 $alumni = Alumni::where('user_id', $user->id)->first();
 
-                // ── FIX: Was logging out; now redirects to the wizard so a
-                //    logged-in alumni who hasn't finished setup isn't stranded.
-                //    Also checks hasTemporaryPassword() in case password_changed_at
-                //    was incorrectly set in the DB.
                 if ($alumni && ($alumni->needsAccountSetup() || $alumni->hasTemporaryPassword())) {
-                    // Self-heal: if DB flag is wrong but temp password is still
-                    // in use, reset password_changed_at so all other guards work.
                     if (!$alumni->needsAccountSetup() && $alumni->hasTemporaryPassword()) {
                         DB::table('alumni')
                             ->where('id', $alumni->id)
@@ -83,8 +75,6 @@ new #[Layout('app')] class extends Component {
             Auth::logout();
         }
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     protected function accountAttemptsKey(): string
     {
@@ -141,8 +131,6 @@ new #[Layout('app')] class extends Component {
         return "{$seconds} second" . ($seconds !== 1 ? 's' : '');
     }
 
-    // ── Login Action ──────────────────────────────────────────────────────────
-
     public function login(): void
     {
         $this->validate([
@@ -150,7 +138,6 @@ new #[Layout('app')] class extends Component {
             'password' => 'required|string|min:1',
         ]);
 
-        // ── 1. Check account-level lockout ────────────────────────────────────
         $lockedFor = $this->accountLockedSeconds();
         if ($lockedFor > 0) {
             $this->password = '';
@@ -161,7 +148,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 2. IP-level rate limit ────────────────────────────────────────────
         if (RateLimiter::tooManyAttempts($this->throttleKey(), 15)) {
             $seconds = RateLimiter::availableIn($this->throttleKey());
             $this->password = '';
@@ -172,7 +158,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 3. Try ALUMNI (Student ID) login ──────────────────────────────────
         $rawId    = ltrim(preg_replace('/[^0-9]/', '', $this->name), '0') ?: '0';
         $paddedId = str_pad($rawId, 8, '0', STR_PAD_LEFT);
 
@@ -205,42 +190,19 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // ✅ ALUMNI PASSWORD CORRECT — log in first, then check gates
             Auth::login($user, false);
             $this->clearAttempts();
             session()->regenerate();
 
-            // Always use a fresh DB query after login
             $alumni = Alumni::where('user_id', $user->id)->first();
 
-            // ══════════════════════════════════════════════════════════════════
-            // GATE 1 — Account Setup (wizard)
-            //
-            // FIX: We now check BOTH needsAccountSetup() AND hasTemporaryPassword().
-            //
-            // Why this matters:
-            //   needsAccountSetup() returns true only when password_changed_at IS NULL.
-            //   But if password_changed_at was set incorrectly (e.g. bad seed data,
-            //   a failed transaction that partially committed, or manual DB edits),
-            //   the alumni could still be holding the default/temporary password.
-            //   In that case needsAccountSetup() would return FALSE and the old code
-            //   would skip the wizard entirely, sending the alumni straight to the
-            //   dashboard — which is exactly the bug being fixed here.
-            //
-            // Self-heal: if we detect the inconsistency (temp password still active
-            //   but password_changed_at already set), we reset password_changed_at
-            //   to NULL so every other guard (middleware, change-password mount) also
-            //   works correctly without needing additional changes.
-            // ══════════════════════════════════════════════════════════════════
             if (!$alumni || $alumni->needsAccountSetup() || $alumni->hasTemporaryPassword()) {
 
-                // Self-heal the DB if password_changed_at was set prematurely
                 if ($alumni && !$alumni->needsAccountSetup() && $alumni->hasTemporaryPassword()) {
                     DB::table('alumni')
                         ->where('id', $alumni->id)
                         ->update(['password_changed_at' => null]);
 
-                    // Refresh in-memory model so downstream code sees null
                     $alumni->password_changed_at = null;
                 }
 
@@ -254,7 +216,6 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // GATE 2: needs profile?
             if (!$alumni->isProfileComplete()) {
                 $this->redirectRoute('alumni.information', navigate: true);
                 return;
@@ -264,7 +225,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 4. Try ORGANIZER (Teacher ID) login ───────────────────────────────
         $organizer = Organizer::where('id_number', $this->name)->first();
 
         if ($organizer && $organizer->user) {
@@ -308,7 +268,6 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // ✅ ORGANIZER SUCCESS
             Auth::login($user, false);
             $this->clearAttempts();
             session()->regenerate();
@@ -332,7 +291,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── 5. Try ADMIN / REGISTRAR (username) login ─────────────────────────
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
             RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
             $attempts = $this->recordFailedAttempt();
@@ -365,7 +323,6 @@ new #[Layout('app')] class extends Component {
 
         $user = Auth::user();
 
-        // ── FIX: Handle REGISTRAR role ────────────────────────────────────────
         if ($user->role === 'registrar') {
             $this->clearAttempts();
             session()->regenerate();
@@ -381,7 +338,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Handle ADMIN role ─────────────────────────────────────────────────
         if ($user->role !== 'admin') {
             Auth::logout();
             $this->password = '';
@@ -389,7 +345,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ✅ ADMIN SUCCESS
         $this->clearAttempts();
         RateLimiter::clear($this->throttleKey());
         session()->regenerate();
@@ -428,16 +383,9 @@ new #[Layout('app')] class extends Component {
             75%       { transform: translateX(8px); }
         }
         .animate-shake { animation: shake 0.3s ease-in-out; animation-iteration-count: 2; }
-
         .guide-backdrop {
             backdrop-filter: blur(6px);
             -webkit-backdrop-filter: blur(6px);
-        }
-
-        .step-connector {
-            border-left: 2px dashed #d8b4fe;
-            margin-left: 1.25rem;
-            height: 1.25rem;
         }
     </style>
 
@@ -452,7 +400,7 @@ new #[Layout('app')] class extends Component {
     <div wire:ignore.self
          class="relative z-10 w-full max-w-md bg-white rounded-[3.5rem] shadow-[0_25px_60px_rgba(0,0,0,0.4)] p-10 md:p-14 fade-in-up {{ $errors->has('invalid') ? 'animate-shake' : '' }}">
 
-        <div class="text-center ">
+        <div class="text-center">
             <div class="inline-flex items-center justify-center w-20 h-20 bg-[#f2eaf7] rounded-[2rem] mb-6 text-[#7a3f91] shadow-inner transform transition-transform duration-500 hover:rotate-12">
                 <i class="fa-solid fa-user-shield text-4xl"></i>
             </div>
@@ -520,11 +468,12 @@ new #[Layout('app')] class extends Component {
 
         </form>
 
+        {{-- ✅ PLAIN TEXT ONLY — no underline, no border, no background --}}
         <div class="mt-6 text-center">
             <button
                 type="button"
                 @click="showGuide = true"
-                class="text-[#7a3f91] hover:text-[#2b0d3e] text-xs font-bold uppercase tracking-widest underline underline-offset-4 decoration-dotted transition-colors duration-300 focus:outline-none">
+                class="text-[#7a3f91] text-xs font-bold uppercase tracking-widest hover:opacity-60 transition-opacity duration-200 focus:outline-none bg-transparent border-0 p-0 cursor-pointer">
                 Don't have an account yet?
             </button>
         </div>
@@ -534,7 +483,6 @@ new #[Layout('app')] class extends Component {
     <div class="relative z-10 mt-5 text-center text-xs text-white/80 font-bold uppercase tracking-widest animate-pulse">
         &copy; {{ date('Y') }} Philippine College of Science and Technology
     </div>
-
 
     {{-- ══════════════════════════════════════════════════════════════════════ --}}
     {{-- FIRST-TIME LOGIN GUIDE MODAL                                          --}}
@@ -561,8 +509,8 @@ new #[Layout('app')] class extends Component {
             x-transition:leave-end="opacity-0 scale-90 translate-y-4"
             class="relative w-full max-w-2xl bg-white rounded-[2rem] shadow-[0_30px_80px_rgba(0,0,0,0.5)] overflow-hidden">
 
-            {{-- ── Decorative header ───────────────────────────────────────── --}}
-            <div class="bg-gradient-to-r from-[#2b0d3e] to-[#7a3f91] px-10 pt-8 pb-7 text-white">
+            {{-- ✅ SOLID PURPLE HEADER — no gradient --}}
+            <div class="bg-[#7a3f91] px-10 pt-8 pb-7 text-white">
                 <div class="flex items-start justify-between gap-4">
                     <div class="flex items-center gap-4">
                         <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
@@ -585,7 +533,6 @@ new #[Layout('app')] class extends Component {
             {{-- ── Guide body ──────────────────────────────────────────────── --}}
             <div class="px-10 py-8">
 
-                {{-- Steps in a 2-col grid on wider modal --}}
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-7">
 
                     {{-- Step 1 --}}
