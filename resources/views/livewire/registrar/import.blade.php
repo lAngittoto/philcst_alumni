@@ -88,7 +88,7 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Excel parser — reads active sheet rows into plain arrays
+    // Excel parser
     // ─────────────────────────────────────────────────────────────────────────
 
     private function parseExcel(string $path): array
@@ -116,8 +116,7 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Main import — validates all rows first, then bulk-inserts in one
-    // transaction (minimises round-trips and avoids partial commits).
+    // Main import
     // ─────────────────────────────────────────────────────────────────────────
 
     public function processImport(): void
@@ -152,8 +151,16 @@ new class extends Component {
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
             // ── Required columns ──────────────────────────────────────────────
-            // Note: Excel column is "middle_name"; stored in DB as "middle_initial"
-            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course_code', 'batch'];
+            $hasCourse     = in_array('course', $header, true);
+            $hasCourseCode = in_array('course_code', $header, true);
+            if (!$hasCourse && !$hasCourseCode) {
+                throw new \Exception('Missing required column: "course" (or "course_code").');
+            }
+            if (!$hasCourse && $hasCourseCode) {
+                $header[array_search('course_code', $header)] = 'course';
+            }
+
+            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch'];
             foreach ($required as $col) {
                 if (!in_array($col, $header, true))
                     throw new \Exception("Missing required column: \"{$col}\".");
@@ -162,41 +169,34 @@ new class extends Component {
             $this->importTotal = count($rows) - 1;
             $isComplete        = ($this->importMode === 'complete');
 
-            // ── Pre-load lookup maps once (avoid per-row queries) ─────────────
-            $courseMap = Course::pluck('name', 'code')
-                               ->mapWithKeys(fn($n, $c) => [strtoupper($c) => $n])
-                               ->toArray();
+            // ── Pre-load lookups ──────────────────────────────────────────────
+            $allCourses    = Course::all();
+            $courseByCode  = $allCourses->keyBy(fn($c) => strtoupper(trim($c->code)));
+            $courseByName  = $allCourses->keyBy(fn($c) => strtolower(trim($c->name)));
 
-            // Existing student IDs → set
             $existingIds = DB::table('alumni')
                              ->pluck('student_id')
                              ->flip()
                              ->toArray();
 
-            // Existing names → set  (key = fn|mi|ln|sf)
             $existingNames = DB::table('alumni')
                                ->selectRaw("LOWER(TRIM(first_name)) as fn,
                                             LOWER(TRIM(COALESCE(middle_initial,''))) as mi,
                                             LOWER(TRIM(last_name)) as ln,
                                             LOWER(TRIM(COALESCE(suffix,''))) as sf")
                                ->get()
-                               ->map(fn($a) => $a->fn . '|' . $a->mi . '|' . $a->ln . '|' . $a->sf)
+                               ->map(fn($a) => $a->fn.'|'.$a->mi.'|'.$a->ln.'|'.$a->sf)
                                ->flip()
                                ->toArray();
 
-            // For complete mode: pre-load all existing emails in one query
             $existingEmails = $isComplete
                 ? DB::table('alumni')
                       ->whereNotNull('email')
                       ->where('email', 'not like', '%@pending.local')
-                      ->pluck('email')
-                      ->flip()
-                      ->toArray()
+                      ->pluck('email')->flip()->toArray()
                   + DB::table('users')
                       ->where('email', 'not like', '%@pending.local')
-                      ->pluck('email')
-                      ->flip()
-                      ->toArray()
+                      ->pluck('email')->flip()->toArray()
                 : [];
 
             // ── Validation pass ───────────────────────────────────────────────
@@ -209,17 +209,19 @@ new class extends Component {
             $maxErrors        = 200;
 
             for ($i = 1; $i < count($rows); $i++) {
-                // Empty row guard
-                if (count(array_filter($rows[$i], fn($v) => trim((string) $v) !== '')) === 0) continue;
+                if (count(array_filter($rows[$i], fn($v) => trim((string)$v) !== '')) === 0) continue;
                 if (count($rows[$i]) < count($header)) continue;
 
                 $row       = array_combine($header, array_slice($rows[$i], 0, count($header)));
                 $firstName = trim($row['first_name']  ?? '');
-                $mid       = trim($row['middle_name'] ?? '');   // Excel col → DB: middle_initial
+
+                // ── FIX: normalise middle name — collapse multiple spaces ──────
+                $mid       = preg_replace('/\s+/', ' ', trim($row['middle_name'] ?? ''));
+
                 $lastName  = trim($row['last_name']   ?? '');
                 $suffix    = trim($row['suffix']      ?? '');
                 $fullName  = $this->buildFullName($firstName, $mid, $lastName, $suffix);
-                $label     = 'Row ' . ($i + 1) . ($fullName ? " ({$fullName})" : '');
+                $label     = 'Row '.($i + 1).($fullName ? " ({$fullName})" : '');
 
                 // ── Name validation ───────────────────────────────────────────
                 if (!$firstName) {
@@ -242,17 +244,27 @@ new class extends Component {
                     $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name is required.");
                     continue;
                 }
-                if (!preg_match('/^[a-zA-Z]+$/', $mid)) {
-                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must contain letters only.");
-                    continue;
-                }
-                if (strlen($mid) < 2) {
-                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must be a full word (e.g. Santos, not S).");
+
+                // ── FIX: allow spaces for compound middle names (Dela Cruz, De Leon, San Pedro) ──
+                if (!preg_match('/^[a-zA-Z][a-zA-Z ]*[a-zA-Z]$|^[a-zA-Z]$/', $mid)) {
+                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must contain letters only (spaces allowed for compound names e.g. Dela Cruz).");
                     continue;
                 }
 
+                // ── FIX: check each word is at least 2 chars (rejects "D Cruz" but allows "De Cruz") ──
+                $midParts = explode(' ', $mid);
+                $midWordError = false;
+                foreach ($midParts as $part) {
+                    if (strlen($part) < 2) {
+                        $this->appendImportError($validationErrors, $maxErrors, "{$label}: Each word in middle name must be at least 2 characters (e.g. \"Dela Cruz\" not \"D Cruz\").");
+                        $midWordError = true;
+                        break;
+                    }
+                }
+                if ($midWordError) continue;
+
                 // ── Duplicate name ────────────────────────────────────────────
-                $nameKey = strtolower($firstName) . '|' . strtolower($mid) . '|' . strtolower($lastName) . '|' . strtolower($suffix);
+                $nameKey = strtolower($firstName).'|'.strtolower($mid).'|'.strtolower($lastName).'|'.strtolower($suffix);
                 if (isset($existingNames[$nameKey]) || isset($seenNames[$nameKey])) {
                     $duplicates[] = "{$label}: Full name \"{$fullName}\" already registered.";
                     $this->importDuplicateCount++;
@@ -260,9 +272,9 @@ new class extends Component {
                 }
 
                 // ── Student ID ────────────────────────────────────────────────
-                $rawId      = preg_replace('/\..*$/', '', rtrim(rtrim((string) ($row['student_id'] ?? ''), '0'), '.'));
+                $rawId      = preg_replace('/\..*$/', '', rtrim(rtrim((string)($row['student_id'] ?? ''), '0'), '.'));
                 $rawIdClean = ltrim($rawId, '0') ?: '0';
-                if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int) $rawIdClean === 0) {
+                if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int)$rawIdClean === 0) {
                     $this->appendImportError($validationErrors, $maxErrors, "{$label}: Student ID \"{$rawId}\" is invalid (1–8 digits required).");
                     continue;
                 }
@@ -273,24 +285,27 @@ new class extends Component {
                     continue;
                 }
 
-                // ── Course & batch ────────────────────────────────────────────
-                $code = strtoupper(trim($row['course_code'] ?? ''));
-                if (!isset($courseMap[$code])) {
-                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Course code \"{$code}\" does not exist.");
+                // ── Course lookup — accept code OR full course name ────────────
+                $courseInput = trim($row['course'] ?? '');
+                $courseMatch = $courseByCode[strtoupper($courseInput)]
+                            ?? $courseByName[strtolower($courseInput)]
+                            ?? null;
+
+                if (!$courseMatch) {
+                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Course \"{$courseInput}\" does not match any course code or name.");
                     continue;
                 }
-                $batchYear = (int) ($row['batch'] ?? 0);
+                $resolvedCode = $courseMatch->code;
+                $resolvedName = $courseMatch->name;
+
+                // ── Batch ─────────────────────────────────────────────────────
+                $batchYear = (int)($row['batch'] ?? 0);
                 if ($batchYear < 1000 || $batchYear > 9999) {
                     $this->appendImportError($validationErrors, $maxErrors, "{$label}: Batch \"{$batchYear}\" must be a 4-digit year.");
                     continue;
                 }
 
-                // ── Extra fields (complete mode) — aligned with current DB ────
-                // DB columns (after migration):
-                //   year_level, father_last_name, father_given_name, father_middle_name,
-                //   mother_last_name, mother_given_name, mother_middle_name,
-                //   dswd_household_no, disability
-                // Removed: father_name, mother_name, spouse_name
+                // ── Extra fields (complete mode) ──────────────────────────────
                 $extra = [];
                 if ($isComplete) {
                     $email = $this->sanitizeEmail($row['email'] ?? '');
@@ -305,45 +320,40 @@ new class extends Component {
                     }
 
                     $extra = [
-                        'email'               => $email,
-                        'gender'              => $this->sanitizeText($row['gender']              ?? ''),
-                        'date_of_birth'       => $this->sanitizeDate($row['date_of_birth']       ?? ''),
-                        'place_of_birth'      => $this->sanitizeText($row['place_of_birth']      ?? ''),
-                        'citizenship'         => $this->sanitizeText($row['citizenship']          ?? ''),
-                        'civil_status'        => $this->sanitizeText($row['civil_status']         ?? ''),
-                        'blood_type'          => $this->sanitizeText($row['blood_type']           ?? ''),
-                        'contact_number'      => $this->sanitizeText($row['contact_number']       ?? ''),
-                        // ── Parent names (split — aligned with DB migration) ──
-                        'year_level'          => $this->sanitizeText($row['year_level']           ?? ''),
-                        'father_last_name'    => $this->sanitizeText($row['father_last_name']     ?? ''),
-                        'father_given_name'   => $this->sanitizeText($row['father_given_name']    ?? ''),
-                        'father_middle_name'  => $this->sanitizeText($row['father_middle_name']   ?? ''),
-                        'mother_last_name'    => $this->sanitizeText($row['mother_last_name']     ?? ''),
-                        'mother_given_name'   => $this->sanitizeText($row['mother_given_name']    ?? ''),
-                        'mother_middle_name'  => $this->sanitizeText($row['mother_middle_name']   ?? ''),
-                        'dswd_household_no'   => $this->sanitizeText($row['dswd_household_no']    ?? ''),
-                        'disability'          => $this->sanitizeText($row['disability']           ?? ''),
-                        // ── Address ───────────────────────────────────────────
-                        'address_no'           => $this->sanitizeText($row['address_no']           ?? ''),
+                        // Personal
+                        'email'                => $email,
+                        'gender'               => $this->sanitizeText($row['gender']              ?? ''),
+                        'date_of_birth'        => $this->sanitizeDate($row['date_of_birth']       ?? ''),
+                        'contact_number'       => $this->sanitizeText($row['contact_number']      ?? ''),
+                        'disability'           => $this->sanitizeText($row['disability']          ?? ''),
+                        'dswd_household_no'    => $this->sanitizeText($row['dswd_household_no']   ?? ''),
+                        // Father's name
+                        'father_last_name'     => $this->sanitizeText($row['father_last_name']    ?? ''),
+                        'father_given_name'    => $this->sanitizeText($row['father_given_name']   ?? ''),
+                        'father_middle_name'   => $this->sanitizeText($row['father_middle_name']  ?? ''),
+                        // Mother's maiden name
+                        'mother_last_name'     => $this->sanitizeText($row['mother_last_name']    ?? ''),
+                        'mother_given_name'    => $this->sanitizeText($row['mother_given_name']   ?? ''),
+                        'mother_middle_name'   => $this->sanitizeText($row['mother_middle_name']  ?? ''),
+                        // Address
                         'address_street'       => $this->sanitizeText($row['address_street']       ?? ''),
                         'address_barangay'     => $this->sanitizeText($row['address_barangay']     ?? ''),
                         'address_municipality' => $this->sanitizeText($row['address_municipality'] ?? ''),
                         'address_province'     => $this->sanitizeText($row['address_province']     ?? ''),
-                        'address_zip_code'     => $this->sanitizeText($row['address_zip_code']     ?? ''),
                     ];
                 }
 
                 $jobs[] = [
-                    'fullName'   => $fullName,
-                    'firstName'  => $firstName,
-                    'mid'        => $mid,
-                    'lastName'   => $lastName,
-                    'suffix'     => $suffix,
-                    'sid'        => $sid,
-                    'code'       => $code,
-                    'courseName' => $courseMap[$code],
-                    'batchYear'  => $batchYear,
-                    'extra'      => $extra,
+                    'fullName'    => $fullName,
+                    'firstName'   => $firstName,
+                    'mid'         => $mid,
+                    'lastName'    => $lastName,
+                    'suffix'      => $suffix,
+                    'sid'         => $sid,
+                    'code'        => $resolvedCode,
+                    'courseName'  => $resolvedName,
+                    'batchYear'   => $batchYear,
+                    'extra'       => $extra,
                 ];
 
                 $seenIds[$sid]       = true;
@@ -352,7 +362,6 @@ new class extends Component {
 
             $this->importErrors     = $validationErrors;
             $this->importDuplicates = $duplicates;
-            // importFailCount already incremented inside appendImportError
 
             if (empty($jobs)) {
                 $this->importStatus  = 'Done';
@@ -362,41 +371,33 @@ new class extends Component {
                 return;
             }
 
-            // ── Bulk insert pass ──────────────────────────────────────────────
-            // Strategy:
-            //   1. Prepare all user rows (plain arrays, bcrypt hashed).
-            //   2. Bulk-insert users in one statement per chunk.
-            //   3. Query back user IDs by login_email.
-            //   4. Bulk-insert alumni rows.
-            //   Everything happens in a single transaction → one commit.
-            // ─────────────────────────────────────────────────────────────────
-
+            // ── Bulk insert ───────────────────────────────────────────────────
             $this->importStatus = 'Importing…';
 
-            $now        = now()->toDateTimeString();
-            $chunkSize  = 500;          // rows per INSERT statement
-            $chunks     = array_chunk($jobs, $chunkSize);
+            $now         = now()->toDateTimeString();
+            $chunkSize   = 500;
+            $chunks      = array_chunk($jobs, $chunkSize);
             $totalChunks = count($chunks);
 
             DB::transaction(function () use ($chunks, $isComplete, $now, $totalChunks) {
+
                 foreach ($chunks as $chunkIdx => $chunk) {
+
                     // ── 1. Prepare user rows ──────────────────────────────────
-                    $userRows  = [];
-                    $loginEmails = [];   // to look up inserted IDs
+                    $userRows    = [];
+                    $loginEmails = [];
 
                     foreach ($chunk as $job) {
                         $hasEmail   = $isComplete && !empty($job['extra']['email'] ?? '');
                         $loginEmail = $hasEmail
                             ? $job['extra']['email']
-                            : ($job['sid'] . '@pending.local');
-
-                        $tmpPass = $this->generateTempPassword($job['sid'], $job['lastName']);
+                            : ($job['sid'].'@pending.local');
 
                         $userRows[]    = [
                             'name'       => $job['fullName'],
                             'role'       => 'alumni',
                             'email'      => $loginEmail,
-                            'password'   => Hash::make($tmpPass),
+                            'password'   => Hash::make($this->generateTempPassword($job['sid'], $job['lastName'])),
                             'created_at' => $now,
                             'updated_at' => $now,
                         ];
@@ -406,68 +407,77 @@ new class extends Component {
                     // ── 2. Bulk insert users ──────────────────────────────────
                     DB::table('users')->insert($userRows);
 
-                    // ── 3. Fetch back user IDs (keyed by email) ───────────────
+                    // ── 3. Map login email → user id ──────────────────────────
                     $userIdMap = DB::table('users')
                         ->whereIn('email', $loginEmails)
                         ->pluck('id', 'email')
                         ->toArray();
 
-                    // ── 4. Prepare alumni rows ────────────────────────────────
+                    // ── 4. Build alumni rows ──────────────────────────────────
                     $alumniRows = [];
+
                     foreach ($chunk as $job) {
                         $hasEmail   = $isComplete && !empty($job['extra']['email'] ?? '');
                         $loginEmail = $hasEmail
                             ? $job['extra']['email']
-                            : ($job['sid'] . '@pending.local');
+                            : ($job['sid'].'@pending.local');
 
                         $userId = $userIdMap[$loginEmail] ?? null;
-                        if (!$userId) continue;   // should never happen inside transaction
+                        if (!$userId) continue;
 
                         $row = [
-                            'user_id'             => $userId,
-                            'first_name'          => $job['firstName'],
-                            'middle_initial'      => $job['mid']    ?: null,
-                            'last_name'           => $job['lastName'],
-                            'suffix'              => $job['suffix'] ?: null,
-                            'student_id'          => $job['sid'],
-                            'email'               => $hasEmail ? $job['extra']['email'] : null,
-                            'course_code'         => $job['code'],
-                            'course_name'         => $job['courseName'],
-                            'batch'               => $job['batchYear'],
-                            'status'              => 'VERIFIED',
-                            'password_changed_at' => $now,
-                            'profile_photo'       => null,
-                            'profile_completed'   => $isComplete ? 1 : 0,
-                            'created_at'          => $now,
-                            'updated_at'          => $now,
+                            'user_id'              => $userId,
+                            'first_name'           => $job['firstName'],
+                            'middle_initial'       => $job['mid']    ?: null,
+                            'last_name'            => $job['lastName'],
+                            'suffix'               => $job['suffix'] ?: null,
+                            'student_id'           => $job['sid'],
+                            'email'                => $hasEmail ? $job['extra']['email'] : null,
+                            'course_code'          => $job['code'],
+                            'course_name'          => $job['courseName'],
+                            'batch'                => $job['batchYear'],
+                            'status'               => 'VERIFIED',
+                            'password_changed_at'  => $now,
+                            'profile_photo'        => null,
+                            'profile_completed'    => 0,
+                            'gender'               => null,
+                            'date_of_birth'        => null,
+                            'contact_number'       => null,
+                            'disability'           => null,
+                            'dswd_household_no'    => null,
+                            'father_last_name'     => null,
+                            'father_given_name'    => null,
+                            'father_middle_name'   => null,
+                            'mother_last_name'     => null,
+                            'mother_given_name'    => null,
+                            'mother_middle_name'   => null,
+                            'address_street'       => null,
+                            'address_barangay'     => null,
+                            'address_municipality' => null,
+                            'address_province'     => null,
+                            'created_at'           => $now,
+                            'updated_at'           => $now,
                         ];
 
                         if ($isComplete) {
-                            $e   = $job['extra'];
-                            $row = array_merge($row, [
-                                'gender'               => $e['gender']               ?: null,
-                                'date_of_birth'        => $e['date_of_birth']        ?: null,
-                                'place_of_birth'       => $e['place_of_birth']       ?: null,
-                                'citizenship'          => $e['citizenship']           ?: null,
-                                'civil_status'         => $e['civil_status']          ?: null,
-                                'blood_type'           => $e['blood_type']            ?: null,
-                                'contact_number'       => $e['contact_number']        ?: null,
-                                'year_level'           => $e['year_level']            ?: null,
-                                'father_last_name'     => $e['father_last_name']      ?: null,
-                                'father_given_name'    => $e['father_given_name']     ?: null,
-                                'father_middle_name'   => $e['father_middle_name']    ?: null,
-                                'mother_last_name'     => $e['mother_last_name']      ?: null,
-                                'mother_given_name'    => $e['mother_given_name']     ?: null,
-                                'mother_middle_name'   => $e['mother_middle_name']    ?: null,
-                                'dswd_household_no'    => $e['dswd_household_no']     ?: null,
-                                'disability'           => $e['disability']            ?: null,
-                                'address_no'           => $e['address_no']            ?: null,
-                                'address_street'       => $e['address_street']        ?: null,
-                                'address_barangay'     => $e['address_barangay']      ?: null,
-                                'address_municipality' => $e['address_municipality']  ?: null,
-                                'address_province'     => $e['address_province']      ?: null,
-                                'address_zip_code'     => $e['address_zip_code']      ?: null,
-                            ]);
+                            $e = $job['extra'];
+
+                            $row['profile_completed']    = 1;
+                            $row['gender']               = $e['gender']               ?: null;
+                            $row['date_of_birth']        = $e['date_of_birth']        ?: null;
+                            $row['contact_number']       = $e['contact_number']       ?: null;
+                            $row['disability']           = $e['disability']           ?: null;
+                            $row['dswd_household_no']    = $e['dswd_household_no']    ?: null;
+                            $row['father_last_name']     = $e['father_last_name']     ?: null;
+                            $row['father_given_name']    = $e['father_given_name']    ?: null;
+                            $row['father_middle_name']   = $e['father_middle_name']   ?: null;
+                            $row['mother_last_name']     = $e['mother_last_name']     ?: null;
+                            $row['mother_given_name']    = $e['mother_given_name']    ?: null;
+                            $row['mother_middle_name']   = $e['mother_middle_name']   ?: null;
+                            $row['address_street']       = $e['address_street']       ?: null;
+                            $row['address_barangay']     = $e['address_barangay']     ?: null;
+                            $row['address_municipality'] = $e['address_municipality'] ?: null;
+                            $row['address_province']     = $e['address_province']     ?: null;
                         }
 
                         $alumniRows[] = $row;
@@ -492,11 +502,11 @@ new class extends Component {
             $this->importingFile  = false;
             $this->importFile     = null;
 
-            Log::info("Alumni import completed: {$this->importSuccessCount} inserted, {$this->importFailCount} errors, {$this->importDuplicateCount} duplicates.");
+            Log::info("Alumni import: {$this->importSuccessCount} inserted, {$this->importFailCount} errors, {$this->importDuplicateCount} duplicates.");
 
         } catch (\Exception $e) {
-            Log::error('Import error: ' . $e->getMessage());
-            $this->importStatus  = 'Error: ' . $e->getMessage();
+            Log::error('Import error: '.$e->getMessage());
+            $this->importStatus  = 'Error: '.$e->getMessage();
             $this->importStep    = 'blocked';
             $this->importingFile = false;
         }
@@ -513,17 +523,18 @@ new class extends Component {
             <i class="fas fa-file-import text-white text-sm"></i>
         </div>
         <div>
-            <h1 class="text-lg sm:text-xl font-extrabold text-gray-900 leading-tight">Import Students</h1>
+            <h1 class="text-2xl sm:text-3xl font-extrabold text-[#2b0d3e] leading-tight">Import Alumni Records</h1>
+            <p class="text-sm sm:text-base text-gray-600 font-medium mt-0.5">Upload and process alumni data from CSV or Excel files in bulk</p>
         </div>
     </div>
 
     <div class="max-w-2xl w-full mx-auto">
         <div class="bg-white rounded-2xl shadow-sm border border-purple-100 overflow-hidden">
 
-            {{-- Card Header bar --}}
+            {{-- Card Header --}}
             <div class="px-5 py-3.5 border-b border-gray-100 bg-gradient-to-r from-[#f9f5ff] to-white">
-                <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                    @if($importStep === 'upload')        File Upload
+                <p class="text-sm font-bold text-gray-500 uppercase tracking-wide">
+                    @if($importStep === 'upload')         File Upload
                     @elseif($importStep === 'processing') Processing…
                     @elseif($importStep === 'blocked')    Import Failed
                     @else                                 Import Summary
@@ -538,11 +549,11 @@ new class extends Component {
 
                 {{-- Mode selector --}}
                 <div>
-                    <p class="text-xs font-bold text-gray-600 uppercase tracking-wide mb-3">Import Mode</p>
+                    <p class="text-sm font-bold text-gray-600 uppercase tracking-wide mb-3">Import Mode</p>
                     <div class="grid grid-cols-2 gap-3">
                         @foreach([
-                            ['new',      'user-plus', "Student's",            'Basic info only'],
-                            ['complete', 'id-card',   "Complete Student's Info", 'Full personal details'],
+                            ['new',      'user-plus', "Basic Alumni Info",        'Core details only'],
+                            ['complete', 'id-card',   "Complete Alumni Profile",  'Full personal details'],
                         ] as [$mode, $icon, $label, $sub])
                         <button type="button" wire:click="$set('importMode','{{ $mode }}')"
                                 class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 text-center transition active:scale-[.98]
@@ -567,68 +578,100 @@ new class extends Component {
                 {{-- Column guide --}}
                 @if($importMode === 'new')
                 <div class="p-4 rounded-xl bg-blue-50 border border-blue-200">
-                    <p class="font-bold text-sm text-blue-900 mb-2">
+                    <p class="font-bold text-base text-blue-900 mb-2">
                         <i class="fas fa-circle-info mr-1.5"></i>Required Columns
                     </p>
                     <div class="flex flex-wrap gap-1 mb-2">
-                        @foreach(['first_name','last_name','middle_name','student_id','course_code','batch'] as $col)
+                        @foreach(['first_name','last_name','middle_name','student_id','course','batch'] as $col)
                             <code class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
                         @endforeach
                     </div>
-                    <p class="text-xs text-blue-700">
-                        Optional: <code class="bg-blue-100 px-1 rounded font-mono">suffix</code>
+                    <p class="text-xs text-blue-600 mt-1">
+                      <code class="bg-blue-100 px-1 rounded font-mono">suffix</code> &nbsp;·&nbsp;
+                        
                     </p>
                 </div>
                 @else
-                <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
-                    <p class="font-bold text-sm text-emerald-900 mb-2">
-                        <i class="fas fa-circle-info mr-1.5"></i>Columns
+                <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 space-y-3">
+                    <p class="font-bold text-base text-emerald-900">
+                        <i class="fas fa-circle-info mr-1.5"></i>Columns for Complete Alumni Profile
                     </p>
-                    <p class="text-xs text-emerald-700 font-semibold mb-1">Required:</p>
-                    <div class="flex flex-wrap gap-1 mb-2">
-                        @foreach(['first_name','last_name','middle_name','student_id','course_code','batch'] as $col)
-                            <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                        @endforeach
+
+                    {{-- Required --}}
+                    <div>
+                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Required</p>
+                        <div class="flex flex-wrap gap-1">
+                            @foreach(['first_name','last_name','middle_name','student_id','course','batch'] as $col)
+                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                            @endforeach
+                        </div>
                     </div>
-                    <p class="text-xs text-emerald-700 font-semibold mb-1">Optional / Extra:</p>
-                    <div class="flex flex-wrap gap-1">
-                        @foreach([
-                            'suffix','email','gender','date_of_birth','place_of_birth',
-                            'citizenship','civil_status','blood_type','contact_number',
-                            'year_level',
-                            'father_last_name','father_given_name','father_middle_name',
-                            'mother_last_name','mother_given_name','mother_middle_name',
-                            'dswd_household_no','disability',
-                            'address_no','address_street','address_barangay',
-                            'address_municipality','address_province','address_zip_code',
-                        ] as $col)
-                            <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                        @endforeach
+
+                    {{-- Personal --}}
+                    <div>
+                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Personal</p>
+                        <div class="flex flex-wrap gap-1">
+                            @foreach(['suffix','email','gender','date_of_birth','contact_number','disability','dswd_household_no'] as $col)
+                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                            @endforeach
+                        </div>
                     </div>
+
+                    {{-- Father --}}
+                    <div>
+                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Father's Name</p>
+                        <div class="flex flex-wrap gap-1">
+                            @foreach(['father_last_name','father_given_name','father_middle_name'] as $col)
+                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                            @endforeach
+                        </div>
+                    </div>
+
+                    {{-- Mother --}}
+                    <div>
+                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Mother's Maiden Name</p>
+                        <div class="flex flex-wrap gap-1">
+                            @foreach(['mother_last_name','mother_given_name','mother_middle_name'] as $col)
+                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                            @endforeach
+                        </div>
+                    </div>
+
+                    {{-- Address --}}
+                    <div>
+                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Address</p>
+                        <div class="flex flex-wrap gap-1">
+                            @foreach(['address_street','address_barangay','address_municipality','address_province'] as $col)
+                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                            @endforeach
+                        </div>
+                    </div>
+
+                    
                 </div>
                 @endif
 
                 {{-- File picker --}}
                 <div>
-                    <p class="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Upload File</p>
+                    <p class="text-sm font-bold text-gray-600 uppercase tracking-wide mb-2">Upload File</p>
                     <div class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#faf5ff] transition"
                          @click="document.getElementById('importFileInput').click()">
                         @if($importFile)
                             <div class="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center bg-emerald-100">
                                 <i class="fas fa-file-circle-check text-2xl text-emerald-500"></i>
                             </div>
-                            <p class="text-emerald-700 font-bold text-sm">{{ $importFile->getClientOriginalName() }}</p>
-                            <p class="text-gray-400 text-xs mt-0.5">Click to change file</p>
+                            <p class="text-emerald-700 font-bold text-base">{{ $importFile->getClientOriginalName() }}</p>
+                            <p class="text-gray-400 text-sm mt-0.5">Click to change file</p>
                         @else
                             <div class="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center bg-gray-100">
                                 <i class="fas fa-file-arrow-up text-2xl text-gray-300"></i>
                             </div>
-                            <p class="text-gray-700 font-semibold text-sm">Click to choose file</p>
-                            <p class="text-gray-400 text-xs mt-0.5">CSV or Excel (.xlsx, .xls)</p>
+                            <p class="text-gray-700 font-semibold text-base">Click to choose file</p>
+                            <p class="text-gray-400 text-sm mt-0.5">CSV or Excel (.xlsx, .xls)</p>
                         @endif
                         <input type="file" id="importFileInput" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
                     </div>
-                    <div wire:loading wire:target="importFile" class="mt-2 text-xs text-[#7a3f91] flex items-center gap-1.5">
+                    <div wire:loading wire:target="importFile" class="mt-2 text-sm text-[#7a3f91] flex items-center gap-1.5">
                         <i class="fas fa-spinner animate-spin"></i> Reading file…
                     </div>
                 </div>
@@ -662,16 +705,16 @@ new class extends Component {
                          style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
                         <i class="fas fa-spinner animate-spin text-white text-2xl"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-base mb-1">
+                    <p class="font-bold text-gray-800 text-lg mb-1">
                         Processing {{ $importProgress }} / {{ $importTotal }}
                     </p>
-                    <p class="text-xs text-gray-400 mb-5">{{ $importStatus }}</p>
+                    <p class="text-sm text-gray-400 mb-5">{{ $importStatus }}</p>
                     <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                         @php $pct = $importTotal > 0 ? round(($importProgress / $importTotal) * 100) : 0; @endphp
                         <div class="h-full rounded-full transition-all duration-300"
                              style="width:{{ $pct }}%; background:linear-gradient(90deg,#7a3f91,#9b59b6);"></div>
                     </div>
-                    <p class="text-xs text-gray-400 mt-2">{{ $pct }}% complete</p>
+                    <p class="text-sm text-gray-400 mt-2">{{ $pct }}% complete</p>
                 </div>
 
                 {{-- ── BLOCKED STEP ─────────────────────────────────── --}}
@@ -700,7 +743,6 @@ new class extends Component {
                     $hasDups   = $importDuplicateCount  > 0;
                 @endphp
 
-                {{-- Result banner --}}
                 <div class="flex items-start gap-4 p-4 rounded-xl border
                             {{ $hasNew ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200' }}">
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0
@@ -710,20 +752,19 @@ new class extends Component {
                     <div>
                         @if($hasNew)
                             <p class="font-bold text-emerald-900">Import Complete</p>
-                            <p class="text-xs text-emerald-700 mt-0.5">
+                            <p class="text-sm text-emerald-700 mt-0.5">
                                 <strong>{{ $importSuccessCount }}</strong> record(s) imported as
-                                <strong>{{ $importMode === 'complete' ? "Complete Student's Info" : "Student's" }}</strong> — all <strong>VERIFIED</strong>
+                                <strong>{{ $importMode === 'complete' ? "Complete Alumni Profile" : "Basic Alumni Info" }}</strong> — all <strong>VERIFIED</strong>
                                 @if($hasDups) · {{ $importDuplicateCount }} duplicate(s) skipped @endif
                                 @if($hasErrors) · {{ $importFailCount }} error(s) @endif
                             </p>
                         @else
                             <p class="font-bold text-amber-900">Nothing Imported</p>
-                            <p class="text-xs text-amber-700 mt-0.5">All records were duplicates or had errors.</p>
+                            <p class="text-sm text-amber-700 mt-0.5">All records were duplicates or had errors.</p>
                         @endif
                     </div>
                 </div>
 
-                {{-- Stats grid --}}
                 <div class="grid grid-cols-4 gap-2">
                     @foreach([
                         ['#f9fafb','#e5e7eb','#6b7280', $importTotal,          'Total'],
@@ -733,22 +774,21 @@ new class extends Component {
                     ] as [$bg, $border, $clr, $num, $lbl])
                     <div class="rounded-xl p-3 text-center" style="background:{{ $bg }};border:1px solid {{ $border }};">
                         <p class="text-xl font-extrabold" style="color:{{ $clr }};">{{ $num }}</p>
-                        <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-0.5">{{ $lbl }}</p>
+                        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mt-0.5">{{ $lbl }}</p>
                     </div>
                     @endforeach
                 </div>
 
-                {{-- Errors list --}}
                 @if($hasErrors)
                 <div class="border border-red-200 rounded-xl overflow-hidden">
                     <div class="px-4 py-2.5 bg-red-50 border-b border-red-100 flex items-center gap-2">
                         <i class="fas fa-circle-xmark text-red-400 text-xs"></i>
-                        <p class="font-bold text-red-900 text-xs">Validation Errors</p>
+                        <p class="font-bold text-red-900 text-sm">Validation Errors</p>
                         <span class="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">{{ count($importErrors) }}</span>
                     </div>
                     <ul class="divide-y divide-red-50 overflow-y-auto" style="max-height:200px;">
                         @foreach($importErrors as $err)
-                        <li class="px-4 py-2.5 text-xs text-red-700 flex items-start gap-2">
+                        <li class="px-4 py-2.5 text-sm text-red-700 flex items-start gap-2">
                             <i class="fas fa-circle-xmark text-red-300 mt-0.5 shrink-0"></i>
                             <span>{{ $err }}</span>
                         </li>
@@ -757,17 +797,16 @@ new class extends Component {
                 </div>
                 @endif
 
-                {{-- Duplicates list --}}
                 @if($hasDups && count($importDuplicates) > 0)
                 <div class="border border-amber-200 rounded-xl overflow-hidden">
                     <div class="px-4 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
                         <i class="fas fa-copy text-amber-400 text-xs"></i>
-                        <p class="font-bold text-amber-900 text-xs">Duplicates Skipped</p>
+                        <p class="font-bold text-amber-900 text-sm">Duplicates Skipped</p>
                         <span class="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{{ $importDuplicateCount }}</span>
                     </div>
                     <ul class="divide-y divide-amber-50 overflow-y-auto" style="max-height:160px;">
                         @foreach($importDuplicates as $dup)
-                        <li class="px-4 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+                        <li class="px-4 py-2.5 text-sm text-amber-700 flex items-start gap-2">
                             <i class="fas fa-triangle-exclamation text-amber-300 mt-0.5 shrink-0"></i>
                             <span>{{ $dup }}</span>
                         </li>
@@ -776,7 +815,6 @@ new class extends Component {
                 </div>
                 @endif
 
-                {{-- Action buttons --}}
                 <div class="flex gap-3">
                     <button wire:click="resetImport"
                             class="flex-1 bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition active:scale-[.99]">

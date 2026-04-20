@@ -77,16 +77,7 @@
                         'icon' => 'file-import',
                         'label' => 'Import Alumni',
                     ],
-                    [
-                        'route' => 'registrar.courses',
-                        'icon' => 'book-open',
-                        'label' => 'Courses',
-                    ],
-                    [
-                        'route' => 'registrar.information-management',
-                        'icon' => 'database',
-                        'label' => 'Info Management',
-                    ],
+
                 ];
 
                 $currentRoute = request()->route()?->getName();

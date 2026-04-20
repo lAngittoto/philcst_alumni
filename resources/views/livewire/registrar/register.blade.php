@@ -224,7 +224,8 @@ new class extends Component {
             <i class="fas fa-user-plus text-white text-sm"></i>
         </div>
         <div>
-            <h1 class="text-lg sm:text-xl font-extrabold text-gray-900 leading-tight">Register Alumni</h1>
+            <h1 class="text-2xl sm:text-3xl font-extrabold text-[#2b0d3e] leading-tight">Register Alumni</h1>
+            <p class="text-sm sm:text-base text-gray-600 font-medium mt-0.5">Add new alumni to the system with their details and credentials</p>
         </div>
     </div>
 
@@ -250,7 +251,7 @@ new class extends Component {
                             <i class="fas fa-rotate-left text-[10px]"></i> Reset Form
                         </button>
                     </div>
-                    <ul class="space-y-1.5 text-xs text-red-700">
+                    <ul class="space-y-1.5 text-sm text-red-700">
                         @foreach($formErrors as $msgs)
                             @foreach($msgs as $msg)
                                 <li class="flex items-start gap-1.5">
@@ -265,64 +266,63 @@ new class extends Component {
                 {{-- Form Card --}}
                 <div class="bg-white rounded-2xl shadow-sm border border-purple-100 overflow-hidden">
                     <div class="px-5 py-3.5 border-b border-gray-200 bg-gray-50">
-                        <p class="text-xs font-bold text-gray-600 uppercase tracking-wide">Alumni Information</p>
+                        <p class="text-sm font-bold text-gray-600 uppercase tracking-wide">Alumni Information</p>
                     </div>
                     <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-6">
 
                         {{-- Name Fields --}}
                         <div class="space-y-3">
-                            <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide">
+                            <label class="block text-sm font-bold text-gray-700 uppercase tracking-wide">
                                 Full Name <span class="text-red-500">*</span>
                             </label>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <input wire:model.defer="regFirstName" type="text" placeholder="First Name"
-                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                            maxlength="100" autocomplete="given-name">
-                                    <p class="text-[10px] text-gray-500 mt-1">First Name <span class="text-red-500">*</span></p>
+                                    <p class="text-xs text-gray-500 mt-1">First Name <span class="text-red-500">*</span></p>
                                 </div>
                                 <div>
                                     <input wire:model.defer="regLastName" type="text" placeholder="Last Name"
-                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                            maxlength="100" autocomplete="family-name">
-                                    <p class="text-[10px] text-gray-500 mt-1">Last Name <span class="text-red-500">*</span></p>
+                                    <p class="text-xs text-gray-500 mt-1">Last Name <span class="text-red-500">*</span></p>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. Santos"
-                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                            maxlength="50">
-                                    <p class="text-[10px] text-gray-500 mt-1">Middle Name <span class="text-gray-400 font-normal">(full word, optional)</span></p>
+                                    <p class="text-xs text-gray-500 mt-1">Middle Name</p>
                                 </div>
                                 <div>
                                     <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr."
-                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                           class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                            maxlength="10">
-                                    <p class="text-[10px] text-gray-500 mt-1">Suffix <span class="text-gray-400 font-normal">(optional)</span></p>
+                                    <p class="text-xs text-gray-500 mt-1">Suffix</p>
                                 </div>
                             </div>
                         </div>
 
                         {{-- Student ID --}}
                         <div>
-                            <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+                            <label class="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
                                 Student ID <span class="text-red-500">*</span>
                             </label>
                             <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345"
-                                   class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 font-mono placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                   class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 font-mono placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                    maxlength="8" inputmode="numeric" autocomplete="off">
-                            <p class="text-[10px] text-gray-500 mt-1">Numbers only · zero-padded to 8 digits (e.g. 12345 → 00012345)</p>
                         </div>
 
                         {{-- Course + Batch --}}
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+                                <label class="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
                                     Course <span class="text-red-500">*</span>
                                 </label>
                                 <select wire:model.defer="regCourseCode"
-                                        class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer">
+                                        class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer">
                                     <option value="">Select Course…</option>
                                     @foreach($this->courses as $c)
                                         <option value="{{ $c->code }}">{{ $c->code }} — {{ $c->name }}</option>
@@ -330,11 +330,11 @@ new class extends Component {
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">
+                                <label class="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
                                     Batch Year <span class="text-red-500">*</span>
                                 </label>
                                 <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}"
-                                       class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                       class="w-full px-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                        min="1900" max="9999">
                             </div>
                         </div>

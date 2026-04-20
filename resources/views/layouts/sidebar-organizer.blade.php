@@ -102,6 +102,12 @@
                         'label'   => 'Generate Report',
                         'pattern' => 'organizer/reports*',
                     ],
+                    [
+                        'route'   => 'organizer.chat/alumni',
+                        'icon'    => 'file-export',
+                        'label'   => 'Messenger',
+                        'pattern' => 'organizer/chat/alumni*',
+                    ],
                 ];
             @endphp
 

@@ -48,7 +48,8 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
     Route::view('/organizer/event/organizer',  'organizer.event-organizer-wrapper')  ->name('organizer.event/organizer');
     Route::view('/organizer/job/management',   'organizer.job-management-wrapper')   ->name('organizer.job/management');
     Route::view('/organizer/alumni/employment','organizer.alumni-employment-wrapper') ->name('organizer.alumni/employment');
-    Route::view('/organizer/reports',          'organizer.reports')                  ->name('organizer.reports');
+    Route::view('/organizer/reports',          'organizer.reports')                   ->name('organizer.reports');    
+    Route::view('/organizer/chat/alumni',          'organizer.chat-alumni-wrapper')           ->name('organizer.chat/alumni');
 });
 
 // ===================================
