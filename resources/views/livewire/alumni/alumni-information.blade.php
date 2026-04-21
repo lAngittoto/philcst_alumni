@@ -282,7 +282,6 @@ input[type="search"] {
     color: #111827;
     cursor: not-allowed;
     pointer-events: none;
-    border-left: 3px solid #d1d5db;
 }
 
 /* ── Radio pill ──────────────────────────────────────────────────── */
@@ -335,12 +334,13 @@ input[type="search"] {
 </style>
 
 {{-- ══ PAGE HEADER ══════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
-        <h1 class="text-xl font-extrabold text-gray-900 tracking-tight">My Profile Information</h1>
-        <p class="text-xs text-gray-500 mt-0.5">
-            Fields marked <span class="text-red-500 font-semibold">*</span> are required to complete your profile.
-            All text entries are saved in <span class="font-semibold text-gray-700">UPPERCASE</span>.
+        <h1 class="text-3xl font-extrabold text-[#2b0d3e] tracking-tight">My Profile Information</h1>
+        <p class="text-sm leading-relaxed mt-2 text-gray-500">
+            Complete your personal details to update your alumni profile. Fields marked with 
+            <span class="text-red-500 font-bold">*</span> are required. 
+           
         </p>
     </div>
 
@@ -418,7 +418,7 @@ input[type="search"] {
                 </div>
             </div>
             <div>
-                <p class="s-label mb-1">Ext. Name / Suffix</p>
+                <p class="s-label mb-1">Ext. Name</p>
                 <div class="px-3 py-2 rounded-xl f-locked text-sm font-semibold uppercase">
                     {{ $suffix ?: '—' }}
                 </div>
@@ -450,7 +450,7 @@ input[type="search"] {
             {{-- Sex / Gender --}}
             <div>
                 <label class="block s-label mb-2">
-                    Sex / Gender @if($editing)<span class="text-red-500 normal-case font-normal text-xs ml-1">*</span>@endif
+                    Sex @if($editing)<span class="text-red-500 normal-case font-normal text-xs ml-1">*</span>@endif
                 </label>
                 @if($editing)
                     <div class="flex gap-2 flex-wrap">
@@ -502,8 +502,6 @@ input[type="search"] {
                     <p class="text-xs text-gray-500 mt-1 pl-1 truncate uppercase" title="{{ $course_name }}">{{ $course_name }}</p>
                 @endif
             </div>
-
-            {{-- Year Level — hidden for now; alumni fills this in later --}}
 
         </div>
     </div>

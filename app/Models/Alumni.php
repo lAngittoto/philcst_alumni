@@ -147,17 +147,30 @@ class Alumni extends Model
     // ─────────────────────────────────────────────────────
 
     /**
-     * TRUE = all required profile fields are filled.
+     * TRUE = profile is marked as complete in the database.
      *
-     * IMPORTANT: This now checks the NEW split fields from the migration.
-     * Old fields (father_name, mother_name, place_of_birth, etc.) were
-     * dropped — do NOT reference them here.
+     * We trust the profile_completed DB flag as the single source of truth.
+     * This flag is set to TRUE by AlumniInformationController only after
+     * all required fields have been validated and saved successfully.
      *
-     * The profile_completed boolean in the DB is the cached result of this
-     * check. The middleware uses profile_completed directly for performance,
-     * but this method is the source of truth for what "complete" means.
+     * DO NOT re-check individual fields here — that caused a mismatch where
+     * profile_completed = true in the DB but this method returned false
+     * because some optional/legacy fields were empty.
      */
     public function isProfileComplete(): bool
+    {
+        return (bool) $this->profile_completed;
+    }
+
+    /**
+     * Check if all required profile fields are filled.
+     * Used by AlumniInformationController when saving the profile
+     * to decide whether to set profile_completed = true.
+     *
+     * Keep this separate from isProfileComplete() so the two concerns
+     * (field validation vs. completion status) don't get tangled.
+     */
+    public function hasAllRequiredFields(): bool
     {
         return !empty($this->gender)
             && !empty($this->date_of_birth)

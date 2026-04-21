@@ -113,7 +113,7 @@ class EnsureAlumniOnboarded
         // ══════════════════════════════════════════════════════════════════════
         // GATE 2 — Profile Completion
         // ══════════════════════════════════════════════════════════════════════
-        if (!$alumni->profile_completed) {
+       if (!$alumni->isProfileComplete()) {
 
             // Allow Livewire AJAX so the information page's own component works
             // (form saves, validation, etc. on the information page itself)
