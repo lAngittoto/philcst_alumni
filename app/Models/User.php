@@ -51,6 +51,11 @@ class User extends Authenticatable
    {
        return $this->role === 'registrar';
    }
+    public function isDirector(): bool
+   {
+       return $this->role === 'director';
+   }
+
 
     // ─────────────────────────────────────────────────────
     // Relationships

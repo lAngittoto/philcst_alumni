@@ -253,7 +253,7 @@ new class extends Component {
     </div>
     <div class="flex-1 min-w-0">
         <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
-        <p class="text-xs mt-0.5 opacity-80 leading-snug break-words" x-text="msg"></p>
+        <p class="text-sm mt-0.5 opacity-80 leading-snug break-words" x-text="msg"></p>
     </div>
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
@@ -265,21 +265,21 @@ new class extends Component {
         <div class="flex items-center gap-4">
             <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shadow-lg flex-shrink-0"
                  style="background:#7a3f91;box-shadow:0 4px 14px rgba(122,63,145,.35);">
-                <i class="fas fa-chart-line text-white text-lg sm:text-xl"></i>
+                <i class="fas fa-chart-line text-white text-xl sm:text-2xl"></i>
             </div>
             <div>
-                <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-800 tracking-tight">Employment Tracking</h1>
-                <p class="text-gray-500 text-xs sm:text-sm mt-0.5 flex flex-wrap items-center gap-2">
+                <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800 tracking-tight">Employment Tracking</h1>
+                <p class="text-gray-500 text-sm sm:text-base mt-0.5 flex flex-wrap items-center gap-2">
                     Track employment status of your assigned alumni.
                     @if($organizerDepartment)
                         <span class="inline-flex items-center gap-1 font-semibold" style="color:#7a3f91;">
-                            <i class="fa-solid fa-building-columns text-xs"></i>
+                            <i class="fa-solid fa-building-columns text-sm"></i>
                             {{ $organizerDepartment }}
                         </span>
                     @endif
                     @if($organizerBatch)
                         <span class="inline-flex items-center gap-1 font-semibold" style="color:#7a3f91;">
-                            <i class="fa-solid fa-calendar text-xs"></i>
+                            <i class="fa-solid fa-calendar text-sm"></i>
                             Batch {{ $organizerBatch }}
                         </span>
                     @endif
@@ -289,50 +289,50 @@ new class extends Component {
     </div>
 
     {{-- ══ STAT CARDS ══ --}}
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-        <div class="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
-            <div class="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid fa-users text-violet-600 text-sm"></i>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-users text-violet-600 text-lg"></i>
             </div>
             <div>
-                <p class="text-xl font-bold text-gray-900 leading-none">{{ $totalAlumni }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">Total</p>
+                <p class="text-2xl font-bold text-gray-900 leading-none">{{ $totalAlumni }}</p>
+                <p class="text-sm text-gray-500 mt-0.5">Total</p>
             </div>
         </div>
-        <div class="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
-            <div class="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid fa-briefcase text-emerald-600 text-sm"></i>
+        <div class="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-briefcase text-emerald-600 text-lg"></i>
             </div>
             <div>
-                <p class="text-xl font-bold text-gray-900 leading-none">{{ $totalEmployed }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">Employed</p>
+                <p class="text-2xl font-bold text-gray-900 leading-none">{{ $totalEmployed }}</p>
+                <p class="text-sm text-gray-500 mt-0.5">Employed</p>
             </div>
         </div>
-        <div class="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
-            <div class="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid fa-store text-blue-600 text-sm"></i>
+        <div class="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-store text-blue-600 text-lg"></i>
             </div>
             <div>
-                <p class="text-xl font-bold text-gray-900 leading-none">{{ $totalSelf }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">Self-Employed</p>
+                <p class="text-2xl font-bold text-gray-900 leading-none">{{ $totalSelf }}</p>
+                <p class="text-sm text-gray-500 mt-0.5">Self-Employed</p>
             </div>
         </div>
-        <div class="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
-            <div class="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid fa-circle-pause text-amber-500 text-sm"></i>
+        <div class="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-circle-pause text-amber-500 text-lg"></i>
             </div>
             <div>
-                <p class="text-xl font-bold text-gray-900 leading-none">{{ $totalUnemployed }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">Unemployed</p>
+                <p class="text-2xl font-bold text-gray-900 leading-none">{{ $totalUnemployed }}</p>
+                <p class="text-sm text-gray-500 mt-0.5">Unemployed</p>
             </div>
         </div>
-        <div class="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm col-span-2 sm:col-span-1">
-            <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid fa-circle-question text-gray-400 text-sm"></i>
+        <div class="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3 shadow-sm col-span-2 sm:col-span-1">
+            <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-circle-question text-gray-400 text-lg"></i>
             </div>
             <div>
-                <p class="text-xl font-bold text-gray-900 leading-none">{{ $totalNotFilled }}</p>
-                <p class="text-xs text-gray-500 mt-0.5">Not Filled</p>
+                <p class="text-2xl font-bold text-gray-900 leading-none">{{ $totalNotFilled }}</p>
+                <p class="text-sm text-gray-500 mt-0.5">Not Filled</p>
             </div>
         </div>
     </div>
@@ -342,22 +342,22 @@ new class extends Component {
          style="min-height:0;height:calc(100vh - 290px);">
 
         {{-- Filter Bar --}}
-        <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
+        <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-white flex flex-wrap gap-2 items-center">
 
             {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
                        placeholder="Search name, ID, company or job…"
-                       class="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-800 transition focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
+                       class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-800 transition focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100"
                        autocomplete="off">
             </div>
 
             {{-- Status --}}
             <select wire:model.live="filterStatus"
-                    class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
+                    class="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                 <option value="">All Statuses</option>
                 <option value="employed">Employed</option>
                 <option value="self_employed">Self-Employed</option>
@@ -367,7 +367,7 @@ new class extends Component {
 
             {{-- Location --}}
             <select wire:model.live="filterLocation"
-                    class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
+                    class="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                 <option value="">All Locations</option>
                 <option value="local">Local</option>
                 <option value="abroad">Abroad (OFW)</option>
@@ -376,7 +376,7 @@ new class extends Component {
             {{-- Course --}}
             @if($courses->isNotEmpty())
                 <select wire:model.live="filterCourse"
-                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
+                        class="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                     <option value="">All Courses</option>
                     @foreach($courses as $c)
                         <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -387,7 +387,7 @@ new class extends Component {
             {{-- Batch --}}
             @if($batches->isNotEmpty())
                 <select wire:model.live="filterBatch"
-                        class="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
+                        class="px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition">
                     <option value="">All Batches</option>
                     @foreach($batches as $b)
                         <option value="{{ $b }}">Batch {{ $b }}</option>
@@ -398,8 +398,8 @@ new class extends Component {
             {{-- Reset --}}
             @if($search || $filterStatus || $filterLocation || $filterBatch || $filterCourse || $filterRelevance)
                 <button wire:click="clearFilters"
-                        class="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition flex items-center gap-1.5">
-                    <i class="fas fa-rotate-left text-xs"></i>
+                        class="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 transition flex items-center gap-1.5">
+                    <i class="fas fa-rotate-left text-sm"></i>
                     <span class="hidden sm:inline">Reset</span>
                 </button>
             @endif
@@ -415,14 +415,14 @@ new class extends Component {
                 <table class="w-full border-collapse min-w-[700px]">
                     <thead>
                         <tr class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Alumni</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Course</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Batch</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Company / Job Title</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Location</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Last Updated</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th class="px-5 py-3.5 text-left text-sm font-bold text-gray-600 uppercase tracking-wider">Alumni</th>
+                            <th class="px-5 py-3.5 text-left text-sm font-bold text-gray-600 uppercase tracking-wider">Course</th>
+                            <th class="px-5 py-3.5 text-left text-sm font-bold text-gray-600 uppercase tracking-wider hidden md:table-cell">Batch</th>
+                            <th class="px-5 py-3.5 text-left text-sm font-bold text-gray-600 uppercase tracking-wider">Company / Job Title</th>
+                            <th class="px-5 py-3.5 text-left text-sm font-bold text-gray-600 uppercase tracking-wider hidden lg:table-cell">Location</th>
+                            <th class="px-5 py-3.5 text-center text-sm font-bold text-gray-600 uppercase tracking-wider">Status</th>
+                            <th class="px-5 py-3.5 text-left text-sm font-bold text-gray-600 uppercase tracking-wider hidden lg:table-cell">Last Updated</th>
+                            <th class="px-5 py-3.5 text-center text-sm font-bold text-gray-600 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-50">
@@ -457,70 +457,70 @@ new class extends Component {
                         <tr class="transition-colors duration-100 {{ $rowBg }}">
 
                             {{-- Alumni --}}
-                            <td class="px-4 sm:px-5 py-3.5">
+                            <td class="px-5 py-3.5">
                                 <div class="flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-white text-xs font-bold"
+                                    <div class="w-9 h-9 rounded-lg flex-shrink-0 flex items-center justify-center text-white text-sm font-bold"
                                          style="background:#7a3f91;">
                                         {{ strtoupper(substr($row->full_name, 0, 1)) }}
                                     </div>
                                     <div class="min-w-0">
-                                        <p class="font-semibold text-gray-900 text-sm truncate">{{ $row->full_name }}</p>
-                                        <p class="text-xs text-gray-400">{{ $row->student_id }}</p>
+                                        <p class="font-semibold text-gray-900 text-sm">{{ $row->full_name }}</p>
+                                        <p class="text-sm text-gray-400">{{ $row->student_id }}</p>
                                     </div>
                                 </div>
                             </td>
 
                             {{-- Course --}}
-                            <td class="px-4 sm:px-5 py-3.5">
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-violet-100 text-violet-700">
+                            <td class="px-5 py-3.5">
+                                <span class="inline-flex items-center px-2.5 py-1 rounded text-sm font-semibold bg-violet-100 text-violet-700">
                                     {{ $row->course_code ?? '—' }}
                                 </span>
                             </td>
 
                             {{-- Batch --}}
-                            <td class="px-4 sm:px-5 py-3.5 text-sm text-gray-700 font-medium hidden md:table-cell">
+                            <td class="px-5 py-3.5 text-sm text-gray-700 font-medium hidden md:table-cell">
                                 {{ $row->batch ?? '—' }}
                             </td>
 
                             {{-- Company / Job --}}
-                            <td class="px-4 sm:px-5 py-3.5">
+                            <td class="px-5 py-3.5">
                                 @if($row->job_title || $row->company_name)
                                     <p class="font-semibold text-gray-900 text-sm">{{ $row->job_title ?? '—' }}</p>
-                                    <p class="text-xs text-gray-400">{{ $row->company_name ?? '' }}</p>
+                                    <p class="text-sm text-gray-400">{{ $row->company_name ?? '' }}</p>
                                 @elseif($row->employment_status === 'unemployed')
-                                    <span class="text-xs text-gray-400 italic">
+                                    <span class="text-sm text-gray-400 italic">
                                         {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
                                     </span>
                                 @else
-                                    <span class="text-xs text-gray-300 italic">No data yet</span>
+                                    <span class="text-sm text-gray-300 italic">No data yet</span>
                                 @endif
                             </td>
 
                             {{-- Location --}}
-                            <td class="px-4 sm:px-5 py-3.5 hidden lg:table-cell">
+                            <td class="px-5 py-3.5 hidden lg:table-cell">
                                 @if($row->work_location === 'abroad')
-                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
-                                        <i class="fa-solid fa-plane-departure text-xs"></i> Abroad
+                                    <span class="inline-flex items-center gap-1 text-sm font-semibold text-amber-600">
+                                        <i class="fa-solid fa-plane-departure text-sm"></i> Abroad
                                     </span>
                                 @elseif($row->work_location === 'local')
-                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
-                                        <i class="fa-solid fa-house text-xs"></i> Local
+                                    <span class="inline-flex items-center gap-1 text-sm font-semibold text-emerald-600">
+                                        <i class="fa-solid fa-house text-sm"></i> Local
                                     </span>
                                 @else
-                                    <span class="text-xs text-gray-300">—</span>
+                                    <span class="text-sm text-gray-300">—</span>
                                 @endif
                             </td>
 
                             {{-- Status --}}
-                            <td class="px-4 sm:px-5 py-3.5 text-center">
-                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold {{ $statusClass }}">
-                                    <i class="fa-solid {{ $statusIcon }} text-[10px]"></i>
+                            <td class="px-5 py-3.5 text-center">
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold {{ $statusClass }}">
+                                    <i class="fa-solid {{ $statusIcon }} text-xs"></i>
                                     {{ $statusLabel }}
                                 </span>
                             </td>
 
                             {{-- Last Updated --}}
-                            <td class="px-4 sm:px-5 py-3.5 text-xs text-gray-400 hidden lg:table-cell">
+                            <td class="px-5 py-3.5 text-sm text-gray-400 hidden lg:table-cell">
                                 @if($row->emp_updated_at)
                                     {{ \Carbon\Carbon::parse($row->emp_updated_at)->diffForHumans() }}
                                 @else
@@ -529,10 +529,10 @@ new class extends Component {
                             </td>
 
                             {{-- Actions --}}
-                            <td class="px-4 sm:px-5 py-3.5 text-center">
+                            <td class="px-5 py-3.5 text-center">
                                 <button wire:click="viewDetail({{ $row->id }})"
-                                        class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
-                                    <i class="fa-solid fa-eye text-[10px]"></i>
+                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 rounded-lg transition">
+                                    <i class="fa-solid fa-eye text-xs"></i>
                                     <span class="hidden sm:inline">View</span>
                                 </button>
                             </td>
@@ -543,13 +543,13 @@ new class extends Component {
                             <td colspan="8" class="py-20 text-center">
                                 <div class="flex flex-col items-center gap-3">
                                     <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
-                                        <i class="fas fa-users-slash text-2xl text-gray-300"></i>
+                                        <i class="fas fa-users-slash text-4xl text-gray-300"></i>
                                     </div>
-                                    <p class="font-semibold text-gray-400">No alumni found</p>
-                                    <p class="text-sm text-gray-400">Try adjusting your search or filters.</p>
+                                    <p class="font-semibold text-gray-400 text-lg">No alumni found</p>
+                                    <p class="text-base text-gray-400">Try adjusting your search or filters.</p>
                                     <button wire:click="clearFilters"
-                                            class="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
-                                        <i class="fas fa-rotate-left text-xs"></i> Reset Filters
+                                            class="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-base border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                                        <i class="fas fa-rotate-left"></i> Reset Filters
                                     </button>
                                 </div>
                             </td>
@@ -571,7 +571,7 @@ new class extends Component {
                 $to    = min($cp * $pp, $total);
             @endphp
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <p class="text-white text-xs sm:text-sm">
+                <p class="text-white text-base sm:text-lg">
                     Showing
                     <span class="font-bold text-white">{{ $from }}–{{ $to }}</span>
                     of
@@ -581,12 +581,12 @@ new class extends Component {
                 <div class="flex items-center gap-1.5">
                     @if($rows->onFirstPage())
                         <button disabled
-                                class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">
+                                class="px-4 sm:px-5 py-2 bg-gray-100 text-gray-400 rounded-lg text-base sm:text-lg font-semibold cursor-not-allowed">
                             ← Prev
                         </button>
                     @else
                         <button wire:click="previousPage"
-                                class="px-3 sm:px-4 py-2 text-white rounded-lg text-xs sm:text-sm font-semibold transition"
+                                class="px-4 sm:px-5 py-2 text-white rounded-lg text-base sm:text-lg font-semibold transition"
                                 style="background:#7a3f91;"
                                 onmouseover="this.style.background='#5e2f72'"
                                 onmouseout="this.style.background='#7a3f91'">
@@ -594,13 +594,13 @@ new class extends Component {
                         </button>
                     @endif
 
-                    <span class="px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 text-xs sm:text-sm font-semibold shadow-sm">
+                    <span class="px-4 py-2 bg-white border border-gray-200 rounded-lg text-gray-600 text-base sm:text-lg font-semibold shadow-sm">
                         {{ $cp }} / {{ $rows->lastPage() }}
                     </span>
 
                     @if($rows->hasMorePages())
                         <button wire:click="nextPage"
-                                class="px-3 sm:px-4 py-2 text-white rounded-lg text-xs sm:text-sm font-semibold transition"
+                                class="px-4 sm:px-5 py-2 text-white rounded-lg text-base sm:text-lg font-semibold transition"
                                 style="background:#7a3f91;"
                                 onmouseover="this.style.background='#5e2f72'"
                                 onmouseout="this.style.background='#7a3f91'">
@@ -608,7 +608,7 @@ new class extends Component {
                         </button>
                     @else
                         <button disabled
-                                class="px-3 sm:px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">
+                                class="px-4 sm:px-5 py-2 bg-gray-100 text-gray-400 rounded-lg text-base sm:text-lg font-semibold cursor-not-allowed">
                             Next →
                         </button>
                     @endif
@@ -633,43 +633,42 @@ new class extends Component {
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0"
              style="background:#7a3f91;">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-white/20 text-white font-bold text-sm flex-shrink-0">
+                <div class="w-11 h-11 rounded-xl flex items-center justify-center bg-white/20 text-white font-bold text-base flex-shrink-0">
                     {{ strtoupper(substr($modalData['full_name'] ?? '?', 0, 1)) }}
                 </div>
                 <div>
-                    <p class="font-bold text-white text-sm">
+                    <p class="font-bold text-white text-base">
                         {{ $modalData['full_name'] ?? '—' }}
                         @if($modalData['suffix'] ?? null) {{ $modalData['suffix'] }}@endif
                     </p>
-                    <p class="text-xs text-white/70">{{ $modalData['student_id'] ?? '—' }}</p>
+                    <p class="text-sm text-white/70">{{ $modalData['student_id'] ?? '—' }}</p>
                 </div>
             </div>
             <button wire:click="closeModal"
                     class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-sm"></i>
+                <i class="fa-solid fa-xmark text-lg"></i>
             </button>
         </div>
 
         {{-- Modal Body --}}
-        <div class="flex-1 min-h-0 overflow-y-auto p-6 space-y-5"
+        <div class="flex-1 min-h-0 overflow-y-auto p-6 space-y-6"
              style="scrollbar-width:thin;scrollbar-color:#d1d5db #f3f4f6;">
 
             {{-- Student Info --}}
             <div>
-                <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <p class="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                     <i class="fa-solid fa-user-graduate text-violet-400"></i> Student Information
                 </p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     @foreach([
-                        'Course'       => $modalData['course_code']    ?? '—',
-                        'Batch'        => $modalData['batch']          ?? '—',
-                        'Gender'       => $modalData['gender']         ?? '—',
-                        'Civil Status' => $modalData['civil_status']   ?? '—',
-                        'Contact'      => $modalData['contact_number'] ?? '—',
+                        'Course'  => $modalData['course_code']    ?? '—',
+                        'Batch'   => $modalData['batch']          ?? '—',
+                        'Gender'  => $modalData['gender']         ?? '—',
+                        'Contact' => $modalData['contact_number'] ?? '—',
                     ] as $label => $value)
-                        <div class="bg-gray-50 rounded-xl px-3 py-2.5">
-                            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{{ $label }}</p>
-                            <p class="text-sm font-semibold text-gray-800 mt-0.5">{{ $value }}</p>
+                        <div class="bg-gray-50 rounded-xl px-4 py-3">
+                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wider">{{ $label }}</p>
+                            <p class="text-base font-semibold text-gray-800 mt-1">{{ $value }}</p>
                         </div>
                     @endforeach
                 </div>
@@ -708,17 +707,17 @@ new class extends Component {
             @endphp
 
             <div class="border-t border-gray-100 pt-4">
-                <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <p class="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                     <i class="fa-solid fa-briefcase text-violet-400"></i> Employment Information
                 </p>
 
                 <div class="flex items-center gap-2 mb-4">
-                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold {{ $statusCls }}">
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold {{ $statusCls }}">
                         {{ $statusLbl }}
                     </span>
                     @if($md['emp_updated_at'] ?? null)
-                        <span class="text-xs text-gray-400">
-                            <i class="fa-regular fa-clock mr-0.5"></i>
+                        <span class="text-sm text-gray-500">
+                            <i class="fa-regular fa-clock mr-1"></i>
                             Updated {{ \Carbon\Carbon::parse($md['emp_updated_at'])->diffForHumans() }}
                         </span>
                     @endif
@@ -735,21 +734,21 @@ new class extends Component {
                             ['Education', $eduMap[$md['education_status'] ?? ''] ?? '—'],
                             ['Relevance', ['yes'=>'Yes','no'=>'No','partially'=>'Partially'][$md['course_relevance'] ?? ''] ?? '—'],
                         ] as [$lbl, $val])
-                            <div class="bg-gray-50 rounded-xl px-3 py-2.5">
-                                <p class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{{ $lbl }}</p>
-                                <p class="text-sm font-semibold text-gray-800 mt-0.5">{{ $val }}</p>
+                            <div class="bg-gray-50 rounded-xl px-4 py-3">
+                                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider">{{ $lbl }}</p>
+                                <p class="text-base font-semibold text-gray-800 mt-1">{{ $val }}</p>
                             </div>
                         @endforeach
                     </div>
 
                     @if(!empty($md['career_path_arr']))
                         <div class="mt-4">
-                            <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Career Path</p>
+                            <p class="text-sm font-bold text-gray-500 uppercase tracking-widest mb-3">Career Path</p>
                             <div class="flex flex-wrap gap-2">
                                 @foreach($md['career_path_arr'] as $cp)
                                     @if(isset($careerLabels[$cp]))
-                                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-violet-100 text-violet-700">
-                                            <i class="fa-solid {{ $careerLabels[$cp][0] }} text-[10px]"></i>
+                                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-violet-100 text-violet-700">
+                                            <i class="fa-solid {{ $careerLabels[$cp][0] }} text-xs"></i>
                                             {{ $careerLabels[$cp][1] }}
                                         </span>
                                     @endif
@@ -760,15 +759,15 @@ new class extends Component {
 
                 @elseif(($md['employment_status'] ?? '') === 'unemployed')
                     <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                        <p class="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1">Unemployment Status</p>
-                        <p class="text-sm font-semibold text-amber-800">
+                        <p class="text-xs font-bold text-amber-600 uppercase tracking-wider mb-1">Unemployment Status</p>
+                        <p class="text-base font-semibold text-amber-800">
                             {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
                         </p>
                     </div>
                 @else
                     <div class="bg-gray-50 border border-gray-200 rounded-xl px-4 py-4 text-center">
-                        <i class="fa-solid fa-circle-question text-gray-300 text-2xl mb-2 block"></i>
-                        <p class="text-sm text-gray-400 italic">This alumni has not filled in their employment information yet.</p>
+                        <i class="fa-solid fa-circle-question text-gray-300 text-4xl mb-2 block"></i>
+                        <p class="text-base text-gray-400 italic">This alumni has not filled in their employment information yet.</p>
                     </div>
                 @endif
             </div>
@@ -778,8 +777,8 @@ new class extends Component {
         {{-- Modal Footer --}}
         <div class="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0 bg-gray-50/50">
             <button wire:click="closeModal"
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 text-gray-600 hover:bg-gray-100 transition">
-                <i class="fa-solid fa-xmark text-xs"></i> Close
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-base font-bold border border-gray-200 text-gray-600 hover:bg-gray-100 transition">
+                <i class="fa-solid fa-xmark"></i> Close
             </button>
         </div>
 

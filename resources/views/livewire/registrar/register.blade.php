@@ -18,6 +18,7 @@ new class extends Component {
     public string $regStudentId     = '';
     public string $regCourseCode    = '';
     public string $regYear          = '';
+    public string $regEmail         = '';
 
     // ── State ────────────────────────────────────────────────────
     public bool   $submitting  = false;
@@ -26,6 +27,7 @@ new class extends Component {
     public string $successName = '';
     public string $successId   = '';
     public string $successPass = '';
+    public string $successEmail = '';
 
     public function mount(): void
     {
@@ -133,6 +135,16 @@ new class extends Component {
             $errors[] = 'Batch year must be exactly 4 digits.';
         }
 
+        // ── Email ───────────────────────────────────────────────
+        $email = trim($this->regEmail);
+        if ($email !== '') {
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = 'Please enter a valid email address.';
+            } elseif (Alumni::whereNotNull('email')->whereRaw('LOWER(TRIM(email))=?', [strtolower($email)])->exists()) {
+                $errors[] = 'This email address is already registered.';
+            }
+        }
+
         return $errors;
     }
 
@@ -152,6 +164,7 @@ new class extends Component {
 
             $paddedId  = str_pad($this->regStudentId, 8, '0', STR_PAD_LEFT);
             $mid       = trim($this->regMiddleInitial);
+            $email     = trim($this->regEmail) ?: null;
             $course    = Course::where('code', $this->regCourseCode)->firstOrFail();
             $fullName  = $this->buildFullName(
                             trim($this->regFirstName),
@@ -176,7 +189,7 @@ new class extends Component {
                 'last_name'           => trim($this->regLastName),
                 'suffix'              => trim($this->regSuffix) ?: null,
                 'student_id'          => $paddedId,
-                'email'               => null,
+                'email'               => $email,
                 'course_code'         => $this->regCourseCode,
                 'course_name'         => $course->name,
                 'batch'               => (int) $this->regYear,
@@ -186,10 +199,11 @@ new class extends Component {
                 'profile_completed'   => 0,
             ]);
 
-            $this->successMsg  = "Alumni '{$fullName}' registered successfully!";
-            $this->successName = $fullName;
-            $this->successId   = $paddedId;
-            $this->successPass = $tmpPass;
+            $this->successMsg   = "Alumni '{$fullName}' registered successfully!";
+            $this->successName  = $fullName;
+            $this->successId    = $paddedId;
+            $this->successPass  = $tmpPass;
+            $this->successEmail = $email ?? '';
             $this->resetForm();
 
         } catch (\Exception $e) {
@@ -203,14 +217,14 @@ new class extends Component {
     public function resetForm(): void
     {
         $this->regFirstName = $this->regMiddleInitial = $this->regLastName = $this->regSuffix = '';
-        $this->regStudentId = $this->regCourseCode = '';
+        $this->regStudentId = $this->regCourseCode = $this->regEmail = '';
         $this->regYear      = (string) date('Y');
         $this->formErrors   = [];
     }
 
     public function clearSuccess(): void
     {
-        $this->successMsg = $this->successName = $this->successId = $this->successPass = '';
+        $this->successMsg = $this->successName = $this->successId = $this->successPass = $this->successEmail = '';
     }
 };
 ?>
@@ -339,6 +353,23 @@ new class extends Component {
                             </div>
                         </div>
 
+                        {{-- Email Address --}}
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 uppercase tracking-wide mb-2">
+                                Email Address
+                                <span class="text-xs font-normal text-gray-400 normal-case ml-1">(Optional)</span>
+                            </label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                                    <i class="fas fa-envelope text-gray-400 text-sm"></i>
+                                </span>
+                                <input wire:model.defer="regEmail" type="email" placeholder="e.g. juan@email.com"
+                                       class="w-full pl-9 pr-3 py-3 border border-gray-300 rounded-xl text-base bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                                       maxlength="255" autocomplete="email">
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Alumni's personal email address for contact purposes.</p>
+                        </div>
+
                         {{-- Buttons --}}
                         <div class="flex gap-3 pt-2">
                             <a href="{{ route('registrar.alumni') }}" wire:navigate
@@ -404,6 +435,12 @@ new class extends Component {
                                     <p class="text-[10px] text-gray-400 font-semibold mb-0.5">Temporary Password</p>
                                     <p class="text-sm font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg inline-block mt-0.5">{{ $successPass }}</p>
                                 </div>
+                                @if($successEmail)
+                                <div class="px-3 py-2.5">
+                                    <p class="text-[10px] text-gray-400 font-semibold mb-0.5">Email Address</p>
+                                    <p class="text-sm font-medium text-gray-900 break-all">{{ $successEmail }}</p>
+                                </div>
+                                @endif
                                 <div class="px-3 py-2.5">
                                     <p class="text-[10px] text-gray-400 font-semibold mb-0.5">Status</p>
                                     <span class="text-xs font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">VERIFIED</span>

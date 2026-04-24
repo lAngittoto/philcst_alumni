@@ -72,6 +72,12 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
+            // ── Director ──────────────────────────────────────────────────────
+            if ($user->role === 'director') {
+                $this->redirect(route('director.dashboard'));
+                return;
+            }
+
             Auth::logout();
         }
     }
@@ -323,6 +329,7 @@ new #[Layout('app')] class extends Component {
 
         $user = Auth::user();
 
+        // ── Registrar ─────────────────────────────────────────────────────────
         if ($user->role === 'registrar') {
             $this->clearAttempts();
             session()->regenerate();
@@ -338,6 +345,23 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ── Director ──────────────────────────────────────────────────────────
+        if ($user->role === 'director') {
+            $this->clearAttempts();
+            session()->regenerate();
+
+            AuditLog::logLogin([
+                'id'    => $user->id,
+                'name'  => $user->name,
+                'email' => $user->email,
+                'role'  => 'director',
+            ], true);
+
+            $this->redirectRoute('director.dashboard', navigate: true);
+            return;
+        }
+
+        // ── Admin ─────────────────────────────────────────────────────────────
         if ($user->role !== 'admin') {
             Auth::logout();
             $this->password = '';

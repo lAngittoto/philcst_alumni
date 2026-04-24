@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ config('app.name', 'Philcst') }} - Coordinator</title>
+    <title>{{ config('app.name', 'Philcst') }} - Alumni Director</title>
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 
@@ -40,10 +40,10 @@
         <div class="flex items-center justify-between h-24 px-6 border-b border-white/10 shrink-0">
             <div class="text-left">
                 <h1 class="text-2xl font-black tracking-tighter uppercase text-white leading-tight">
-                    Coordinator<span class="font-light opacity-70 text-[#7a3f91]">Portal</span>
+                    Alumni<span class="font-light opacity-70 text-[#7a3f91]">Director</span>
                 </h1>
                 <p class="text-[10px] uppercase tracking-[0.2em] opacity-50 text-white font-bold">
-                    Event Management System
+                    Alumni Management System
                 </p>
             </div>
             <button @click="open = false" class="lg:hidden text-white/70 hover:text-white transition-colors">
@@ -51,17 +51,17 @@
             </button>
         </div>
 
-        {{-- Organizer Info --}}
-        @php $organizer = auth()->user()?->organizer; @endphp
-        @if ($organizer)
+        {{-- Director Info --}}
+        @php $director = auth()->user()?->director; @endphp
+        @if ($director)
             <div class="px-6 py-4 border-b border-white/10 shrink-0">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-full bg-[#7a3f91] flex items-center justify-center font-bold text-lg text-white shrink-0">
-                        {{ strtoupper(substr($organizer->name, 0, 1)) }}
+                        {{ strtoupper(substr($director->name, 0, 1)) }}
                     </div>
                     <div class="min-w-0">
-                        <p class="text-sm font-bold text-white truncate">{{ $organizer->name }}</p>
-                        <p class="text-xs text-white/50 truncate">{{ $organizer->department ?? 'No Department' }}</p>
+                        <p class="text-sm font-bold text-white truncate">{{ $director->name }}</p>
+                        <p class="text-xs text-white/50 truncate">{{ $director->department ?? 'Alumni Director' }}</p>
                     </div>
                 </div>
             </div>
@@ -73,34 +73,40 @@
             @php
                 $sidebarLinks = [
                     [
-                        'route'   => 'organizer.dashboard',
+                        'route'   => 'director.dashboard',
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
-                        'pattern' => 'organizer/dashboard*',
+                        'pattern' => 'director/dashboard*',
                     ],
                     [
-                        'route'   => 'organizer.event/organizer',
+                        'route'   => 'director.coordinator/management',
+                        'icon'    => 'users-gear',
+                        'label'   => 'Manage Coordinator',
+                        'pattern' => 'director/coordinator/management*',
+                    ],
+                    [
+                        'route'   => 'director.event/management',
                         'icon'    => 'calendar-check',
-                        'label'   => 'Event Organizer',
-                        'pattern' => 'organizer/event/oganizer*',
+                        'label'   => 'Manage Event',
+                        'pattern' => 'director/event/management*',
                     ],
                     [
-                        'route'   => 'organizer.job/management',
+                        'route'   => 'director.job/management',
                         'icon'    => 'briefcase',
-                        'label'   => 'Job Management',
-                        'pattern' => 'organizer/job/management*',
+                        'label'   => 'Manage Job',
+                        'pattern' => 'director/job/management*',
                     ],
                     [
-                        'route'   => 'organizer.alumni/employment',
-                        'icon'    => 'chart-line',
-                        'label'   => 'Employment Tracking',
-                        'pattern' => 'organizer/alumni/employment*',
-                    ],
-                    [
-                        'route'   => 'organizer.chat/alumni',
-                        'icon'    => 'file-export',
+                        'route'   => 'director.director/messenger',
+                        'icon'    => 'comments',
                         'label'   => 'Messenger',
-                        'pattern' => 'organizer/chat/alumni*',
+                        'pattern' => 'director/messenger*',
+                    ],
+                    [
+                        'route'   => 'director.manage/employment',
+                        'icon'    => 'chart-line',
+                        'label'   => 'Manage Employment',
+                        'pattern' => 'manage/employment*',
                     ],
                 ];
             @endphp
@@ -153,7 +159,7 @@
                     <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#2b0d3e]">Organizer Panel</h2>
+            <h2 class="text-lg font-bold text-[#2b0d3e]">Director Panel</h2>
             <div class="w-10"></div>
         </header>
 

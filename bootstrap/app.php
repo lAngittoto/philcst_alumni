@@ -11,13 +11,14 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        
+
         // Register middleware aliases
         $middleware->alias([
-            'admin' => \App\Http\Middleware\AdminMiddleware::class,
-            'organizer.password.ensure' => \App\Http\Middleware\EnsureOrganizerPasswordChanged::class,
-            'alumni.onboarded' => \App\Http\Middleware\EnsureAlumniOnboarded::class,
-            'registrar' => \App\Http\Middleware\RegistrarMiddleware::class,
+            'admin'                    => \App\Http\Middleware\AdminMiddleware::class,
+            'organizer.password.ensure'=> \App\Http\Middleware\EnsureOrganizerPasswordChanged::class,
+            'alumni.onboarded'         => \App\Http\Middleware\EnsureAlumniOnboarded::class,
+            'registrar'                => \App\Http\Middleware\RegistrarMiddleware::class,
+            'director'                 => \App\Http\Middleware\DirectorMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

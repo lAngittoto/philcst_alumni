@@ -1,0 +1,34 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+public function up(): void
+{
+    if (!Schema::hasTable('director')) {
+        return; // table doesn't exist yet, skip
+    }
+
+    Schema::table('director', function (Blueprint $table) {
+        $table->timestamp('last_seen_at')
+              ->nullable()
+              ->after('status')
+              ->index();
+    });
+}
+
+public function down(): void
+{
+    if (!Schema::hasTable('director')) {
+        return;
+    }
+
+    Schema::table('director', function (Blueprint $table) {
+        $table->dropIndex(['last_seen_at']);
+        $table->dropColumn('last_seen_at');
+    });
+}
+};

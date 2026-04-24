@@ -20,8 +20,6 @@ Route::get('/showevents', fn() => view('showevents'));
 
 // ===================================
 // Public Job Detail Route (used for sharing)
-// Renders the alumni job-opportunities page; the ?job=ID query param
-// can be read by the Livewire component to pre-open the listing.
 // ===================================
 Route::get('/jobs/{id}', function ($id) {
     return view('alumni.job-opportunities-wrapper', ['highlightJobId' => (int) $id]);
@@ -48,8 +46,8 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
     Route::view('/organizer/event/organizer',  'organizer.event-organizer-wrapper')  ->name('organizer.event/organizer');
     Route::view('/organizer/job/management',   'organizer.job-management-wrapper')   ->name('organizer.job/management');
     Route::view('/organizer/alumni/employment','organizer.alumni-employment-wrapper') ->name('organizer.alumni/employment');
-    Route::view('/organizer/reports',          'organizer.reports')                   ->name('organizer.reports');    
-    Route::view('/organizer/chat/alumni',          'organizer.chat-alumni-wrapper')           ->name('organizer.chat/alumni');
+    Route::view('/organizer/reports',          'organizer.reports')                   ->name('organizer.reports');
+    Route::view('/organizer/chat/alumni',      'organizer.chat-alumni-wrapper')       ->name('organizer.chat/alumni');
 });
 
 // ===================================
@@ -57,7 +55,6 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 // ===================================
 Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
 
-    // ── Gate 1: Account setup wizard ─────────────────────────────────────────
     Volt::route('/alumni/change-password', 'alumni/change-password')
         ->name('alumni.change-password');
 
@@ -66,20 +63,17 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
     Route::post('/alumni/verify-otp',       [AlumniPasswordChangeController::class, 'verifyOtp'])      ->name('alumni.verify-otp');
     Route::post('/alumni/confirm-password', [AlumniPasswordChangeController::class, 'confirmPassword'])->name('alumni.confirm-password');
 
-    // ── Gate 2: Profile information ───────────────────────────────────────────
     Route::get('/alumni/information', [AlumniInformationController::class, 'show'])  ->name('alumni.information');
     Route::put('/alumni/information', [AlumniInformationController::class, 'update'])->name('alumni.information.update');
 
-    // ── Protected pages ───────────────────────────────────────────────────────
     Route::view('/alumni/dashboard',  'alumni.dashboard-wrapper')         ->name('alumni.dashboard');
     Route::view('/alumni/employment', 'alumni.employment-wrapper')        ->name('alumni.employment');
     Route::view('/alumni/messenger',  'alumni.messenger-wrapper')         ->name('alumni.messenger');
     Route::view('/job/opportunities', 'alumni.job-opportunities-wrapper') ->name('job.opportunities');
     Route::view('/upcoming/events',   'alumni.upcoming-events-wrapper')   ->name('upcoming.events');
 
-    // ── Messenger API ─────────────────────────────────────────────────────────
-    Route::post('/messenger/ping',              [MessengerController::class, 'ping'])        ->name('messenger.ping');
-    Route::get('/messenger/{roomId}/online',    [MessengerController::class, 'onlineCount']) ->name('messenger.online');
+    Route::post('/messenger/ping',           [MessengerController::class, 'ping'])        ->name('messenger.ping');
+    Route::get('/messenger/{roomId}/online', [MessengerController::class, 'onlineCount']) ->name('messenger.online');
 });
 
 // ===================================
@@ -87,20 +81,36 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
 // ===================================
 Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.')->group(function () {
 
+    Route::view('/dashboard',              'registrar.dashboard-wrapper')              ->name('dashboard');
+    Route::view('/alumni',                 'registrar.alumni-wrapper')                 ->name('alumni');
+    Route::view('/alumni/register',        'registrar.register-wrapper')               ->name('alumni.register');
+    Route::view('/alumni/import',          'registrar.import-wrapper')                 ->name('alumni.import');
+    Route::view('/information-management', 'registrar.information-management-wrapper') ->name('information-management');
+    Route::view('/courses',                'registrar.courses-wrapper')                ->name('courses');
+});
+
+// ===================================
+// Director Routes
+// ===================================
+Route::middleware(['auth', 'director'])->prefix('director')->name('director.')->group(function () {
+
     // ── Dashboard ─────────────────────────────────────────────────────────────
-    Route::view('/dashboard', 'registrar.dashboard-wrapper')->name('dashboard');
+    Route::view('/dashboard',              'director.dashboard-wrapper')          ->name('dashboard');
 
-    // ── Alumni Management ─────────────────────────────────────────────────────
-    Route::view('/alumni',           'registrar.alumni-wrapper')   ->name('alumni');
-    Route::view('/alumni/register',  'registrar.register-wrapper') ->name('alumni.register');
-    Route::view('/alumni/import',    'registrar.import-wrapper')   ->name('alumni.import');
+    // ── Coordinator Management ────────────────────────────────────────────────
+    Route::view('/coordinator/management', 'director.manage-coordinator-wrapper') ->name('coordinator/management');
 
-    // ── Information Management ────────────────────────────────────────────────
-    Route::view('/information-management', 'registrar.information-management-wrapper')->name('information-management');
+    // ── Event Management ──────────────────────────────────────────────────────
+    Route::view('/event/management',       'director.manage-event-wrapper')       ->name('event/management');
 
-    // ── Courses ───────────────────────────────────────────────────────────────
-    Route::view('/courses', 'registrar.courses-wrapper')->name('courses');
+    // ── Job Management ────────────────────────────────────────────────────────
+    Route::view('/job/management',         'director.manage-job-wrapper')         ->name('job/management');
 
+    // ── Messenger ─────────────────────────────────────────────────────────────
+    Route::view('/messenger', 'director.director-messenger-wrapper') ->name('director/messenger');
+
+    // ── Employment Management ─────────────────────────────────────────────────
+    Route::view('/manage/employment',      'director.manage-employment-wrapper')  ->name('manage/employment');
 });
 
 // ===================================
@@ -115,11 +125,11 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/admin/audit-logs/stats',  [AuditLogsController::class, 'stats']) ->name('admin.audit-logs.stats');
     Route::get('/admin/audit-logs/{log}',  [AuditLogsController::class, 'show'])  ->name('admin.audit-logs.show');
 
-    Route::get('/user/management',     fn() => view('admin.alumni-management-wrapper'))    ->name('user.management');
-    Route::get('/employment/tracking', fn() => view('admin.employment-tracking-wrapper'))  ->name('employment.tracking');
-    Route::get('/yearbook',            fn() => view('admin.yearbook-wrapper'))              ->name('admin.yearbook');
-    Route::get('/job/posts',           fn() => view('admin.job-posts-wrapper'))             ->name('job.posts');
-    Route::get('/events',              fn() => view('admin.events-wrapper'))                ->name('events');
+    Route::get('/user/management',     fn() => view('admin.alumni-management-wrapper'))   ->name('user.management');
+    Route::get('/employment/tracking', fn() => view('admin.employment-tracking-wrapper')) ->name('employment.tracking');
+    Route::get('/yearbook',            fn() => view('admin.yearbook-wrapper'))             ->name('admin.yearbook');
+    Route::get('/job/posts',           fn() => view('admin.job-posts-wrapper'))            ->name('job.posts');
+    Route::get('/events',              fn() => view('admin.events-wrapper'))               ->name('events');
 
     Route::post('/alumni/import', [AlumniController::class, 'import'])->name('alumni.import');
 
