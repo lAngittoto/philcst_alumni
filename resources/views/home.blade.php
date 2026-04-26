@@ -4,104 +4,21 @@
 
 <style>
     html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
-    body { margin: 0; padding: 0; background-color: #f9f7fc; }
+    body { margin: 0; padding: 0; background-color: #F5F5F5; }
 
     ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: #f9f7fc; }
-    ::-webkit-scrollbar-thumb { background: #2b0d3e; border-radius: 10px; }
+    ::-webkit-scrollbar-track { background: #F5F5F5; }
+    ::-webkit-scrollbar-thumb { background: #333333; border-radius: 10px; }
 
     [data-aos] {
         transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1) !important;
     }
-
-    /* ─── FONT SIZES (aligned with About page) ─── */
-    /* Label        → 0.8rem  / 12.8px  */
-    /* Hero body    → 1.15rem / 18.4px  */
-    /* Card body    → 1.05rem / 16.8px  */
-    /* Card title   → 1.15rem / 18.4px  */
-    /* Hero h2      → clamp(2.5rem, 6vw, 4.5rem) */
-
-    .home-label {
-        font-family: 'Courier New', monospace;
-        font-size: 0.8rem;
-        font-weight: 700;
-        letter-spacing: 0.35em;
-        text-transform: uppercase;
-        color: #7a3f91;
-        display: block;
-    }
-    .home-title {
-        font-family: 'Courier New', monospace;
-        font-weight: 900;
-        text-transform: uppercase;
-        color: #2b0d3e;
-        letter-spacing: -0.02em;
-        line-height: 1.08;
-    }
-    .home-body {
-        font-family: 'Georgia', serif;
-        font-size: 1.15rem;
-        line-height: 1.95;
-        color: #4a4056;
-    }
-
-    /* ─── FEATURE CARDS ─── */
-    .feature-card {
-        background: #ffffff;
-        border-radius: 2rem;
-        border: 1.5px solid #e8e0f0;
-        padding: 2.75rem 2rem;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        transition: box-shadow 0.3s ease, transform 0.3s ease,
-                    border-color 0.3s, background 0.3s;
-    }
-    .feature-card:hover {
-        background: #f3ecfa;
-        box-shadow: 0 14px 45px rgba(122,63,145,0.14);
-        transform: translateY(-6px);
-        border-color: #b87fd4;
-    }
-
-    /* ─── ICON — no circle, just big FA icon ─── */
-    .feature-icon {
-        font-size: 3.5rem;          /* 56px */
-        color: #7a3f91;
-        margin-bottom: 1.75rem;
-        transition: color 0.3s, transform 0.3s;
-        line-height: 1;
-    }
-    .feature-card:hover .feature-icon {
-        color: #9b51b8;
-        transform: scale(1.12);
-    }
-
-    /* ─── HERO ACCENT LINE ─── */
-    .hero-accent-line {
-        width: 3rem;
-        height: 2px;
-        background: #7a3f91;
-        margin: 0.75rem auto 0;
-    }
-
-    /* ─── SECTION DIVIDER ─── */
-    .section-divider {
-        padding: 0 1.5rem;
-        background: #f9f7fc;
-    }
-    .section-divider-inner {
-        max-width: 64rem;
-        margin: 0 auto;
-        border-top: 1.5px solid #e0d5ee;
-    }
 </style>
 
-<main class="w-full overflow-x-hidden" style="background:#f9f7fc;">
+<main class="w-full mt-8 overflow-x-hidden bg-[#F5F5F5]">
 
     {{-- ══ HERO IMAGE ══ --}}
-    <section class="relative w-full flex flex-col items-center" style="background:#f9f7fc;">
+    <section class="relative w-full flex flex-col items-center bg-[#F5F5F5]">
         <div class="w-full h-[50vh] md:h-[80vh] overflow-hidden">
             <img src="{{ asset('images/philcst-img.jpg') }}"
                  alt="PhilCST Background"
@@ -111,23 +28,22 @@
     </section>
 
     {{-- ══ HERO TEXT ══ --}}
-    <section class="relative z-10 py-16 md:py-24" style="background:#f9f7fc;">
+    <section class="relative z-10 py-16 md:py-24 bg-[#F5F5F5]">
         <div class="max-w-5xl mx-auto px-6 text-center">
 
             <div class="inline-block mb-10" data-aos="fade-up" data-aos-delay="0">
-                <span class="home-label">Official Alumni Platform</span>
-                <div class="hero-accent-line"></div>
+                <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block">Official Alumni Platform</span>
+                <div class="w-12 h-0.5 bg-[#7a3f91] mx-auto mt-3"></div>
             </div>
 
-            <h2 class="home-title mb-8"
-                style="font-size: clamp(2.5rem, 6vw, 4.5rem);"
+            <h2 class="font-sans font-bold text-3xl md:text-5xl uppercase leading-tight text-[#333333] mb-8"
                 data-aos="fade-up" data-aos-delay="200">
                 Connecting Alumni.<br>
-                <span style="color:#7a3f91;">Empowering Futures.</span>
+                <span class="text-[#7a3f91]">Empowering Futures.</span>
             </h2>
 
-            <p class="home-body mx-auto"
-               style="max-width:44rem; font-size:1.15rem;"
+            <p class="font-sans font-normal text-xl leading-relaxed text-[#333333] mx-auto"
+               style="max-width:44rem;"
                data-aos="fade-up" data-aos-delay="400">
                 The Philippine College of Science and Technology's digital home for alumni.
                 Reconnect with batchmates, explore career opportunities, and stay connected with your alma mater.
@@ -137,45 +53,48 @@
     </section>
 
     {{-- ══ DIVIDER ══ --}}
-    <div class="section-divider">
-        <div class="section-divider-inner"></div>
+    <div class="px-6 bg-[#F5F5F5]">
+        <div class="max-w-5xl mx-auto border-t-2 border-[#e0e0e0]"></div>
     </div>
 
     {{-- ══ FEATURE CARDS ══ --}}
-    <section class="py-16 pb-32 px-6 w-full" style="background:#f9f7fc;">
+    <section class="py-16 pb-32 px-6 w-full bg-[#F5F5F5]">
         <div class="max-w-5xl mx-auto">
-
-            <div class="text-center mb-12" data-aos="fade-up" data-aos-duration="800">
-                <span class="home-label" style="margin-bottom:0.75rem;">What We Offer</span>
-                <h2 class="home-title mt-2"
-                    style="font-size: clamp(2rem, 4vw, 3rem);">
-                    Everything You Need,<br>
-                    <span style="color:#7a3f91;">In One Place</span>
-                </h2>
-            </div>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
 
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="100">
-                    <i class="fa-solid fa-id-badge feature-icon"></i>
-                    <h3 class="home-title mb-4" style="font-size:1.15rem;">Alumni Profiles</h3>
-                    <p class="home-body" style="font-size:1.05rem;">
+                {{-- Feature Card 1 --}}
+                <div class="bg-white border-2 border-[#e0e0e0] rounded-2xl p-8 flex flex-col items-center text-center transition-all duration-300"
+                     data-aos="fade-up" data-aos-delay="100">
+                    <div class="w-16 h-16 rounded-full bg-[#F5F5F5] flex items-center justify-center mb-6">
+                        <i class="fa-solid fa-id-badge text-3xl text-[#7a3f91]"></i>
+                    </div>
+                    <h3 class="font-sans font-bold text-2xl uppercase text-[#333333] mb-4">Alumni Profiles</h3>
+                    <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
                         Update your professional and academic journey with our secure alumni profiles.
                     </p>
                 </div>
 
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="200">
-                    <i class="fa-solid fa-calendar-check feature-icon"></i>
-                    <h3 class="home-title mb-4" style="font-size:1.15rem;">Events &amp; Reunions</h3>
-                    <p class="home-body" style="font-size:1.05rem;">
+                {{-- Feature Card 2 --}}
+                <div class="bg-white border-2 border-[#e0e0e0] rounded-2xl p-8 flex flex-col items-center text-center transition-all duration-300"
+                     data-aos="fade-up" data-aos-delay="200">
+                    <div class="w-16 h-16 rounded-full bg-[#F5F5F5] flex items-center justify-center mb-6">
+                        <i class="fa-solid fa-calendar-check text-3xl text-[#7a3f91]"></i>
+                    </div>
+                    <h3 class="font-sans font-bold text-2xl uppercase text-[#333333] mb-4">Events &amp; Reunions</h3>
+                    <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
                         Stay updated on campus events, reunions, and alumni activities.
                     </p>
                 </div>
 
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="300">
-                    <i class="fa-solid fa-briefcase feature-icon"></i>
-                    <h3 class="home-title mb-4" style="font-size:1.15rem;">Job Opportunities</h3>
-                    <p class="home-body" style="font-size:1.05rem;">
+                {{-- Feature Card 3 --}}
+                <div class="bg-white border-2 border-[#e0e0e0] rounded-2xl p-8 flex flex-col items-center text-center transition-all duration-300"
+                     data-aos="fade-up" data-aos-delay="300">
+                    <div class="w-16 h-16 rounded-full bg-[#F5F5F5] flex items-center justify-center mb-6">
+                        <i class="fa-solid fa-briefcase text-3xl text-[#7a3f91]"></i>
+                    </div>
+                    <h3 class="font-sans font-bold text-2xl uppercase text-[#333333] mb-4">Job Opportunities</h3>
+                    <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
                         Explore available job opportunities shared through the system.
                     </p>
                 </div>

@@ -244,7 +244,7 @@ new class extends Component {
 /* ── Base tokens ─────────────────────────────────────────────────── */
 :root {
     --brand:       #7a3f91;
-    --brand-light: #f3eef8;
+    --brand-light: #f9f7fc;
     --brand-mid:   #ede9fe;
 }
 
@@ -258,9 +258,9 @@ input[type="search"] {
 
 /* ── Field states ────────────────────────────────────────────────── */
 .f-edit {
-    border: 1.5px solid #d1d5db;
-    background: #fff;
-    color: #111827;
+    border: 1.5px solid #e8e0f0;
+    background: #ffffff;
+    color: #333333;
     transition: border-color .15s, box-shadow .15s;
 }
 .f-edit:hover  { border-color: var(--brand); }
@@ -268,18 +268,18 @@ input[type="search"] {
 .f-edit.err    { border-color: #ef4444; }
 
 .f-view {
-    border: 1.5px solid #e5e7eb;
+    border: 1.5px solid #e8e0f0;
     background: #f9fafb;
-    color: #111827;
+    color: #333333;
     cursor: default;
     pointer-events: none;
 }
 
 /* Locked = from school records, truly immutable */
 .f-locked {
-    border: 1.5px solid #e5e7eb;
+    border: 1.5px solid #e8e0f0;
     background: #f9fafb;
-    color: #111827;
+    color: #333333;
     cursor: not-allowed;
     pointer-events: none;
 }
@@ -287,7 +287,7 @@ input[type="search"] {
 /* ── Radio pill ──────────────────────────────────────────────────── */
 .r-pill {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 16px; border: 1.5px solid #e5e7eb;
+    padding: 8px 16px; border: 1.5px solid #e8e0f0;
     border-radius: .75rem; cursor: pointer;
     transition: border-color .15s, background .15s; font-size: .875rem;
 }
@@ -296,16 +296,16 @@ input[type="search"] {
 
 /* ── Section card ────────────────────────────────────────────────── */
 .s-card {
-    background: #fff;
-    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    border: 1px solid #e8e0f0;
     border-radius: 1rem;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    box-shadow: 0 1px 2px rgba(0,0,0,.03);
 }
 .s-head {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 18px; border-bottom: 1px solid #f3f4f6;
-    background: var(--brand-light);
+    padding: 14px 18px; border-bottom: 1px solid #e8e0f0;
+    background: linear-gradient(135deg,#f9f7fc,#ffffff);
 }
 .s-icon {
     width: 32px; height: 32px; border-radius: 10px;
@@ -313,8 +313,8 @@ input[type="search"] {
     background: var(--brand); flex-shrink: 0;
 }
 .s-label {
-    font-size: .7rem; font-weight: 700; letter-spacing: .06em;
-    text-transform: uppercase; color: #6b7280;
+    font-size: .7rem; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: #999999;
 }
 
 /* ── Error text ──────────────────────────────────────────────────── */
@@ -326,42 +326,41 @@ input[type="search"] {
 /* ── Divider label ───────────────────────────────────────────────── */
 .div-lbl {
     display: flex; align-items: center; gap: 8px;
-    font-size: .7rem; font-weight: 700; letter-spacing: .07em;
-    text-transform: uppercase; color: #9ca3af;
+    font-size: .7rem; font-weight: 600; letter-spacing: .07em;
+    text-transform: uppercase; color: #999999;
     margin-bottom: 10px; margin-top: 2px;
 }
-.div-lbl::after { content: ''; flex: 1; height: 1px; background: #f3f4f6; }
+.div-lbl::after { content: ''; flex: 1; height: 1px; background: #e8e0f0; }
 </style>
 
 {{-- ══ PAGE HEADER ══════════════════════════════════════════════════════════ --}}
 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
-        <h1 class="text-3xl font-extrabold text-[#2b0d3e] tracking-tight">My Profile Information</h1>
-        <p class="text-sm leading-relaxed mt-2 text-gray-500">
+        <h1 class="text-3xl font-semibold text-[#333333] tracking-tight">My Profile Information</h1>
+        <p class="text-base leading-relaxed mt-2 text-[#666666] font-normal">
             Complete your personal details to update your alumni profile. Fields marked with 
-            <span class="text-red-500 font-bold">*</span> are required. 
-           
+            <span class="text-red-500 font-bold">*</span> are required.
         </p>
     </div>
 
     <div class="flex items-center gap-2 flex-wrap">
         @if ($profileComplete)
-            <span class="inline-flex items-center gap-2 bg-emerald-100 border border-emerald-300
-                         text-emerald-800 px-4 py-2 rounded-xl text-sm font-semibold">
+            <span class="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200
+                         text-emerald-700 px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest">
                 <i class="fa-solid fa-circle-check text-emerald-600"></i> Profile Complete
             </span>
         @else
-            <span class="inline-flex items-center gap-2 bg-amber-50 border border-amber-300
-                         text-amber-800 px-4 py-2 rounded-xl text-sm font-semibold">
+            <span class="inline-flex items-center gap-2 bg-amber-50 border border-amber-200
+                         text-amber-700 px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest">
                 <i class="fa-solid fa-triangle-exclamation text-amber-500"></i> Profile Incomplete
             </span>
         @endif
 
         @if(!$editing)
             <button wire:click="startEditing"
-                    class="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold
-                           text-white shadow-sm transition hover:opacity-90 active:scale-95"
-                    style="background-color:#7a3f91;">
+                    class="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-semibold
+                           text-white shadow-md transition hover:opacity-90 active:scale-95 uppercase tracking-widest"
+                    style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                 <i class="fa-solid fa-pen"></i> Edit Profile
             </button>
         @endif
@@ -370,15 +369,15 @@ input[type="search"] {
 
 {{-- ── Alerts ── --}}
 @if ($errorMessage)
-    <div class="p-3 bg-red-50 border border-red-300 rounded-xl text-red-800 flex items-start gap-2">
+    <div class="p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 flex items-start gap-2">
         <i class="fa-solid fa-circle-exclamation mt-0.5 text-red-600 text-sm flex-shrink-0"></i>
-        <p class="text-sm font-medium">{{ $errorMessage }}</p>
+        <p class="text-sm font-semibold">{{ $errorMessage }}</p>
     </div>
 @endif
 @if ($successMessage)
-    <div class="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 flex items-start gap-2">
+    <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-start gap-2">
         <i class="fa-solid fa-circle-check mt-0.5 text-emerald-600 text-sm flex-shrink-0"></i>
-        <p class="text-sm font-medium">{{ $successMessage }}</p>
+        <p class="text-sm font-semibold">{{ $successMessage }}</p>
     </div>
 @endif
 
@@ -389,10 +388,10 @@ input[type="search"] {
     <div class="s-head">
         <div class="s-icon"><i class="fa-solid fa-id-card text-white text-xs"></i></div>
         <div class="flex-1">
-            <p class="text-sm font-bold text-gray-900">Student's Name</p>
-            <p class="text-xs text-gray-500">From your school records — read only</p>
+            <p class="text-base font-semibold text-[#333333]">Student's Name</p>
+            <p class="text-xs text-[#666666] font-normal">From your school records — read only</p>
         </div>
-        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">
+        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
             <i class="fa-solid fa-lock text-xs"></i> Locked
         </span>
     </div>
@@ -401,25 +400,25 @@ input[type="search"] {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
                 <p class="s-label mb-1">Last Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-sm font-semibold uppercase">
+                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
                     {{ $last_name ?: '—' }}
                 </div>
             </div>
             <div>
                 <p class="s-label mb-1">Given Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-sm font-semibold uppercase">
+                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
                     {{ $first_name ?: '—' }}
                 </div>
             </div>
             <div>
                 <p class="s-label mb-1">Middle Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-sm font-semibold uppercase">
+                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
                     {{ $middle_initial ?: '—' }}
                 </div>
             </div>
             <div>
                 <p class="s-label mb-1">Ext. Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-sm font-semibold uppercase">
+                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
                     {{ $suffix ?: '—' }}
                 </div>
             </div>
@@ -434,11 +433,11 @@ input[type="search"] {
     <div class="s-head">
         <div class="s-icon"><i class="fa-solid fa-user-graduate text-white text-xs"></i></div>
         <div class="flex-1">
-            <p class="text-sm font-bold text-gray-900">Student's Data</p>
-            <p class="text-xs text-gray-500">Sex, birth date, and course</p>
+            <p class="text-base font-semibold text-[#333333]">Student's Data</p>
+            <p class="text-xs text-[#666666] font-normal">Sex, birth date, and course</p>
         </div>
         @if(!$editing)
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">
+            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
                 <i class="fa-solid fa-eye text-xs"></i> View Only
             </span>
         @endif
@@ -457,19 +456,19 @@ input[type="search"] {
                         <label class="r-pill">
                             <input wire:model="gender" type="radio" value="Male" class="w-4 h-4 accent-blue-600">
                             <i class="fa-solid fa-mars text-blue-500 text-xs"></i>
-                            <span class="font-medium text-gray-700 text-sm">Male</span>
+                            <span class="font-semibold text-[#333333] text-sm">Male</span>
                         </label>
                         <label class="r-pill">
                             <input wire:model="gender" type="radio" value="Female" class="w-4 h-4 accent-pink-500">
                             <i class="fa-solid fa-venus text-pink-500 text-xs"></i>
-                            <span class="font-medium text-gray-700 text-sm">Female</span>
+                            <span class="font-semibold text-[#333333] text-sm">Female</span>
                         </label>
                     </div>
                     @error('gender')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
                 @else
-                    <div class="px-3 py-2 rounded-xl f-view text-sm font-semibold">
+                    <div class="px-3 py-2 rounded-xl f-view text-base font-semibold">
                         @if($gender === 'Male') <i class="fa-solid fa-mars text-blue-400 mr-1.5"></i>
                         @elseif($gender === 'Female') <i class="fa-solid fa-venus text-pink-400 mr-1.5"></i>
                         @endif
@@ -485,7 +484,7 @@ input[type="search"] {
                 </label>
                 <input wire:model="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
                        {{ !$editing ? 'disabled' : '' }}
-                       class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('date_of_birth') ? ' err' : '') : 'f-view' }}">
+                       class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('date_of_birth') ? ' err' : '') : 'f-view' }}">
                 @error('date_of_birth')
                     <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                 @enderror
@@ -494,12 +493,12 @@ input[type="search"] {
             {{-- Course --}}
             <div>
                 <p class="s-label mb-2">Course</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-sm font-bold tracking-wide uppercase" title="{{ $course_name }}">
-                    <i class="fa-solid fa-graduation-cap text-violet-400 mr-1.5 text-xs"></i>
+                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold tracking-wide uppercase" title="{{ $course_name }}">
+                    <i class="fa-solid fa-graduation-cap mr-1.5 text-xs" style="color:#7A3F91;"></i>
                     {{ $course_code ?: '—' }}
                 </div>
                 @if($course_name)
-                    <p class="text-xs text-gray-500 mt-1 pl-1 truncate uppercase" title="{{ $course_name }}">{{ $course_name }}</p>
+                    <p class="text-xs text-[#999999] mt-1 pl-1 truncate uppercase" title="{{ $course_name }}">{{ $course_name }}</p>
                 @endif
             </div>
 
@@ -517,11 +516,11 @@ input[type="search"] {
         <div class="s-head">
             <div class="s-icon" style="background:#2563eb;"><i class="fa-solid fa-person text-white text-xs"></i></div>
             <div class="flex-1">
-                <p class="text-sm font-bold text-gray-900">Father's Name</p>
-                <p class="text-xs text-gray-500">Father's full name</p>
+                <p class="text-base font-semibold text-[#333333]">Father's Name</p>
+                <p class="text-xs text-[#666666] font-normal">Father's full name</p>
             </div>
             @if(!$editing)
-                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">
+                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
                     <i class="fa-solid fa-eye text-xs"></i> View Only
                 </span>
             @endif
@@ -535,7 +534,7 @@ input[type="search"] {
                     <input wire:model="father_last_name" type="text" placeholder="DELA CRUZ"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_last_name') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_last_name') ? ' err' : '') : 'f-view' }}">
                     @error('father_last_name')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -547,7 +546,7 @@ input[type="search"] {
                     <input wire:model="father_given_name" type="text" placeholder="JUAN"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_given_name') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_given_name') ? ' err' : '') : 'f-view' }}">
                     @error('father_given_name')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -557,7 +556,7 @@ input[type="search"] {
                     <input wire:model="father_middle_name" type="text" placeholder="SANTOS"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
                 </div>
             </div>
         </div>
@@ -568,11 +567,11 @@ input[type="search"] {
         <div class="s-head">
             <div class="s-icon" style="background:#db2777;"><i class="fa-solid fa-person-dress text-white text-xs"></i></div>
             <div class="flex-1">
-                <p class="text-sm font-bold text-gray-900">Mother's Maiden Name</p>
-                <p class="text-xs text-gray-500">Mother's maiden name before marriage</p>
+                <p class="text-base font-semibold text-[#333333]">Mother's Maiden Name</p>
+                <p class="text-xs text-[#666666] font-normal">Mother's maiden name before marriage</p>
             </div>
             @if(!$editing)
-                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">
+                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
                     <i class="fa-solid fa-eye text-xs"></i> View Only
                 </span>
             @endif
@@ -586,7 +585,7 @@ input[type="search"] {
                     <input wire:model="mother_last_name" type="text" placeholder="REYES"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_last_name') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_last_name') ? ' err' : '') : 'f-view' }}">
                     @error('mother_last_name')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -598,7 +597,7 @@ input[type="search"] {
                     <input wire:model="mother_given_name" type="text" placeholder="MARIA"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_given_name') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_given_name') ? ' err' : '') : 'f-view' }}">
                     @error('mother_given_name')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -608,7 +607,7 @@ input[type="search"] {
                     <input wire:model="mother_middle_name" type="text" placeholder="CRUZ"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
                 </div>
             </div>
         </div>
@@ -623,11 +622,11 @@ input[type="search"] {
     <div class="s-head">
         <div class="s-icon" style="background:#059669;"><i class="fa-solid fa-map-location-dot text-white text-xs"></i></div>
         <div class="flex-1">
-            <p class="text-sm font-bold text-gray-900">Other Information</p>
-            <p class="text-xs text-gray-500">DSWD, address, disability, contact &amp; email</p>
+            <p class="text-base font-semibold text-[#333333]">Other Information</p>
+            <p class="text-xs text-[#666666] font-normal">DSWD, address, disability, contact &amp; email</p>
         </div>
         @if(!$editing)
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500">
+            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
                 <i class="fa-solid fa-eye text-xs"></i> View Only
             </span>
         @endif
@@ -639,14 +638,14 @@ input[type="search"] {
         <div>
             <div class="div-lbl"><span>DSWD Household</span></div>
             <label class="block s-label mb-1">
-                DSWD Household No. <span class="normal-case font-normal text-gray-400 text-xs">(optional)</span>
+                DSWD Household No. <span class="normal-case font-normal text-[#999999] text-xs">(optional)</span>
             </label>
             <input wire:model="dswd_household_no" type="text" placeholder="E.G. 004-0012345"
                    oninput="this.value=this.value.toUpperCase()"
                    {{ !$editing ? 'disabled' : '' }}
-                   class="w-full sm:w-1/2 px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
+                   class="w-full sm:w-1/2 px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
             @if($editing)
-                <p class="text-xs text-gray-400 mt-1">
+                <p class="text-xs text-[#999999] mt-1 font-normal">
                     <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
                     Leave blank if not a DSWD beneficiary.
                 </p>
@@ -665,7 +664,7 @@ input[type="search"] {
                     <input wire:model="address_street" type="text" placeholder="E.G. 123 RIZAL ST."
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_street') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_street') ? ' err' : '') : 'f-view' }}">
                     @error('address_street')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -678,7 +677,7 @@ input[type="search"] {
                     <input wire:model="address_barangay" type="text" placeholder="E.G. BAGONG SILANG"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_barangay') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_barangay') ? ' err' : '') : 'f-view' }}">
                     @error('address_barangay')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -691,7 +690,7 @@ input[type="search"] {
                     <input wire:model="address_municipality" type="text" placeholder="E.G. LIPA CITY"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_municipality') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_municipality') ? ' err' : '') : 'f-view' }}">
                     @error('address_municipality')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -704,7 +703,7 @@ input[type="search"] {
                     <input wire:model="address_province" type="text" placeholder="E.G. BATANGAS"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_province') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_province') ? ' err' : '') : 'f-view' }}">
                     @error('address_province')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -717,14 +716,14 @@ input[type="search"] {
         <div>
             <div class="div-lbl"><span>Disability</span></div>
             <label class="block s-label mb-1">
-                Disability <span class="normal-case font-normal text-gray-400 text-xs">(optional)</span>
+                Disability <span class="normal-case font-normal text-[#999999] text-xs">(optional)</span>
             </label>
             <input wire:model="disability" type="text" placeholder="E.G. NONE / VISUAL IMPAIRMENT / HEARING LOSS"
                    oninput="this.value=this.value.toUpperCase()"
                    {{ !$editing ? 'disabled' : '' }}
-                   class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
+                   class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
             @if($editing)
-                <p class="text-xs text-gray-400 mt-1">
+                <p class="text-xs text-[#999999] mt-1 font-normal">
                     <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
                     Type <strong>NONE</strong> if you have no disability.
                 </p>
@@ -743,7 +742,7 @@ input[type="search"] {
                     <input wire:model="contact_number" type="tel" placeholder="09XX-XXX-XXXX"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-sm rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('contact_number') ? ' err' : '') : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('contact_number') ? ' err' : '') : 'f-view' }}">
                     @error('contact_number')
                         <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
                     @enderror
@@ -751,11 +750,11 @@ input[type="search"] {
 
                 <div>
                     <label class="block s-label mb-1">Email Address</label>
-                    <div class="flex items-center gap-2 px-3 py-2 f-locked rounded-xl text-sm">
-                        <i class="fa-solid fa-envelope text-gray-400 text-xs flex-shrink-0"></i>
-                        <span class="truncate text-gray-800 font-medium">{{ $email ?: '—' }}</span>
+                    <div class="flex items-center gap-2 px-3 py-2 f-locked rounded-xl text-base">
+                        <i class="fa-solid fa-envelope text-[#999999] text-xs flex-shrink-0"></i>
+                        <span class="truncate text-[#333333] font-semibold">{{ $email ?: '—' }}</span>
                         <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5
-                                     rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0">
+                                     rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0 uppercase tracking-widest">
                             <i class="fa-solid fa-check text-[10px]"></i> Verified
                         </span>
                     </div>
@@ -773,9 +772,9 @@ input[type="search"] {
         <button wire:click="saveProfile"
                 wire:loading.attr="disabled"
                 wire:target="saveProfile"
-                class="flex-1 text-white py-3 rounded-xl font-bold text-sm shadow-md hover:opacity-90
-                       disabled:opacity-70 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                style="background-color:#7a3f91;">
+                class="flex-1 text-white py-3 rounded-xl font-semibold text-sm shadow-md hover:opacity-90
+                       disabled:opacity-70 active:scale-[0.98] transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
+                style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
             <span wire:loading.remove wire:target="saveProfile">
                 <i class="fa-solid fa-floppy-disk mr-1.5"></i> Save Profile
             </span>
@@ -786,9 +785,9 @@ input[type="search"] {
 
         @if($profileComplete)
             <button wire:click="cancelEditing"
-                    class="flex-1 py-3 rounded-xl font-bold text-sm border-2 border-gray-300 bg-white
-                           text-gray-700 hover:bg-gray-100 active:scale-[0.98] transition-all
-                           flex items-center justify-center gap-2">
+                    class="flex-1 py-3 rounded-xl font-semibold text-sm border-2 border-[#E8E0F0] bg-white
+                           text-[#333333] hover:bg-[#F5F5F5] active:scale-[0.98] transition-all
+                           flex items-center justify-center gap-2 uppercase tracking-widest">
                 <i class="fa-solid fa-xmark mr-1.5"></i> Cancel
             </button>
         @endif
@@ -796,7 +795,7 @@ input[type="search"] {
 @endif
 
 @if(!$profileComplete && !$editing)
-    <p class="text-xs text-center text-gray-400 pb-2">
+    <p class="text-xs text-center text-[#999999] pb-2 font-normal">
         <i class="fa-solid fa-circle-info mr-1 text-blue-400"></i>
         Click <strong>Edit Profile</strong> to fill in your information.
     </p>

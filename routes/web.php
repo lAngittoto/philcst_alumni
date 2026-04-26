@@ -66,6 +66,8 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
     Route::get('/alumni/information', [AlumniInformationController::class, 'show'])  ->name('alumni.information');
     Route::put('/alumni/information', [AlumniInformationController::class, 'update'])->name('alumni.information.update');
 
+    Route::view('/alumni/yearbook',  'alumni.yearbook-wrapper')         ->name('alumni.yearbook');
+
     Route::view('/alumni/dashboard',  'alumni.dashboard-wrapper')         ->name('alumni.dashboard');
     Route::view('/alumni/employment', 'alumni.employment-wrapper')        ->name('alumni.employment');
     Route::view('/alumni/messenger',  'alumni.messenger-wrapper')         ->name('alumni.messenger');

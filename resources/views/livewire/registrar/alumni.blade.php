@@ -175,10 +175,10 @@ new class extends Component {
            'fa-circle-info text-blue-500': type==='info',
        }"></i>
     <div class="flex-1 min-w-0">
-        <p class="font-bold text-sm text-gray-900" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
-        <p class="text-sm mt-0.5 text-gray-600 leading-snug break-words" x-text="msg"></p>
+        <p class="font-semibold text-sm text-[#333333]" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
+        <p class="text-sm mt-0.5 text-[#666666] leading-snug break-words font-normal" x-text="msg"></p>
     </div>
-    <button @click="show=false" class="text-gray-400 hover:text-gray-600 transition shrink-0 mt-0.5">
+    <button @click="show=false" class="text-[#999999] hover:text-[#666666] transition shrink-0 mt-0.5">
         <i class="fas fa-xmark text-sm"></i>
     </button>
 </div>
@@ -190,37 +190,37 @@ new class extends Component {
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
+                 style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
                 <i class="fas fa-graduation-cap text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-xl sm:text-3xl font-extrabold text-[#2b0d3e] leading-tight">Alumni Records</h1>
-                <p class="text-gray-500 text-sm sm:text-base">View and manage alumni accounts</p>
+                <h1 class="text-2xl sm:text-3xl font-semibold text-[#333333] leading-tight">Alumni Records</h1>
+                <p class="text-[#666666] text-xs sm:text-xl font-normal">View and manage alumni accounts</p>
             </div>
         </div>
     </div>
 
     {{-- Table Card --}}
-    <div class="bg-white rounded-2xl shadow-sm border border-purple-100 flex flex-col overflow-hidden"
+    <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden"
          style="min-height:0; height:calc(100vh - 148px);">
 
         {{-- Filters --}}
-        <div class="px-3 sm:px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex flex-wrap gap-2 items-center">
+        <div class="px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center">
 
             {{-- Search --}}
             <div class="relative flex-1 min-w-[150px] max-w-xs"
                  x-data="{ query: @entangle('alumniSearch').live, timer: null,
                             onInput(e){ clearTimeout(this.timer); this.timer = setTimeout(() => { this.query = e.target.value; }, 120); } }"
                  wire:ignore>
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
                 <input type="text" :value="query" @input="onInput($event)"
                        placeholder="Search name, ID, course…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                       class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
                        autocomplete="off" spellcheck="false">
             </div>
 
             <select wire:model.live="alumniBatch"
-                    class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 min-w-[90px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
+                    class="px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] min-w-[90px] focus:outline-none focus:border-[#7A3F91] cursor-pointer font-normal">
                 <option value="">All Years</option>
                 @foreach($this->batches as $b)
                     <option value="{{ $b }}">{{ $b }}</option>
@@ -228,7 +228,7 @@ new class extends Component {
             </select>
 
             <select wire:model.live="alumniCourse"
-                    class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 min-w-[100px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
+                    class="px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] min-w-[100px] focus:outline-none focus:border-[#7A3F91] cursor-pointer font-normal">
                 <option value="">All Courses</option>
                 @foreach($this->courses as $c)
                     <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -236,13 +236,13 @@ new class extends Component {
             </select>
 
             <select wire:model.live="alumniSort"
-                    class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-700 min-w-[110px] focus:outline-none focus:border-[#7a3f91] cursor-pointer">
+                    class="px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] min-w-[110px] focus:outline-none focus:border-[#7A3F91] cursor-pointer font-normal">
                 <option value="recent">Newest First</option>
                 <option value="oldest">Oldest First</option>
             </select>
 
             <button wire:click="resetAlumniFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 transition active:scale-95">
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95">
                 <i class="fas fa-rotate-left text-sm"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
@@ -258,50 +258,50 @@ new class extends Component {
 
                 <table class="w-full border-collapse" style="min-width:720px;">
                     <thead>
-                        <tr class="bg-gray-100 border-b-2 border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 py-3 text-left text-sm font-extrabold text-gray-600 uppercase tracking-widest">Name</th>
-                            <th class="px-4 py-3 text-left text-sm font-extrabold text-gray-600 uppercase tracking-widest">Student ID</th>
-                            <th class="px-4 py-3 text-left text-sm font-extrabold text-gray-600 uppercase tracking-widest">Course</th>
-                            <th class="px-4 py-3 text-center text-sm font-extrabold text-gray-600 uppercase tracking-widest">Batch</th>
-                            <th class="px-4 py-3 text-left text-sm font-extrabold text-gray-600 uppercase tracking-widest hidden md:table-cell">Email</th>
-                            <th class="px-4 py-3 text-center text-sm font-extrabold text-gray-600 uppercase tracking-widest">View</th>
+                        <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
+                            <th class="px-4 py-3 text-left text-sm font-semibold text-[#333333] uppercase tracking-widest">Name</th>
+                            <th class="px-4 py-3 text-left text-sm font-semibold text-[#333333] uppercase tracking-widest">Student ID</th>
+                            <th class="px-4 py-3 text-left text-sm font-semibold text-[#333333] uppercase tracking-widest">Course</th>
+                            <th class="px-4 py-3 text-center text-sm font-semibold text-[#333333] uppercase tracking-widest">Batch</th>
+                            <th class="px-4 py-3 text-left text-sm font-semibold text-[#333333] uppercase tracking-widest hidden md:table-cell">Email</th>
+                            <th class="px-4 py-3 text-center text-sm font-semibold text-[#333333] uppercase tracking-widest">View</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-100">
+                    <tbody class="divide-y divide-[#F5F5F5]">
                         @forelse($this->alumniRecords as $item)
-                        <tr class="bg-white hover:bg-[#faf7ff] transition-colors duration-100">
+                        <tr class="bg-white hover:bg-[#FAFAFA] transition-colors duration-100">
                             <td class="px-4 py-3">
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
                                          alt="{{ $item->first_name }}"
-                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-gray-200">
-                                    <span class="font-semibold text-gray-900 text-base uppercase">
+                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]">
+                                    <span class="font-semibold text-[#333333] text-xl uppercase">
                                         {{ $this->formatDisplayName($item->first_name??'', $item->middle_initial??'', $item->last_name??'', $item->suffix??'') }}
                                     </span>
                                 </div>
                             </td>
                             <td class="px-4 py-3">
-                                <span class="font-mono text-gray-800 text-sm font-bold uppercase">{{ $item->student_id }}</span>
+                                <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->student_id }}</span>
                             </td>
                             <td class="px-4 py-3">
-                                <span class="inline-block px-2.5 py-1 rounded-full text-sm font-bold uppercase"
-                                      style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
+                                <span class="inline-block px-2.5 py-1 rounded-full text-sm font-semibold uppercase"
+                                      style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
                                     {{ $item->course_code ?? '—' }}
                                 </span>
                             </td>
                             <td class="px-4 py-3 text-center">
-                                <span class="font-mono text-gray-800 text-sm font-bold uppercase">{{ $item->batch }}</span>
+                                <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
                             {{-- Always show email, even @pending.local --}}
                             <td class="px-4 py-3 hidden md:table-cell">
-                                <span class="text-gray-700 text-sm font-medium uppercase">
+                                <span class="text-[#333333] text-sm font-normal uppercase">
                                     {{ strtoupper($item->email ?? '—') }}
                                 </span>
                             </td>
                             <td class="px-4 py-3 text-center">
                                 <button wire:click="viewProfile({{ $item->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition active:scale-95"
-                                        style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
+                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition active:scale-95"
+                                        style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
                                     <i class="fas fa-eye text-sm"></i>
                                     <span class="hidden sm:inline">View</span>
                                 </button>
@@ -314,8 +314,8 @@ new class extends Component {
                                     <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
                                         <i class="fas fa-users text-2xl" style="color:#c89de0;"></i>
                                     </div>
-                                    <p class="font-bold text-gray-500 text-base">No alumni found</p>
-                                    <p class="text-sm text-gray-400">Try adjusting your filters</p>
+                                    <p class="font-semibold text-[#666666] text-xl">No alumni found</p>
+                                    <p class="text-sm text-[#999999] font-normal">Try adjusting your filters</p>
                                 </div>
                             </td>
                         </tr>
@@ -328,14 +328,14 @@ new class extends Component {
             <button x-show="showTop"
                     @click="document.getElementById('alumni-scroll').scrollTo({top:0,behavior:'smooth'})"
                     class="absolute bottom-4 right-4 z-20 w-8 h-8 rounded-full flex items-center justify-center shadow-lg text-white transition hover:opacity-90"
-                    style="background:linear-gradient(135deg,#7a3f91,#9b59b6); display:none;">
+                    style="background:linear-gradient(135deg,#7A3F91,#7A3F91); display:none;">
                 <i class="fas fa-arrow-up text-sm"></i>
             </button>
         </div>
 
         {{-- Pagination --}}
-        <div class="px-4 py-2.5 border-t border-gray-100 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-             style="background:linear-gradient(135deg,#2b0d3e,#1e0630);">
+        <div class="px-4 py-2.5 border-t border-[#E8E0F0] shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+             style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
             @php
                 $total = $this->alumniRecords->total();
                 $pp    = $this->alumniRecords->perPage();
@@ -343,24 +343,24 @@ new class extends Component {
                 $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
                 $to    = min($cp * $pp, $total);
             @endphp
-            <p class="text-white/70 text-sm">
-                Showing <strong class="text-white">{{ $from }}–{{ $to }}</strong> of <strong class="text-white">{{ $total }}</strong> alumni
+            <p class="text-white/70 text-sm font-normal">
+                Showing <strong class="text-white font-semibold">{{ $from }}–{{ $to }}</strong> of <strong class="text-white font-semibold">{{ $total }}</strong> alumni
             </p>
             <div class="flex items-center gap-1.5">
                 @if($this->alumniRecords->onFirstPage())
-                    <button disabled class="px-3 py-1.5 rounded-lg text-sm font-bold text-white/30 bg-white/5 cursor-not-allowed">← Prev</button>
+                    <button disabled class="px-3 py-1.5 rounded-lg text-sm font-semibold text-white/30 bg-white/5 cursor-not-allowed">← Prev</button>
                 @else
                     <button wire:click="previousPage('alumniPage')"
-                            class="px-3 py-1.5 rounded-lg text-sm font-bold text-white transition hover:opacity-80 active:scale-95"
-                            style="background:#7a3f91;">← Prev</button>
+                            class="px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition hover:opacity-80 active:scale-95"
+                            style="background:#7A3F91;">← Prev</button>
                 @endif
-                <span class="px-3 py-1.5 text-gray-800 text-sm font-bold bg-white rounded-lg">{{ $cp }} / {{ $this->alumniRecords->lastPage() }}</span>
+                <span class="px-3 py-1.5 text-[#333333] text-sm font-semibold bg-white rounded-lg">{{ $cp }} / {{ $this->alumniRecords->lastPage() }}</span>
                 @if($this->alumniRecords->hasMorePages())
                     <button wire:click="nextPage('alumniPage')"
-                            class="px-3 py-1.5 rounded-lg text-sm font-bold text-white transition hover:opacity-80 active:scale-95"
-                            style="background:#7a3f91;">Next →</button>
+                            class="px-3 py-1.5 rounded-lg text-sm font-semibold text-white transition hover:opacity-80 active:scale-95"
+                            style="background:#7A3F91;">Next →</button>
                 @else
-                    <button disabled class="px-3 py-1.5 rounded-lg text-sm font-bold text-white/30 bg-white/5 cursor-not-allowed">Next →</button>
+                    <button disabled class="px-3 py-1.5 rounded-lg text-sm font-semibold text-white/30 bg-white/5 cursor-not-allowed">Next →</button>
                 @endif
             </div>
         </div>
@@ -382,9 +382,9 @@ new class extends Component {
 
         {{-- Modal Header --}}
         <div class="flex items-center justify-between px-5 py-4 rounded-t-2xl sticky top-0 z-10"
-             style="background:linear-gradient(135deg,#2b0d3e,#3d1559);">
-            <h2 class="text-white font-extrabold text-lg flex items-center gap-2">
-                <i class="fas fa-graduation-cap text-[#9b6fbe]"></i>
+             style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
+            <h2 class="text-white font-semibold text-2xl flex items-center gap-2">
+                <i class="fas fa-graduation-cap text-[#ffffff]"></i>
                 Alumni Profile
             </h2>
             <button wire:click="closeModal"
@@ -396,28 +396,28 @@ new class extends Component {
         <div class="p-5 sm:p-6 space-y-4 overflow-y-auto" style="max-height:82vh;">
 
             {{-- Avatar + Quick Info --}}
-            <div class="flex items-center gap-4 p-4 rounded-xl border border-gray-200 bg-gray-50">
+            <div class="flex items-center gap-4 p-4 rounded-xl border border-[#E8E0F0] bg-[#F5F5F5]">
                 <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
                      alt="{{ $viewingProfile['first_name'] ?? '' }}"
-                     class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shadow-md ring-2 ring-gray-200 shrink-0">
+                     class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover shadow-md ring-2 ring-[#E8E0F0] shrink-0">
                 <div class="flex-1 min-w-0">
-                    <p class="text-lg font-extrabold text-gray-900 leading-tight uppercase">
+                    <p class="text-2xl font-semibold text-[#333333] leading-tight uppercase">
                         {{ $this->formatDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
                     </p>
-                    <p class="text-sm text-gray-500 font-mono mt-0.5 uppercase">{{ $viewingProfile['student_id'] ?? '—' }}</p>
+                    <p class="text-sm text-[#666666] font-mono mt-0.5 uppercase font-normal">{{ $viewingProfile['student_id'] ?? '—' }}</p>
                     <div class="flex flex-wrap gap-1.5 mt-2">
-                        <span class="px-2 py-0.5 rounded-full text-sm font-bold uppercase" style="background:#f0e6f8;color:#5c2f6e;border:1px solid #c89de0;">
+                        <span class="px-2 py-0.5 rounded-full text-sm font-semibold uppercase" style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
                             {{ $viewingProfile['course_code'] ?? '—' }}
                         </span>
-                        <span class="px-2 py-0.5 rounded-full text-sm font-semibold uppercase bg-gray-200 text-gray-700 border border-gray-300">
+                        <span class="px-2 py-0.5 rounded-full text-sm font-semibold uppercase bg-[#F5F5F5] text-[#333333] border border-[#E8E0F0]">
                             BATCH {{ $viewingProfile['batch'] ?? '—' }}
                         </span>
                         @if(!empty($viewingProfile['profile_completed']))
-                            <span class="px-2 py-0.5 rounded-full text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <i class="fas fa-check text-xs mr-0.5"></i>PROFILE COMPLETE
+                            <span class="px-2 py-0.5 rounded-full text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <i class="fas fa-check text-xs mr-0.5"></i>COMPLETE
                             </span>
                         @else
-                            <span class="px-2 py-0.5 rounded-full text-sm font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <span class="px-2 py-0.5 rounded-full text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                                 <i class="fas fa-triangle-exclamation text-xs mr-0.5"></i>INCOMPLETE
                             </span>
                         @endif
@@ -426,14 +426,14 @@ new class extends Component {
             </div>
 
             {{-- ── SECTION 1: Student Record ── --}}
-            <div class="rounded-xl border border-gray-200 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200"
-                     style="background:#f3eafc;">
-                    <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style="background:#7a3f91;">
+            <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0]"
+                     style="background:#F9F7FC;">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style="background:#7A3F91;">
                         <i class="fas fa-id-card text-white" style="font-size:12px;"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-sm uppercase tracking-wide">Student Record</p>
-                    <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-500">
+                    <p class="font-semibold text-[#333333] text-xl uppercase tracking-wide">Student Record</p>
+                    <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F5F5F5] text-[#666666]">
                         <i class="fas fa-lock text-xs"></i> From School
                     </span>
                 </div>
@@ -446,9 +446,9 @@ new class extends Component {
                         ['Course',      $up($viewingProfile['course_code']    ?? '')],
                         ['Batch Year',  $up($viewingProfile['batch']          ?? '')],
                     ] as [$lbl, $val])
-                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-sm font-semibold text-gray-900">{{ $val ?: '—' }}</p>
+                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -456,9 +456,9 @@ new class extends Component {
                     @foreach([
                         ['Course Name', $up($viewingProfile['course_name'] ?? '')],
                     ] as [$lbl, $val])
-                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-sm font-semibold text-gray-900 break-words">{{ $val ?: '—' }}</p>
+                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-sm font-semibold text-[#333333] break-words">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -470,12 +470,12 @@ new class extends Component {
                     ? strtoupper(\Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y'))
                     : '—';
             @endphp
-            <div class="rounded-xl border border-gray-200 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-blue-50">
+            <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0] bg-blue-50">
                     <div class="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
                         <i class="fas fa-person text-white" style="font-size:12px;"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-sm uppercase tracking-wide">Personal Details</p>
+                    <p class="font-semibold text-[#333333] text-xl uppercase tracking-wide">Personal Details</p>
                 </div>
                 <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
                     @foreach([
@@ -486,26 +486,26 @@ new class extends Component {
                         ['DSWD No.',      $up($viewingProfile['dswd_household_no']  ?? '')],
                         ['Email Address', $up($viewingProfile['email']              ?? '')],
                     ] as [$lbl, $val])
-                    <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                        <p class="text-sm font-semibold text-gray-900 break-words">{{ $val ?: '—' }}</p>
+                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                        <p class="text-sm font-semibold text-[#333333] break-words">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
             </div>
 
             {{-- ── SECTION 3: Family Background ── --}}
-            <div class="rounded-xl border border-gray-200 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-rose-50">
+            <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0] bg-rose-50">
                     <div class="w-6 h-6 rounded-lg bg-rose-500 flex items-center justify-center shrink-0">
                         <i class="fas fa-people-roof text-white" style="font-size:12px;"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-sm uppercase tracking-wide">Family Background</p>
+                    <p class="font-semibold text-[#333333] text-xl uppercase tracking-wide">Family Background</p>
                 </div>
 
                 {{-- Father --}}
                 <div class="px-3 pt-3">
-                    <p class="text-xs font-extrabold text-blue-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                    <p class="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
                         <i class="fas fa-person text-blue-400 text-xs"></i> Father's Name
                     </p>
                     <div class="grid grid-cols-3 gap-2 mb-3">
@@ -514,9 +514,9 @@ new class extends Component {
                             ['Given Name',  $up($viewingProfile['father_given_name']  ?? '')],
                             ['Middle Name', $up($viewingProfile['father_middle_name'] ?? '')],
                         ] as [$lbl, $val])
-                        <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $val ?: '—' }}</p>
+                        <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                            <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                            <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
                         </div>
                         @endforeach
                     </div>
@@ -524,7 +524,7 @@ new class extends Component {
 
                 {{-- Mother --}}
                 <div class="px-3 pb-3">
-                    <p class="text-xs font-extrabold text-pink-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                    <p class="text-xs font-semibold text-pink-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
                         <i class="fas fa-person-dress text-pink-400 text-xs"></i> Mother's Maiden Name
                     </p>
                     <div class="grid grid-cols-3 gap-2">
@@ -533,9 +533,9 @@ new class extends Component {
                             ['Given Name',  $up($viewingProfile['mother_given_name']  ?? '')],
                             ['Middle Name', $up($viewingProfile['mother_middle_name'] ?? '')],
                         ] as [$lbl, $val])
-                        <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $val ?: '—' }}</p>
+                        <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                            <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                            <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
                         </div>
                         @endforeach
                     </div>
@@ -543,12 +543,12 @@ new class extends Component {
             </div>
 
             {{-- ── SECTION 4: Permanent Address ── --}}
-            <div class="rounded-xl border border-gray-200 overflow-hidden">
-                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-gray-200 bg-emerald-50">
+            <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0] bg-emerald-50">
                     <div class="w-6 h-6 rounded-lg bg-emerald-600 flex items-center justify-center shrink-0">
                         <i class="fas fa-map-location-dot text-white" style="font-size:12px;"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-sm uppercase tracking-wide">Permanent Address</p>
+                    <p class="font-semibold text-[#333333] text-xl uppercase tracking-wide">Permanent Address</p>
                 </div>
                 <div class="p-3 space-y-2">
                     @php
@@ -561,8 +561,8 @@ new class extends Component {
                         $fullAddress = implode(', ', $addrParts) ?: '—';
                     @endphp
                     <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
-                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">Full Address</p>
-                        <p class="text-sm font-semibold text-gray-900 leading-snug">{{ $fullAddress }}</p>
+                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">Full Address</p>
+                        <p class="text-sm font-semibold text-[#333333] leading-snug">{{ $fullAddress }}</p>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         @foreach([
@@ -571,9 +571,9 @@ new class extends Component {
                             ['City/Municipality', $up($viewingProfile['address_municipality'] ?? '')],
                             ['Province',          $up($viewingProfile['address_province']     ?? '')],
                         ] as [$lbl, $val])
-                        <div class="bg-white border border-gray-200 rounded-lg p-2.5">
-                            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $val ?: '—' }}</p>
+                        <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                            <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
+                            <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
                         </div>
                         @endforeach
                     </div>
@@ -582,7 +582,7 @@ new class extends Component {
 
             {{-- Close Button --}}
             <button wire:click="closeModal"
-                    class="w-full bg-white border border-gray-300 text-gray-800 px-5 py-2.5 rounded-xl text-base font-bold hover:bg-gray-50 transition active:scale-[.99]">
+                    class="w-full bg-white border border-[#E8E0F0] text-[#333333] px-5 py-2.5 rounded-xl text-xl font-semibold hover:bg-[#F5F5F5] transition active:scale-[.99]">
                 Close
             </button>
         </div>

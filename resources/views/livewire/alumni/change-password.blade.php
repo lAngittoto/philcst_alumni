@@ -11,385 +11,345 @@ use Illuminate\Support\Facades\Auth;
 
 new #[Layout('app')] class extends Component {
 
-    public int $step = 1;
+    public int    $step = 1;
 
-    // ── Step 1 — Identity Verification ────────────────────────────────────────
-    public string $first_name     = '';
-    public string $middle_initial = '';
-    public string $last_name      = '';
-    public string $suffix         = '';
-    public string $student_id     = '';
-    public string $course_code    = '';
-    public string $batch          = '';
+    // ── Email Display (Step 1) ────────────────────────────────────
+    public bool   $hasExistingEmail = false;
+    public string $maskedEmail      = '';
 
-    // ── Step 2 — Email ────────────────────────────────────────────────────────
-    public string $email              = '';
-    public string $email_confirmation = '';
+    // ── OTP (Step 2) ─────────────────────────────────────────────
+    public string $otp       = '';
+    public bool   $otpSent   = false;
+    public bool   $otpLocked = false;
 
-    // ── Step 3 — Password ─────────────────────────────────────────────────────
+    // ── Password (Step 3) ────────────────────────────────────────
     public string $password              = '';
     public string $password_confirmation = '';
     public string $passwordStrength      = 'weak';
     public bool   $showPassword          = false;
     public bool   $showConfirmPassword   = false;
 
-    // ── Step 4 — OTP ──────────────────────────────────────────────────────────
-    public string $otp       = '';
-    public bool   $otpSent   = false;
-    public bool   $otpLocked = false;
-
-    // ── Identity lock ─────────────────────────────────────────────────────────
-    public bool $identityLocked          = false;
-    public int  $identityLockSecondsLeft = 0;
-
-    // ── UI ────────────────────────────────────────────────────────────────────
+    // ── UI ────────────────────────────────────────────────────────
     public string $errorMessage     = '';
     public string $successMessage   = '';
     public bool   $showSuccessModal = false;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Cache key helpers — keyed by alumni ID so they survive session resets
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Private Helpers
+    // ─────────────────────────────────────────────────────────────
 
-    private function cacheEmailKey(int $alumniId): string
+    private function maskEmail(string $email): string
     {
-        return "alumni_pending_email:{$alumniId}";
+        if (!str_contains($email, '@')) return '***@***';
+        [$local, $domain] = explode('@', $email, 2);
+        $len    = strlen($local);
+        $masked = $len <= 2
+            ? str_repeat('*', $len)
+            : substr($local, 0, 1) . str_repeat('*', max(1, $len - 2)) . substr($local, -1);
+        return $masked . '@' . $domain;
     }
 
-    private function cachePasswordKey(int $alumniId): string
+    private function cacheEmailKey(int $id): string    { return "alumni_pending_email:{$id}"; }
+    private function cachePasswordKey(int $id): string { return "alumni_pending_password:{$id}"; }
+    private function cacheFlowKey(int $id): string     { return "alumni_wizard_flow:{$id}"; }
+
+    private function clearWizardCache(int $id): void
     {
-        return "alumni_pending_password:{$alumniId}";
+        cache()->forget($this->cacheEmailKey($id));
+        cache()->forget($this->cachePasswordKey($id));
+        cache()->forget($this->cacheFlowKey($id));
     }
 
-    private function cacheStepKey(int $alumniId): string
+    private function getAlumni(): ?\App\Models\Alumni
     {
-        return "alumni_pending_step:{$alumniId}";
+        return \App\Models\Alumni::where('user_id', auth()->id())->first();
     }
 
-    private function clearWizardCache(int $alumniId): void
+    private function resolveExistingEmail(\App\Models\Alumni $alumni): ?string
     {
-        cache()->forget($this->cacheEmailKey($alumniId));
-        cache()->forget($this->cachePasswordKey($alumniId));
-        cache()->forget($this->cacheStepKey($alumniId));
+        $e = trim($alumni->email ?? '');
+        return ($e !== '' && !str_ends_with($e, '@pending.local')) ? $e : null;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
     // Mount
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
 
     public function mount(): void
     {
         $user = auth()->user();
 
         if (!$user || $user->role !== 'alumni') {
-            $this->redirect(route('login'));
-            return;
+            $this->redirect(route('login')); return;
         }
 
-        $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
-
+        $alumni = $this->getAlumni();
         if (!$alumni) {
-            $this->redirect(route('login'));
-            return;
+            $this->redirect(route('login')); return;
         }
 
-        // ── GUARD: Must arrive via the login flow ─────────────────────────────
-        //
-        // The session key 'alumni_requires_password_change' is ONLY set by the
-        // login component after the alumni has entered their credentials.
-        // If it is absent, the alumni navigated here directly (e.g. typed the
-        // URL or used browser history) without logging in — so we log them out
-        // and send them back to the login page to re-enter their credentials.
-        //
-        // Exception: if the wizard is already in progress (alumni_password_reset_step
-        // is set), we let them continue — they have already authenticated this session.
-        //
         $hasLoginFlag  = session()->has('alumni_requires_password_change');
         $wizardStarted = session()->has('alumni_password_reset_step');
 
         if (!$hasLoginFlag && !$wizardStarted) {
-            // Not from login and no wizard in progress — force re-authentication.
             Auth::logout();
             session()->invalidate();
             session()->regenerateToken();
-            $this->redirect(route('login'));
-            return;
+            $this->redirect(route('login')); return;
         }
 
-        // ── Determine whether this alumni still needs onboarding ──────────────
-        $stillOnTempPassword = $alumni->hasTemporaryPassword();
-        $wizardIncomplete    = $alumni->needsAccountSetup();
-        $requiresOnboarding  = $wizardIncomplete || $stillOnTempPassword;
+        $stillOnTemp = $alumni->hasTemporaryPassword();
+        $wizardInc   = $alumni->needsAccountSetup();
 
-        if (!$requiresOnboarding) {
-            // Wizard is genuinely complete — clean up and send to profile page
-            session()->forget([
-                'alumni_requires_password_change',
-                'alumni_pending_email',
-                'alumni_pending_password',
-                'alumni_password_reset_step',
-            ]);
+        if (!$wizardInc && !$stillOnTemp) {
+            session()->forget(['alumni_requires_password_change', 'alumni_pending_email',
+                'alumni_pending_password', 'alumni_password_reset_step', 'alumni_wizard_flow']);
             $this->clearWizardCache($alumni->id);
-            $this->redirect(route('alumni.information'));
-            return;
+            $this->redirect(route('alumni.information')); return;
         }
 
-        // ── Self-heal: DB flag inconsistent with actual password state ────────
-        if (!$wizardIncomplete && $stillOnTempPassword) {
-            DB::table('alumni')
-                ->where('id', $alumni->id)
-                ->update(['password_changed_at' => null]);
+        if (!$wizardInc && $stillOnTemp) {
+            DB::table('alumni')->where('id', $alumni->id)->update(['password_changed_at' => null]);
             $alumni->password_changed_at = null;
-
             Log::info("change-password mount: self-healed password_changed_at for alumni #{$alumni->id}");
         }
 
         session()->put('alumni_requires_password_change', true);
 
-        // ── Identity lock state ───────────────────────────────────────────────
-        $identityLockKey = 'alumni_identity_locked:' . $alumni->id;
-        if (cache()->has($identityLockKey)) {
-            $this->identityLocked          = true;
-            $this->identityLockSecondsLeft = (int) cache()->get('alumni_identity_locked_time:' . $alumni->id, 600);
+        // ── Email state ───────────────────────────────────────────
+        $existingEmail          = $this->resolveExistingEmail($alumni);
+        $this->hasExistingEmail = $existingEmail !== null;
+        if ($this->hasExistingEmail) {
+            $this->maskedEmail = $this->maskEmail($existingEmail);
         }
 
-        // ── DB-FIRST: If OTP is still active in DB, force Step 4 ─────────────
+        // ── DB-FIRST: active OTP → restore OTP step ──────────────
+        // FIX: Fall back to resolving email directly from alumni so
+        //      re-login after "Back to Home" still restores step 2
+        //      as long as the OTP hasn't expired in the DB.
         if ($alumni->isOtpStillActive()) {
-            $cachedEmail    = cache()->get($this->cacheEmailKey($alumni->id));
-            $cachedPassword = cache()->get($this->cachePasswordKey($alumni->id));
+            $cachedEmail = cache()->get($this->cacheEmailKey($alumni->id))
+                           ?? $existingEmail; // ← fallback to alumni record
 
-            if ($cachedEmail && $cachedPassword) {
+            if ($cachedEmail) {
+                // Repopulate cache so it survives future page loads
+                cache()->put($this->cacheEmailKey($alumni->id), $cachedEmail, now()->addMinutes(15));
+
                 session()->put('alumni_pending_email',       $cachedEmail);
-                session()->put('alumni_pending_password',    $cachedPassword);
-                session()->put('alumni_password_reset_step', 'password_set');
-
-                $this->step      = 4;
+                session()->put('alumni_password_reset_step', 'otp_sent');
+                $this->step      = 2;
                 $this->otpSent   = true;
                 $this->otpLocked = cache()->has('alumni_otp_locked:' . $alumni->id);
-
                 $this->dispatch('otp-sent');
                 return;
             }
 
-            // OTP active but cache evicted — clear stale OTP and start fresh
+            // No usable email at all — clear the stale OTP
             $alumni->clearOtp();
             cache()->forget('alumni_otp_attempts:' . $alumni->id);
             cache()->forget('alumni_otp_locked:'   . $alumni->id);
         }
 
-        // ── Fallback: restore from session (same browser, session intact) ─────
-        $resetStep       = session('alumni_password_reset_step');
-        $pendingEmail    = session('alumni_pending_email');
-        $pendingPassword = session('alumni_pending_password');
+        // ── Session restore ───────────────────────────────────────
+        $resetStep    = session('alumni_password_reset_step');
+        $pendingEmail = session('alumni_pending_email');
 
-        if ($resetStep === 'password_set' && $pendingEmail && $pendingPassword) {
-            $this->step      = 4;
+        if ($resetStep === 'otp_verified') {
+            $this->step = 3;
+        } elseif ($resetStep === 'otp_sent' && $pendingEmail) {
+            $this->step      = 2;
             $this->otpSent   = true;
             $this->otpLocked = cache()->has('alumni_otp_locked:' . $alumni->id);
             $this->dispatch('otp-sent');
-        } elseif ($resetStep === 'email_set' && $pendingEmail) {
-            $this->step  = 3;
-            $this->email = $pendingEmail;
-        } elseif ($resetStep === 'identity_verified') {
-            $this->step = 2;
         } else {
             $this->step = 1;
-            session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
+            session()->forget(['alumni_pending_email', 'alumni_password_reset_step', 'alumni_wizard_flow']);
             $this->clearWizardCache($alumni->id);
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Back to Home — LOG OUT so alumni must re-enter credentials on next visit
-    //
-    // Kapag nag-click ang alumni ng "Back to Home", ini-invalidate natin ang
-    // session nila. Kaya sa susunod na pumunta sila sa login page, wala nang
-    // auto-redirect — kailangan nilang i-enter ulit ang kanilang credentials.
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Back to Home — LOG OUT
+    // FIX: Do NOT wipe the OTP email cache when an OTP is still
+    //      active so that re-login correctly restores step 2.
+    // ─────────────────────────────────────────────────────────────
 
     public function backToHome(): void
     {
-        $user   = auth()->user();
-        $alumni = $user ? \App\Models\Alumni::where('user_id', $user->id)->first() : null;
-
-        // Clear wizard cache so no stale data remains
+        $alumni = $this->getAlumni();
         if ($alumni) {
-            $this->clearWizardCache($alumni->id);
+            if (!$alumni->isOtpStillActive()) {
+                // OTP already expired/unused — safe to wipe everything
+                $this->clearWizardCache($alumni->id);
+            }
+            // If OTP is still active we intentionally leave the cache
+            // intact so mount() can restore step 2 on the next login.
         }
-
         Auth::logout();
         session()->invalidate();
         session()->regenerateToken();
-
         $this->redirect('/');
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 1 — Verify Identity
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Step 1 — Send OTP
+    // ─────────────────────────────────────────────────────────────
 
-    public function verifyIdentity(): void
+    public function sendOtp(): void
     {
-        $this->errorMessage   = '';
-        $this->successMessage = '';
+        $this->errorMessage = $this->successMessage = '';
+        $alumni        = $this->getAlumni();
+        $existingEmail = $alumni ? $this->resolveExistingEmail($alumni) : null;
 
-        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
-
-        if (!$alumni) {
-            $this->errorMessage = 'Alumni record not found.';
+        if (!$alumni || !$existingEmail) {
+            $this->errorMessage = 'No valid email found on your account. Please contact the registrar.';
             return;
         }
 
-        $lockKey        = 'alumni_identity_locked:'      . $alumni->id;
-        $lockTimeKey    = 'alumni_identity_locked_time:' . $alumni->id;
-        $attemptsKey    = 'alumni_identity_attempts:'    . $alumni->id;
+        try {
+            $otp = $alumni->generateOtp();
+
+            try {
+                Mail::to($existingEmail)->send(new AlumniPasswordReset($alumni, $otp));
+                Log::info("Alumni OTP sent to: {$existingEmail}");
+            } catch (\Exception $e) {
+                Log::warning("Alumni OTP mail failed: " . $e->getMessage());
+            }
+
+            session()->put('alumni_pending_email',       $existingEmail);
+            session()->put('alumni_password_reset_step', 'otp_sent');
+            cache()->put($this->cacheEmailKey($alumni->id), $existingEmail, now()->addMinutes(15));
+            cache()->forget('alumni_otp_attempts:' . $alumni->id);
+            cache()->forget('alumni_otp_locked:'   . $alumni->id);
+
+            $this->step           = 2;
+            $this->otpSent        = true;
+            $this->otpLocked      = false;
+            $this->successMessage = "Verification code sent to {$this->maskedEmail}. Please check your inbox.";
+            $this->dispatch('otp-sent-fresh');
+
+        } catch (\Exception $e) {
+            Log::error("sendOtp error: " . $e->getMessage());
+            $this->errorMessage = 'Failed to send verification code. Please try again.';
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Step 2 — Verify OTP
+    // ─────────────────────────────────────────────────────────────
+
+    public function verifyOtp(): void
+    {
+        $this->errorMessage = $this->successMessage = '';
+        $trimmed = trim($this->otp);
+
+        if ($trimmed === '' || strlen($trimmed) < 6) {
+            $this->errorMessage = 'Please enter the complete 6-digit verification code.'; return;
+        }
+        if (!preg_match('/^\d{6}$/', $trimmed)) {
+            $this->errorMessage = 'The code must contain digits only.'; return;
+        }
+
+        $alumni = $this->getAlumni();
+        if (!$alumni) { $this->errorMessage = 'Alumni record not found.'; return; }
+
+        $lockKey     = 'alumni_otp_locked:'   . $alumni->id;
+        $attemptsKey = 'alumni_otp_attempts:' . $alumni->id;
+        $attempts    = cache()->get($attemptsKey, 0);
 
         if (cache()->has($lockKey)) {
-            $remaining                     = (int) cache()->get($lockTimeKey, 600);
-            $this->identityLocked          = true;
-            $this->identityLockSecondsLeft = $remaining;
-            $mins = ceil($remaining / 60);
-            $this->errorMessage = "Too many failed attempts. Your account is locked. Please try again in {$mins} minute(s).";
+            $this->otpLocked = true;
+            $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire, then request a new code.';
             return;
         }
 
-        $attempts = cache()->get($attemptsKey, 0) + 1;
-        cache()->put($attemptsKey, $attempts, 700);
+        if ($attempts >= 3) {
+            cache()->put($lockKey, true, 700);
+            $this->otpLocked    = true;
+            $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire.';
+            return;
+        }
 
-        $inputFn  = strtolower(trim($this->first_name));
-        $inputMi  = strtolower(trim($this->middle_initial));
-        $inputLn  = strtolower(trim($this->last_name));
-        $inputSfx = strtolower(trim($this->suffix ?? ''));
-        $inputCc  = strtoupper(trim($this->course_code));
-        $inputBat = (int) $this->batch;
-
-        $rawId    = ltrim(preg_replace('/[^0-9]/', '', $this->student_id), '0') ?: '0';
-        $inputSid = str_pad($rawId, 8, '0', STR_PAD_LEFT);
-
-        $dbFn  = strtolower(trim($alumni->first_name));
-        $dbMi  = strtolower(trim($alumni->middle_initial ?? ''));
-        $dbLn  = strtolower(trim($alumni->last_name));
-        $dbSfx = strtolower(trim($alumni->suffix ?? ''));
-        $dbCc  = strtoupper(trim($alumni->course_code));
-        $dbBat = (int) $alumni->batch;
-        $dbSid = $alumni->student_id;
-
-        $valid = $inputFn  === $dbFn
-              && $inputMi  === $dbMi
-              && $inputLn  === $dbLn
-              && $inputSfx === $dbSfx
-              && $inputSid === $dbSid
-              && $inputCc  === $dbCc
-              && $inputBat === $dbBat;
-
-        if (!$valid) {
-            if ($attempts >= 3) {
-                cache()->put($lockKey,     true, 600);
-                cache()->put($lockTimeKey, 600,  600);
-                $this->identityLocked          = true;
-                $this->identityLockSecondsLeft = 600;
-                $this->errorMessage = 'Too many failed attempts. Your account is locked for 10 minutes.';
+        if (!$alumni->isOtpValid($trimmed)) {
+            $new = $attempts + 1;
+            cache()->put($attemptsKey, $new, 700);
+            $rem = 3 - $new;
+            if ($rem <= 0) {
+                cache()->put($lockKey, true, 700);
+                $this->otpLocked    = true;
+                $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire, then request a new code.';
             } else {
-                $remaining          = 3 - $attempts;
-                $this->errorMessage = "One or more fields do not match our records. You have {$remaining} attempt(s) remaining.";
+                $this->errorMessage = "Invalid or expired code. You have {$rem} attempt(s) remaining.";
             }
             return;
         }
 
         cache()->forget($attemptsKey);
         cache()->forget($lockKey);
-        cache()->forget($lockTimeKey);
+        $alumni->clearOtp();
 
-        session()->put('alumni_password_reset_step', 'identity_verified');
-        $this->step           = 2;
-        $this->successMessage = 'Identity verified! Please provide your email address.';
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 2 — Set Email
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public function canSetEmail(): bool
-    {
-        return $this->email !== ''
-            && $this->email_confirmation !== ''
-            && $this->email === $this->email_confirmation;
-    }
-
-    public function setEmail(): void
-    {
-        $this->errorMessage   = '';
-        $this->successMessage = '';
-
-        $this->validate([
-            'email'              => 'required|email:rfc,dns|max:255',
-            'email_confirmation' => 'required|same:email',
-        ], [
-            'email.required'              => 'Email address is required.',
-            'email.email'                 => 'Please enter a valid email address (e.g. you@gmail.com).',
-            'email_confirmation.required' => 'Please confirm your email address.',
-            'email_confirmation.same'     => 'Email addresses do not match.',
-        ]);
-
-        if (str_ends_with(strtolower(trim($this->email)), '@pending.local')) {
-            $this->errorMessage = 'Please enter a valid personal email address.';
-            return;
-        }
-
-        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
-
-        $exists = \App\Models\Alumni::where('email', $this->email)
-            ->where('id', '!=', $alumni->id)
-            ->whereNotNull('email')
-            ->exists();
-
-        if ($exists) {
-            $this->errorMessage = 'This email address is already registered to another alumni account.';
-            return;
-        }
-
-        $userConflict = \App\Models\User::where('email', $this->email)
-            ->where('id', '!=', auth()->id())
-            ->where('email', 'not like', '%@pending.local')
-            ->exists();
-
-        if ($userConflict) {
-            $this->errorMessage = 'This email address is already registered to another account.';
-            return;
-        }
-
-        session()->put('alumni_pending_email', $this->email);
-        session()->put('alumni_password_reset_step', 'email_set');
-        cache()->put($this->cacheEmailKey($alumni->id), $this->email, now()->addHour());
-        cache()->put($this->cacheStepKey($alumni->id), 'email_set', now()->addHour());
-
+        session()->put('alumni_password_reset_step', 'otp_verified');
         $this->step           = 3;
-        $this->successMessage = 'Email saved! Now create a strong password for your account.';
+        $this->successMessage = 'Email verified! Please set your new password below.';
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 3 — Password + Send OTP
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // OTP — Resend
+    // ─────────────────────────────────────────────────────────────
 
-    public function updatedPassword(): void
+    public function resendOtp(): void
     {
-        $this->updatePasswordStrength();
+        $this->errorMessage = $this->successMessage = '';
+        $alumni = $this->getAlumni();
+        if (!$alumni) { $this->errorMessage = 'Session expired.'; $this->step = 1; return; }
+
+        $targetEmail  = $this->resolveExistingEmail($alumni);
+        $displayEmail = $this->maskedEmail;
+
+        if (!$targetEmail) {
+            $this->errorMessage = 'Session expired. Please start over.'; $this->step = 1; return;
+        }
+
+        try {
+            $otp = $alumni->generateOtp();
+
+            try {
+                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+                Log::info("Alumni OTP resent to: {$targetEmail}");
+            } catch (\Exception $e) {
+                Log::warning("Alumni resend OTP mail failed: " . $e->getMessage());
+            }
+
+            cache()->put($this->cacheEmailKey($alumni->id), $targetEmail, now()->addMinutes(15));
+            cache()->forget('alumni_otp_attempts:' . $alumni->id);
+            cache()->forget('alumni_otp_locked:'   . $alumni->id);
+            session()->put('alumni_password_reset_step', 'otp_sent');
+
+            $this->otp            = '';
+            $this->otpLocked      = false;
+            $this->successMessage = "New code sent to {$displayEmail}. You have 3 attempts.";
+            $this->dispatch('otp-sent-fresh');
+
+        } catch (\Exception $e) {
+            Log::error("resendOtp error: " . $e->getMessage());
+            $this->errorMessage = 'Failed to resend code. Please try again.';
+        }
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Password Helpers
+    // ─────────────────────────────────────────────────────────────
+
+    public function updatedPassword(): void { $this->updatePasswordStrength(); }
 
     public function updatePasswordStrength(): void
     {
         $pwd = $this->password;
-
-        if (strlen($pwd) < 8) {
-            $this->passwordStrength = 'weak';
-            return;
-        }
-
+        if (strlen($pwd) < 8) { $this->passwordStrength = 'weak'; return; }
         $score = (int) preg_match('/[A-Z]/', $pwd)
                + (int) preg_match('/[a-z]/', $pwd)
                + (int) preg_match('/[0-9]/', $pwd)
                + (int) preg_match('/[!@#$%^&*?]/', $pwd);
-
         $this->passwordStrength = match (true) {
             strlen($pwd) >= 12 && $score >= 4 => 'strong',
             strlen($pwd) >= 10 && $score >= 3 => 'good',
@@ -402,16 +362,13 @@ new #[Layout('app')] class extends Component {
     {
         return match ($this->passwordStrength) {
             'weak'   => ['label' => 'Weak',   'color' => 'text-red-600',    'progressColor' => 'bg-red-500',    'width' => 'w-1/4'],
-            'fair'   => ['label' => 'Fair',   'color' => 'text-orange-600', 'progressColor' => 'bg-orange-500', 'width' => 'w-2/4'],
+            'fair'   => ['label' => 'Fair',   'color' => 'text-orange-500', 'progressColor' => 'bg-orange-500', 'width' => 'w-2/4'],
             'good'   => ['label' => 'Good',   'color' => 'text-amber-600',  'progressColor' => 'bg-amber-500',  'width' => 'w-3/4'],
             'strong' => ['label' => 'Strong', 'color' => 'text-emerald-600','progressColor' => 'bg-emerald-500','width' => 'w-full'],
         };
     }
 
-    public function isPasswordStrengthValid(): bool
-    {
-        return in_array($this->passwordStrength, ['good', 'strong']);
-    }
+    public function isPasswordStrengthValid(): bool { return in_array($this->passwordStrength, ['good', 'strong']); }
 
     public function isPasswordsMatching(): bool
     {
@@ -420,18 +377,24 @@ new #[Layout('app')] class extends Component {
             && $this->password === $this->password_confirmation;
     }
 
-    public function canSendOtp(): bool
-    {
-        return $this->isPasswordStrengthValid() && $this->isPasswordsMatching();
-    }
+    public function canSavePassword(): bool { return $this->isPasswordStrengthValid() && $this->isPasswordsMatching(); }
 
-    public function sendOtp(): void
+    // ─────────────────────────────────────────────────────────────
+    // Step 3 — Save Password
+    // ─────────────────────────────────────────────────────────────
+
+    public function savePassword(): void
     {
-        $this->errorMessage   = '';
-        $this->successMessage = '';
+        $this->errorMessage = $this->successMessage = '';
+
+        if (session('alumni_password_reset_step') !== 'otp_verified') {
+            $this->errorMessage = 'Please complete OTP verification first.';
+            $this->step = 2;
+            return;
+        }
 
         if (!$this->isPasswordStrengthValid()) {
-            $this->errorMessage = 'Password strength must be "Good" or "Strong". Add uppercase letters, numbers, and special characters.';
+            $this->errorMessage = 'Password must be "Good" or "Strong" strength. Add uppercase letters, numbers, and special characters.';
             return;
         }
 
@@ -443,386 +406,182 @@ new #[Layout('app')] class extends Component {
             'password_confirmation.same' => 'Passwords do not match.',
         ]);
 
-        $pendingEmail = session('alumni_pending_email')
-            ?? cache()->get($this->cacheEmailKey(
-                \App\Models\Alumni::where('user_id', auth()->id())->value('id')
-            ));
-
-        if (!$pendingEmail) {
-            $this->errorMessage = 'Session expired. Please go back and re-enter your email.';
-            $this->step = 2;
-            return;
-        }
-
-        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
-
-        if (!$alumni) {
-            $this->errorMessage = 'Alumni record not found.';
-            return;
-        }
-
-        try {
-            $otp = $alumni->generateOtp();
-
-            try {
-                Mail::to($pendingEmail)->send(new AlumniPasswordReset($alumni, $otp));
-                Log::info("Alumni OTP sent to: {$pendingEmail}");
-            } catch (\Exception $e) {
-                Log::warning("Alumni OTP mail failed for {$pendingEmail}: " . $e->getMessage());
-            }
-
-            session()->put('alumni_pending_password',    $this->password);
-            session()->put('alumni_pending_email',       $pendingEmail);
-            session()->put('alumni_password_reset_step', 'password_set');
-
-            cache()->put($this->cachePasswordKey($alumni->id), $this->password,  now()->addMinutes(15));
-            cache()->put($this->cacheEmailKey($alumni->id),    $pendingEmail,     now()->addMinutes(15));
-            cache()->put($this->cacheStepKey($alumni->id),     'password_set',   now()->addMinutes(15));
-
-            cache()->forget('alumni_otp_attempts:' . $alumni->id);
-            cache()->forget('alumni_otp_locked:'   . $alumni->id);
-
-            $this->step           = 4;
-            $this->otpSent        = true;
-            $this->otpLocked      = false;
-            $this->successMessage = "Verification code sent to {$pendingEmail}. Please check your inbox.";
-
-            $this->dispatch('otp-sent-fresh');
-
-        } catch (\Exception $e) {
-            Log::error("Alumni sendOtp error: " . $e->getMessage());
-            $this->errorMessage = 'Failed to send verification code. Please try again.';
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Step 4 — Verify OTP & Save Everything
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public function verifyOtp(): void
-    {
-        $this->errorMessage   = '';
-        $this->successMessage = '';
-
-        $trimmedOtp = trim($this->otp);
-
-        if ($trimmedOtp === '' || strlen($trimmedOtp) < 6) {
-            $this->errorMessage = 'Please enter the complete 6-digit verification code.';
-            return;
-        }
-
-        if (!preg_match('/^\d{6}$/', $trimmedOtp)) {
-            $this->errorMessage = 'The verification code must contain only digits.';
-            return;
-        }
-
         $user   = auth()->user();
-        $alumni = \App\Models\Alumni::where('user_id', $user->id)->first();
-
-        if (!$alumni) {
-            $this->errorMessage = 'Alumni record not found.';
-            return;
-        }
-
-        $pendingEmail    = session('alumni_pending_email')
-            ?? cache()->get($this->cacheEmailKey($alumni->id));
-        $pendingPassword = session('alumni_pending_password')
-            ?? cache()->get($this->cachePasswordKey($alumni->id));
-
-        if (!$pendingEmail || !$pendingPassword) {
-            $this->errorMessage = 'Session expired. Please start over.';
-            $this->step = 1;
-            session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
-            $this->clearWizardCache($alumni->id);
-            return;
-        }
+        $alumni = $this->getAlumni();
+        if (!$alumni) { $this->errorMessage = 'Alumni record not found.'; return; }
 
         try {
-            $lockKey     = 'alumni_otp_locked:'   . $alumni->id;
-            $attemptsKey = 'alumni_otp_attempts:' . $alumni->id;
-            $attempts    = cache()->get($attemptsKey, 0);
-
-            if (cache()->has($lockKey)) {
-                $this->otpLocked    = true;
-                $this->errorMessage = 'Too many failed attempts. Please wait for the timer to expire, then request a new code.';
-                return;
-            }
-
-            if ($attempts >= 3) {
-                cache()->put($lockKey, true, 700);
-                $this->otpLocked    = true;
-                $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire, then request a new code.';
-                return;
-            }
-
-            if (!$alumni->isOtpValid($trimmedOtp)) {
-                $newAttempts       = $attempts + 1;
-                cache()->put($attemptsKey, $newAttempts, 700);
-                $remainingAttempts = 3 - $newAttempts;
-
-                if ($remainingAttempts <= 0) {
-                    cache()->put($lockKey, true, 700);
-                    $this->otpLocked    = true;
-                    $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire, then request a new code.';
-                } else {
-                    $this->errorMessage = "Invalid or expired code. You have {$remainingAttempts} attempt(s) remaining.";
-                }
-                return;
-            }
-
-            cache()->forget($attemptsKey);
-            cache()->forget($lockKey);
-            $alumni->clearOtp();
-
             $now = now();
 
-            DB::transaction(function () use ($user, $alumni, $pendingEmail, $pendingPassword, $now) {
-                DB::table('users')
-                    ->where('id', $user->id)
-                    ->update([
-                        'email'      => $pendingEmail,
-                        'password'   => Hash::make($pendingPassword),
-                        'updated_at' => $now,
-                    ]);
-
-                DB::table('alumni')
-                    ->where('id', $alumni->id)
-                    ->update([
-                        'email'               => $pendingEmail,
-                        'status'              => 'VERIFIED',
-                        'password_changed_at' => $now,
-                        'updated_at'          => $now,
-                    ]);
+            DB::transaction(function () use ($user, $alumni, $now) {
+                DB::table('users')->where('id', $user->id)->update([
+                    'password'   => Hash::make($this->password),
+                    'updated_at' => $now,
+                ]);
+                DB::table('alumni')->where('id', $alumni->id)->update([
+                    'status'              => 'VERIFIED',
+                    'password_changed_at' => $now,
+                    'updated_at'          => $now,
+                ]);
             });
 
             $alumni->refresh();
 
             if ($alumni->needsAccountSetup()) {
-                Log::error("Alumni verifyOtp: needsAccountSetup() still true after update for alumni #{$alumni->id}.");
-                $this->errorMessage = 'Account activation failed due to a data error. Please contact support.';
+                Log::error("savePassword: needsAccountSetup() still true after update for alumni #{$alumni->id}.");
+                $this->errorMessage = 'Activation failed due to a data error. Please contact support.';
                 return;
             }
 
-            session()->forget([
-                'alumni_pending_email',
-                'alumni_pending_password',
-                'alumni_password_reset_step',
-                'alumni_requires_password_change',
-            ]);
+            session()->forget(['alumni_pending_email', 'alumni_pending_password',
+                'alumni_password_reset_step', 'alumni_requires_password_change', 'alumni_wizard_flow']);
             $this->clearWizardCache($alumni->id);
 
-            Log::info("Alumni account setup completed: {$pendingEmail} (alumni_id: {$alumni->id}, student_id: {$alumni->student_id})");
+            Log::info("Alumni account setup completed: alumni_id #{$alumni->id}");
 
             $this->showSuccessModal = true;
             $this->dispatch('account-activated');
 
         } catch (\Exception $e) {
-            Log::error("Alumni verifyOtp error: " . $e->getMessage() . " | Trace: " . $e->getTraceAsString());
-            $this->errorMessage = 'Verification failed. Please try again.';
+            Log::error("savePassword error: " . $e->getMessage());
+            $this->errorMessage = 'Failed to save password. Please try again.';
         }
     }
 
-    public function resendOtp(): void
-    {
-        $this->errorMessage   = '';
-        $this->successMessage = '';
-
-        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
-
-        $pendingEmail = session('alumni_pending_email')
-            ?? ($alumni ? cache()->get($this->cacheEmailKey($alumni->id)) : null);
-
-        if (!$alumni || !$pendingEmail) {
-            $this->errorMessage = 'Session expired. Please start over.';
-            $this->step = 1;
-            return;
-        }
-
-        try {
-            $otp = $alumni->generateOtp();
-
-            try {
-                Mail::to($pendingEmail)->send(new AlumniPasswordReset($alumni, $otp));
-                Log::info("Alumni OTP resent to: {$pendingEmail}");
-            } catch (\Exception $e) {
-                Log::warning("Alumni resend OTP mail failed: " . $e->getMessage());
-            }
-
-            $pendingPassword = session('alumni_pending_password')
-                ?? cache()->get($this->cachePasswordKey($alumni->id));
-
-            cache()->put($this->cacheEmailKey($alumni->id),    $pendingEmail,     now()->addMinutes(15));
-            cache()->put($this->cachePasswordKey($alumni->id), $pendingPassword,  now()->addMinutes(15));
-            cache()->put($this->cacheStepKey($alumni->id),     'password_set',   now()->addMinutes(15));
-
-            cache()->forget('alumni_otp_attempts:' . $alumni->id);
-            cache()->forget('alumni_otp_locked:'   . $alumni->id);
-
-            $this->otp            = '';
-            $this->otpLocked      = false;
-            $this->successMessage = "New verification code sent to {$pendingEmail}. You have 3 attempts.";
-
-            $this->dispatch('otp-sent-fresh');
-
-        } catch (\Exception $e) {
-            Log::error("Alumni resendOtp error: " . $e->getMessage());
-            $this->errorMessage = 'Failed to resend code. Please try again.';
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Navigation
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // Navigation — Previous Step
+    // ─────────────────────────────────────────────────────────────
 
     public function previousStep(): void
     {
         if ($this->step <= 1) return;
+        $alumni = $this->getAlumni();
 
-        if ($this->step === 4) {
-            $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
-            if ($alumni && $alumni->isOtpStillActive()) {
-                $this->errorMessage = 'You cannot go back while a verification code is active. Please wait for the timer to expire, then request a new code.';
-                return;
-            }
-            if ($alumni) {
-                $alumni->clearOtp();
-                cache()->forget('alumni_otp_attempts:' . $alumni->id);
-                cache()->forget('alumni_otp_locked:'   . $alumni->id);
-                $this->clearWizardCache($alumni->id);
-            }
+        if ($this->step === 2 && $alumni && $alumni->isOtpStillActive()) {
+            $this->errorMessage = 'You cannot go back while a verification code is active. Wait for the timer to expire.';
+            return;
+        }
+
+        if ($this->step === 2 && $alumni) {
+            $alumni->clearOtp();
+            cache()->forget('alumni_otp_attempts:' . $alumni->id);
+            cache()->forget('alumni_otp_locked:'   . $alumni->id);
+            $this->clearWizardCache($alumni->id);
+        }
+
+        if ($this->step === 3) {
+            $this->dispatch('otp-reset');
+            session()->put('alumni_password_reset_step', 'otp_sent');
         }
 
         $this->step--;
-        $this->errorMessage   = '';
-        $this->successMessage = '';
-        $this->otp            = '';
-        $this->otpLocked      = false;
+        $this->errorMessage = $this->successMessage = '';
+        $this->otp = ''; $this->otpLocked = false;
 
         if ($this->step === 1) {
-            session()->forget(['alumni_pending_email', 'alumni_pending_password', 'alumni_password_reset_step']);
-            $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
+            session()->forget(['alumni_pending_email', 'alumni_password_reset_step', 'alumni_wizard_flow']);
             if ($alumni) $this->clearWizardCache($alumni->id);
-            $this->first_name = $this->middle_initial = $this->last_name = '';
-            $this->suffix = $this->student_id = $this->course_code = $this->batch = '';
-        } elseif ($this->step === 2) {
-            session()->forget(['alumni_pending_password', 'alumni_password_reset_step']);
-            session()->put('alumni_password_reset_step', 'identity_verified');
-            $this->email              = session('alumni_pending_email', '');
-            $this->email_confirmation = $this->email;
-        } elseif ($this->step === 3) {
-            session()->forget('alumni_pending_password');
-            session()->put('alumni_password_reset_step', 'email_set');
-            $this->password              = '';
-            $this->password_confirmation = '';
-            $this->passwordStrength      = 'weak';
+            $this->password = $this->password_confirmation = '';
+            $this->passwordStrength = 'weak';
         }
     }
 
     public function goToDashboard(): void
     {
-        $alumni = \App\Models\Alumni::where('user_id', auth()->id())->first();
-
+        $alumni = $this->getAlumni();
         if ($alumni && !$alumni->needsAccountSetup()) {
             $this->redirect(route('alumni.information'));
         } else {
-            Log::warning("goToDashboard called but needsAccountSetup() still true for user #" . auth()->id());
-            $this->errorMessage = 'Account activation is still pending. Please refresh and try again.';
+            Log::warning("goToDashboard: needsAccountSetup() still true for user #" . auth()->id());
+            $this->errorMessage = 'Account activation still pending. Please refresh and try again.';
         }
     }
-
 }; ?>
 
 <div
-    class="min-h-screen w-full flex flex-col items-center justify-center p-4 font-sans antialiased"
+    class="min-h-screen w-full flex flex-col items-center justify-center p-4 font-sans"
     style="background-image: url('{{ asset('images/school-1.jpg') }}'); background-size: cover; background-position: center;"
     x-data="alumniOtpTimer()"
     x-init="initTimer({{ $step }})"
     x-on:otp-sent-fresh.window="startFresh()"
     x-on:otp-sent.window="restoreOrStart()"
+    x-on:otp-reset.window="resetTimer()"
 >
-    {{-- Overlay --}}
-    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm z-0"></div>
+    {{-- Dark overlay for readability --}}
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]"></div>
 
-    {{-- Back link — calls backToHome() to log out before redirecting --}}
-    <button
-        wire:click="backToHome"
-        wire:loading.attr="disabled"
-        wire:target="backToHome"
-        class="fixed top-6 left-6 z-50 flex items-center gap-2 text-white hover:text-purple-100 transition-all group text-base bg-transparent border-0 cursor-pointer"
-    >
-        <div class="w-8 h-8 flex items-center justify-center rounded-full border border-white/50 group-hover:border-white group-hover:bg-white/20 transition-all">
-            <span wire:loading.remove wire:target="backToHome">
-                <i class="fa-solid fa-arrow-left text-xs"></i>
-            </span>
-            <span wire:loading wire:target="backToHome">
-                <i class="fa-solid fa-circle-notch fa-spin text-xs"></i>
-            </span>
-        </div>
-        <span class="font-medium tracking-wide hidden sm:inline">Back to Home</span>
-    </button>
-
-    {{-- ═══════════════════════════════════════════════════════════════════════
-         SUCCESS MODAL
-    ════════════════════════════════════════════════════════════════════════ --}}
-    @if ($showSuccessModal)
-        <div
-            class="fixed inset-0 z-[100] flex items-center justify-center p-4"
-            x-data="{ visible: false }"
-            x-init="$nextTick(() => { visible = true })"
+    {{-- Back to Home --}}
+    <div class="relative z-10 w-full max-w-2xl mb-4">
+        <button
+            wire:click="backToHome"
+            wire:loading.attr="disabled"
+            wire:target="backToHome"
+            class="inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors font-semibold text-xl group"
         >
-            <div
-                class="absolute inset-0 bg-black/70 backdrop-blur-md"
-                x-show="visible"
-                x-transition:enter="transition ease-out duration-300"
-                x-transition:enter-start="opacity-0"
-                x-transition:enter-end="opacity-100"
-            ></div>
+            <div class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/30 bg-white/10 group-hover:border-white/60 group-hover:bg-white/20 transition-all shadow-sm">
+                <span wire:loading.remove wire:target="backToHome"><i class="fa-solid fa-arrow-left text-sm"></i></span>
+                <span wire:loading wire:target="backToHome"><i class="fa-solid fa-circle-notch fa-spin text-sm"></i></span>
+            </div>
+            <span>Back to Home</span>
+        </button>
+    </div>
 
-            <div
-                class="relative z-10 w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden text-center"
-                x-show="visible"
-                x-transition:enter="transition ease-out duration-400"
-                x-transition:enter-start="opacity-0 scale-90 translate-y-8"
-                x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-            >
-                <div class="h-2 bg-gradient-to-r from-[#7a3f91] via-emerald-500 to-[#7a3f91]"></div>
+    {{-- ══════════════════════════════════════════════════════════════
+         SUCCESS MODAL
+    ═══════════════════════════════════════════════════════════════ --}}
+    @if ($showSuccessModal)
+        <div class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+             x-data="{ visible: false }" x-init="$nextTick(() => { visible = true })">
+            <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                 x-show="visible"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0"
+                 x-transition:enter-end="opacity-100"></div>
+
+            <div class="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden text-center"
+                 x-show="visible"
+                 x-transition:enter="transition ease-out duration-400"
+                 x-transition:enter-start="opacity-0 scale-90 translate-y-6"
+                 x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+
+                {{-- Top accent bar --}}
+                <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #7A3F91, #059669, #7A3F91);"></div>
 
                 <div class="px-8 pt-8 pb-7 space-y-5">
+                    {{-- Animated checkmark --}}
                     <div class="flex justify-center">
                         <div class="relative w-20 h-20">
                             <div class="absolute inset-0 rounded-full bg-emerald-100 animate-ping opacity-40"></div>
-                            <div class="absolute inset-2 rounded-full bg-emerald-100 animate-ping opacity-30" style="animation-delay: 0.2s"></div>
-                            <div class="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200">
+                            <div class="absolute inset-2 rounded-full bg-emerald-100 animate-ping opacity-30" style="animation-delay:.2s"></div>
+                            <div class="relative w-20 h-20 rounded-full flex items-center justify-center shadow-lg"
+                                 style="background: linear-gradient(135deg, #34d399, #059669);">
                                 <i class="fa-solid fa-check text-white text-3xl"></i>
                             </div>
                         </div>
                     </div>
 
-                    <div class="space-y-2">
-                        <h2 class="text-2xl font-extrabold text-gray-900 tracking-tight">🎉 Account Activated!</h2>
-                        <p class="text-base font-semibold text-gray-700">Your alumni account has been verified.</p>
-                        <p class="text-sm text-gray-600 leading-relaxed">
-                            Welcome to the PCST Alumni Portal! Please complete your profile information to access all features.
-                        </p>
+                    <div class="space-y-1.5">
+                        <h2 class="text-2xl font-extrabold text-[#333333]">🎉 Account Activated!</h2>
+                        <p class="text-xl font-semibold text-[#333333]">Your alumni account has been verified.</p>
+                        <p class="text-xl text-[#666666] leading-relaxed">Welcome to the PCST Alumni Portal! Please complete your profile to access all features.</p>
                     </div>
 
-                    <div class="bg-gradient-to-r from-[#7a3f91]/10 to-purple-50 border border-[#7a3f91]/20 rounded-2xl p-4 flex items-center gap-4">
-                        <div class="w-11 h-11 rounded-xl bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
-                            <i class="fa-solid fa-graduation-cap text-white text-base"></i>
+                    <div class="rounded-2xl p-4 flex items-center gap-4 border"
+                         style="background: linear-gradient(135deg, rgba(122,63,145,0.07), rgba(122,63,145,0.03)); border-color: rgba(122,63,145,0.2);">
+                        <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                             style="background: #7A3F91;">
+                            <i class="fa-solid fa-graduation-cap text-white"></i>
                         </div>
                         <div class="text-left">
-                            <p class="text-sm font-semibold text-[#7a3f91] uppercase tracking-wider">Account Status</p>
-                            <p class="text-base font-bold text-gray-800">Verified Alumni ✓</p>
-                            <p class="text-sm text-gray-600">Philippine College of Science and Technology</p>
+                            <p class="text-sm font-bold uppercase tracking-wider" style="color: #7A3F91;">Account Status</p>
+                            <p class="text-xl font-bold text-[#333333]">Verified Alumni ✓</p>
+                            <p class="text-xl text-[#666666]">Philippine College of Science and Technology</p>
                         </div>
                     </div>
 
-                    <button
-                        wire:click="goToDashboard"
-                        wire:loading.attr="disabled"
-                        wire:target="goToDashboard"
-                        class="w-full bg-gradient-to-r from-[#7a3f91] to-[#6a3080] hover:from-[#6a3080] hover:to-[#5a2670] text-white py-3.5 rounded-2xl font-bold text-base shadow-lg shadow-purple-200 hover:shadow-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3"
-                    >
+                    <button wire:click="goToDashboard" wire:loading.attr="disabled" wire:target="goToDashboard"
+                            class="w-full text-white py-3.5 rounded-xl font-bold text-xl shadow-lg hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                         <span wire:loading.remove wire:target="goToDashboard">
                             <i class="fa-solid fa-user-circle mr-2"></i>Complete My Profile
                         </span>
@@ -835,498 +594,396 @@ new #[Layout('app')] class extends Component {
         </div>
     @endif
 
-    {{-- ═══════════════════════════════════════════════════════════════════════
+    {{-- ══════════════════════════════════════════════════════════════
          MAIN CARD
-    ════════════════════════════════════════════════════════════════════════ --}}
-    <div class="relative z-10 w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden">
+    ═══════════════════════════════════════════════════════════════ --}}
+    <div class="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl border overflow-hidden" style="border-color: #E8E0F0;">
 
-        {{-- Header --}}
-        <div class="px-6 pt-5 pb-4 border-b border-gray-200">
-            <div class="flex items-center gap-3 mb-4">
-                <div class="w-10 h-10 rounded-xl bg-[#7a3f91]/10 flex items-center justify-center flex-shrink-0">
-                    <i class="fa-solid fa-graduation-cap text-[#7a3f91] text-base"></i>
+        {{-- ── Card Header ─────────────────────────────────────────── --}}
+        <div class="px-8 pt-7 pb-6 border-b" style="border-color: #E8E0F0;">
+
+            {{-- Logo + Title --}}
+            <div class="flex items-center gap-3 mb-6">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow-md flex-shrink-0"
+                     style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                    <i class="fa-solid fa-graduation-cap text-white text-lg"></i>
                 </div>
                 <div>
-                    <h1 class="text-xl font-bold text-gray-900 leading-tight">Alumni Account Setup</h1>
-                    <p class="text-sm text-gray-600 mt-0.5">Complete your account to access the portal</p>
+                    <h1 class="text-2xl font-bold leading-tight" style="color: #333333;">Alumni Account Setup</h1>
+                    <p class="text-base" style="color: #666666;">Philippine College of Science and Technology</p>
                 </div>
             </div>
 
-            {{-- 4-Step Indicator --}}
-            <div class="flex items-center gap-1">
-                @foreach ([1 => 'Verify', 2 => 'Email', 3 => 'Password', 4 => 'OTP'] as $i => $label)
-                    <div class="flex items-center {{ $i < 4 ? 'flex-1' : '' }}">
-                        <div class="flex items-center gap-1.5 flex-shrink-0">
-                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold transition-all
-                                {{ $i == $step ? 'bg-[#7a3f91] text-white' : ($i < $step ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500') }}">
-                                @if ($i < $step)
+            {{-- Step Indicator --}}
+            @php
+                $steps = ['Send OTP', 'Verify OTP', 'Set Password'];
+            @endphp
+            <div class="flex items-center gap-0">
+                @foreach ($steps as $idx => $label)
+                    @php $pos = $idx + 1; $total = count($steps); @endphp
+                    <div class="flex items-center {{ $pos < $total ? 'flex-1' : '' }}">
+                        <div class="flex flex-col items-center gap-1 flex-shrink-0">
+                            <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all
+                                @if($pos == $step) text-white border-transparent @elseif($pos < $step) text-white border-transparent @else border-[#E0E0E0] text-[#999999] bg-white @endif"
+                                style="{{ $pos == $step ? 'background:#7A3F91;' : ($pos < $step ? 'background:#059669;' : '') }}">
+                                @if ($pos < $step)
                                     <i class="fa-solid fa-check text-xs"></i>
                                 @else
-                                    {{ $i }}
+                                    {{ $pos }}
                                 @endif
                             </div>
-                            <span class="text-sm font-semibold hidden sm:inline
-                                {{ $i == $step ? 'text-gray-800' : ($i < $step ? 'text-emerald-600' : 'text-gray-400') }}">
+                            <span class="text-sm font-semibold whitespace-nowrap
+                                @if($pos == $step) text-[#7A3F91] @elseif($pos < $step) text-emerald-600 @else text-[#999999] @endif">
                                 {{ $label }}
                             </span>
                         </div>
-                        @if ($i < 4)
-                            <div class="flex-1 mx-1.5 h-px {{ $i < $step ? 'bg-emerald-400' : 'bg-gray-300' }}"></div>
+                        @if ($pos < $total)
+                            <div class="flex-1 h-0.5 mx-3 mb-5 rounded-full transition-all
+                                {{ $pos < $step ? 'bg-emerald-400' : 'bg-[#E0E0E0]' }}">
+                            </div>
                         @endif
                     </div>
                 @endforeach
             </div>
         </div>
 
-        {{-- Body --}}
-        <div class="px-6 py-4">
+        {{-- ── Card Body ───────────────────────────────────────────── --}}
+        <div class="px-8 py-7">
 
             {{-- Alerts --}}
             @if ($errorMessage)
-                <div class="mb-4 p-4 bg-red-50 border border-red-300 rounded-xl text-red-800 flex items-start gap-3">
-                    <i class="fa-solid fa-circle-exclamation mt-0.5 flex-shrink-0 text-red-600 text-lg"></i>
-                    <p class="text-base leading-relaxed font-medium">{{ $errorMessage }}</p>
+                <div class="mb-5 px-4 py-3.5 rounded-xl border flex items-start gap-3"
+                     style="background:#FEF2F2; border-color:#FECACA;">
+                    <i class="fa-solid fa-circle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xl"></i>
+                    <p class="text-base font-medium text-red-800 leading-snug">{{ $errorMessage }}</p>
                 </div>
             @endif
 
             @if ($successMessage)
-                <div class="mb-4 p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-800 flex items-start gap-3">
-                    <i class="fa-solid fa-circle-check mt-0.5 flex-shrink-0 text-emerald-600 text-lg"></i>
-                    <p class="text-base leading-relaxed font-medium">{{ $successMessage }}</p>
+                <div class="mb-5 px-4 py-3.5 rounded-xl border flex items-start gap-3"
+                     style="background:#ECFDF5; border-color:#A7F3D0;">
+                    <i class="fa-solid fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-xl"></i>
+                    <p class="text-base font-medium text-emerald-800 leading-snug">{{ $successMessage }}</p>
                 </div>
             @endif
 
-            {{-- ═══ STEP 1 — Identity Verification ═══ --}}
+            {{-- ══════════════════════════════════════════════════════
+                 STEP 1 — Send OTP
+            ════════════════════════════════════════════════════════ --}}
             @if ($step == 1)
-                <div class="space-y-4">
+                <div class="space-y-6">
                     <div>
-                        <h2 class="text-xl font-bold text-gray-900">Verify Your Identity</h2>
-                        <p class="text-base text-gray-600 mt-0.5">Enter your details exactly as they appear in our records. All fields must match.</p>
-                    </div>
-
-                    @if ($identityLocked)
-                        <div class="bg-red-50 border-2 border-red-300 rounded-xl p-4 flex items-start gap-3">
-                            <i class="fa-solid fa-lock text-red-500 mt-0.5 flex-shrink-0"></i>
-                            <div>
-                                <p class="text-base font-bold text-red-700">Account Temporarily Locked</p>
-                                <p class="text-sm text-red-600 mt-0.5">
-                                    Too many failed attempts. Please wait 10 minutes before trying again.
-                                    You may close this page and return later.
-                                </p>
-                            </div>
-                        </div>
-                    @else
-                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-3">
-                            <i class="fa-solid fa-circle-info text-blue-500 mt-0.5 flex-shrink-0 text-lg"></i>
-                            <p class="text-base text-blue-800">This step confirms you are the rightful owner of this student record. Use the exact spelling from your school documents.</p>
-                        </div>
-                    @endif
-
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">First Name</label>
-                            <input wire:model="first_name" type="text" autocomplete="off" autocorrect="off" spellcheck="false"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Middle Name</label>
-                            <input wire:model="middle_initial" type="text" autocomplete="off" autocorrect="off" spellcheck="false"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Last Name</label>
-                            <input wire:model="last_name" type="text" autocomplete="off" autocorrect="off" spellcheck="false"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">
-                                Suffix <span class="text-gray-400 font-normal text-sm"></span>
-                            </label>
-                            <input wire:model="suffix" type="text" autocomplete="off"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Student ID</label>
-                            <input wire:model="student_id" type="text" autocomplete="off"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Course</label>
-                            <input wire:model="course_code" type="text" autocomplete="off"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Batch Year</label>
-                            <input wire:model="batch" type="text" maxlength="4" autocomplete="off"
-                                   {{ $identityLocked ? 'disabled' : '' }}
-                                   class="w-full px-3 py-2.5 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all bg-white text-gray-900 disabled:bg-gray-100 disabled:cursor-not-allowed">
-                        </div>
-                    </div>
-
-                    <button wire:click="verifyIdentity"
-                            wire:loading.attr="disabled"
-                            wire:target="verifyIdentity"
-                            {{ $identityLocked ? 'disabled' : '' }}
-                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold text-base shadow-md hover:shadow-lg active:scale-[0.98] disabled:shadow-none disabled:opacity-70 transition-all flex items-center justify-center gap-2">
-                        @if ($identityLocked)
-                            <span><i class="fa-solid fa-lock mr-1"></i> Account Locked — Try Again Later</span>
-                        @else
-                            <span wire:loading.remove wire:target="verifyIdentity">
-                                <i class="fa-solid fa-shield-halved mr-1"></i> Verify My Identity
-                            </span>
-                            <span wire:loading wire:target="verifyIdentity">
-                                <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Verifying…
-                            </span>
-                        @endif
-                    </button>
-
-                    @if (!$identityLocked)
-                        <p class="text-sm text-center text-gray-600">
-                            <i class="fa-solid fa-triangle-exclamation mr-1 text-amber-400"></i>
-                            Maximum 3 attempts — 10-minute lockout after 3 failures
+                        <h2 class="text-2xl font-bold" style="color: #333333;">Welcome Back!</h2>
+                        <p class="text-base mt-1" style="color: #666666;">
+                            To activate your account, we'll send a verification code to your registered email address.
                         </p>
-                    @endif
-                </div>
-            @endif
-
-            {{-- ═══ STEP 2 — Email Address ═══ --}}
-            @if ($step == 2)
-                <div class="space-y-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-gray-900">Set Your Email Address</h2>
-                        <p class="text-base text-gray-600 mt-0.5">This email will be used for your account login and notifications.</p>
                     </div>
 
-                    <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-3">
-                        <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0 text-lg"></i>
-                        <p class="text-base text-amber-800">Use a personal email address you have access to. A verification code will be sent there.</p>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Email Address <span class="text-red-500">*</span></label>
-                            <input wire:model.live.debounce.300ms="email" type="email" autocomplete="email"
-                                   class="w-full px-3 py-3 text-base border-2 rounded-xl focus:outline-none focus:ring-2 transition-all bg-white text-gray-900
-                                       {{ $errors->has('email') ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : 'border-gray-300 focus:border-[#7a3f91] focus:ring-[#7a3f91]/20' }}">
-                            @error('email')
-                                <p class="text-sm text-red-700 mt-1.5 flex items-center gap-1 font-medium">
-                                    <i class="fa-solid fa-circle-exclamation"></i> {{ $message }}
-                                </p>
-                            @enderror
-                        </div>
-
-                        <div>
-                            <label class="block text-base font-semibold text-gray-800 mb-1.5">Confirm Email <span class="text-red-500">*</span></label>
-                            <input wire:model.live.debounce.300ms="email_confirmation" type="email" autocomplete="email"
-                                   class="w-full px-3 py-3 text-base border-2 rounded-xl focus:outline-none focus:ring-2 transition-all bg-white text-gray-900
-                                       {{ $errors->has('email_confirmation') ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ($email_confirmation !== '' && $email !== $email_confirmation ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ($email_confirmation !== '' && $email === $email_confirmation ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-100' : 'border-gray-300 focus:border-[#7a3f91] focus:ring-[#7a3f91]/20')) }}">
-                            @error('email_confirmation')
-                                <p class="text-sm text-red-700 mt-1.5 flex items-center gap-1 font-medium">
-                                    <i class="fa-solid fa-circle-exclamation"></i> {{ $message }}
-                                </p>
-                            @enderror
-                            @if (!$errors->has('email_confirmation'))
-                                @if ($email_confirmation !== '' && $email !== $email_confirmation)
-                                    <p class="text-sm text-red-700 mt-1.5 flex items-center gap-1 font-medium">
-                                        <i class="fa-solid fa-xmark"></i> Emails do not match
-                                    </p>
-                                @elseif ($email_confirmation !== '' && $email === $email_confirmation && $email !== '')
-                                    <p class="text-sm text-emerald-700 mt-1.5 flex items-center gap-1 font-medium">
-                                        <i class="fa-solid fa-check"></i> Emails match
-                                    </p>
-                                @endif
-                            @endif
-                        </div>
-                    </div>
-
-                    <button wire:click="setEmail"
-                            wire:loading.attr="disabled"
-                            wire:target="setEmail"
-                            {{ !$this->canSetEmail() ? 'disabled' : '' }}
-                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold text-base shadow-md hover:shadow-lg active:scale-[0.98] disabled:shadow-none disabled:opacity-70 transition-all flex items-center justify-center gap-2">
-                        <span wire:loading.remove wire:target="setEmail">
-                            @if (!$this->canSetEmail())
-                                <i class="fa-solid fa-lock mr-1"></i> Enter matching emails to continue
-                            @else
-                                <i class="fa-solid fa-envelope mr-1"></i> Save Email & Continue
-                            @endif
-                        </span>
-                        <span wire:loading wire:target="setEmail">
-                            <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Saving…
-                        </span>
-                    </button>
-
-                    <button wire:click="previousStep" type="button"
-                            class="w-full text-base text-gray-600 py-2 text-center hover:text-[#7a3f91] hover:bg-gray-50 rounded-lg transition-colors font-medium">
-                        ← Back to Identity Verification
-                    </button>
-                </div>
-            @endif
-
-            {{-- ═══ STEP 3 — Create Password ═══ --}}
-            @if ($step == 3)
-                <div class="space-y-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-gray-900">Create Your Password</h2>
-                        <p class="text-base text-gray-600 mt-0.5">Minimum 8 characters — "Good" or "Strong" strength required.</p>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-5">
-
-                        {{-- Left: requirements --}}
-                        <div class="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200 self-start">
-                            <p class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Password Requirements</p>
-                            <div class="space-y-2">
-                                @foreach ([
-                                    [strlen($password) >= 8,                 '8 or more characters'],
-                                    [preg_match('/[A-Z]/', $password),       'One uppercase letter (A–Z)'],
-                                    [preg_match('/[a-z]/', $password),       'One lowercase letter (a–z)'],
-                                    [preg_match('/[0-9]/', $password),       'One number (0–9)'],
-                                    [preg_match('/[!@#$%^&*?]/', $password), 'One special character (!@#$%^&*)'],
-                                ] as [$met, $text])
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-xs
-                                            {{ $met ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-500' }}">
-                                            {{ $met ? '✓' : '○' }}
-                                        </span>
-                                        <span class="text-sm {{ $met ? 'text-emerald-800 font-medium' : 'text-gray-600' }}">{{ $text }}</span>
-                                    </div>
-                                @endforeach
-                            </div>
-                        </div>
-
-                        {{-- Right: inputs --}}
-                        <div class="space-y-3">
-                            <div>
-                                <label class="block text-base font-semibold text-gray-800 mb-1.5">New Password</label>
-                                <div class="relative">
-                                    <input wire:model.live.debounce.200ms="password"
-                                           type="{{ $showPassword ? 'text' : 'password' }}"
-                                           autocomplete="new-password"
-                                           class="w-full px-3 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-[#7a3f91] focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/20 transition-all pr-10 bg-white text-gray-900">
-                                    <button type="button" wire:click="$toggle('showPassword')"
-                                            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#7a3f91] transition-colors">
-                                        <i class="fa-solid {{ $showPassword ? 'fa-eye-slash' : 'fa-eye' }} text-lg"></i>
-                                    </button>
+                    @if ($hasExistingEmail)
+                        {{-- Email card --}}
+                        <div class="rounded-xl border-2 p-5" style="border-color: #E8E0F0; background: #FAFAFA;">
+                            <div class="flex items-center gap-4">
+                                <div class="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0"
+                                     style="background: rgba(122,63,145,0.1);">
+                                    <i class="fa-solid fa-envelope text-2xl" style="color: #7A3F91;"></i>
                                 </div>
-                            </div>
-
-                            @if ($password !== '')
                                 <div>
-                                    <div class="flex justify-between items-center mb-1.5">
-                                        <span class="text-sm font-semibold text-gray-700">Strength</span>
-                                        <span class="text-sm font-bold {{ $this->getPasswordStrengthInfo()['color'] }}">
-                                            {{ $this->getPasswordStrengthInfo()['label'] }}
-                                        </span>
-                                    </div>
-                                    <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                                        <div class="h-full rounded-full transition-all duration-300 {{ $this->getPasswordStrengthInfo()['progressColor'] }} {{ $this->getPasswordStrengthInfo()['width'] }}"></div>
-                                    </div>
+                                    <p class="text-sm font-semibold uppercase tracking-wide" style="color: #666666;">Registered Email Address</p>
+                                    <p class="text-lg font-bold tracking-wide mt-0.5" style="color: #7A3F91;">{{ $maskedEmail }}</p>
+                                    <p class="text-sm mt-0.5" style="color: #999999;">A 6-digit code will be sent here</p>
                                 </div>
-                            @endif
-
-                            <div>
-                                <label class="block text-base font-semibold text-gray-800 mb-1.5">Confirm Password</label>
-                                <div class="relative">
-                                    <input wire:model.live.debounce.200ms="password_confirmation"
-                                           type="{{ $showConfirmPassword ? 'text' : 'password' }}"
-                                           autocomplete="new-password"
-                                           class="w-full px-3 py-3 text-base border-2 rounded-xl focus:outline-none focus:ring-2 transition-all pr-10 bg-white text-gray-900
-                                               {{ $password_confirmation !== '' && $password !== $password_confirmation ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : ($password_confirmation !== '' && $password === $password_confirmation ? 'border-emerald-400 focus:border-emerald-500 focus:ring-emerald-100' : 'border-gray-300 focus:border-[#7a3f91] focus:ring-[#7a3f91]/20') }}">
-                                    <button type="button" wire:click="$toggle('showConfirmPassword')"
-                                            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#7a3f91] transition-colors">
-                                        <i class="fa-solid {{ $showConfirmPassword ? 'fa-eye-slash' : 'fa-eye' }} text-lg"></i>
-                                    </button>
-                                </div>
-                                @if ($password_confirmation !== '' && $password !== $password_confirmation)
-                                    <p class="text-sm text-red-700 mt-1 flex items-center gap-1 font-medium">
-                                        <i class="fa-solid fa-xmark"></i> Passwords do not match
-                                    </p>
-                                @elseif ($password_confirmation !== '' && $password === $password_confirmation && $password !== '')
-                                    <p class="text-sm text-emerald-700 mt-1 flex items-center gap-1 font-medium">
-                                        <i class="fa-solid fa-check"></i> Passwords match
-                                    </p>
-                                @endif
                             </div>
                         </div>
-                    </div>
 
-                    <button wire:click="sendOtp"
+                        <button
+                            wire:click="sendOtp"
                             wire:loading.attr="disabled"
                             wire:target="sendOtp"
-                            {{ !$this->canSendOtp() ? 'disabled' : '' }}
-                            class="w-full bg-[#7a3f91] hover:bg-[#6a3080] disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-3 rounded-xl font-semibold text-base shadow-md hover:shadow-lg active:scale-[0.98] disabled:shadow-none transition-all flex items-center justify-center gap-2">
-                        <span wire:loading.remove wire:target="sendOtp">
-                            <i class="fa-solid fa-paper-plane mr-1"></i> Send Verification Code & Continue
-                        </span>
-                        <span wire:loading wire:target="sendOtp">
-                            <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Sending…
-                        </span>
-                    </button>
-
-                    <button wire:click="previousStep" type="button"
-                            class="w-full text-base text-gray-600 py-2 text-center hover:text-[#7a3f91] hover:bg-gray-50 rounded-lg transition-colors font-medium">
-                        ← Back to Email Setup
-                    </button>
-                </div>
-            @endif
-
-            {{-- ═══ STEP 4 — OTP Verification ═══ --}}
-            @if ($step == 4)
-                <div class="space-y-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-gray-900">Verify Your Email</h2>
-                        <p class="text-base text-gray-600 mt-0.5">
-                            Enter the 6-digit code sent to
-                            <strong class="text-[#7a3f91]">
-                                {{ session('alumni_pending_email')
-                                    ?? cache()->get('alumni_pending_email:' . (\App\Models\Alumni::where('user_id', auth()->id())->value('id') ?? 0))
-                                    ?? 'your email' }}
-                            </strong>.
-                        </p>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-5 items-start">
-
-                        {{-- Left: timer --}}
-                        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-5 text-center">
-                            <p class="text-sm font-semibold text-gray-600 uppercase tracking-widest mb-1.5">Code expires in</p>
-                            <div class="text-5xl font-bold font-mono tabular-nums transition-colors duration-300"
-                                 :class="seconds <= 60 ? 'text-red-600' : 'text-[#7a3f91]'"
-                                 x-text="formattedTime">
-                                10:00
-                            </div>
-                            <p x-show="expired" x-cloak class="text-red-700 text-sm mt-2 font-semibold">
-                                <i class="fa-solid fa-triangle-exclamation mr-1"></i> Code expired. Request a new one.
-                            </p>
-
-                            @if ($otpLocked)
-                                <p class="text-sm text-red-600 mt-2 font-semibold">
-                                    <i class="fa-solid fa-lock mr-1"></i>
-                                    Wait for timer to expire, then request a new code.
-                                </p>
-                            @else
-                                <p class="text-sm text-gray-600 mt-2">
-                                    <i class="fa-solid fa-shield-halved mr-1 text-[#7a3f91]"></i>
-                                    Max 3 attempts before lockout
-                                </p>
-                            @endif
-                        </div>
-
-                        {{-- Right: input + buttons --}}
-                        <div class="space-y-3">
-                            <div>
-                                <label class="block text-base font-semibold text-gray-800 mb-1.5">6-Digit Code</label>
-                                <input wire:model="otp"
-                                       type="text" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
-                                       autocomplete="one-time-code"
-                                       {{ $otpLocked ? 'disabled' : '' }}
-                                       class="w-full px-3 py-3 text-center text-4xl font-bold tracking-[0.4em] border-2 rounded-xl focus:outline-none focus:ring-2 transition-all bg-white text-gray-900
-                                           {{ $otpLocked ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed' : 'border-gray-300 focus:border-[#7a3f91] focus:ring-[#7a3f91]/20' }}">
-                            </div>
-
-                            @if (!$otpLocked)
-                                <button wire:click="verifyOtp"
-                                        wire:loading.attr="disabled"
-                                        wire:target="verifyOtp"
-                                        x-bind:disabled="expired"
-                                        :class="expired ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#7a3f91] hover:bg-[#6a3080] hover:shadow-lg active:scale-[0.98]'"
-                                        class="w-full text-white py-3 rounded-xl font-semibold text-base shadow-md disabled:opacity-70 transition-all flex items-center justify-center gap-2">
-                                    <span wire:loading.remove wire:target="verifyOtp">
-                                        <i class="fa-solid fa-circle-check mr-1"></i> Verify & Activate Account
-                                    </span>
-                                    <span wire:loading wire:target="verifyOtp">
-                                        <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Verifying…
-                                    </span>
-                                </button>
-                            @else
-                                <div class="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
-                                    <i class="fa-solid fa-lock text-red-500 text-2xl mb-1"></i>
-                                    <p class="text-base font-semibold text-red-700">Verification locked</p>
-                                    <p class="text-sm text-red-600 mt-0.5">Wait for the timer to expire, then request a new code.</p>
-                                </div>
-                            @endif
-
-                            <button wire:click="resendOtp"
-                                    wire:loading.attr="disabled"
-                                    wire:target="resendOtp"
-                                    x-bind:disabled="!canResend"
-                                    type="button"
-                                    :class="{
-                                        'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed': !canResend,
-                                        'bg-white text-[#7a3f91] border-[#7a3f91] hover:bg-purple-50 active:scale-[0.98] cursor-pointer': canResend
-                                    }"
-                                    class="w-full py-3 rounded-xl font-semibold text-base border-2 transition-all flex items-center justify-center gap-2">
-                                <span wire:loading.remove wire:target="resendOtp">
-                                    <i class="fa-solid fa-rotate-right mr-1.5"></i>
-                                    <span x-show="!canResend" class="text-base font-medium">
-                                        Resend available in <span class="font-bold" x-text="formattedTime"></span>
-                                    </span>
-                                    <span x-show="canResend" class="text-base font-medium">
-                                        @if ($otpLocked) Request New Code @else Resend Code @endif
-                                    </span>
-                                </span>
-                                <span wire:loading wire:target="resendOtp">
-                                    <i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i> Sending…
-                                </span>
-                            </button>
-
-                            <p x-show="!canResend" x-cloak class="text-sm text-gray-600 text-center">
-                                @if ($otpLocked)
-                                    Wait for the timer to reach 0:00 before requesting a new code.
-                                @else
-                                    Wait for the timer before requesting a new code.
-                                @endif
-                            </p>
-                        </div>
-                    </div>
-
-                    {{-- Back button — locked while OTP is active --}}
-                    <div x-data>
-                        <button
-                            wire:click="previousStep"
-                            type="button"
-                            x-bind:disabled="!canResend"
-                            x-bind:title="!canResend ? 'You cannot go back while a verification code is active. Wait for the timer to expire.' : ''"
-                            :class="canResend
-                                ? 'text-gray-600 hover:text-[#7a3f91] hover:bg-gray-50 cursor-pointer'
-                                : 'text-gray-300 cursor-not-allowed'"
-                            class="w-full text-base py-2 text-center rounded-lg transition-colors font-medium flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-arrow-left text-sm"></i>
-                            <span x-show="canResend">Back to Password Setup</span>
-                            <span x-show="!canResend" x-cloak class="flex items-center gap-1.5">
-                                <i class="fa-solid fa-lock text-sm text-gray-300"></i>
-                                Back locked — wait for timer to expire
+                            class="w-full text-white py-4 rounded-xl font-bold text-base shadow-md hover:opacity-90 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                            <span wire:loading.remove wire:target="sendOtp">
+                                <i class="fa-solid fa-paper-plane mr-2"></i>Send Verification Code
+                            </span>
+                            <span wire:loading wire:target="sendOtp">
+                                <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Sending…
                             </span>
                         </button>
 
-                        <p x-show="!canResend" x-cloak
-                           class="text-sm text-center text-amber-600 mt-1 font-medium">
-                            <i class="fa-solid fa-triangle-exclamation mr-1"></i>
-                            A verification code is active. You can go back only after it expires.
+                    @else
+                        {{-- No email on file --}}
+                        <div class="rounded-xl border-2 p-6 text-center space-y-3"
+                             style="background: #FFFBEB; border-color: #FDE68A;">
+                            <div class="w-14 h-14 rounded-full flex items-center justify-center mx-auto"
+                                 style="background: #FEF3C7;">
+                                <i class="fa-solid fa-envelope-circle-check text-amber-500 text-2xl"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-amber-800">No Email Address Found</h3>
+                                <p class="text-base text-amber-700 mt-1 leading-relaxed">
+                                    We don't have an email address on file for your account. Please contact the registrar to add your email before proceeding.
+                                </p>
+                            </div>
+                        </div>
+                    @endif
+                </div>
+            @endif
+
+            {{-- ══════════════════════════════════════════════════════
+                 STEP 2 — Verify OTP
+            ════════════════════════════════════════════════════════ --}}
+            @if ($step == 2)
+                <div class="space-y-5">
+                    <div>
+                        <h2 class="text-2xl font-bold" style="color: #333333;">Enter Verification Code</h2>
+                        <p class="text-base mt-1" style="color: #666666;">
+                            A 6-digit code was sent to
+                            <strong style="color: #7A3F91;">{{ $maskedEmail }}</strong>.
+                            Check your inbox.
                         </p>
                     </div>
 
+                    {{-- Timer + OTP Input stacked --}}
+                    <div class="space-y-4">
+
+                        {{-- Timer --}}
+                        <div class="rounded-xl border p-5 text-center" style="background: #F8F4FC; border-color: #E8E0F0;">
+                            <p class="text-sm font-semibold uppercase tracking-widest mb-1" style="color: #666666;">
+                                Code expires in
+                            </p>
+                            <div class="text-5xl font-bold font-mono tabular-nums transition-colors duration-300"
+                                 :class="seconds <= 60 ? 'text-red-600' : ''"
+                                 :style="seconds > 60 ? 'color: #7A3F91;' : ''"
+                                 x-text="formattedTime">10:00</div>
+                            <p x-show="expired" x-cloak class="text-red-600 text-sm mt-2 font-semibold">
+                                <i class="fa-solid fa-triangle-exclamation mr-1"></i>Code expired. Request a new one below.
+                            </p>
+                            @if (!$otpLocked)
+                                <p class="text-sm mt-2" style="color: #999999;">
+                                    <i class="fa-solid fa-shield-halved mr-1" style="color: #7A3F91;"></i>Maximum 3 attempts before lockout
+                                </p>
+                            @endif
+                        </div>
+
+                        {{-- OTP Field --}}
+                        <div>
+                            <label class="block text-base font-semibold mb-2" style="color: #333333;">6-Digit Code</label>
+                            <input wire:model="otp"
+                                   type="text" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
+                                   autocomplete="one-time-code"
+                                   {{ $otpLocked ? 'disabled' : '' }}
+                                   placeholder="——————"
+                                   class="w-full px-4 py-4 text-center text-4xl font-bold tracking-[0.5em] border-2 rounded-xl focus:outline-none focus:ring-2 transition-all"
+                                   style="{{ $otpLocked
+                                       ? 'background:#F5F5F5; border-color:#E0E0E0; color:#999999; cursor:not-allowed;'
+                                       : 'background:#FFFFFF; border-color:#E8E0F0; color:#333333;' }}"
+                                   onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'"
+                                   onblur="if(!this.disabled)this.style.borderColor='#E8E0F0'">
+                        </div>
+
+                        {{-- Locked notice --}}
+                        @if ($otpLocked)
+                            <div class="rounded-xl border px-4 py-3 flex items-center gap-3"
+                                 style="background:#FEF2F2; border-color:#FECACA;">
+                                <i class="fa-solid fa-lock text-red-500 text-xl flex-shrink-0"></i>
+                                <div>
+                                    <p class="text-base font-bold text-red-700">Verification Locked</p>
+                                    <p class="text-sm text-red-600">Wait for the timer to expire, then request a new code.</p>
+                                </div>
+                            </div>
+                        @endif
+
+                        {{-- Verify button --}}
+                        @if (!$otpLocked)
+                            <button wire:click="verifyOtp" wire:loading.attr="disabled" wire:target="verifyOtp"
+                                    x-bind:disabled="expired"
+                                    :class="expired ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]'"
+                                    class="w-full text-white py-4 rounded-xl font-bold text-base shadow-md transition-all flex items-center justify-center gap-2"
+                                    style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                                <span wire:loading.remove wire:target="verifyOtp">
+                                    <i class="fa-solid fa-circle-check mr-2"></i>Verify Code & Continue
+                                </span>
+                                <span wire:loading wire:target="verifyOtp">
+                                    <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Verifying…
+                                </span>
+                            </button>
+                        @endif
+
+                        {{-- Resend --}}
+                        <button wire:click="resendOtp" wire:loading.attr="disabled" wire:target="resendOtp"
+                                x-bind:disabled="!canResend" type="button"
+                                :class="canResend ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+                                class="w-full py-3.5 rounded-xl font-semibold text-base border-2 transition-all flex items-center justify-center gap-2"
+                                :style="canResend
+                                    ? 'background:#FFFFFF; border-color:#7A3F91; color:#7A3F91;'
+                                    : 'background:#F5F5F5; border-color:#E0E0E0; color:#999999;'">
+                            <span wire:loading.remove wire:target="resendOtp">
+                                <i class="fa-solid fa-rotate-right mr-1.5"></i>
+                                <span x-show="!canResend">
+                                    Resend in <span class="font-bold" x-text="formattedTime"></span>
+                                </span>
+                                <span x-show="canResend">
+                                    @if ($otpLocked) Request New Code @else Resend Code @endif
+                                </span>
+                            </span>
+                            <span wire:loading wire:target="resendOtp">
+                                <i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i>Sending…
+                            </span>
+                        </button>
+
+                        {{-- Back --}}
+                        <div x-data>
+                            <button wire:click="previousStep" type="button"
+                                    x-bind:disabled="!canResend"
+                                    :class="canResend ? 'cursor-pointer hover:text-[#7A3F91] hover:bg-[#F5F5F5]' : 'cursor-not-allowed opacity-40'"
+                                    class="w-full py-2.5 rounded-lg text-base font-medium transition-colors flex items-center justify-center gap-2"
+                                    style="color: #666666;">
+                                <i class="fa-solid fa-arrow-left text-sm"></i>
+                                <span x-show="canResend">Back to Step 1</span>
+                                <span x-show="!canResend" x-cloak class="flex items-center gap-1.5">
+                                    <i class="fa-solid fa-lock text-sm"></i> Back locked — wait for timer to expire
+                                </span>
+                            </button>
+                            <p x-show="!canResend" x-cloak
+                               class="text-sm text-center text-amber-600 mt-1 font-medium">
+                                <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                                A verification code is active. You can go back only after it expires.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
+            {{-- ══════════════════════════════════════════════════════
+                 STEP 3 — Set Password
+            ════════════════════════════════════════════════════════ --}}
+            @if ($step == 3)
+                <div class="space-y-5">
+                    <div>
+                        <h2 class="text-2xl font-bold" style="color: #333333;">Set Your New Password</h2>
+                        <p class="text-base mt-1" style="color: #666666;">Create a strong password to secure your alumni account.</p>
+                    </div>
+
+                    {{-- Password Requirements --}}
+                    <div class="rounded-xl border p-5 space-y-2.5" style="background: #FAFAFA; border-color: #E8E0F0;">
+                        <p class="text-sm font-bold uppercase tracking-wide mb-3" style="color: #666666;">Password Requirements</p>
+                        @foreach ([
+                            [strlen($password) >= 8,                 '8 or more characters'],
+                            [preg_match('/[A-Z]/', $password),       'One uppercase letter (A–Z)'],
+                            [preg_match('/[a-z]/', $password),       'One lowercase letter (a–z)'],
+                            [preg_match('/[0-9]/', $password),       'One number (0–9)'],
+                            [preg_match('/[!@#$%^&*?]/', $password), 'One special character (!@#$%^&*)'],
+                        ] as [$met, $text])
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold
+                                    {{ $met ? 'bg-emerald-100 text-emerald-700' : 'bg-[#F0F0F0] text-[#999999]' }}">
+                                    {{ $met ? '✓' : '○' }}
+                                </span>
+                                <span class="text-base {{ $met ? 'text-emerald-700 font-semibold' : '' }}"
+                                      style="{{ !$met ? 'color:#666666;' : '' }}">{{ $text }}</span>
+                            </div>
+                        @endforeach
+                        <p class="text-sm mt-2 pt-2 border-t" style="border-color: #E8E0F0; color: #999999;">
+                            <i class="fa-solid fa-circle-info mr-1 text-blue-400"></i>
+                            "Good" or "Strong" strength required to proceed.
+                        </p>
+                    </div>
+
+                    {{-- New Password --}}
+                    <div>
+                        <label class="block text-base font-semibold mb-2" style="color: #333333;">New Password</label>
+                        <div class="relative">
+                            <input wire:model.live.debounce.200ms="password"
+                                   type="{{ $showPassword ? 'text' : 'password' }}"
+                                   autocomplete="new-password"
+                                   class="w-full px-4 py-3.5 text-base border-2 rounded-xl focus:outline-none transition-all pr-12"
+                                   style="border-color: #E8E0F0; color: #333333; background: #FFFFFF;"
+                                   onfocus="this.style.borderColor='#7A3F91'"
+                                   onblur="this.style.borderColor='#E8E0F0'">
+                            <button type="button" wire:click="$toggle('showPassword')"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 transition-colors hover:opacity-80"
+                                    style="color: #999999;">
+                                <i class="fa-solid {{ $showPassword ? 'fa-eye-slash' : 'fa-eye' }} text-lg"></i>
+                            </button>
+                        </div>
+
+                        {{-- Strength bar --}}
+                        @if ($password !== '')
+                            <div class="mt-2 space-y-1">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-semibold" style="color: #666666;">Strength</span>
+                                    <span class="text-sm font-bold {{ $this->getPasswordStrengthInfo()['color'] }}">
+                                        {{ $this->getPasswordStrengthInfo()['label'] }}
+                                    </span>
+                                </div>
+                                <div class="h-2 rounded-full overflow-hidden" style="background: #E8E0F0;">
+                                    <div class="h-full rounded-full transition-all duration-300
+                                        {{ $this->getPasswordStrengthInfo()['progressColor'] }}
+                                        {{ $this->getPasswordStrengthInfo()['width'] }}"></div>
+                                </div>
+                            </div>
+                        @endif
+                    </div>
+
+                    {{-- Confirm Password --}}
+                    <div>
+                        <label class="block text-base font-semibold mb-2" style="color: #333333;">Confirm Password</label>
+                        <div class="relative">
+                            <input wire:model.live.debounce.200ms="password_confirmation"
+                                   type="{{ $showConfirmPassword ? 'text' : 'password' }}"
+                                   autocomplete="new-password"
+                                   class="w-full px-4 py-3.5 text-base border-2 rounded-xl focus:outline-none transition-all pr-12"
+                                   style="border-color: {{ $password_confirmation !== '' && $password !== $password_confirmation ? '#FCA5A5' : ($password_confirmation !== '' && $password === $password_confirmation ? '#6EE7B7' : '#E8E0F0') }}; color: #333333; background: #FFFFFF;"
+                                   onfocus="this.style.borderColor='#7A3F91'"
+                                   onblur="this.style.borderColor='{{ $password_confirmation !== '' && $password !== $password_confirmation ? '#FCA5A5' : ($password_confirmation !== '' && $password === $password_confirmation ? '#6EE7B7' : '#E8E0F0') }}'">
+                            <button type="button" wire:click="$toggle('showConfirmPassword')"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 transition-colors hover:opacity-80"
+                                    style="color: #999999;">
+                                <i class="fa-solid {{ $showConfirmPassword ? 'fa-eye-slash' : 'fa-eye' }} text-lg"></i>
+                            </button>
+                        </div>
+                        @if ($password_confirmation !== '' && $password !== $password_confirmation)
+                            <p class="text-sm text-red-600 mt-1.5 flex items-center gap-1 font-medium">
+                                <i class="fa-solid fa-xmark"></i> Passwords do not match
+                            </p>
+                        @elseif ($password_confirmation !== '' && $password === $password_confirmation && $password !== '')
+                            <p class="text-sm text-emerald-600 mt-1.5 flex items-center gap-1 font-medium">
+                                <i class="fa-solid fa-check"></i> Passwords match
+                            </p>
+                        @endif
+                    </div>
+
+                    {{-- Save Button --}}
+                    <button wire:click="savePassword" wire:loading.attr="disabled" wire:target="savePassword"
+                            {{ !$this->canSavePassword() ? 'disabled' : '' }}
+                            class="w-full text-white py-4 rounded-xl font-bold text-base shadow-md transition-all flex items-center justify-center gap-2
+                                {{ !$this->canSavePassword() ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]' }}"
+                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                        <span wire:loading.remove wire:target="savePassword">
+                            @if (!$this->canSavePassword())
+                                <i class="fa-solid fa-lock mr-2"></i>Enter a strong matching password to continue
+                            @else
+                                <i class="fa-solid fa-key mr-2"></i>Set Password & Activate Account
+                            @endif
+                        </span>
+                        <span wire:loading wire:target="savePassword">
+                            <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Saving…
+                        </span>
+                    </button>
+
+                    {{-- Back --}}
+                    <button wire:click="previousStep" type="button"
+                            class="w-full py-2.5 rounded-lg text-base font-medium transition-colors hover:bg-[#F5F5F5] flex items-center justify-center gap-2"
+                            style="color: #666666;">
+                        <i class="fa-solid fa-arrow-left text-sm"></i> Back to OTP Verification
+                    </button>
                 </div>
             @endif
 
         </div>
 
-        {{-- Footer --}}
-        <div class="px-6 py-3 text-center bg-gray-50 border-t border-gray-200">
-            <p class="text-sm text-gray-600">&copy; {{ date('Y') }} Philippine College of Science and Technology</p>
+        {{-- ── Card Footer ─────────────────────────────────────────── --}}
+        <div class="px-8 py-4 text-center border-t" style="background: #FAFAFA; border-color: #E8E0F0;">
+            <p class="text-sm" style="color: #999999;">&copy; {{ date('Y') }} Philippine College of Science and Technology</p>
         </div>
     </div>
 </div>
@@ -1350,7 +1007,7 @@ new #[Layout('app')] class extends Component {
             },
 
             initTimer(step) {
-                if (step === 4) this.restoreOrStart();
+                if (step === 2) this.restoreOrStart();
             },
 
             startFresh() {
@@ -1378,6 +1035,14 @@ new #[Layout('app')] class extends Component {
                 } else {
                     this.startFresh();
                 }
+            },
+
+            resetTimer() {
+                this._clearInterval();
+                this.seconds   = 0;
+                this.expired   = true;
+                this.canResend = true;
+                localStorage.setItem(STORAGE_KEY, '0');
             },
 
             _beginCountdown(expiry) {

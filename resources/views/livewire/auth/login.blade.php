@@ -72,7 +72,6 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
-            // ── Director ──────────────────────────────────────────────────────
             if ($user->role === 'director') {
                 $this->redirect(route('director.dashboard'));
                 return;
@@ -329,7 +328,6 @@ new #[Layout('app')] class extends Component {
 
         $user = Auth::user();
 
-        // ── Registrar ─────────────────────────────────────────────────────────
         if ($user->role === 'registrar') {
             $this->clearAttempts();
             session()->regenerate();
@@ -345,7 +343,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Director ──────────────────────────────────────────────────────────
         if ($user->role === 'director') {
             $this->clearAttempts();
             session()->regenerate();
@@ -361,7 +358,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Admin ─────────────────────────────────────────────────────────────
         if ($user->role !== 'admin') {
             Auth::logout();
             $this->password = '';
@@ -385,30 +381,16 @@ new #[Layout('app')] class extends Component {
 
 }; ?>
 
-<div class="min-h-screen w-full flex flex-col items-center justify-center p-6 md:p-10 antialiased relative overflow-hidden"
+<div class="min-h-screen w-full flex flex-col items-center justify-center p-6 md:p-10 antialiased relative overflow-hidden bg-[#F5F5F5]"
      x-data="{ loading: false, showGuide: false }"
-     style="background-image: url('{{ asset('images/school-1.jpg') }}'); background-size: cover; background-position: center; background-repeat: no-repeat;">
+     style="background-image: url('{{ asset('images/school-1.jpg') }}'); background-size: cover; background-position: center; background-repeat: no-repeat; background-attachment: fixed;">
 
     {{-- Dark overlay --}}
     <div class="absolute inset-0 bg-black/45 z-0"></div>
 
-    {{-- Google Fonts --}}
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-
     <style>
-        /*
-         * FONT SYSTEM
-         * Labels / buttons : DM Mono 500  — clean, readable monospace
-         * All body copy    : Inter 400    — neutral, highly legible sans-serif
-         * Inputs           : Inter 400
-         * No bold anywhere in step bodies
-         */
-
         [x-cloak] { display: none !important; }
 
-        /* ── Animations ── */
         .fade-in-up {
             animation: fadeInUp 0.6s ease-out forwards;
         }
@@ -423,47 +405,43 @@ new #[Layout('app')] class extends Component {
         }
         .animate-shake { animation: shake 0.3s ease-in-out 2; }
 
-        /* ── Card ── */
         .login-card {
-            background: #ffffff;
+            background: #FFFFFF;
             border-radius: 2.5rem;
-            box-shadow: 0 25px 60px rgba(43,13,62,0.45);
+            box-shadow: 0 25px 60px rgba(122, 63, 145, 0.15);
         }
 
-        /* ── Brand label ── */
         .lg-brand-label {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.72rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: #9ca3af;
+            color: #7A3F91;
         }
 
-        /* ── Field labels ── */
         .lg-field-label {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.72rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             letter-spacing: 0.12em;
             text-transform: uppercase;
-            color: #2b0d3e;
+            color: #333333;
             display: flex;
             align-items: center;
             gap: 0.5rem;
             margin-left: 0.25rem;
         }
 
-        /* ── Input fields ── */
         .lg-input {
             font-family: 'Inter', sans-serif;
-            font-size: 0.93rem;
+            font-size: 1rem;
             font-weight: 400;
-            color: #2b0d3e;
+            color: #333333;
             width: 100%;
             padding: 1rem 1.5rem;
-            background: #f9f7fc;
-            border: 1.5px solid #e8e0f0;
+            background: #F5F5F5;
+            border: 1.5px solid #E8E0F0;
             border-radius: 1rem;
             outline: none;
             transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
@@ -471,16 +449,15 @@ new #[Layout('app')] class extends Component {
         .lg-input::placeholder {
             font-family: 'Inter', sans-serif;
             font-weight: 400;
-            font-size: 0.9rem;
-            color: #c4b5d1;
+            font-size: 0.95rem;
+            color: #999999;
         }
         .lg-input:focus {
-            border-color: #7a3f91;
-            background: #ffffff;
-            box-shadow: 0 0 0 4px rgba(122,63,145,0.10);
+            border-color: #7A3F91;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 4px rgba(122, 63, 145, 0.10);
         }
 
-        /* ── Error alert ── */
         .lg-error {
             display: flex;
             align-items: flex-start;
@@ -492,39 +469,37 @@ new #[Layout('app')] class extends Component {
         }
         .lg-error-text {
             font-family: 'Inter', sans-serif;
-            font-size: 0.83rem;
+            font-size: 1rem;
             font-weight: 400;
             color: #dc2626;
             line-height: 1.5;
         }
 
-        /* ── Submit button ── */
         .lg-btn {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.82rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             letter-spacing: 0.14em;
             text-transform: uppercase;
-            color: #ffffff;
+            color: #FFFFFF;
             width: 100%;
-            background: #2b0d3e;
+            background: #7A3F91;
             padding: 1.1rem;
             border-radius: 1rem;
             border: none;
             cursor: pointer;
             transition: background 0.25s, transform 0.15s, box-shadow 0.25s;
-            box-shadow: 0 6px 20px rgba(43,13,62,0.3);
+            box-shadow: 0 6px 20px rgba(122, 63, 145, 0.25);
         }
-        .lg-btn:hover  { background: #7a3f91; box-shadow: 0 8px 24px rgba(122,63,145,0.35); }
+        .lg-btn:hover  { background: #6A3A7F; box-shadow: 0 8px 24px rgba(122, 63, 145, 0.35); }
         .lg-btn:active { transform: scale(0.97); }
         .lg-btn:disabled { opacity: 0.65; cursor: not-allowed; }
 
-        /* ── "Don't have account" link ── */
         .lg-no-account {
             font-family: 'Inter', sans-serif;
-            font-size: 0.83rem;
+            font-size: 1rem;
             font-weight: 400;
-            color: #7a3f91;
+            color: #7A3F91;
             background: transparent;
             border: none;
             padding: 0;
@@ -536,137 +511,128 @@ new #[Layout('app')] class extends Component {
         }
         .lg-no-account:hover {
             opacity: 0.8;
-            text-decoration-color: #7a3f91;
+            text-decoration-color: #7A3F91;
         }
 
-        /* ── Back button ── */
         .lg-back-label {
             font-family: 'Inter', sans-serif;
-            font-size: 0.83rem;
+            font-size: 1rem;
             font-weight: 500;
-            color: #ffffff;
+            color: #FFFFFF;
         }
 
-        /* ── Copyright ── */
         .lg-copyright {
             font-family: 'Inter', sans-serif;
-            font-size: 0.72rem;
+            font-size: 1rem;
             font-weight: 400;
             letter-spacing: 0.04em;
-            color: rgba(255,255,255,0.65);
+            color: rgba(255,255,255,0.75);
         }
 
-        /* ── GUIDE MODAL ── */
         .guide-backdrop {
             backdrop-filter: blur(6px);
             -webkit-backdrop-filter: blur(6px);
         }
 
-        /* Header */
         .guide-header-label {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.68rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: rgba(255,255,255,0.75);
+            color: #7A3F91;
             display: block;
             margin-bottom: 0.3rem;
         }
         .guide-header-title {
             font-family: 'Inter', sans-serif;
-            font-size: 1.3rem;
+            font-size: 1.5rem;
             font-weight: 600;
-            color: #ffffff;
+            color: #333333;
             line-height: 1.2;
         }
         .guide-header-sub {
             font-family: 'Inter', sans-serif;
-            font-size: 0.88rem;
+            font-size: 1rem;
             font-weight: 400;
-            color: rgba(255,255,255,0.80);
+            color: #666666;
             margin-top: 0.35rem;
         }
 
-        /* Step cards */
         .guide-step-title {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.72rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: #2b0d3e;
+            color: #333333;
             margin-bottom: 0.5rem;
         }
         .guide-step-body {
             font-family: 'Inter', sans-serif;
-            font-size: 0.875rem;
+            font-size: 1rem;
             font-weight: 400;
-            color: #6b7280;
+            color: #666666;
             line-height: 1.65;
         }
-        /* strip all bold from inside step cards */
         .guide-step-body strong,
         .guide-step-body b {
-            font-weight: 400;
-            color: inherit;
+            font-weight: 500;
+            color: #333333;
         }
         .guide-step-num {
-            font-family: 'DM Mono', monospace;
-            font-weight: 500;
-            font-size: 1rem;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-size: 1.2rem;
         }
 
-        /* Formula */
         .guide-formula-label {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.68rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             letter-spacing: 0.18em;
             text-transform: uppercase;
-            color: #7a3f91;
+            color: #7A3F91;
             display: flex;
             align-items: center;
             gap: 0.5rem;
             margin-bottom: 0.75rem;
         }
         .guide-formula-chip {
-            font-family: 'DM Mono', monospace;
+            font-family: 'Inter', sans-serif;
             font-weight: 400;
-            font-size: 0.82rem;
-            background: #ffffff;
-            border: 1.5px solid #e8e0f0;
-            color: #2b0d3e;
+            font-size: 1rem;
+            background: #FFFFFF;
+            border: 1.5px solid #E8E0F0;
+            color: #333333;
             padding: 0.4rem 1rem;
             border-radius: 0.75rem;
         }
         .guide-formula-eg {
             font-family: 'Inter', sans-serif;
-            font-size: 0.85rem;
+            font-size: 1rem;
             font-weight: 400;
-            color: #6b7280;
+            color: #666666;
             margin-left: 0.35rem;
         }
 
-        /* Warning */
         .guide-warning-text {
             font-family: 'Inter', sans-serif;
-            font-size: 0.875rem;
+            font-size: 1rem;
             font-weight: 400;
             color: #92400e;
             line-height: 1.65;
         }
 
-        /* Close button */
         .guide-close-btn {
-            font-family: 'DM Mono', monospace;
-            font-size: 0.78rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
             font-weight: 500;
             letter-spacing: 0.14em;
             text-transform: uppercase;
-            color: #ffffff;
+            color: #FFFFFF;
             width: 100%;
-            background: #2b0d3e;
+            background: #7A3F91;
             padding: 1rem;
             border-radius: 1rem;
             border: none;
@@ -676,12 +642,13 @@ new #[Layout('app')] class extends Component {
             align-items: center;
             justify-content: center;
             gap: 0.5rem;
+            box-shadow: 0 6px 20px rgba(122, 63, 145, 0.25);
         }
-        .guide-close-btn:hover  { background: #7a3f91; }
+        .guide-close-btn:hover  { background: #6A3A7F; }
         .guide-close-btn:active { transform: scale(0.97); }
     </style>
 
-    {{-- ── Back to Home ── --}}
+    {{-- Back to Home --}}
     <a href="/" wire:navigate
        class="fixed top-8 left-8 z-50 flex items-center gap-3 hover:opacity-80 transition-opacity duration-200 group">
         <div class="w-11 h-11 flex items-center justify-center rounded-full border-2 border-white/40 group-hover:border-white group-hover:bg-white/10 transition-all duration-300">
@@ -690,13 +657,13 @@ new #[Layout('app')] class extends Component {
         <span class="lg-back-label">Back to Home</span>
     </a>
 
-    {{-- ── Login Card ── --}}
+    {{-- Login Card --}}
     <div wire:ignore.self
          class="login-card relative z-10 w-full max-w-md p-10 md:p-14 fade-in-up {{ $errors->has('invalid') ? 'animate-shake' : '' }}">
 
         {{-- Brand mark --}}
         <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-20 h-20 bg-[#f3ecfa] rounded-[1.5rem] mb-5 text-[#7a3f91] shadow-inner transition-transform duration-500 hover:rotate-12">
+            <div class="inline-flex items-center justify-center w-20 h-20 bg-[#F5F5F5] rounded-[1.5rem] mb-5 text-[#7A3F91] shadow-inner transition-transform duration-500 hover:rotate-12">
                 <i class="fa-solid fa-user-shield text-4xl"></i>
             </div>
             <p class="lg-brand-label">PhilCST Alumni Connect</p>
@@ -719,7 +686,7 @@ new #[Layout('app')] class extends Component {
             {{-- Username --}}
             <div class="space-y-2">
                 <label class="lg-field-label">
-                    <i class="fa-solid fa-user text-[#7a3f91]"></i>
+                    <i class="fa-solid fa-user text-[#7A3F91]"></i>
                     Username
                 </label>
                 <input wire:model="name" type="text"
@@ -731,7 +698,7 @@ new #[Layout('app')] class extends Component {
             {{-- Password --}}
             <div class="space-y-2" x-data="{ show: false }">
                 <label class="lg-field-label">
-                    <i class="fa-solid fa-lock text-[#7a3f91]"></i>
+                    <i class="fa-solid fa-lock text-[#7A3F91]"></i>
                     Password
                 </label>
                 <div class="relative">
@@ -740,7 +707,7 @@ new #[Layout('app')] class extends Component {
                            autocomplete="current-password" required minlength="1"
                            class="lg-input" style="padding-right:3.5rem;">
                     <button type="button" @click="show = !show"
-                            class="absolute inset-y-0 right-0 pr-5 flex items-center text-[#7a3f91] hover:text-[#2b0d3e] transition-colors duration-200 focus:outline-none z-10">
+                            class="absolute inset-y-0 right-0 pr-5 flex items-center text-[#7A3F91] hover:text-[#6A3A7F] transition-colors duration-200 focus:outline-none z-10">
                         <svg x-show="!show" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                             <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
@@ -785,7 +752,7 @@ new #[Layout('app')] class extends Component {
         &copy; {{ date('Y') }} Philippine College of Science and Technology
     </p>
 
-    {{-- ══ FIRST-TIME LOGIN GUIDE MODAL ══ --}}
+    {{-- FIRST-TIME LOGIN GUIDE MODAL --}}
     <div x-show="showGuide"
          x-cloak
          x-transition:enter="transition ease-out duration-300"
@@ -804,23 +771,18 @@ new #[Layout('app')] class extends Component {
              x-transition:leave="transition ease-in duration-200"
              x-transition:leave-start="opacity-100 scale-100 translate-y-0"
              x-transition:leave-end="opacity-0 scale-90 translate-y-4"
-             class="relative w-full max-w-2xl bg-white rounded-[2rem] shadow-[0_30px_80px_rgba(43,13,62,0.5)] overflow-hidden">
+             class="relative w-full max-w-2xl bg-white rounded-[2rem] shadow-[0_30px_80px_rgba(122,63,145,0.3)] overflow-hidden">
 
-            {{-- Modal header --}}
-            <div class="bg-[#7a3f91] px-10 pt-8 pb-7">
+            {{-- Modal header (flat background) --}}
+            <div class="bg-[#F5F5F5] px-10 pt-8 pb-7 border-b border-[#E8E0F0]">
                 <div class="flex items-start justify-between gap-4">
-                    <div class="flex items-center gap-4">
-                        <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center flex-shrink-0">
-                            <i class="fa-solid fa-graduation-cap text-white text-2xl"></i>
-                        </div>
-                        <div>
-                            <span class="guide-header-label">PhilCST Alumni Portal</span>
-                            <h2 class="guide-header-title">First-Time Login Guide</h2>
-                            <p class="guide-header-sub">Welcome back, Alumni! 👋 Here's how to get in.</p>
-                        </div>
+                    <div>
+                        <span class="guide-header-label">First-Time Login</span>
+                        <h2 class="guide-header-title">Welcome Back, Alumni! 👋</h2>
+                        <p class="guide-header-sub">Here's how to get started and access your account.</p>
                     </div>
                     <button @click="showGuide = false"
-                            class="w-9 h-9 rounded-full bg-white/20 hover:bg-white/40 flex items-center justify-center text-white transition-colors duration-200 focus:outline-none flex-shrink-0 mt-0.5">
+                            class="w-9 h-9 rounded-full bg-[#E8E0F0] hover:bg-[#D8C8E0] flex items-center justify-center text-[#7A3F91] transition-colors duration-200 focus:outline-none flex-shrink-0 mt-0.5">
                         <i class="fa-solid fa-xmark text-base"></i>
                     </button>
                 </div>
@@ -833,8 +795,8 @@ new #[Layout('app')] class extends Component {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-7">
 
                     {{-- Step 1 --}}
-                    <div class="flex flex-col items-start gap-3 bg-[#f9f7fc] rounded-2xl p-5 border border-[#e8e0f0]">
-                        <div class="w-10 h-10 rounded-xl bg-[#7a3f91] text-white flex items-center justify-center flex-shrink-0">
+                    <div class="flex flex-col items-start gap-3 bg-[#F5F5F5] rounded-2xl p-5 border border-[#E8E0F0]">
+                        <div class="w-10 h-10 rounded-xl bg-[#7A3F91] text-white flex items-center justify-center flex-shrink-0">
                             <span class="guide-step-num">1</span>
                         </div>
                         <div>
@@ -842,33 +804,33 @@ new #[Layout('app')] class extends Component {
                             <p class="guide-step-body">
                                 Use your 8-digit Student ID as your username.
                             </p>
-                            <div class="mt-3 inline-flex items-center gap-2 bg-white border border-[#e8e0f0] rounded-xl px-3 py-2">
-                                <i class="fa-solid fa-id-card text-[#7a3f91] text-sm"></i>
-                                <code style="font-family:'DM Mono',monospace; font-weight:400; font-size:0.85rem; color:#2b0d3e;">00037801</code>
+                            <div class="mt-3 inline-flex items-center gap-2 bg-white border border-[#E8E0F0] rounded-xl px-3 py-2">
+                                <i class="fa-solid fa-id-card text-[#7A3F91] text-sm"></i>
+                                <code style="font-family:'Inter',sans-serif; font-weight:400; font-size:1rem; color:#333333;">00037801</code>
                             </div>
                         </div>
                     </div>
 
                     {{-- Step 2 --}}
-                    <div class="flex flex-col items-start gap-3 bg-[#f9f7fc] rounded-2xl p-5 border border-[#e8e0f0]">
-                        <div class="w-10 h-10 rounded-xl bg-[#7a3f91] text-white flex items-center justify-center flex-shrink-0">
+                    <div class="flex flex-col items-start gap-3 bg-[#F5F5F5] rounded-2xl p-5 border border-[#E8E0F0]">
+                        <div class="w-10 h-10 rounded-xl bg-[#7A3F91] text-white flex items-center justify-center flex-shrink-0">
                             <span class="guide-step-num">2</span>
                         </div>
                         <div>
                             <p class="guide-step-title">Default Password</p>
                             <p class="guide-step-body">
-                                Your password is your Student ID + underscore + first 2 letters of your last name (first letter uppercase).
+                                StudentID + _ + First 2 Letters of Last Name
                             </p>
-                            <div class="mt-3 inline-flex items-center gap-2 bg-white border border-[#e8e0f0] rounded-xl px-3 py-2">
-                                <i class="fa-solid fa-key text-[#7a3f91] text-sm"></i>
-                                <code style="font-family:'DM Mono',monospace; font-weight:400; font-size:0.85rem; color:#2b0d3e;">00037801_Al</code>
+                            <div class="mt-3 inline-flex items-center gap-2 bg-white border border-[#E8E0F0] rounded-xl px-3 py-2">
+                                <i class="fa-solid fa-key text-[#7A3F91] text-sm"></i>
+                                <code style="font-family:'Inter',sans-serif; font-weight:400; font-size:1rem; color:#333333;">00037801_Al</code>
                             </div>
                         </div>
                     </div>
 
                     {{-- Step 3 --}}
-                    <div class="flex flex-col items-start gap-3 bg-[#f9f7fc] rounded-2xl p-5 border border-[#e8e0f0]">
-                        <div class="w-10 h-10 rounded-xl bg-[#7a3f91] text-white flex items-center justify-center flex-shrink-0">
+                    <div class="flex flex-col items-start gap-3 bg-[#F5F5F5] rounded-2xl p-5 border border-[#E8E0F0]">
+                        <div class="w-10 h-10 rounded-xl bg-[#7A3F91] text-white flex items-center justify-center flex-shrink-0">
                             <span class="guide-step-num">3</span>
                         </div>
                         <div>
@@ -882,22 +844,22 @@ new #[Layout('app')] class extends Component {
                 </div>
 
                 {{-- Password formula --}}
-                <div class="bg-[#f9f7fc] border-2 border-[#e0d5ee] rounded-2xl px-6 py-5 mb-5">
+                <div class="bg-[#F5F5F5] border-2 border-[#E0D5EE] rounded-2xl px-6 py-5 mb-5">
                     <p class="guide-formula-label">
                         <i class="fa-solid fa-flask"></i> Password Formula
                     </p>
                     <div class="flex items-center gap-2 flex-wrap">
                         <span class="guide-formula-chip">StudentID</span>
-                        <span style="font-family:'DM Mono',monospace; font-weight:500; font-size:1.1rem; color:#7a3f91;">+</span>
+                        <span style="font-family:'Inter',sans-serif; font-weight:500; font-size:1.2rem; color:#7A3F91;">+</span>
                         <span class="guide-formula-chip">_</span>
-                        <span style="font-family:'DM Mono',monospace; font-weight:500; font-size:1.1rem; color:#7a3f91;">+</span>
+                        <span style="font-family:'Inter',sans-serif; font-weight:500; font-size:1.2rem; color:#7A3F91;">+</span>
                         <span class="guide-formula-chip">First 2 Letters of Last Name</span>
                     </div>
                     <div class="mt-3 flex items-center gap-2">
                         <i class="fa-solid fa-circle-check text-green-500"></i>
                         <span class="guide-formula-eg">
-                            Example: <code style="font-family:'DM Mono',monospace; font-weight:400; color:#2b0d3e; background:#fff; border:1px solid #e8e0f0; padding:0.1rem 0.5rem; border-radius:0.5rem;">00037801_Al</code>
-                            — for a last name starting with "Al…"
+                            Example: <code style="font-family:'Inter',sans-serif; font-weight:400; color:#333333; background:#fff; border:1px solid #E8E0F0; padding:0.1rem 0.5rem; border-radius:0.5rem;">00037801_Al</code>
+                            — for last name "Alford"
                         </span>
                     </div>
                 </div>
@@ -906,11 +868,10 @@ new #[Layout('app')] class extends Component {
                 <div class="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 mb-6">
                     <i class="fa-solid fa-triangle-exclamation text-amber-500 text-base flex-shrink-0 mt-0.5"></i>
                     <p class="guide-warning-text">
-                        The first 2 letters of your last name are case-sensitive.
-                        The first letter must be uppercase and the second lowercase —
-                        e.g., <code style="font-family:'DM Mono',monospace; background:#fef3c7; padding:0.1rem 0.4rem; border-radius:0.4rem;">Al</code>,
-                        not <code style="font-family:'DM Mono',monospace; background:#fef3c7; padding:0.1rem 0.4rem; border-radius:0.4rem;">al</code>
-                        or <code style="font-family:'DM Mono',monospace; background:#fef3c7; padding:0.1rem 0.4rem; border-radius:0.4rem;">AL</code>.
+                        The first 2 letters of your last name are case-sensitive. The first letter must be uppercase and the second lowercase —
+                        e.g., <code style="font-family:'Inter',sans-serif; background:#fef3c7; padding:0.1rem 0.4rem; border-radius:0.4rem;">Al</code>,
+                        not <code style="font-family:'Inter',sans-serif; background:#fef3c7; padding:0.1rem 0.4rem; border-radius:0.4rem;">al</code>
+                        or <code style="font-family:'Inter',sans-serif; background:#fef3c7; padding:0.1rem 0.4rem; border-radius:0.4rem;">AL</code>.
                     </p>
                 </div>
 
@@ -923,6 +884,5 @@ new #[Layout('app')] class extends Component {
             </div>
         </div>
     </div>
-    {{-- ══ END GUIDE MODAL ══ --}}
 
 </div>

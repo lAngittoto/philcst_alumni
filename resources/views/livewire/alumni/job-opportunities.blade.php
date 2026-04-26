@@ -258,8 +258,40 @@ new class extends Component {
 
 }; ?>
 
-{{-- Root: flex column filling available viewport height --}}
 <div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+
+<style>
+/* ── Base tokens ─────────────────────────────────────────────────── */
+:root {
+    --brand:       #7a3f91;
+    --brand-light: #f9f7fc;
+    --brand-mid:   #ede9fe;
+}
+
+@keyframes modalIn {
+    from { opacity:0; transform:translateY(14px) scale(.97); }
+    to   { opacity:1; transform:none; }
+}
+.m-in { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
+
+.job-card { transition: box-shadow .18s; }
+.job-card:hover {
+    box-shadow: 0 8px 28px rgba(122,63,145,.18), 0 2px 8px rgba(0,0,0,.07);
+}
+.job-card:hover .card-view-hint { background-color: #6a3080 !important; }
+
+.scroll-c::-webkit-scrollbar { width: 5px; }
+.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+.filter-input {
+    border: 1.5px solid #e8e0f0;
+    transition: border-color .15s, box-shadow .15s;
+}
+.filter-input:hover  { border-color: var(--brand); }
+.filter-input:focus  { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
+</style>
 
 {{-- ── FLASH TOAST ─────────────────────────────────────────────────────────── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
@@ -285,75 +317,42 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<style>
-@keyframes modalIn {
-    from { opacity:0; transform:translateY(14px) scale(.97); }
-    to   { opacity:1; transform:none; }
-}
-.m-in { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
-
-.job-card { transition: box-shadow .18s, transform .18s; }
-.job-card:hover {
-    box-shadow: 0 8px 28px rgba(122,63,145,.18), 0 2px 8px rgba(0,0,0,.07);
-    transform: translateY(-3px);
-}
-.job-card:hover .card-view-hint { background-color: #6a3080 !important; }
-
-.scroll-c::-webkit-scrollbar { width: 5px; }
-.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-.scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-.scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-
-.filter-input {
-    border: 1.5px solid #d1d5db;
-    transition: border-color .15s, box-shadow .15s;
-}
-.filter-input:hover  { border-color: #7a3f91; }
-.filter-input:focus  { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
-</style>
-
     {{-- Inner flex column: header + filters + cards grow, pagination pinned last --}}
     <div class="flex flex-col flex-1 gap-5">
 
         {{-- ══ PAGE HEADER ═══════════════════════════════════════════════════ --}}
-        <div class="rounded-2xl overflow-hidden shadow-sm" style="background-color:#7a3f91;">
-            <div class="px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                    <h1 class="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-                        <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                            <i class="fa-solid fa-briefcase text-white text-base"></i>
-                        </div>
-                        Job Opportunities
-                    </h1>
-                    <p class="text-sm text-white/75 mt-1 ml-12">
-                        Showing jobs available for
-                        <span class="font-semibold text-white">{{ $alumniCourse ?: 'your course' }}</span>
-                        @if($alumniCollege)
-                            &middot; <span class="font-semibold text-white/90">{{ $alumniCollege }}</span>
-                        @endif
-                    </p>
-                </div>
-                <div class="ml-12 sm:ml-0">
-                    <span class="inline-flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl bg-white/20 text-white border border-white/30">
-                        <i class="fa-solid fa-circle-check text-emerald-300"></i>
-                        {{ $this->jobPostings->total() }} active job{{ $this->jobPostings->total() !== 1 ? 's' : '' }}
-                    </span>
-                </div>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-semibold text-[#333333] tracking-tight">Job Opportunities</h1>
+                <p class="text-base leading-relaxed mt-2 text-[#666666] font-normal">
+                    Find and apply to job openings available for
+                    <span class="font-semibold">{{ $alumniCourse ?: 'your course' }}</span>
+                    @if($alumniCollege)
+                        &middot; <span class="font-semibold">{{ $alumniCollege }}</span>
+                    @endif
+                </p>
+            </div>
+
+            <div class="flex items-center gap-2 flex-wrap">
+                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 uppercase tracking-widest">
+                    <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                    {{ $this->jobPostings->total() }} Active {{ $this->jobPostings->total() !== 1 ? 'Jobs' : 'Job' }}
+                </span>
             </div>
         </div>
 
         {{-- ══ FILTER BAR ════════════════════════════════════════════════════ --}}
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-4 py-3 flex flex-wrap gap-2 items-center">
+        <div class="px-4 py-3 flex flex-wrap gap-2 items-center">
             <div class="relative flex-1 min-w-[200px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
+                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search', q)"
                        placeholder="Search title, company, location…"
-                       class="filter-input w-full pl-9 pr-3 py-2.5 rounded-xl text-sm text-gray-900 bg-white"
+                       class="filter-input w-full pl-9 pr-3 py-2.5 rounded-xl text-sm text-[#333333] bg-white"
                        autocomplete="off" maxlength="100">
             </div>
-            <select wire:model.live="filterType" class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white text-gray-700">
+            <select wire:model.live="filterType" class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white text-[#333333]">
                 <option value="">All Types</option>
                 <option value="Full-Time">Full-Time</option>
                 <option value="Part-Time">Part-Time</option>
@@ -361,7 +360,7 @@ new class extends Component {
                 <option value="Internship">Internship</option>
                 <option value="Freelance">Freelance</option>
             </select>
-            <select wire:model.live="filterLevel" class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white text-gray-700">
+            <select wire:model.live="filterLevel" class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white text-[#333333]">
                 <option value="">All Levels</option>
                 <option value="No Experience Required">No Experience Required</option>
                 <option value="Entry Level (At Least 1 Year)">Entry Level (At Least 1 Year)</option>
@@ -369,12 +368,12 @@ new class extends Component {
                 <option value="Senior Level (4-5 Years)">Senior Level (4-5 Years)</option>
                 <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
             </select>
-            <select wire:model.live="filterSort" class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white text-gray-700">
+            <select wire:model.live="filterSort" class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white text-[#333333]">
                 <option value="recent">Newest First</option>
                 <option value="oldest">Oldest First</option>
             </select>
             <button wire:click="resetFilters"
-                    class="filter-input px-3 py-2.5 rounded-xl bg-white text-sm font-medium text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 transition">
+                    class="filter-input px-3 py-2.5 rounded-xl bg-white text-sm font-semibold text-[#666666] hover:bg-[#f5f5f5] flex items-center gap-1.5 transition uppercase tracking-widest">
                 <i class="fa-solid fa-rotate-left text-xs"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
@@ -402,10 +401,10 @@ new class extends Component {
                             {{-- Company + badge --}}
                             <div class="flex items-start justify-between gap-2">
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-semibold text-gray-500 truncate">{{ $job->company_name }}</p>
-                                    <h3 class="text-base font-extrabold text-gray-900 leading-snug mt-0.5 line-clamp-2">{{ $job->job_title }}</h3>
+                                    <p class="text-xs font-semibold text-[#999999] truncate uppercase tracking-widest">{{ $job->company_name }}</p>
+                                    <h3 class="text-base font-bold text-[#333333] leading-snug mt-0.5 line-clamp-2">{{ $job->job_title }}</h3>
                                 </div>
-                                <span class="inline-flex shrink-0 items-center text-xs font-bold px-2.5 py-1 rounded-full border border-gray-200 bg-gray-100 text-gray-600 mt-0.5">
+                                <span class="inline-flex shrink-0 items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-gray-200 bg-gray-100 text-[#666666] mt-0.5">
                                     {{ Str::limit($displayType, 14) }}
                                 </span>
                             </div>
@@ -415,15 +414,15 @@ new class extends Component {
                                 <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
                                     <i class="fa-solid fa-clock text-[10px]"></i> {{ $job->employment_type }}
                                 </span>
-                                <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 border border-gray-200">
+                                <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-gray-100 text-[#666666] border border-gray-200">
                                     <i class="fa-solid fa-layer-group text-[10px]"></i> {{ Str::limit($job->experience_level, 22) }}
                                 </span>
                             </div>
 
                             {{-- Location --}}
                             @if($job->location)
-                            <div class="flex items-center gap-1.5 text-sm text-gray-500">
-                                <i class="fa-solid fa-location-dot text-gray-400 text-xs"></i>
+                            <div class="flex items-center gap-1.5 text-sm text-[#666666]">
+                                <i class="fa-solid fa-location-dot text-[#999999] text-xs"></i>
                                 <span class="truncate">{{ $job->location }}</span>
                             </div>
                             @endif
@@ -435,7 +434,7 @@ new class extends Component {
                                 <span class="truncate">{{ $job->salary }}</span>
                             </div>
                             @else
-                            <div class="flex items-center gap-1.5 text-sm text-gray-400 italic">
+                            <div class="flex items-center gap-1.5 text-sm text-[#999999] italic">
                                 <i class="fa-solid fa-money-bill-wave text-xs"></i>
                                 Salary not disclosed
                             </div>
@@ -444,14 +443,14 @@ new class extends Component {
                             {{-- Footer --}}
                             <div class="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-0.5">
                                 <div class="flex flex-col gap-0.5">
-                                    <span class="text-xs text-gray-400">{{ $postedAgo }}</span>
+                                    <span class="text-xs text-[#999999]">{{ $postedAgo }}</span>
                                     @if($isUrgent)
                                         <span class="inline-flex items-center gap-1 text-xs font-bold text-red-600">
                                             <i class="fa-solid fa-fire text-[10px]"></i>
                                             Closes {{ $deadlineStr }} ({{ $daysLeft === 0 ? 'today' : ($daysLeft === 1 ? 'tomorrow' : 'in '.$daysLeft.' days') }})
                                         </span>
                                     @else
-                                        <span class="inline-flex items-center gap-1 text-xs text-gray-400">
+                                        <span class="inline-flex items-center gap-1 text-xs text-[#999999]">
                                             <i class="fa-regular fa-calendar text-[10px]"></i>
                                             Closes {{ $deadlineStr }}
                                         </span>
@@ -480,17 +479,17 @@ new class extends Component {
             @else
                 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm py-20 flex flex-col items-center gap-4 text-center px-6">
                     <div class="w-16 h-16 rounded-2xl flex items-center justify-center bg-gray-100">
-                        <i class="fa-solid fa-briefcase text-2xl text-gray-400"></i>
+                        <i class="fa-solid fa-briefcase text-2xl text-[#999999]"></i>
                     </div>
                     <div>
-                        <p class="font-bold text-gray-700 text-lg">
+                        <p class="font-bold text-[#333333] text-lg">
                             @if($search || $filterType || $filterLevel)
                                 No jobs match your filters
                             @else
                                 No job openings yet
                             @endif
                         </p>
-                        <p class="text-sm text-gray-400 mt-1">
+                        <p class="text-sm text-[#999999] mt-1">
                             @if($search || $filterType || $filterLevel)
                                 Try clearing your filters to see all available jobs.
                             @else
@@ -500,7 +499,7 @@ new class extends Component {
                         </p>
                     </div>
                     @if($search || $filterType || $filterLevel)
-                        <button wire:click="resetFilters" class="px-4 py-2 rounded-xl text-sm font-bold text-white" style="background-color:#7a3f91;">
+                        <button wire:click="resetFilters" class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 uppercase tracking-widest" style="background-color:#7a3f91;">
                             <i class="fa-solid fa-rotate-left mr-1.5"></i> Clear Filters
                         </button>
                     @endif
@@ -509,8 +508,8 @@ new class extends Component {
         </div>
 
         {{-- ══ PAGINATION — mt-auto pushes it to the bottom of the flex column ══ --}}
-        <div class="mt-auto rounded-2xl px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-             style="background-color:#2b0d3e;">
+        <div class="mt-auto rounded-2xl px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0"
+             style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
             @php
                 $total = $this->jobPostings->total();
                 $pp    = $this->jobPostings->perPage();
@@ -518,27 +517,25 @@ new class extends Component {
                 $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
                 $to    = min($cp * $pp, $total);
             @endphp
-            <p class="text-white text-xs sm:text-sm">
-                Showing <span class="font-bold">{{ $from }}&ndash;{{ $to }}</span>
-                of <span class="font-bold">{{ $total }}</span> job{{ $total !== 1 ? 's' : '' }}
+            <p class="text-white/70 text-sm font-normal">
+                Showing <span class="text-white font-semibold">{{ $from }}&ndash;{{ $to }}</span>
+                of <span class="text-white font-semibold">{{ $total }}</span> job{{ $total !== 1 ? 's' : '' }}
             </p>
             <div class="flex items-center gap-1.5">
                 @if($this->jobPostings->onFirstPage())
-                    <button disabled class="px-3 sm:px-4 py-1.5 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">&larr; Prev</button>
+                    <button disabled class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white/30 bg-white/5 cursor-not-allowed">← Prev</button>
                 @else
                     <button wire:click="previousPage"
-                            class="px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-white cursor-pointer hover:opacity-90 transition"
-                            style="background-color:#7a3f91;">&larr; Prev</button>
+                            class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition"
+                            style="background:#7A3F91;">← Prev</button>
                 @endif
-                <span class="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-xs sm:text-sm font-semibold shadow-sm">
-                    {{ $cp }} / {{ $this->jobPostings->lastPage() }}
-                </span>
+                <span class="px-3 py-1.5 text-[#333333] text-sm font-semibold bg-white rounded-lg">{{ $cp }} / {{ $this->jobPostings->lastPage() }}</span>
                 @if($this->jobPostings->hasMorePages())
                     <button wire:click="nextPage"
-                            class="px-3 sm:px-4 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-white cursor-pointer hover:opacity-90 transition"
-                            style="background-color:#7a3f91;">Next &rarr;</button>
+                            class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition"
+                            style="background:#7A3F91;">Next →</button>
                 @else
-                    <button disabled class="px-3 sm:px-4 py-1.5 bg-gray-100 text-gray-400 rounded-lg text-xs sm:text-sm font-semibold cursor-not-allowed">Next &rarr;</button>
+                    <button disabled class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white/30 bg-white/5 cursor-not-allowed">Next →</button>
                 @endif
             </div>
         </div>
@@ -566,17 +563,17 @@ new class extends Component {
             </button>
 
             {{-- Header --}}
-            <div class="px-6 pt-6 pb-5 flex-shrink-0 text-white" style="background-color:#7a3f91;">
+            <div class="px-6 pt-6 pb-5 flex-shrink-0 text-white" style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                 <div class="flex items-center gap-2 mb-2 flex-wrap pr-8">
                     <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
                         <i class="fa-solid fa-building text-white text-base"></i>
                     </div>
                     <div>
                         <p class="text-sm font-semibold text-white/75">{{ $job->company_name }}</p>
-                        <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-white/20 text-white">{{ $displayType }}</span>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/20 text-white">{{ $displayType }}</span>
                     </div>
                 </div>
-                <h2 class="text-2xl font-extrabold text-white leading-snug mb-3">{{ $job->job_title }}</h2>
+                <h2 class="text-2xl font-bold text-white leading-snug mb-3">{{ $job->job_title }}</h2>
                 <div class="flex flex-wrap gap-2">
                     <span class="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg bg-white/20 text-white">
                         <i class="fa-solid fa-clock text-xs"></i> {{ $job->employment_type }}
@@ -601,11 +598,11 @@ new class extends Component {
                     <div class="grid grid-cols-2 gap-4">
                         <div class="flex items-start gap-2.5">
                             <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                                <i class="fa-solid fa-location-dot text-base text-gray-500"></i>
+                                <i class="fa-solid fa-location-dot text-base text-[#999999]"></i>
                             </div>
                             <div>
-                                <p class="text-xs font-bold text-gray-400 uppercase tracking-wide">Location</p>
-                                <p class="text-sm font-semibold text-gray-800 mt-0.5">{{ $job->location ?? 'Not specified' }}</p>
+                                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">Location</p>
+                                <p class="text-sm font-semibold text-[#333333] mt-0.5">{{ $job->location ?? 'Not specified' }}</p>
                             </div>
                         </div>
                         <div class="flex items-start gap-2.5">
@@ -613,11 +610,11 @@ new class extends Component {
                                 <i class="fa-solid fa-money-bill-wave text-base text-emerald-600"></i>
                             </div>
                             <div>
-                                <p class="text-xs font-bold text-gray-400 uppercase tracking-wide">Salary</p>
+                                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">Salary</p>
                                 @if($job->salary)
                                     <p class="text-sm font-semibold text-emerald-700 mt-0.5">{{ $job->salary }}</p>
                                 @else
-                                    <p class="text-sm text-gray-400 italic mt-0.5">Not disclosed</p>
+                                    <p class="text-sm text-[#999999] italic mt-0.5">Not disclosed</p>
                                 @endif
                             </div>
                         </div>
@@ -626,9 +623,9 @@ new class extends Component {
                                 <i class="fa-solid fa-calendar-xmark text-base text-amber-600"></i>
                             </div>
                             <div>
-                                <p class="text-xs font-bold text-gray-400 uppercase tracking-wide">Application Deadline</p>
-                                <p class="text-sm font-bold mt-0.5 {{ $isUrgent ? 'text-red-600' : 'text-gray-800' }}">{{ $dl->format('F d, Y') }}</p>
-                                <p class="text-xs mt-0.5 {{ $isUrgent ? 'text-red-500 font-semibold' : 'text-gray-400' }}">
+                                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">Application Deadline</p>
+                                <p class="text-sm font-bold mt-0.5 {{ $isUrgent ? 'text-red-600' : 'text-[#333333]' }}">{{ $dl->format('F d, Y') }}</p>
+                                <p class="text-xs mt-0.5 {{ $isUrgent ? 'text-red-500 font-semibold' : 'text-[#999999]' }}">
                                     @if($daysLeft === 0) Closing today!
                                     @elseif($daysLeft === 1) Tomorrow is the last day
                                     @else {{ $daysLeft }} days remaining
@@ -641,9 +638,9 @@ new class extends Component {
                                 <i class="fa-solid fa-calendar-plus text-base text-blue-600"></i>
                             </div>
                             <div>
-                                <p class="text-xs font-bold text-gray-400 uppercase tracking-wide">Date Posted</p>
-                                <p class="text-sm font-semibold text-gray-800 mt-0.5">{{ $createdPH->format('F d, Y') }}</p>
-                                <p class="text-xs text-gray-400 mt-0.5">{{ $createdPH->diffForHumans() }}</p>
+                                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">Date Posted</p>
+                                <p class="text-sm font-semibold text-[#333333] mt-0.5">{{ $createdPH->format('F d, Y') }}</p>
+                                <p class="text-xs text-[#999999] mt-0.5">{{ $createdPH->diffForHumans() }}</p>
                             </div>
                         </div>
                     </div>
@@ -651,30 +648,30 @@ new class extends Component {
 
                 {{-- Description --}}
                 <div class="px-6 py-5 border-b border-gray-100">
-                    <h3 class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
-                        <i class="fa-solid fa-file-lines text-sm text-gray-400"></i> Job Description
+                    <h3 class="text-base font-bold text-[#333333] mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-file-lines text-sm text-[#999999]"></i> Job Description
                     </h3>
-                    <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl p-4 border border-gray-100">{{ $job->description }}</div>
+                    <div class="text-sm text-[#666666] leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl p-4 border border-gray-100">{{ $job->description }}</div>
                 </div>
 
                 {{-- Qualifications --}}
                 @if($job->qualifications)
                 <div class="px-6 py-5 border-b border-gray-100">
-                    <h3 class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <h3 class="text-base font-bold text-[#333333] mb-3 flex items-center gap-2">
                         <i class="fa-solid fa-list-check text-sm" style="color:#7a3f91;"></i> Qualifications
                     </h3>
-                    <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap bg-purple-50 rounded-xl p-4 border border-purple-100">{{ $job->qualifications }}</div>
+                    <div class="text-sm text-[#666666] leading-relaxed whitespace-pre-wrap bg-purple-50 rounded-xl p-4 border border-purple-100">{{ $job->qualifications }}</div>
                 </div>
                 @endif
 
                 {{-- Application Instructions --}}
                 @if($job->application_instructions)
                 <div class="px-6 py-5 border-b border-gray-100">
-                    <h3 class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <h3 class="text-base font-bold text-[#333333] mb-3 flex items-center gap-2">
                         <i class="fa-solid fa-paper-plane text-sm" style="color:#7a3f91;"></i> How to Apply
                     </h3>
                     <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                        <div class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->application_instructions }}</div>
+                        <div class="text-sm text-[#666666] leading-relaxed whitespace-pre-wrap">{{ $job->application_instructions }}</div>
                     </div>
                 </div>
                 @endif
@@ -682,12 +679,12 @@ new class extends Component {
                 {{-- Target college --}}
                 @if($job->target_college)
                 <div class="px-6 py-5">
-                    <h3 class="text-base font-bold text-gray-900 mb-2 flex items-center gap-2">
-                        <i class="fa-solid fa-building-columns text-sm text-gray-400"></i> Open For
+                    <h3 class="text-base font-bold text-[#333333] mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-building-columns text-sm text-[#999999]"></i> Open For
                     </h3>
                     <div class="flex flex-wrap gap-1.5">
                         @foreach(explode(',', $job->target_college) as $col)
-                            <span class="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1 rounded-lg border border-gray-200 bg-gray-100 text-gray-600">
+                            <span class="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1 rounded-lg border border-gray-200 bg-gray-100 text-[#666666]">
                                 <i class="fa-solid fa-check text-xs"></i> {{ trim($col) }}
                             </span>
                         @endforeach
@@ -704,8 +701,8 @@ new class extends Component {
                     <i class="fas fa-share-nodes text-xs mr-1.5"></i> Share
                 </button>
                 <button wire:click="closeViewModal" type="button"
-                        class="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition flex items-center gap-2 cursor-pointer"
-                        style="background-color:#7a3f91;">
+                        class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition flex items-center gap-2 cursor-pointer"
+                        style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                     <i class="fa-solid fa-xmark text-xs"></i> Close
                 </button>
             </div>
@@ -787,11 +784,11 @@ new class extends Component {
 
             {{-- Header --}}
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-                <h2 class="text-lg font-extrabold text-gray-800 flex items-center gap-2">
+                <h2 class="text-lg font-bold text-[#333333] flex items-center gap-2">
                     <i class="fas fa-share-nodes text-sky-600"></i> Share Job Posting
                 </h2>
                 <button wire:click="closeShareModal" type="button"
-                        class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
+                        class="w-8 h-8 rounded-full flex items-center justify-center text-[#999999] hover:text-[#333333] hover:bg-gray-100 transition cursor-pointer">
                     <i class="fas fa-xmark text-base"></i>
                 </button>
             </div>
@@ -802,22 +799,22 @@ new class extends Component {
                 {{-- LEFT: Preview --}}
                 <div class="flex-1 px-6 py-5 border-b lg:border-b-0 lg:border-r border-gray-100 flex flex-col gap-4">
 
-                    <p class="text-xs font-black text-gray-400 uppercase tracking-widest">What recipients will see</p>
+                    <p class="text-xs font-bold text-[#999999] uppercase tracking-widest">What recipients will see</p>
 
                     {{-- Preview card --}}
                     <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-                        <div class="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
-                            <div class="w-14 h-14 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] flex items-center justify-center flex-shrink-0 shadow">
+                        <div class="bg-[#f9f7fc] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
+                            <div class="w-14 h-14 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#6a3080] flex items-center justify-center flex-shrink-0 shadow">
                                 <i class="fas fa-briefcase text-white text-xl"></i>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="font-extrabold text-gray-900 text-sm leading-tight truncate">{{ $shareJobTitle }}</p>
-                                <p class="text-xs text-gray-700 mt-0.5 font-semibold">
-                                    {{ $shareCompany }}@if($shareEmpType) &middot; <span class="text-purple-700">{{ $shareEmpType }}</span>@endif
+                                <p class="font-bold text-[#333333] text-sm leading-tight truncate">{{ $shareJobTitle }}</p>
+                                <p class="text-xs text-[#666666] mt-0.5 font-semibold">
+                                    {{ $shareCompany }}@if($shareEmpType) &middot; <span style="color:#7a3f91;">{{ $shareEmpType }}</span>@endif
                                 </p>
                                 <div class="flex flex-wrap gap-1 mt-1.5">
-                                    @if($shareLocation)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-gray-700"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}</span>@endif
-                                    @if($shareExpLevel)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700"><i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}</span>@endif
+                                    @if($shareLocation)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}</span>@endif
+                                    @if($shareExpLevel)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100" style="color:#7a3f91;"><i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}</span>@endif
                                     @if($shareSalary)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700"><i class="fas fa-money-bill-wave text-[8px]"></i>{{ $shareSalary }}</span>@endif
                                     @if($shareDlFormatted)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-600"><i class="fas fa-calendar-xmark text-[8px]"></i>Deadline: {{ $shareDlFormatted }}</span>@endif
                                     @if($shareCollege)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700"><i class="fas fa-building-columns text-[8px]"></i>{{ $shareCollege }}</span>@endif
@@ -826,12 +823,12 @@ new class extends Component {
                         </div>
                         @if($shareDescPreview)
                         <div class="px-4 py-2.5 bg-white border-b border-gray-100">
-                            <p class="text-xs text-gray-600 leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
+                            <p class="text-xs text-[#666666] leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
                         </div>
                         @endif
-                        <div class="px-4 py-2 bg-[#f0f2f5] flex items-center gap-2">
-                            <i class="fas fa-globe text-gray-400 text-[10px]"></i>
-                            <span class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+                        <div class="px-4 py-2 bg-[#f9f7fc] flex items-center gap-2">
+                            <i class="fas fa-globe text-[#999999] text-[10px]"></i>
+                            <span class="text-[10px] text-[#666666] uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
                         </div>
                     </div>
 
@@ -848,7 +845,7 @@ new class extends Component {
                 {{-- RIGHT: Share buttons --}}
                 <div class="w-full lg:w-72 px-6 py-5 flex flex-col gap-3 flex-shrink-0">
 
-                    <p class="text-xs font-black text-gray-400 uppercase tracking-widest">Share via</p>
+                    <p class="text-xs font-bold text-[#999999] uppercase tracking-widest">Share via</p>
 
                     {{-- Copied banners --}}
                     <div x-show="fbCopied" x-cloak
@@ -858,7 +855,7 @@ new class extends Component {
                          class="bg-emerald-50 border border-emerald-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
                         <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
                         <div>
-                            <p class="text-xs font-extrabold text-emerald-800">Text copied! Paste in Facebook popup.</p>
+                            <p class="text-xs font-bold text-emerald-800">Text copied! Paste in Facebook popup.</p>
                         </div>
                     </div>
 
@@ -868,12 +865,12 @@ new class extends Component {
                          x-transition:enter-end="opacity-100 translate-y-0"
                          class="bg-blue-50 border border-blue-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
                         <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
-                        <p class="text-xs font-extrabold text-blue-800">Text copied! Paste in Messenger.</p>
+                        <p class="text-xs font-bold text-blue-800">Text copied! Paste in Messenger.</p>
                     </div>
 
                     {{-- Facebook --}}
                     <button type="button" @click="shareOnFacebook()"
-                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-extrabold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
                         <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
                                 <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
@@ -888,7 +885,7 @@ new class extends Component {
 
                     {{-- Messenger --}}
                     <button type="button" @click="shareOnMessenger()"
-                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-extrabold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
                         <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
                                 <defs><linearGradient id="mgr3" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
@@ -901,7 +898,7 @@ new class extends Component {
                         </span>
                         <i class="fas fa-arrow-up-right-from-square text-white/60 text-xs group-hover:text-white transition"></i>
                     </button>
-                    <p class="text-[10px] text-gray-400 text-center -mt-1">
+                    <p class="text-[10px] text-[#999999] text-center -mt-1">
                         <i class="fas fa-users text-[9px] mr-0.5"></i> Works for private chats & group chats.
                     </p>
 
@@ -909,14 +906,15 @@ new class extends Component {
                     <div class="relative">
                         <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                         <div class="relative flex justify-center">
-                            <span class="bg-white px-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">or post directly</span>
+                            <span class="bg-white px-2 text-[10px] font-bold text-[#999999] uppercase tracking-widest">or post directly</span>
                         </div>
                     </div>
 
                     <button type="button"
                             wire:click="shareToChat"
                             wire:loading.attr="disabled"
-                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-extrabold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-300 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 text-purple-800">
+                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-300 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200"
+                            style="color:#7a3f91;">
                         <span class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform"
                               style="background:#7a3f91;">
                             <i class="fas fa-users text-white text-sm"></i>
@@ -924,32 +922,32 @@ new class extends Component {
                         <span class="flex-1 text-left">
                             <span wire:loading.remove wire:target="shareToChat">Post to Batch Chat</span>
                             <span wire:loading wire:target="shareToChat"><i class="fas fa-spinner fa-spin mr-1"></i> Posting…</span>
-                            <span class="block text-xs font-semibold text-purple-500 mt-0.5">Sends directly to your batchmates</span>
+                            <span class="block text-xs font-semibold mt-0.5" style="color:#7a3f91;">Sends directly to your batchmates</span>
                         </span>
-                        <i class="fas fa-paper-plane text-purple-400 text-xs group-hover:text-purple-700 transition"></i>
+                        <i class="fas fa-paper-plane text-xs transition" style="color:#7a3f91;"></i>
                     </button>
 
                     {{-- Divider then Copy Link --}}
                     <div class="relative">
                         <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                         <div class="relative flex justify-center">
-                            <span class="bg-white px-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">or copy link</span>
+                            <span class="bg-white px-2 text-[10px] font-bold text-[#999999] uppercase tracking-widest">or copy link</span>
                         </div>
                     </div>
 
                     <button type="button" @click="copyLinkFn()"
-                            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-bold text-sm transition cursor-pointer group">
+                            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 text-[#333333] font-bold text-sm transition cursor-pointer group">
                         <span class="w-9 h-9 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
-                            <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-sm"></i>
+                            <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-[#999999]'" class="text-sm"></i>
                         </span>
                         <div class="flex-1 text-left min-w-0">
-                            <p :class="copied ? 'text-emerald-600' : 'text-gray-700'" class="font-bold text-sm"
+                            <p :class="copied ? 'text-emerald-600' : 'text-[#333333]'" class="font-bold text-sm"
                                x-text="copied ? '✓ Link copied!' : 'Copy Jobs Page Link'"></p>
-                            <p class="text-[10px] text-gray-400 font-mono mt-0.5 truncate">{{ $shareBaseUrl }}</p>
+                            <p class="text-[10px] text-[#999999] font-mono mt-0.5 truncate">{{ $shareBaseUrl }}</p>
                         </div>
                     </button>
 
-                    <p class="text-[10px] text-gray-400 text-center leading-snug pt-1">
+                    <p class="text-[10px] text-[#999999] text-center leading-snug pt-1">
                         Sharing is disabled for postings past their deadline.
                     </p>
                 </div>

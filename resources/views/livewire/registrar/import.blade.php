@@ -16,7 +16,6 @@ new class extends Component {
     public bool   $importingFile        = false;
     public string $importStatus         = '';
     public string $importStep           = 'upload';
-    public string $importMode           = 'new';
 
     public int    $importProgress       = 0;
     public int    $importTotal          = 0;
@@ -43,22 +42,6 @@ new class extends Component {
         return mb_substr(strip_tags(trim($val)), 0, 255);
     }
 
-    private function sanitizeEmail(string $val): string
-    {
-        $val = filter_var(trim($val), FILTER_SANITIZE_EMAIL);
-        return filter_var($val, FILTER_VALIDATE_EMAIL) ? $val : '';
-    }
-
-    private function sanitizeDate(string $val): ?string
-    {
-        if (!trim($val)) return null;
-        try {
-            return \Carbon\Carbon::parse($val)->format('Y-m-d');
-        } catch (\Exception) {
-            return null;
-        }
-    }
-
     private function appendImportError(array &$errors, int $max, string $msg): void
     {
         $this->importFailCount++;
@@ -71,13 +54,17 @@ new class extends Component {
         return implode(' ', array_filter(array_map('trim', [$f, $m, $l, $s])));
     }
 
+    private function validateEmail(string $email): bool
+    {
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
     public function resetImport(): void
     {
         $this->importFile           = null;
         $this->importingFile        = false;
         $this->importStatus         = '';
         $this->importStep           = 'upload';
-        $this->importMode           = 'new';
         $this->importProgress       = 0;
         $this->importTotal          = 0;
         $this->importSuccessCount   = 0;
@@ -160,14 +147,13 @@ new class extends Component {
                 $header[array_search('course_code', $header)] = 'course';
             }
 
-            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch'];
+            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
             foreach ($required as $col) {
                 if (!in_array($col, $header, true))
                     throw new \Exception("Missing required column: \"{$col}\".");
             }
 
             $this->importTotal = count($rows) - 1;
-            $isComplete        = ($this->importMode === 'complete');
 
             // ── Pre-load lookups ──────────────────────────────────────────────
             $allCourses    = Course::all();
@@ -179,6 +165,14 @@ new class extends Component {
                              ->flip()
                              ->toArray();
 
+            $existingEmails = DB::table('users')
+                                ->whereNotNull('email')
+                                ->where('email', '!=', '')
+                                ->pluck('email')
+                                ->map(fn($e) => strtolower($e))
+                                ->flip()
+                                ->toArray();
+
             $existingNames = DB::table('alumni')
                                ->selectRaw("LOWER(TRIM(first_name)) as fn,
                                             LOWER(TRIM(COALESCE(middle_initial,''))) as mi,
@@ -189,21 +183,11 @@ new class extends Component {
                                ->flip()
                                ->toArray();
 
-            $existingEmails = $isComplete
-                ? DB::table('alumni')
-                      ->whereNotNull('email')
-                      ->where('email', 'not like', '%@pending.local')
-                      ->pluck('email')->flip()->toArray()
-                  + DB::table('users')
-                      ->where('email', 'not like', '%@pending.local')
-                      ->pluck('email')->flip()->toArray()
-                : [];
-
             // ── Validation pass ───────────────────────────────────────────────
             $jobs             = [];
             $seenIds          = [];
-            $seenNames        = [];
             $seenEmails       = [];
+            $seenNames        = [];
             $validationErrors = [];
             $duplicates       = [];
             $maxErrors        = 200;
@@ -220,8 +204,24 @@ new class extends Component {
 
                 $lastName  = trim($row['last_name']   ?? '');
                 $suffix    = trim($row['suffix']      ?? '');
+                $email     = strtolower(trim($row['email'] ?? ''));
                 $fullName  = $this->buildFullName($firstName, $mid, $lastName, $suffix);
                 $label     = 'Row '.($i + 1).($fullName ? " ({$fullName})" : '');
+
+                // ── Email validation ──────────────────────────────────────────
+                if (!$email) {
+                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Email is required and cannot be empty.");
+                    continue;
+                }
+                if (!$this->validateEmail($email)) {
+                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Email \"{$email}\" is not a valid email format.");
+                    continue;
+                }
+                if (isset($existingEmails[$email]) || isset($seenEmails[$email])) {
+                    $duplicates[] = "{$label}: Email \"{$email}\" is already registered.";
+                    $this->importDuplicateCount++;
+                    continue;
+                }
 
                 // ── Name validation ───────────────────────────────────────────
                 if (!$firstName) {
@@ -305,58 +305,21 @@ new class extends Component {
                     continue;
                 }
 
-                // ── Extra fields (complete mode) ──────────────────────────────
-                $extra = [];
-                if ($isComplete) {
-                    $email = $this->sanitizeEmail($row['email'] ?? '');
-
-                    if (!empty($email)) {
-                        if (isset($existingEmails[$email]) || isset($seenEmails[$email])) {
-                            $duplicates[] = "{$label}: Email \"{$email}\" already registered.";
-                            $this->importDuplicateCount++;
-                            continue;
-                        }
-                        $seenEmails[$email] = true;
-                    }
-
-                    $extra = [
-                        // Personal
-                        'email'                => $email,
-                        'gender'               => $this->sanitizeText($row['gender']              ?? ''),
-                        'date_of_birth'        => $this->sanitizeDate($row['date_of_birth']       ?? ''),
-                        'contact_number'       => $this->sanitizeText($row['contact_number']      ?? ''),
-                        'disability'           => $this->sanitizeText($row['disability']          ?? ''),
-                        'dswd_household_no'    => $this->sanitizeText($row['dswd_household_no']   ?? ''),
-                        // Father's name
-                        'father_last_name'     => $this->sanitizeText($row['father_last_name']    ?? ''),
-                        'father_given_name'    => $this->sanitizeText($row['father_given_name']   ?? ''),
-                        'father_middle_name'   => $this->sanitizeText($row['father_middle_name']  ?? ''),
-                        // Mother's maiden name
-                        'mother_last_name'     => $this->sanitizeText($row['mother_last_name']    ?? ''),
-                        'mother_given_name'    => $this->sanitizeText($row['mother_given_name']   ?? ''),
-                        'mother_middle_name'   => $this->sanitizeText($row['mother_middle_name']  ?? ''),
-                        // Address
-                        'address_street'       => $this->sanitizeText($row['address_street']       ?? ''),
-                        'address_barangay'     => $this->sanitizeText($row['address_barangay']     ?? ''),
-                        'address_municipality' => $this->sanitizeText($row['address_municipality'] ?? ''),
-                        'address_province'     => $this->sanitizeText($row['address_province']     ?? ''),
-                    ];
-                }
-
                 $jobs[] = [
                     'fullName'    => $fullName,
                     'firstName'   => $firstName,
                     'mid'         => $mid,
                     'lastName'    => $lastName,
                     'suffix'      => $suffix,
+                    'email'       => $email,
                     'sid'         => $sid,
                     'code'        => $resolvedCode,
                     'courseName'  => $resolvedName,
                     'batchYear'   => $batchYear,
-                    'extra'       => $extra,
                 ];
 
                 $seenIds[$sid]       = true;
+                $seenEmails[$email]  = true;
                 $seenNames[$nameKey] = true;
             }
 
@@ -379,7 +342,7 @@ new class extends Component {
             $chunks      = array_chunk($jobs, $chunkSize);
             $totalChunks = count($chunks);
 
-            DB::transaction(function () use ($chunks, $isComplete, $now, $totalChunks) {
+            DB::transaction(function () use ($chunks, $now, $totalChunks) {
 
                 foreach ($chunks as $chunkIdx => $chunk) {
 
@@ -388,20 +351,15 @@ new class extends Component {
                     $loginEmails = [];
 
                     foreach ($chunk as $job) {
-                        $hasEmail   = $isComplete && !empty($job['extra']['email'] ?? '');
-                        $loginEmail = $hasEmail
-                            ? $job['extra']['email']
-                            : ($job['sid'].'@pending.local');
-
                         $userRows[]    = [
                             'name'       => $job['fullName'],
                             'role'       => 'alumni',
-                            'email'      => $loginEmail,
+                            'email'      => $job['email'],
                             'password'   => Hash::make($this->generateTempPassword($job['sid'], $job['lastName'])),
                             'created_at' => $now,
                             'updated_at' => $now,
                         ];
-                        $loginEmails[] = $loginEmail;
+                        $loginEmails[] = $job['email'];
                     }
 
                     // ── 2. Bulk insert users ──────────────────────────────────
@@ -417,12 +375,7 @@ new class extends Component {
                     $alumniRows = [];
 
                     foreach ($chunk as $job) {
-                        $hasEmail   = $isComplete && !empty($job['extra']['email'] ?? '');
-                        $loginEmail = $hasEmail
-                            ? $job['extra']['email']
-                            : ($job['sid'].'@pending.local');
-
-                        $userId = $userIdMap[$loginEmail] ?? null;
+                        $userId = $userIdMap[$job['email']] ?? null;
                         if (!$userId) continue;
 
                         $row = [
@@ -432,7 +385,7 @@ new class extends Component {
                             'last_name'            => $job['lastName'],
                             'suffix'               => $job['suffix'] ?: null,
                             'student_id'           => $job['sid'],
-                            'email'                => $hasEmail ? $job['extra']['email'] : null,
+                            'email'                => $job['email'],
                             'course_code'          => $job['code'],
                             'course_name'          => $job['courseName'],
                             'batch'                => $job['batchYear'],
@@ -458,27 +411,6 @@ new class extends Component {
                             'created_at'           => $now,
                             'updated_at'           => $now,
                         ];
-
-                        if ($isComplete) {
-                            $e = $job['extra'];
-
-                            $row['profile_completed']    = 1;
-                            $row['gender']               = $e['gender']               ?: null;
-                            $row['date_of_birth']        = $e['date_of_birth']        ?: null;
-                            $row['contact_number']       = $e['contact_number']       ?: null;
-                            $row['disability']           = $e['disability']           ?: null;
-                            $row['dswd_household_no']    = $e['dswd_household_no']    ?: null;
-                            $row['father_last_name']     = $e['father_last_name']     ?: null;
-                            $row['father_given_name']    = $e['father_given_name']    ?: null;
-                            $row['father_middle_name']   = $e['father_middle_name']   ?: null;
-                            $row['mother_last_name']     = $e['mother_last_name']     ?: null;
-                            $row['mother_given_name']    = $e['mother_given_name']    ?: null;
-                            $row['mother_middle_name']   = $e['mother_middle_name']   ?: null;
-                            $row['address_street']       = $e['address_street']       ?: null;
-                            $row['address_barangay']     = $e['address_barangay']     ?: null;
-                            $row['address_municipality'] = $e['address_municipality'] ?: null;
-                            $row['address_province']     = $e['address_province']     ?: null;
-                        }
 
                         $alumniRows[] = $row;
                     }
@@ -523,8 +455,8 @@ new class extends Component {
             <i class="fas fa-file-import text-white text-sm"></i>
         </div>
         <div>
-            <h1 class="text-2xl sm:text-3xl font-extrabold text-[#2b0d3e] leading-tight">Import Alumni Records</h1>
-            <p class="text-sm sm:text-base text-gray-600 font-medium mt-0.5">Upload and process alumni data from CSV or Excel files in bulk</p>
+            <h1 class="text-2xl sm:text-3xl font-semibold text-[#333333] leading-tight">Import Alumni Records</h1>
+            <p class="text-[#666666] text-xl sm:text-base font-normal mt-0.5">Upload and process alumni data from CSV or Excel files in bulk</p>
         </div>
     </div>
 
@@ -533,7 +465,7 @@ new class extends Component {
 
             {{-- Card Header --}}
             <div class="px-5 py-3.5 border-b border-gray-100 bg-gradient-to-r from-[#f9f5ff] to-white">
-                <p class="text-sm font-bold text-gray-500 uppercase tracking-wide">
+                <p class="text-xl font-bold text-gray-500 uppercase tracking-wide">
                     @if($importStep === 'upload')         File Upload
                     @elseif($importStep === 'processing') Processing…
                     @elseif($importStep === 'blocked')    Import Failed
@@ -547,131 +479,42 @@ new class extends Component {
                 {{-- ── UPLOAD STEP ──────────────────────────────────── --}}
                 @if($importStep === 'upload')
 
-                {{-- Mode selector --}}
-                <div>
-                    <p class="text-sm font-bold text-gray-600 uppercase tracking-wide mb-3">Import Mode</p>
-                    <div class="grid grid-cols-2 gap-3">
-                        @foreach([
-                            ['new',      'user-plus', "Basic Alumni Info",        'Core details only'],
-                            ['complete', 'id-card',   "Complete Alumni Profile",  'Full personal details'],
-                        ] as [$mode, $icon, $label, $sub])
-                        <button type="button" wire:click="$set('importMode','{{ $mode }}')"
-                                class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 text-center transition active:scale-[.98]
-                                       {{ $importMode === $mode
-                                           ? 'border-[#7a3f91] bg-[#f5eef9]'
-                                           : 'border-gray-200 hover:border-purple-200 bg-white' }}">
-                            <div class="w-10 h-10 rounded-xl flex items-center justify-center {{ $importMode === $mode ? 'bg-[#7a3f91]' : 'bg-gray-100' }}">
-                                <i class="fas fa-{{ $icon }} text-sm {{ $importMode === $mode ? 'text-white' : 'text-gray-400' }}"></i>
-                            </div>
-                            <div>
-                                <p class="font-bold text-sm {{ $importMode === $mode ? 'text-[#7a3f91]' : 'text-gray-700' }}">{{ $label }}</p>
-                                <p class="text-xs text-gray-400 mt-0.5">{{ $sub }}</p>
-                            </div>
-                            @if($importMode === $mode)
-                                <i class="fas fa-circle-check text-[#7a3f91] text-xs"></i>
-                            @endif
-                        </button>
-                        @endforeach
-                    </div>
-                </div>
-
                 {{-- Column guide --}}
-                @if($importMode === 'new')
                 <div class="p-4 rounded-xl bg-blue-50 border border-blue-200">
-                    <p class="font-bold text-base text-blue-900 mb-2">
+                    <p class="font-bold text-xl text-blue-900 mb-2">
                         <i class="fas fa-circle-info mr-1.5"></i>Required Columns
                     </p>
                     <div class="flex flex-wrap gap-1 mb-2">
-                        @foreach(['first_name','last_name','middle_name','student_id','course','batch'] as $col)
-                            <code class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
+                        @foreach(['first_name','last_name','middle_name','student_id','course','batch','email'] as $col)
+                            <code class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xl font-mono">{{ $col }}</code>
                         @endforeach
                     </div>
-                    <p class="text-xs text-blue-600 mt-1">
-                      <code class="bg-blue-100 px-1 rounded font-mono">suffix</code> &nbsp;·&nbsp;
-                        
+                    <p class="text-xl text-blue-600 mt-1">
+                      <code class="bg-blue-100 px-1 rounded font-mono">suffix</code> 
                     </p>
                 </div>
-                @else
-                <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-200 space-y-3">
-                    <p class="font-bold text-base text-emerald-900">
-                        <i class="fas fa-circle-info mr-1.5"></i>Columns for Complete Alumni Profile
-                    </p>
-
-                    {{-- Required --}}
-                    <div>
-                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Required</p>
-                        <div class="flex flex-wrap gap-1">
-                            @foreach(['first_name','last_name','middle_name','student_id','course','batch'] as $col)
-                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                            @endforeach
-                        </div>
-                    </div>
-
-                    {{-- Personal --}}
-                    <div>
-                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Personal</p>
-                        <div class="flex flex-wrap gap-1">
-                            @foreach(['suffix','email','gender','date_of_birth','contact_number','disability','dswd_household_no'] as $col)
-                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                            @endforeach
-                        </div>
-                    </div>
-
-                    {{-- Father --}}
-                    <div>
-                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Father's Name</p>
-                        <div class="flex flex-wrap gap-1">
-                            @foreach(['father_last_name','father_given_name','father_middle_name'] as $col)
-                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                            @endforeach
-                        </div>
-                    </div>
-
-                    {{-- Mother --}}
-                    <div>
-                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Mother's Maiden Name</p>
-                        <div class="flex flex-wrap gap-1">
-                            @foreach(['mother_last_name','mother_given_name','mother_middle_name'] as $col)
-                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                            @endforeach
-                        </div>
-                    </div>
-
-                    {{-- Address --}}
-                    <div>
-                        <p class="text-xs font-extrabold text-emerald-700 uppercase tracking-widest mb-1">Address</p>
-                        <div class="flex flex-wrap gap-1">
-                            @foreach(['address_street','address_barangay','address_municipality','address_province'] as $col)
-                                <code class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-mono">{{ $col }}</code>
-                            @endforeach
-                        </div>
-                    </div>
-
-                    
-                </div>
-                @endif
 
                 {{-- File picker --}}
                 <div>
-                    <p class="text-sm font-bold text-gray-600 uppercase tracking-wide mb-2">Upload File</p>
+                    <p class="text-xl font-bold text-gray-600 uppercase tracking-wide mb-2">Upload File</p>
                     <div class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#faf5ff] transition"
                          @click="document.getElementById('importFileInput').click()">
                         @if($importFile)
                             <div class="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center bg-emerald-100">
                                 <i class="fas fa-file-circle-check text-2xl text-emerald-500"></i>
                             </div>
-                            <p class="text-emerald-700 font-bold text-base">{{ $importFile->getClientOriginalName() }}</p>
-                            <p class="text-gray-400 text-sm mt-0.5">Click to change file</p>
+                            <p class="text-emerald-700 font-bold text-xl">{{ $importFile->getClientOriginalName() }}</p>
+                            <p class="text-gray-400 text-xl mt-0.5">Click to change file</p>
                         @else
                             <div class="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center bg-gray-100">
                                 <i class="fas fa-file-arrow-up text-2xl text-gray-300"></i>
                             </div>
-                            <p class="text-gray-700 font-semibold text-base">Click to choose file</p>
-                            <p class="text-gray-400 text-sm mt-0.5">CSV or Excel (.xlsx, .xls)</p>
+                            <p class="text-gray-700 font-semibold text-xl">Click to choose file</p>
+                            <p class="text-gray-400 text-xl mt-0.5">CSV or Excel (.xlsx, .xls)</p>
                         @endif
                         <input type="file" id="importFileInput" wire:model="importFile" accept=".csv,.xlsx,.xls" class="hidden">
                     </div>
-                    <div wire:loading wire:target="importFile" class="mt-2 text-sm text-[#7a3f91] flex items-center gap-1.5">
+                    <div wire:loading wire:target="importFile" class="mt-2 text-xl text-[#7a3f91] flex items-center gap-1.5">
                         <i class="fas fa-spinner animate-spin"></i> Reading file…
                     </div>
                 </div>
@@ -679,14 +522,14 @@ new class extends Component {
                 {{-- Buttons --}}
                 <div class="flex gap-3">
                     <a href="{{ route('registrar.alumni') }}" wire:navigate
-                       class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition text-center active:scale-[.99]">
+                       class="flex-1 px-5 py-2.5 rounded-xl text-xl font-bold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition text-center active:scale-[.99]">
                         Cancel
                     </a>
                     <button type="button"
                             wire:click="processImport"
                             @if(!$importFile) disabled @endif
                             wire:loading.attr="disabled" wire:target="processImport"
-                            class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:opacity-90 active:scale-[.99]"
+                            class="flex-1 px-5 py-2.5 rounded-xl text-xl font-bold text-white transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:opacity-90 active:scale-[.99]"
                             style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
                         <span wire:loading wire:target="processImport">
                             <i class="fas fa-spinner animate-spin"></i> Processing…
@@ -705,16 +548,16 @@ new class extends Component {
                          style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
                         <i class="fas fa-spinner animate-spin text-white text-2xl"></i>
                     </div>
-                    <p class="font-bold text-gray-800 text-lg mb-1">
+                    <p class="font-bold text-gray-800 text-xl mb-1">
                         Processing {{ $importProgress }} / {{ $importTotal }}
                     </p>
-                    <p class="text-sm text-gray-400 mb-5">{{ $importStatus }}</p>
+                    <p class="text-xl text-gray-400 mb-5">{{ $importStatus }}</p>
                     <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                         @php $pct = $importTotal > 0 ? round(($importProgress / $importTotal) * 100) : 0; @endphp
                         <div class="h-full rounded-full transition-all duration-300"
                              style="width:{{ $pct }}%; background:linear-gradient(90deg,#7a3f91,#9b59b6);"></div>
                     </div>
-                    <p class="text-sm text-gray-400 mt-2">{{ $pct }}% complete</p>
+                    <p class="text-xl text-gray-400 mt-2">{{ $pct }}% complete</p>
                 </div>
 
                 {{-- ── BLOCKED STEP ─────────────────────────────────── --}}
@@ -725,12 +568,12 @@ new class extends Component {
                         <i class="fas fa-xmark text-red-600"></i>
                     </div>
                     <div>
-                        <p class="font-bold text-red-900">Import Failed</p>
-                        <p class="text-sm text-red-700 mt-0.5">{{ $importStatus }}</p>
+                        <p class="font-bold text-red-900 text-xl">Import Failed</p>
+                        <p class="text-xl text-red-700 mt-0.5">{{ $importStatus }}</p>
                     </div>
                 </div>
                 <button wire:click="resetImport"
-                        class="w-full bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition active:scale-[.99]">
+                        class="w-full bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-xl font-bold hover:bg-gray-50 transition active:scale-[.99]">
                     <i class="fas fa-rotate-left mr-2"></i>Try Again
                 </button>
 
@@ -751,16 +594,15 @@ new class extends Component {
                     </div>
                     <div>
                         @if($hasNew)
-                            <p class="font-bold text-emerald-900">Import Complete</p>
-                            <p class="text-sm text-emerald-700 mt-0.5">
-                                <strong>{{ $importSuccessCount }}</strong> record(s) imported as
-                                <strong>{{ $importMode === 'complete' ? "Complete Alumni Profile" : "Basic Alumni Info" }}</strong> — all <strong>VERIFIED</strong>
+                            <p class="font-bold text-emerald-900 text-xl">Import Complete</p>
+                            <p class="text-xl text-emerald-700 mt-0.5">
+                                <strong>{{ $importSuccessCount }}</strong> record(s) imported — all <strong>VERIFIED</strong>
                                 @if($hasDups) · {{ $importDuplicateCount }} duplicate(s) skipped @endif
                                 @if($hasErrors) · {{ $importFailCount }} error(s) @endif
                             </p>
                         @else
-                            <p class="font-bold text-amber-900">Nothing Imported</p>
-                            <p class="text-sm text-amber-700 mt-0.5">All records were duplicates or had errors.</p>
+                            <p class="font-bold text-amber-900 text-xl">Nothing Imported</p>
+                            <p class="text-xl text-amber-700 mt-0.5">All records were duplicates or had errors.</p>
                         @endif
                     </div>
                 </div>
@@ -774,7 +616,7 @@ new class extends Component {
                     ] as [$bg, $border, $clr, $num, $lbl])
                     <div class="rounded-xl p-3 text-center" style="background:{{ $bg }};border:1px solid {{ $border }};">
                         <p class="text-xl font-extrabold" style="color:{{ $clr }};">{{ $num }}</p>
-                        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mt-0.5">{{ $lbl }}</p>
+                        <p class="text-xl font-bold text-gray-400 uppercase tracking-wide mt-0.5">{{ $lbl }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -782,13 +624,13 @@ new class extends Component {
                 @if($hasErrors)
                 <div class="border border-red-200 rounded-xl overflow-hidden">
                     <div class="px-4 py-2.5 bg-red-50 border-b border-red-100 flex items-center gap-2">
-                        <i class="fas fa-circle-xmark text-red-400 text-xs"></i>
-                        <p class="font-bold text-red-900 text-sm">Validation Errors</p>
-                        <span class="ml-auto text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">{{ count($importErrors) }}</span>
+                        <i class="fas fa-circle-xmark text-red-400 text-xl"></i>
+                        <p class="font-bold text-red-900 text-xl">Validation Errors</p>
+                        <span class="ml-auto text-xl bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">{{ count($importErrors) }}</span>
                     </div>
                     <ul class="divide-y divide-red-50 overflow-y-auto" style="max-height:200px;">
                         @foreach($importErrors as $err)
-                        <li class="px-4 py-2.5 text-sm text-red-700 flex items-start gap-2">
+                        <li class="px-4 py-2.5 text-xl text-red-700 flex items-start gap-2">
                             <i class="fas fa-circle-xmark text-red-300 mt-0.5 shrink-0"></i>
                             <span>{{ $err }}</span>
                         </li>
@@ -800,13 +642,13 @@ new class extends Component {
                 @if($hasDups && count($importDuplicates) > 0)
                 <div class="border border-amber-200 rounded-xl overflow-hidden">
                     <div class="px-4 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
-                        <i class="fas fa-copy text-amber-400 text-xs"></i>
-                        <p class="font-bold text-amber-900 text-sm">Duplicates Skipped</p>
-                        <span class="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{{ $importDuplicateCount }}</span>
+                        <i class="fas fa-copy text-amber-400 text-xl"></i>
+                        <p class="font-bold text-amber-900 text-xl">Duplicates Skipped</p>
+                        <span class="ml-auto text-xl bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{{ $importDuplicateCount }}</span>
                     </div>
                     <ul class="divide-y divide-amber-50 overflow-y-auto" style="max-height:160px;">
                         @foreach($importDuplicates as $dup)
-                        <li class="px-4 py-2.5 text-sm text-amber-700 flex items-start gap-2">
+                        <li class="px-4 py-2.5 text-xl text-amber-700 flex items-start gap-2">
                             <i class="fas fa-triangle-exclamation text-amber-300 mt-0.5 shrink-0"></i>
                             <span>{{ $dup }}</span>
                         </li>
@@ -817,11 +659,11 @@ new class extends Component {
 
                 <div class="flex gap-3">
                     <button wire:click="resetImport"
-                            class="flex-1 bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-gray-50 transition active:scale-[.99]">
+                            class="flex-1 bg-white border border-gray-200 text-gray-700 px-5 py-2.5 rounded-xl text-xl font-bold hover:bg-gray-50 transition active:scale-[.99]">
                         <i class="fas fa-rotate-left mr-2"></i>Import Another
                     </button>
                     <a href="{{ route('registrar.alumni') }}" wire:navigate
-                       class="flex-1 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition text-center hover:opacity-90 active:scale-[.99]"
+                       class="flex-1 text-white px-5 py-2.5 rounded-xl text-xl font-bold transition text-center hover:opacity-90 active:scale-[.99]"
                        style="background:linear-gradient(135deg,#7a3f91,#9b59b6);">
                         Done
                     </a>
@@ -831,4 +673,4 @@ new class extends Component {
             </div>
         </div>
     </div>
-</div>
+</d
