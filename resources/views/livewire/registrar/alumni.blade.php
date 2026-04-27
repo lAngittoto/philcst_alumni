@@ -8,6 +8,7 @@ use Livewire\WithPagination;
 use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 new class extends Component {
     use WithPagination;
@@ -21,8 +22,9 @@ new class extends Component {
     public string $alumniSort   = 'recent';
 
     // ── View profile ──────────────────────────────────────────────
-    public ?int   $viewingProfileId = null;
-    public        $viewingProfile   = null;
+    public ?int   $viewingProfileId  = null;
+    public        $viewingProfile    = null;
+    public        $viewingEmployment = null;
 
     // ── Modal ─────────────────────────────────────────────────────
     public string $activeModal = '';
@@ -130,6 +132,15 @@ new class extends Component {
                 'created_at', 'updated_at',
             ])->findOrFail($id)->toArray();
 
+            // ── Fetch current employment record ──
+            $emp = DB::table('employment_trackings')
+                ->where('alumni_id', $id)
+                ->whereNull('deleted_at')
+                ->latest('created_at')
+                ->first();
+
+            $this->viewingEmployment = $emp ? (array) $emp : null;
+
             $this->viewingProfileId = $id;
             $this->activeModal      = 'viewProfile';
         } catch (\Exception $e) {
@@ -139,9 +150,10 @@ new class extends Component {
 
     public function closeModal(): void
     {
-        $this->activeModal      = '';
-        $this->viewingProfileId = null;
-        $this->viewingProfile   = null;
+        $this->activeModal       = '';
+        $this->viewingProfileId  = null;
+        $this->viewingProfile    = null;
+        $this->viewingEmployment = null;
     }
 };
 ?>
@@ -372,6 +384,52 @@ new class extends Component {
 @php
     // Helper — uppercase shorthand used throughout the modal
     $up = fn(?string $v): string => strtoupper(trim($v ?? ''));
+
+    // ── Employment helpers ──
+    $emp = $viewingEmployment;
+
+    $empStatusMap = [
+        'employed'      => ['Employed',      'fa-user-tie',        'text-violet-700', 'bg-violet-50 border-violet-200'],
+        'self_employed' => ['Self-Employed',  'fa-store',           'text-blue-700',   'bg-blue-50 border-blue-200'],
+        'unemployed'    => ['Unemployed',     'fa-magnifying-glass','text-orange-700', 'bg-orange-50 border-orange-200'],
+    ];
+    $empTypeMap = [
+        'full_time'     => 'Full-Time',
+        'part_time'     => 'Part-Time',
+        'contractual'   => 'Contractual',
+        'project_based' => 'Project-Based',
+        'internship'    => 'Internship',
+    ];
+    $relevanceMap = [
+        'yes'       => ['Related to Course',    'text-emerald-700', 'bg-emerald-50 border-emerald-200', 'fa-check-circle'],
+        'no'        => ['Not Related to Course', 'text-red-700',     'bg-red-50 border-red-200',         'fa-times-circle'],
+        'partially' => ['Partially Related',     'text-amber-700',   'bg-amber-50 border-amber-200',     'fa-adjust'],
+    ];
+    $unempMap = [
+        'seeking_employment' => ['Actively Seeking Employment', 'text-violet-700', 'bg-violet-50 border-violet-200'],
+        'not_looking'        => ['Not Currently Looking',       'text-gray-700',   'bg-gray-100 border-gray-300'],
+    ];
+
+    $empStatus   = $emp['employment_status'] ?? null;
+    $isWorking   = in_array($empStatus, ['employed', 'self_employed']);
+    $statusInfo  = $empStatusMap[$empStatus] ?? null;
+    $relInfo     = $relevanceMap[$emp['course_relevance'] ?? ''] ?? null;
+    $unempInfo   = $unempMap[$emp['unemployment_status'] ?? ''] ?? null;
+    $empTypeLbl  = $empTypeMap[$emp['employment_type'] ?? ''] ?? null;
+    $dateHired   = !empty($emp['date_hired'])
+        ? \Carbon\Carbon::parse($emp['date_hired'])->format('F j, Y')
+        : null;
+    $submittedAt = !empty($emp['created_at'])
+        ? \Carbon\Carbon::parse($emp['created_at'])->format('M j, Y')
+        : null;
+    $careerPath  = !empty($emp['career_path']) ? json_decode($emp['career_path'], true) : [];
+    $cpLabels    = [
+        'ofw'                   => 'OFW',
+        'freelancer'            => 'Freelancer',
+        'entrepreneur'          => 'Entrepreneur',
+        'career_shifter'        => 'Career Shifter',
+        'industry_professional' => 'Industry Professional',
+    ];
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto"
      style="background:rgba(27,6,46,0.55); backdrop-filter:blur(4px);"
@@ -579,6 +637,172 @@ new class extends Component {
                     </div>
                 </div>
             </div>
+
+            {{-- ══ SECTION 5: Employment Status ══════════════════════════════ --}}
+            <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0]"
+                     style="background:#F9F7FC;">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
+                         style="background:#7A3F91;">
+                        <i class="fas fa-briefcase text-white" style="font-size:12px;"></i>
+                    </div>
+                    <p class="font-semibold text-[#333333] text-xl uppercase tracking-wide">Employment Status</p>
+                    @if($emp && $submittedAt)
+                        <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F5F5F5] text-[#666666]">
+                            <i class="fas fa-clock text-xs"></i> Updated {{ $submittedAt }}
+                        </span>
+                    @endif
+                </div>
+
+                @if(!$emp)
+                    {{-- No record yet --}}
+                    <div class="p-5 flex flex-col items-center gap-2 text-center">
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center bg-amber-50 border border-amber-200 mb-1">
+                            <i class="fas fa-triangle-exclamation text-amber-500 text-base"></i>
+                        </div>
+                        <p class="text-sm font-semibold text-[#666666]">No employment record submitted yet.</p>
+                        <p class="text-xs text-[#999999]">The alumni has not filled in their employment information.</p>
+                    </div>
+                @else
+                    <div class="p-3 space-y-3">
+
+                        {{-- Row 1: Status badge + employment type + work location --}}
+                        <div class="flex flex-wrap gap-2 items-center">
+                            {{-- Employment status badge --}}
+                            @if($statusInfo)
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold border
+                                             {{ $statusInfo[2] }} {{ $statusInfo[3] }}">
+                                    <i class="fas {{ $statusInfo[1] }} text-xs"></i>
+                                    {{ $statusInfo[0] }}
+                                </span>
+                            @endif
+
+                            {{-- Employment type (for working alumni) --}}
+                            @if($isWorking && $empTypeLbl)
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border
+                                             text-[#555555] bg-gray-100 border-gray-300">
+                                    <i class="fas fa-clock text-xs text-gray-400"></i>
+                                    {{ $empTypeLbl }}
+                                </span>
+                            @endif
+
+                            {{-- Work location --}}
+                            @if($isWorking && !empty($emp['work_location']))
+                                @php
+                                    $locClass = $emp['work_location'] === 'abroad'
+                                        ? 'text-sky-700 bg-sky-50 border-sky-200'
+                                        : 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                                    $locIcon  = $emp['work_location'] === 'abroad'
+                                        ? 'fa-earth-asia'
+                                        : 'fa-location-dot';
+                                    $locLabel = ucfirst($emp['work_location']);
+                                @endphp
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border {{ $locClass }}">
+                                    <i class="fas {{ $locIcon }} text-xs"></i>
+                                    {{ $locLabel }}
+                                </span>
+                            @endif
+
+                            {{-- Unemployment sub-status --}}
+                            @if($empStatus === 'unemployed' && $unempInfo)
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border
+                                             {{ $unempInfo[1] }} {{ $unempInfo[2] }}">
+                                    <i class="fas fa-person-walking text-xs"></i>
+                                    {{ $unempInfo[0] }}
+                                </span>
+                            @endif
+                        </div>
+
+                        {{-- Row 2: Company + Job Title (for employed/self-employed) --}}
+                        @if($isWorking && (!empty($emp['company_name']) || !empty($emp['job_title'])))
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                @if(!empty($emp['company_name']))
+                                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">
+                                            {{ $empStatus === 'self_employed' ? 'Business Name' : 'Company Name' }}
+                                        </p>
+                                        <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
+                                            {{ strtoupper($emp['company_name']) }}
+                                        </p>
+                                    </div>
+                                @endif
+                                @if(!empty($emp['job_title']))
+                                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">Job Title / Position</p>
+                                        <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
+                                            {{ strtoupper($emp['job_title']) }}
+                                        </p>
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
+
+                        {{-- Row 3: Date Hired + Course Relevance (for employed/self-employed) --}}
+                        @if($isWorking)
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                @if($dateHired)
+                                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">Date Hired</p>
+                                        <p class="text-sm font-semibold text-[#333333] flex items-center gap-1.5">
+                                            <i class="fas fa-calendar-check text-violet-400 text-xs"></i>
+                                            {{ $dateHired }}
+                                        </p>
+                                    </div>
+                                @endif
+                                @if($relInfo)
+                                    <div class="bg-white border border-[#E8E0F0] rounded-lg p-2.5">
+                                        <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-0.5">Course Relevance</p>
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border
+                                                     {{ $relInfo[1] }} {{ $relInfo[2] }}">
+                                            <i class="fas {{ $relInfo[3] }} text-xs"></i>
+                                            {{ $relInfo[0] }}
+                                        </span>
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
+
+                        {{-- Row 4: Career path tags --}}
+                        @if($isWorking && count($careerPath))
+                            <div class="pt-1">
+                                <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-1.5">Career Path</p>
+                                <div class="flex flex-wrap gap-1.5">
+                                    @foreach($careerPath as $cpKey)
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border
+                                                     text-cyan-700 bg-cyan-50 border-cyan-200">
+                                            <i class="fas fa-check text-xs"></i>
+                                            {{ $cpLabels[$cpKey] ?? $cpKey }}
+                                        </span>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+
+                        {{-- Row 5: Further Education --}}
+                        @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none')
+                            @php
+                                $eduMap = [
+                                    'pursuing_masteral'  => ['Pursuing Masteral',  'fa-scroll',     'text-blue-700',   'bg-blue-50 border-blue-200'],
+                                    'pursuing_doctorate' => ['Pursuing Doctorate', 'fa-hat-wizard', 'text-violet-700', 'bg-violet-50 border-violet-200'],
+                                ];
+                                $eduInfo = $eduMap[$emp['education_status']] ?? null;
+                            @endphp
+                            @if($eduInfo)
+                                <div class="pt-1 border-t border-[#F3F4F6]">
+                                    <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide mb-1.5">Further Education</p>
+                                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border
+                                                 {{ $eduInfo[2] }} {{ $eduInfo[3] }}">
+                                        <i class="fas {{ $eduInfo[1] }} text-xs"></i>
+                                        {{ $eduInfo[0] }}
+                                    </span>
+                                </div>
+                            @endif
+                        @endif
+
+                    </div>
+                @endif
+            </div>
+            {{-- ══ END Employment Status Section ══ --}}
 
             {{-- Close Button --}}
             <button wire:click="closeModal"

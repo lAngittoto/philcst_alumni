@@ -1,7 +1,6 @@
 <?php
 /**
  * FILE: resources/views/livewire/organizer/dashboard.blade.php
- * UPDATED: Larger font sizes for better readability
  */
 
 use Livewire\Volt\Component;
@@ -11,6 +10,7 @@ use App\Models\JobPosting;
 use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 new class extends Component {
 
@@ -53,6 +53,21 @@ new class extends Component {
     }
 
     #[Computed]
+    public function organizerBatch(): string
+    {
+        return Auth::user()?->organizer?->batch ?? '';
+    }
+
+    #[Computed]
+    public function allowedCourseCodes(): array
+    {
+        $dept = Auth::user()?->organizer?->department;
+        if (!$dept) return [];
+        return DB::table('courses')->where('college', $dept)->pluck('code')->toArray();
+    }
+
+    // ── Events ───────────────────────────────────────────────────
+    #[Computed]
     public function totalEvents(): int
     {
         return OrganizerEvent::where('organizer_id', $this->organizerId)
@@ -64,56 +79,78 @@ new class extends Component {
     public function pendingEvents(): int
     {
         return OrganizerEvent::where('organizer_id', $this->organizerId)
-            ->where('status', 'PENDING')
-            ->count();
+            ->where('status', 'PENDING')->count();
     }
 
     #[Computed]
     public function approvedEvents(): int
     {
         return OrganizerEvent::where('organizer_id', $this->organizerId)
-            ->where('status', 'APPROVED')
-            ->count();
+            ->where('status', 'APPROVED')->count();
     }
 
     #[Computed]
     public function rejectedEvents(): int
     {
         return OrganizerEvent::where('organizer_id', $this->organizerId)
-            ->where('status', 'REJECTED')
-            ->count();
+            ->where('status', 'REJECTED')->count();
     }
 
+    // ── Jobs ─────────────────────────────────────────────────────
     #[Computed]
     public function totalJobs(): int
     {
         return JobPosting::where('organizer_id', $this->organizerId)
-            ->whereIn('status', ['ACTIVE', 'INACTIVE'])
-            ->count();
+            ->whereIn('status', ['ACTIVE', 'INACTIVE'])->count();
     }
 
     #[Computed]
     public function activeJobs(): int
     {
         return JobPosting::where('organizer_id', $this->organizerId)
-            ->where('status', 'ACTIVE')
-            ->count();
+            ->where('status', 'ACTIVE')->count();
     }
 
     #[Computed]
     public function inactiveJobs(): int
     {
         return JobPosting::where('organizer_id', $this->organizerId)
-            ->where('status', 'INACTIVE')
-            ->count();
+            ->where('status', 'INACTIVE')->count();
     }
 
+    // ── Alumni / Employment ──────────────────────────────────────
     #[Computed]
     public function totalAlumniInCollege(): int
     {
-        $dept = Auth::user()?->organizer?->department;
-        if (!$dept) return 0;
-        return Alumni::whereHas('course', fn($q) => $q->where('college', $dept))->count();
+        $q = DB::table('alumni')->whereNull('deleted_at');
+        if ($this->organizerBatch)             $q->where('batch', $this->organizerBatch);
+        if (!empty($this->allowedCourseCodes)) $q->whereIn('course_code', $this->allowedCourseCodes);
+        return $q->count();
+    }
+
+    #[Computed]
+    public function empCounts(): array
+    {
+        $base = DB::table('alumni as a')
+            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
+            ->whereNull('a.deleted_at')
+            ->whereNull('et.deleted_at');
+
+        if ($this->organizerBatch)             $base->where('a.batch', $this->organizerBatch);
+        if (!empty($this->allowedCourseCodes)) $base->whereIn('a.course_code', $this->allowedCourseCodes);
+
+        $rows = (clone $base)
+            ->select('et.employment_status', DB::raw('COUNT(*) as total'))
+            ->groupBy('et.employment_status')
+            ->get()->keyBy('employment_status');
+
+        $employed   = (int) ($rows['employed']->total      ?? 0);
+        $self       = (int) ($rows['self_employed']->total ?? 0);
+        $unemployed = (int) ($rows['unemployed']->total    ?? 0);
+        $submitted  = $employed + $self + $unemployed;
+        $noRecord   = max($this->totalAlumniInCollege - $submitted, 0);
+
+        return compact('employed', 'self', 'unemployed', 'submitted', 'noRecord');
     }
 
     #[Computed]
@@ -124,8 +161,10 @@ new class extends Component {
         $courses = Course::where('college', $dept)->orderBy('code')->get();
         $result  = [];
         foreach ($courses as $course) {
+            $q = Alumni::where('course_code', $course->code);
+            if ($this->organizerBatch) $q->where('batch', $this->organizerBatch);
             $result[$course->code] = [
-                'count' => Alumni::where('course_code', $course->code)->count(),
+                'count' => $q->count(),
                 'name'  => $course->name ?? $course->code,
             ];
         }
@@ -138,8 +177,7 @@ new class extends Component {
         return OrganizerEvent::where('organizer_id', $this->organizerId)
             ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED'])
             ->orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
+            ->limit(5)->get();
     }
 
     #[Computed]
@@ -148,8 +186,7 @@ new class extends Component {
         return JobPosting::where('organizer_id', $this->organizerId)
             ->whereIn('status', ['ACTIVE', 'INACTIVE'])
             ->orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
+            ->limit(5)->get();
     }
 
     #[Computed]
@@ -171,319 +208,399 @@ new class extends Component {
 };
 ?>
 
-<div class="min-h-screen bg-gray-50">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-8 max-w-screen-2xl mx-auto" style="min-height:90vh;">
 
-    {{-- ══ HEADER ══ --}}
-    <div class="max-w-screen-2xl mx-auto px-5 sm:px-8 lg:px-10 pt-7 pb-0">
-        <div class="rounded-2xl px-6 sm:px-8 py-6 sm:py-7" style="background:#7a3f91;">
-            <div class="flex items-center gap-4">
-                <div class="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
-                     style="background:rgba(255,255,255,.18);">
-                    <i class="fas fa-gauge-high text-white text-xl"></i>
-                </div>
-                <div>
-                    <h1 class="text-2xl sm:text-3xl font-bold text-white leading-snug">
-                        {{ $this->greeting }}, {{ $this->organizerName }}
-                    </h1>
-                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                        <span class="text-white/80 text-sm font-normal">
-                            <i class="fas fa-building-columns mr-1.5 text-white/60"></i>{{ $this->organizerDepartment }}
-                        </span>
-                        <span class="text-white/30 text-sm select-none">·</span>
-                        <span class="text-white/70 text-sm font-normal">
-                            <i class="fas fa-calendar-day mr-1.5 text-white/50"></i>{{ $this->todayDate }}
-                        </span>
-                    </div>
-                </div>
-            </div>
+    {{-- ── PAGE HEADER ──────────────────────────────────────────── --}}
+    <div class="flex items-center gap-3 mb-6">
+        <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <i class="fas fa-gauge-high text-white text-base"></i>
         </div>
-    </div>
-
-    {{-- ══ MAIN CONTENT ══ --}}
-    <div class="max-w-screen-2xl mx-auto px-5 sm:px-8 lg:px-10 py-7">
-
-        {{-- ── METRICS GRID ── --}}
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-7">
-
-            {{-- 1 · Total Alumni --}}
-            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-purple-300 transition-all p-6">
-                <div class="mb-4">
-                    <div class="w-11 h-11 rounded-xl flex items-center justify-center"
-                         style="background:rgba(122,63,145,.12);">
-                        <i class="fas fa-graduation-cap text-base" style="color:#7a3f91;"></i>
-                    </div>
-                </div>
-                <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Total Alumni</h3>
-                <p class="text-4xl font-bold mb-4" style="color:#7a3f91;">
-                    {{ $this->totalAlumniInCollege }}
-                </p>
-                @if(count($this->alumniByDepartment) > 0)
-                    <div class="flex flex-wrap gap-2">
-                        @foreach($this->alumniByDepartment as $code => $info)
-                            <div class="relative group inline-flex">
-                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-sm font-medium cursor-default select-none"
-                                      style="background:rgba(122,63,145,.08);color:#7a3f91;border:1px solid rgba(122,63,145,.2);">
-                                    {{ $code }}<span class="opacity-40 mx-0.5">·</span>{{ $info['count'] }}
-                                </span>
-                                {{-- Tooltip --}}
-                                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-20
-                                            pointer-events-none opacity-0 group-hover:opacity-100
-                                            transition-opacity duration-150">
-                                    <div class="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-white shadow-lg"
-                                         style="background:#3b1a50;">
-                                        {{ $info['name'] }}
-                                    </div>
-                                    <div class="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent"
-                                         style="border-top-color:#3b1a50;"></div>
-                                </div>
-                            </div>
-                        @endforeach
-                    </div>
-                @else
-                    <p class="text-sm text-gray-500">
-                        <i class="fas fa-info-circle mr-1"></i>{{ $this->organizerDepartment }}
-                    </p>
+        <div>
+            <h1 class="text-3xl font-semibold text-[#333333] leading-tight">
+                {{ $this->greeting }}, {{ $this->organizerName }}
+            </h1>
+            <p class="text-xl text-[#666666] font-normal flex flex-wrap items-center gap-x-2">
+                <span>{{ $this->todayDate }}</span>
+                @if($this->organizerDepartment)
+                    <span class="text-[#c0a0d8]">·</span>
+                    <span class="font-semibold" style="color:#7A3F91;">{{ $this->organizerDepartment }}</span>
                 @endif
-            </div>
-
-            {{-- 2 · Total Events --}}
-            <a href="{{ route('organizer.event/organizer') }}"
-               class="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-purple-300 transition-all p-6 block">
-                <div class="mb-4">
-                    <div class="w-11 h-11 rounded-xl bg-purple-100 flex items-center justify-center group-hover:bg-purple-200 transition">
-                        <i class="fas fa-calendar-days text-base" style="color:#7a3f91;"></i>
-                    </div>
-                </div>
-                <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Total Events</h3>
-                <p class="text-4xl font-bold text-gray-800 mb-4">{{ $this->totalEvents }}</p>
-                <div class="flex flex-wrap items-center gap-3 text-sm font-medium">
-                    <span class="flex items-center gap-1.5 text-red-500">
-                        <i class="fas fa-circle-xmark"></i>{{ $this->rejectedEvents }} Rejected
-                    </span>
-                    <span class="flex items-center gap-1.5 text-emerald-600">
-                        <i class="fas fa-circle-check"></i>{{ $this->approvedEvents }} Approved
-                    </span>
-                </div>
-            </a>
-
-            {{-- 3 · Pending Review --}}
-            <a href="{{ route('organizer.event/organizer') }}"
-               class="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-yellow-300 transition-all p-6 block">
-                <div class="mb-4">
-                    <div class="w-11 h-11 rounded-xl bg-yellow-100 flex items-center justify-center group-hover:bg-yellow-200 transition">
-                        <i class="fas fa-hourglass-end text-yellow-500 text-base"></i>
-                    </div>
-                </div>
-                <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Pending Review</h3>
-                <p class="text-4xl font-bold text-yellow-600 mb-4">{{ $this->pendingEvents }}</p>
-                <p class="text-sm text-gray-500">
-                    <i class="fas fa-info-circle mr-1 text-gray-400"></i>Awaiting admin approval
-                </p>
-            </a>
-
-            {{-- 4 · Job Postings --}}
-            <a href="{{ route('organizer.job/management') }}"
-               class="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all p-6 block">
-                <div class="mb-4">
-                    <div class="w-11 h-11 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition">
-                        <i class="fas fa-briefcase text-blue-500 text-base"></i>
-                    </div>
-                </div>
-                <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-2">Job Postings</h3>
-                <p class="text-4xl font-bold text-gray-800 mb-4">{{ $this->totalJobs }}</p>
-                <div class="flex flex-wrap items-center gap-3 text-sm font-medium">
-                    <span class="flex items-center gap-1.5 text-emerald-600">
-                        <i class="fas fa-circle text-[9px]"></i>{{ $this->activeJobs }} Active
-                    </span>
-                    <span class="flex items-center gap-1.5 text-gray-400">
-                        <i class="fas fa-circle text-[9px]"></i>{{ $this->inactiveJobs }} Inactive
-                    </span>
-                </div>
-            </a>
-
-        </div>
-
-        {{-- ── TWO-COLUMN LAYOUT ── --}}
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-            {{-- LEFT: recent panels (2/3) --}}
-            <div class="lg:col-span-2 flex flex-col gap-6">
-
-                {{-- Recent Events --}}
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-6 py-4 border-b border-gray-100 flex items-center gap-3" style="background:#f9f5fc;">
-                        <div class="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
-                            <i class="fas fa-calendar-days text-sm" style="color:#7a3f91;"></i>
-                        </div>
-                        <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Recent Events</h2>
-                    </div>
-                    <div class="divide-y divide-gray-100 overflow-y-auto" style="min-height:320px;max-height:320px;">
-                        @forelse($this->recentEvents as $event)
-                            @php
-                                $sc = match($event->status) {
-                                    'PENDING'  => ['bg'=>'bg-yellow-50','text'=>'text-yellow-700','border'=>'border-yellow-200','icon'=>'hourglass-end'],
-                                    'APPROVED' => ['bg'=>'bg-emerald-50','text'=>'text-emerald-700','border'=>'border-emerald-200','icon'=>'circle-check'],
-                                    'REJECTED' => ['bg'=>'bg-red-50','text'=>'text-red-600','border'=>'border-red-200','icon'=>'circle-xmark'],
-                                    default    => ['bg'=>'bg-gray-50','text'=>'text-gray-500','border'=>'border-gray-200','icon'=>'circle'],
-                                };
-                            @endphp
-                            <a href="{{ route('organizer.event/organizer') }}"
-                               class="px-6 py-4 hover:bg-purple-50/40 transition-colors block">
-                                <div class="flex items-start justify-between gap-3">
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-base font-semibold text-gray-800 truncate">{{ $event->title }}</p>
-                                        <p class="text-sm text-gray-500 mt-1">
-                                            <i class="fas fa-calendar text-gray-400 mr-1"></i>
-                                            {{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}
-                                        </p>
-                                    </div>
-                                    <span class="px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 border {{ $sc['bg'] }} {{ $sc['text'] }} {{ $sc['border'] }}">
-                                        <i class="fas fa-{{ $sc['icon'] }} mr-1.5 text-[11px]"></i>{{ $event->status }}
-                                    </span>
-                                </div>
-                            </a>
-                        @empty
-                            <div class="flex flex-col items-center justify-center py-16 text-center" style="height:320px;">
-                                <i class="fas fa-calendar-days text-4xl text-gray-200 block mb-3"></i>
-                                <p class="text-base font-medium text-gray-400">No events posted yet</p>
-                                <a href="{{ route('organizer.event/organizer') }}"
-                                   class="text-sm font-semibold hover:underline mt-2 inline-block" style="color:#7a3f91;">
-                                    Create your first event →
-                                </a>
-                            </div>
-                        @endforelse
-                    </div>
-                </div>
-
-                {{-- Recent Job Postings --}}
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-6 py-4 border-b border-gray-100 flex items-center gap-3" style="background:#f0f5ff;">
-                        <div class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                            <i class="fas fa-briefcase text-blue-500 text-sm"></i>
-                        </div>
-                        <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Recent Job Posts</h2>
-                    </div>
-                    <div class="divide-y divide-gray-100 overflow-y-auto" style="min-height:320px;max-height:320px;">
-                        @forelse($this->recentJobs as $job)
-                            @php
-                                $dl        = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-                                $isExpired = now('Asia/Manila')->gt($dl);
-                            @endphp
-                            <a href="{{ route('organizer.job/management') }}"
-                               class="px-6 py-4 hover:bg-blue-50/40 transition-colors block">
-                                <div class="flex items-start justify-between gap-3">
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-base font-semibold text-gray-800 truncate">{{ $job->job_title }}</p>
-                                        <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-1">
-                                            <span class="text-sm text-gray-500 flex items-center gap-1">
-                                                <i class="fas fa-building text-gray-400 text-[11px]"></i>
-                                                {{ $job->company_name }}
-                                            </span>
-                                            <span class="text-gray-300 text-sm select-none">·</span>
-                                            <span class="text-sm font-medium text-blue-600">{{ $job->employment_type }}</span>
-                                            <span class="text-gray-300 text-sm select-none">·</span>
-                                            <span class="text-sm {{ $isExpired ? 'text-red-500' : 'text-gray-500' }}">
-                                                <i class="fas fa-calendar-xmark text-[11px] mr-0.5"></i>
-                                                {{ $dl->format('M d, Y') }}
-                                                @if($isExpired)<span class="font-semibold"> · Expired</span>@endif
-                                            </span>
-                                        </div>
-                                    </div>
-                                    @if($job->status === 'ACTIVE')
-                                        <span class="px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                            <i class="fas fa-circle text-[8px] mr-1.5"></i>ACTIVE
-                                        </span>
-                                    @else
-                                        <span class="px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 bg-amber-50 text-amber-700 border border-amber-200">
-                                            <i class="fas fa-circle-xmark text-[11px] mr-1.5"></i>INACTIVE
-                                        </span>
-                                    @endif
-                                </div>
-                            </a>
-                        @empty
-                            <div class="flex flex-col items-center justify-center py-16 text-center" style="height:320px;">
-                                <i class="fas fa-briefcase text-4xl text-gray-200 block mb-3"></i>
-                                <p class="text-base font-medium text-gray-400">No job postings yet</p>
-                                <a href="{{ route('organizer.job/management') }}"
-                                   class="text-sm font-semibold hover:underline mt-2 inline-block" style="color:#7a3f91;">
-                                    Create your first job posting →
-                                </a>
-                            </div>
-                        @endforelse
-                    </div>
-                </div>
-
-            </div>
-
-            {{-- RIGHT: quick actions + account (1/3) --}}
-            <div class="flex flex-col gap-6">
-
-                {{-- Quick Actions --}}
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                    <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-                        <i class="fas fa-bolt" style="color:#7a3f91;"></i> Quick Actions
-                    </h2>
-                    <div class="flex flex-col gap-3">
-                        <a href="{{ route('organizer.event/organizer') }}"
-                           class="flex items-center gap-3 px-4 py-3.5 rounded-xl border transition-all group"
-                           style="border-color:rgba(122,63,145,.22);background:rgba(122,63,145,.05);"
-                           onmouseover="this.style.background='rgba(122,63,145,.10)'"
-                           onmouseout="this.style.background='rgba(122,63,145,.05)'">
-                            <i class="fas fa-calendar-plus text-lg flex-shrink-0" style="color:#7a3f91;"></i>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-base font-semibold" style="color:#7a3f91;">Post Event</p>
-                                <p class="text-sm text-gray-500">Create and submit event</p>
-                            </div>
-                            <i class="fas fa-arrow-right text-sm group-hover:translate-x-1 transition-transform"
-                               style="color:rgba(122,63,145,.35);"></i>
-                        </a>
-                        <a href="{{ route('organizer.job/management') }}"
-                           class="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors group">
-                            <i class="fas fa-briefcase text-blue-600 text-lg flex-shrink-0"></i>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-base font-semibold text-blue-700">Post Job</p>
-                                <p class="text-sm text-gray-500">Create job listing</p>
-                            </div>
-                            <i class="fas fa-arrow-right text-blue-400 text-sm group-hover:translate-x-1 transition-transform"></i>
-                        </a>
-                    </div>
-                </div>
-
-                {{-- Account Info --}}
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                    <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-                        <i class="fas fa-user-circle" style="color:#7a3f91;"></i> Account
-                    </h2>
-                    <div class="divide-y divide-gray-100">
-
-                        <div class="flex items-center justify-between py-3">
-                            <span class="text-sm text-gray-600 shrink-0">Name</span>
-                            <span class="text-sm font-medium text-gray-800 text-right ml-2">{{ $this->organizerName }}</span>
-                        </div>
-
-                        <div class="flex items-center justify-between py-3">
-                            <span class="text-sm text-gray-600 shrink-0">Teacher ID</span>
-                            <span class="text-sm font-semibold font-mono text-right ml-2" style="color:#7a3f91;">
-                                {{ $this->organizerTeacherId }}
-                            </span>
-                        </div>
-
-                        <div class="flex items-center justify-between py-3">
-                            <span class="text-sm text-gray-600 shrink-0">Email</span>
-                            <span class="text-sm text-gray-700 truncate ml-2 max-w-[160px] text-right">
-                                {{ $this->organizerEmail }}
-                            </span>
-                        </div>
-
-                        <div class="flex items-center justify-between py-3">
-                            <span class="text-sm text-gray-600 shrink-0">College</span>
-                            <span class="text-sm font-medium text-gray-800 text-right ml-2">{{ $this->organizerDepartment }}</span>
-                        </div>
-
-                    </div>
-                </div>
-
-            </div>
+                @if($this->organizerBatch)
+                    <span class="text-[#c0a0d8]">·</span>
+                    <span class="font-semibold" style="color:#7A3F91;">Batch {{ $this->organizerBatch }}</span>
+                @endif
+            </p>
         </div>
     </div>
-</div>
+
+    {{-- ── STAT CARDS ───────────────────────────────────────────── --}}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+
+        {{-- Total Alumni --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
+                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    <i class="fas fa-graduation-cap text-white text-base"></i>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">Alumni</span>
+            </div>
+            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalAlumniInCollege) }}</p>
+            <p class="text-xl text-[#666666] mt-1 font-normal">Total Alumni</p>
+            @if(!empty($this->alumniByDepartment))
+                <div class="flex flex-wrap gap-1.5 mt-2">
+                    @foreach($this->alumniByDepartment as $code => $info)
+                        <div class="relative group inline-flex">
+                            <span class="text-xs font-semibold px-2 py-0.5 rounded-full cursor-default select-none"
+                                  style="background:rgba(122,63,145,.10);color:#7A3F91;border:1px solid rgba(122,63,145,.20);">
+                                {{ $code }} · {{ $info['count'] }}
+                            </span>
+                            <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-20 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                                <div class="whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white shadow-lg" style="background:#3b1a50;">
+                                    {{ $info['name'] }}
+                                </div>
+                                <div class="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent" style="border-top-color:#3b1a50;"></div>
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+        </div>
+
+        {{-- Total Events --}}
+        <a href="{{ route('organizer.event/organizer') }}" wire:navigate
+           class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow block group">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center shadow group-hover:bg-purple-200 transition">
+                    <i class="fas fa-calendar-days text-base" style="color:#7A3F91;"></i>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">Events</span>
+            </div>
+            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalEvents) }}</p>
+            <p class="text-xl text-[#666666] mt-1 font-normal">Total Events</p>
+            <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                <span class="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                    <i class="fas fa-circle-check text-xs"></i> {{ $this->approvedEvents }} Approved
+                </span>
+                <span class="text-xs font-semibold text-amber-600 flex items-center gap-1">
+                    <i class="fas fa-hourglass-end text-xs"></i> {{ $this->pendingEvents }} Pending
+                </span>
+            </div>
+        </a>
+
+        {{-- Pending Events --}}
+        <a href="{{ route('organizer.event/organizer') }}" wire:navigate
+           class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow block group">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shadow group-hover:bg-amber-200 transition">
+                    <i class="fas fa-hourglass-end text-amber-500 text-base"></i>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Pending</span>
+            </div>
+            <p class="text-3xl font-semibold text-amber-600 leading-none">{{ number_format($this->pendingEvents) }}</p>
+            <p class="text-xl text-[#666666] mt-1 font-normal">Pending Review</p>
+            @if($this->rejectedEvents > 0)
+                <p class="text-xs text-red-500 font-semibold mt-2 flex items-center gap-1">
+                    <i class="fas fa-circle-xmark text-xs"></i> {{ $this->rejectedEvents }} Rejected
+                </p>
+            @else
+                <p class="text-xs text-[#999999] mt-2 font-normal">Awaiting admin approval</p>
+            @endif
+        </a>
+
+        {{-- Job Postings --}}
+        <a href="{{ route('organizer.job/management') }}" wire:navigate
+           class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow block group">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center shadow group-hover:bg-blue-200 transition">
+                    <i class="fas fa-briefcase text-blue-500 text-base"></i>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">Jobs</span>
+            </div>
+            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalJobs) }}</p>
+            <p class="text-xl text-[#666666] mt-1 font-normal">Job Postings</p>
+            <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                <span class="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                    <i class="fas fa-circle text-[8px]"></i> {{ $this->activeJobs }} Active
+                </span>
+                <span class="text-xs font-semibold text-[#999999] flex items-center gap-1">
+                    <i class="fas fa-circle text-[8px]"></i> {{ $this->inactiveJobs }} Inactive
+                </span>
+            </div>
+        </a>
+
+    </div>
+
+    {{-- ── MAIN GRID: Employment (left 2/3) + Account Info (right 1/3) ── --}}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+
+        {{-- ── Employment Overview ────────────────────────────────── --}}
+        @php
+            $ec        = $this->empCounts;
+            $submitted = $ec['submitted'];
+
+            $empRows = [
+                [
+                    'label'  => 'Employed',
+                    'count'  => $ec['employed'],
+                    'icon'   => 'fa-user-tie',
+                    'color'  => '#7A3F91',
+                    'light'  => '#F9F7FC',
+                    'border' => '#E8E0F0',
+                ],
+                [
+                    'label'  => 'Self-Employed',
+                    'count'  => $ec['self'],
+                    'icon'   => 'fa-store',
+                    'color'  => '#2563eb',
+                    'light'  => '#EFF6FF',
+                    'border' => '#BFDBFE',
+                ],
+                [
+                    'label'  => 'Unemployed',
+                    'count'  => $ec['unemployed'],
+                    'icon'   => 'fa-magnifying-glass',
+                    'color'  => '#d97706',
+                    'light'  => '#FFFBEB',
+                    'border' => '#FCD34D',
+                ],
+                [
+                    'label'  => 'No Record',
+                    'count'  => $ec['noRecord'],
+                    'icon'   => 'fa-circle-minus',
+                    'color'  => '#6B7280',
+                    'light'  => '#F9FAFB',
+                    'border' => '#E5E7EB',
+                ],
+            ];
+        @endphp
+
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+
+            <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center justify-between"
+                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+                <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center"
+                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        <i class="fas fa-briefcase text-white" style="font-size:12px;"></i>
+                    </div>
+                    <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Employment Overview</p>
+                </div>
+                <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+                   class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                    View All <i class="fas fa-arrow-right text-xs"></i>
+                </a>
+            </div>
+
+            <div class="p-4 grid grid-cols-2 gap-3 flex-1">
+                @foreach($empRows as $row)
+                @php $barPct = $submitted > 0 && $row['count'] > 0 ? round(($row['count'] / max($submitted, 1)) * 100) : 0; @endphp
+                <div class="rounded-xl border p-3"
+                     style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }};">
+                    <div class="flex items-center gap-2 mb-2">
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                             style="background:{{ $row['color'] }}20; color:{{ $row['color'] }};">
+                            <i class="fas {{ $row['icon'] }} text-xs"></i>
+                        </div>
+                        <span class="text-xl font-semibold text-[#333333]">{{ $row['label'] }}</span>
+                    </div>
+                    <p class="text-3xl font-semibold leading-none" style="color:{{ $row['color'] }};">
+                        {{ number_format($row['count']) }}
+                    </p>
+                    @if($row['count'] > 0 && $row['label'] !== 'No Record')
+                
+                    @endif
+                </div>
+                @endforeach
+            </div>
+
+        </div>
+
+        {{-- ── Account Info ────────────────────────────────────────── --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+
+            <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center gap-2"
+                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+                <div class="w-6 h-6 rounded-lg flex items-center justify-center"
+                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    <i class="fas fa-user-circle text-white" style="font-size:12px;"></i>
+                </div>
+                <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Account</p>
+            </div>
+
+            <div class="divide-y divide-[#F5F5F5] px-4 flex-1">
+
+                <div class="flex items-center justify-between py-3">
+                    <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">Name</span>
+                    <span class="text-sm font-semibold text-[#333333] text-right ml-3 truncate max-w-[170px]">{{ $this->organizerName }}</span>
+                </div>
+
+                <div class="flex items-center justify-between py-3">
+                    <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">Teacher ID</span>
+                    <span class="text-sm font-semibold font-mono text-right ml-3" style="color:#7A3F91;">{{ $this->organizerTeacherId }}</span>
+                </div>
+
+                <div class="flex items-start justify-between py-3">
+                    <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0 mt-0.5">Email</span>
+                    <span class="text-xs text-[#666666] font-normal text-right ml-3 break-all max-w-[170px]">{{ $this->organizerEmail }}</span>
+                </div>
+
+                <div class="flex items-center justify-between py-3">
+                    <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">College</span>
+                    <span class="text-sm font-semibold text-[#333333] text-right ml-3 truncate max-w-[170px]">{{ $this->organizerDepartment }}</span>
+                </div>
+
+                @if($this->organizerBatch)
+                <div class="flex items-center justify-between py-3">
+                    <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">Batch</span>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">{{ $this->organizerBatch }}</span>
+                </div>
+                @endif
+
+            </div>
+        </div>
+
+    </div>
+
+    {{-- ── BOTTOM GRID: Recent Events (left) + Recent Jobs (right) ── --}}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        {{-- ── Recent Events ───────────────────────────────────────── --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden">
+
+            <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center justify-between"
+                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+                <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center"
+                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        <i class="fas fa-calendar-days text-white" style="font-size:12px;"></i>
+                    </div>
+                    <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Recent Events</p>
+                </div>
+                <a href="{{ route('organizer.event/organizer') }}" wire:navigate
+                   class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                    View All <i class="fas fa-arrow-right text-xs"></i>
+                </a>
+            </div>
+
+            <div class="divide-y divide-[#F5F5F5]">
+                @forelse($this->recentEvents as $index => $event)
+                @php
+                    $sc = match($event->status) {
+                        'PENDING'  => ['text-amber-700 bg-amber-50 border-amber-200',       'fa-hourglass-end', '#d97706'],
+                        'APPROVED' => ['text-emerald-700 bg-emerald-50 border-emerald-200', 'fa-circle-check',  '#059669'],
+                        'REJECTED' => ['text-red-600 bg-red-50 border-red-200',             'fa-circle-xmark',  '#dc2626'],
+                        default    => ['text-[#666666] bg-[#F9F7FC] border-[#E8E0F0]',      'fa-circle',        '#9b59b6'],
+                    };
+                @endphp
+                <div class="px-4 py-3 flex items-center gap-3 hover:bg-[#FAFAFA] transition-colors">
+                    <span class="w-5 text-center text-sm font-semibold shrink-0" style="color:#c0a0d8;">
+                        {{ str_pad($index + 1, 2, '0', STR_PAD_LEFT) }}
+                    </span>
+                    <div class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                         style="background:{{ $sc[2] }}20; color:{{ $sc[2] }};">
+                        <i class="fas {{ $sc[1] }} text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-lg font-semibold text-[#333333] truncate">{{ $event->title }}</p>
+                        <p class="text-sm text-[#999999] font-normal mt-0.5">
+                            <i class="fas fa-calendar text-[#CCCCCC] mr-1"></i>
+                            {{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}
+                        </p>
+                    </div>
+                    <div class="shrink-0 flex flex-col items-end gap-1">
+                        <span class="text-sm font-semibold px-2 py-0.5 rounded-full border {{ $sc[0] }}">
+                            {{ $event->status }}
+                        </span>
+                        <span class="text-sm text-[#999999] font-normal">{{ $event->created_at->diffForHumans() }}</span>
+                    </div>
+                </div>
+                @empty
+                <div class="py-14 text-center">
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:#f0e6f8;">
+                        <i class="fas fa-calendar-days text-2xl" style="color:#c89de0;"></i>
+                    </div>
+                    <p class="text-sm font-semibold text-[#999999]">No events posted yet</p>
+                    <a href="{{ route('organizer.event/organizer') }}" wire:navigate
+                       class="text-xs font-semibold hover:underline mt-1 inline-block" style="color:#7A3F91;">
+                        Create your first event →
+                    </a>
+                </div>
+                @endforelse
+            </div>
+
+        </div>
+
+        {{-- ── Recent Job Postings ─────────────────────────────────── --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden">
+
+            <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center justify-between"
+                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+                <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center bg-blue-500">
+                        <i class="fas fa-briefcase text-white" style="font-size:12px;"></i>
+                    </div>
+                    <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Recent Job Posts</p>
+                </div>
+                <a href="{{ route('organizer.job/management') }}" wire:navigate
+                   class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                    View All <i class="fas fa-arrow-right text-xs"></i>
+                </a>
+            </div>
+
+            <div class="divide-y divide-[#F5F5F5]">
+                @forelse($this->recentJobs as $index => $job)
+                @php
+                    $dl        = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                    $isExpired = now('Asia/Manila')->gt($dl);
+                    $isActive  = $job->status === 'ACTIVE';
+                @endphp
+                <div class="px-4 py-3 flex items-center gap-3 hover:bg-[#FAFAFA] transition-colors">
+                    <span class="w-5 text-center text-sm font-semibold shrink-0" style="color:#c0a0d8;">
+                        {{ str_pad($index + 1, 2, '0', STR_PAD_LEFT) }}
+                    </span>
+                    <div class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                         style="background:{{ $isActive ? '#EFF6FF' : '#F9FAFB' }}; color:{{ $isActive ? '#2563eb' : '#6B7280' }};">
+                        <i class="fas fa-briefcase text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-lg font-semibold text-[#333333] truncate">{{ $job->job_title }}</p>
+                        <p class="text-sm text-[#999999] font-normal mt-0.5 flex flex-wrap items-center gap-1.5">
+                            <span class="truncate max-w-[110px]">{{ $job->company_name }}</span>
+                            <span class="text-[#E8E0F0]">·</span>
+                            <span class="font-semibold text-blue-600">{{ $job->employment_type }}</span>
+                            @if($isExpired)
+                                <span class="text-[#E8E0F0]">·</span>
+                                <span class="text-red-500 font-semibold">Expired</span>
+                            @endif
+                        </p>
+                    </div>
+                    <div class="shrink-0 flex flex-col items-end gap-1">
+                        @if($isActive)
+                            <span class="text-sm font-semibold px-2 py-0.5 rounded-full border text-emerald-700 bg-emerald-50 border-emerald-200">Active</span>
+                        @else
+                            <span class="text-sm font-semibold px-2 py-0.5 rounded-full border text-amber-700 bg-amber-50 border-amber-200">Inactive</span>
+                        @endif
+                        <span class="text-sm text-[#999999] font-normal">{{ $dl->format('M d, Y') }}</span>
+                    </div>
+                </div>
+                @empty
+                <div class="py-14 text-center">
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 bg-blue-50">
+                        <i class="fas fa-briefcase text-2xl text-blue-300"></i>
+                    </div>
+                    <p class="text-sm font-semibold text-[#999999]">No job postings yet</p>
+                    <a href="{{ route('organizer.job/management') }}" wire:navigate
+                       class="text-xs font-semibold hover:underline mt-1 inline-block" style="color:#7A3F91;">
+                        Create your first job posting →
+                    </a>
+                </div>
+                @endforelse
+            </div>
+
+        </div>
+
+    </div>
+
+</div>{{-- end page --}}

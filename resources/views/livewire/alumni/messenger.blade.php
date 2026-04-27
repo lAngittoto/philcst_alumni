@@ -732,13 +732,13 @@ new class extends Component {
     }
 }; ?>
 
-<div class="flex flex-col rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+<div class="flex flex-col rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
      style="height: calc(100vh - 90px);"
      wire:poll.8000ms="refreshAll">
 
     {{-- ── HEADER ──────────────────────────────────────────────────────── --}}
-    <div class="flex items-center gap-3 px-4 py-3 flex-shrink-0 border-b border-gray-200"
-         style="background:#7a3f91;">
+    <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#E8E0F0]"
+         style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
 
         <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
              style="background:rgba(255,255,255,.18); border:1.5px solid rgba(255,255,255,.28);">
@@ -746,10 +746,10 @@ new class extends Component {
         </div>
 
         <div class="flex-1 min-w-0">
-            <p class="text-white font-bold text-base leading-tight truncate">
+            <p class="text-white font-semibold text-sm leading-tight truncate uppercase tracking-wide">
                 {{ $room['name'] ?? 'Group Chat' }}
             </p>
-            <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center gap-2 flex-wrap mt-0.5">
                 @if($onlineCount > 0)
                 <div class="flex items-center gap-1">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
@@ -765,22 +765,20 @@ new class extends Component {
             </div>
         </div>
 
-        <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="flex items-center gap-1.5 flex-shrink-0">
             <button wire:click="togglePins"
-                    class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition"
+                    class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition"
                     style="{{ $showPins
                         ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
                         : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);' }}">
                 <i class="fa-solid fa-thumbtack text-xs"></i>
-                <span class="hidden sm:inline">Pins</span>
             </button>
             <button wire:click="toggleBatchmates"
-                    class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition"
+                    class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition"
                     style="{{ $showBatchmates
                         ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
                         : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);' }}">
                 <i class="fa-solid fa-user-group text-xs"></i>
-                <span class="hidden sm:inline">Members</span>
             </button>
         </div>
     </div>
@@ -793,7 +791,7 @@ new class extends Component {
 
             {{-- ── Message list ──────────────────────────────────────── --}}
             <div id="msg-list"
-                 class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 bg-gray-50"
+                 class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 bg-[#fafafa]"
                  x-data
                  x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
                  @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })">
@@ -812,11 +810,11 @@ new class extends Component {
                     {{-- Date separator --}}
                     @if($dateChanged)
                     <div class="flex items-center gap-3 my-4">
-                        <div class="flex-1 h-px bg-gray-200"></div>
-                        <span class="text-xs font-bold text-[#999999] tracking-wider uppercase px-2 whitespace-nowrap">
+                        <div class="flex-1 h-px bg-[#E8E0F0]"></div>
+                        <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">
                             {{ $msg['date_label'] }}
                         </span>
-                        <div class="flex-1 h-px bg-gray-200"></div>
+                        <div class="flex-1 h-px bg-[#E8E0F0]"></div>
                     </div>
                     @endif
 
@@ -845,11 +843,11 @@ new class extends Component {
 
                             {{-- Sender name --}}
                             @if(! $msg['is_mine'] && ! $sameGroup)
-                            <p class="text-xs font-bold px-1 mb-0.5 {{ $msg['is_coordinator'] ? 'text-blue-600' : 'text-purple-700' }}">
+                            <p class="text-xs font-semibold px-1 mb-0.5 {{ $msg['is_coordinator'] ? 'text-blue-600' : 'text-[#7a3f91]' }}">
                                 {{ $msg['sender_name'] }}
                                 @if($msg['is_coordinator'])
                                     <span class="ml-1 text-xs font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                                        Alumni Coordinator
+                                        Coordinator
                                     </span>
                                 @endif
                             </p>
@@ -857,7 +855,7 @@ new class extends Component {
 
                             {{-- Pinned indicator --}}
                             @if($msg['is_pinned'])
-                            <div class="flex items-center gap-1 text-xs text-amber-600 font-bold mb-0.5 px-1">
+                            <div class="flex items-center gap-1 text-xs text-amber-600 font-semibold mb-0.5 px-1">
                                 <i class="fa-solid fa-thumbtack text-xs"></i> Pinned
                             </div>
                             @endif
@@ -867,8 +865,8 @@ new class extends Component {
                             <div class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug
                                 {{ $msg['is_mine']
                                     ? 'bg-purple-200/60 border-white/70 text-purple-900'
-                                    : 'bg-white border-gray-400 text-gray-600' }}">
-                                <span class="font-bold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
+                                    : 'bg-white border-[#E8E0F0] text-[#666666]' }}">
+                                <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
                                 <span class="truncate block text-xs">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
                             </div>
                             @endif
@@ -878,17 +876,17 @@ new class extends Component {
                             <div class="flex flex-col gap-1.5 min-w-[220px]">
                                 <textarea wire:model="editBody"
                                           rows="2"
-                                          class="text-sm rounded-lg border border-purple-400 px-3 py-2 resize-none
-                                                 focus:outline-none focus:ring-2 focus:ring-purple-300 w-full bg-white shadow-sm"
+                                          class="text-sm rounded-lg border border-[#7A3F91] px-3 py-2 resize-none
+                                                 focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/30 w-full bg-white shadow-sm"
                                           wire:keydown.escape="cancelEdit"></textarea>
                                 <div class="flex gap-1.5 justify-end">
                                     <button wire:click="cancelEdit"
-                                            class="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-[#666666]
-                                                   hover:bg-gray-100 transition font-semibold">
+                                            class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0] text-[#666666]
+                                                   hover:bg-[#f5f5f5] transition font-semibold">
                                         Cancel
                                     </button>
                                     <button wire:click="saveEdit"
-                                            class="text-xs px-3 py-1.5 rounded-lg text-white font-bold hover:opacity-90 transition"
+                                            class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition"
                                             style="background:#7a3f91;">
                                         Save
                                     </button>
@@ -900,8 +898,8 @@ new class extends Component {
                             @php
                                 $safe         = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
                                 $mentionClass = $msg['is_mine']
-                                    ? 'font-bold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
-                                    : 'font-bold text-purple-700 bg-purple-100 px-0.5 rounded';
+                                    ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
+                                    : 'font-semibold text-[#7a3f91] bg-[#f3eef8] px-0.5 rounded';
                                 $formatted    = preg_replace(
                                     '/@(everyone|\w+(?:\s\w+)?)/u',
                                     '<span class="' . $mentionClass . '">@$1</span>',
@@ -915,7 +913,7 @@ new class extends Component {
                                             ? 'text-white rounded-br-none'
                                             : ($msg['is_coordinator']
                                                 ? 'bg-blue-600 text-white rounded-bl-none'
-                                                : 'bg-white border border-gray-200 text-[#333333] rounded-bl-none') }}"
+                                                : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}"
                                  style="{{ $msg['is_mine'] ? 'background:#7a3f91;' : '' }}">
                                 {!! $formatted !!}
                                 @if($msg['edited'])
@@ -930,8 +928,8 @@ new class extends Component {
                                  x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
                                  x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                                  x-cloak
-                                 class="flex flex-wrap items-center gap-1.5 mt-2 bg-white border border-gray-200
-                                        rounded-2xl px-3 py-2 shadow-xl z-10 w-auto">
+                                 class="flex flex-wrap items-center gap-1.5 mt-2 bg-white border border-[#E8E0F0]
+                                        rounded-2xl px-3 py-2 shadow-lg z-10 w-auto">
 
                                 @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎'] as $rk => $re)
                                 <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
@@ -941,54 +939,50 @@ new class extends Component {
                                         title="{{ ucfirst($rk) }}">{{ $re }}</button>
                                 @endforeach
 
-                                <span class="w-px h-5 bg-gray-200 block"></span>
+                                <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                 <button wire:click="setReply({{ $msg['id'] }})"
                                         @click.stop="open = false"
                                         class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
-                                               hover:text-purple-700 hover:bg-purple-50 transition text-xs font-semibold">
+                                               hover:text-[#7a3f91] hover:bg-[#f3eef8] transition text-xs font-semibold">
                                     <i class="fa-solid fa-reply text-xs"></i>
-                                    <span class="hidden sm:inline">Reply</span>
                                 </button>
 
                                 <button wire:click="togglePin({{ $msg['id'] }})"
                                         @click.stop
                                         class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
                                                {{ $msg['is_pinned']
-                                                    ? 'text-amber-500 bg-amber-50 hover:bg-amber-100'
-                                                    : 'text-[#666666] hover:text-amber-500 hover:bg-amber-50' }}">
+                                                    ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                                                    : 'text-[#666666] hover:text-amber-600 hover:bg-amber-50' }}">
                                     <i class="fa-solid fa-thumbtack text-xs"></i>
-                                    <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
                                 </button>
 
                                 @if($msg['is_mine'])
-                                <span class="w-px h-5 bg-gray-200 block"></span>
+                                <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                 <button wire:click="startEdit({{ $msg['id'] }})"
                                         @click.stop="open = false"
                                         class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
                                                hover:text-blue-600 hover:bg-blue-50 transition text-xs font-semibold">
                                     <i class="fa-solid fa-pen text-xs"></i>
-                                    <span class="hidden sm:inline">Edit</span>
                                 </button>
 
                                 <div x-show="!confirmUnsend">
                                     <button @click.stop="confirmUnsend = true"
                                             class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
-                                                   hover:text-red-500 hover:bg-red-50 transition text-xs font-semibold">
+                                                   hover:text-red-600 hover:bg-red-50 transition text-xs font-semibold">
                                         <i class="fa-solid fa-trash-can text-xs"></i>
-                                        <span class="hidden sm:inline">Unsend</span>
                                     </button>
                                 </div>
                                 <div x-show="confirmUnsend" class="flex items-center gap-1">
-                                    <span class="text-xs text-red-600 font-bold">Delete?</span>
+                                    <span class="text-xs text-red-600 font-semibold">Delete?</span>
                                     <button wire:click="unsend({{ $msg['id'] }})"
                                             @click.stop
-                                            class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-bold hover:bg-red-600 transition">
+                                            class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">
                                         Yes
                                     </button>
                                     <button @click.stop="confirmUnsend = false"
-                                            class="text-xs px-2 py-1 rounded-lg bg-gray-100 text-[#666666] font-bold hover:bg-gray-200 transition">
+                                            class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#666666] font-semibold hover:bg-[#E8E0F0] transition">
                                         No
                                     </button>
                                 </div>
@@ -1003,8 +997,8 @@ new class extends Component {
                                 <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
                                         class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all
                                                {{ $msg['my_reaction'] === $rk
-                                                    ? 'bg-purple-100 border-purple-300 text-purple-800 font-bold'
-                                                    : 'bg-white border-gray-200 text-[#666666] hover:border-purple-200' }}">
+                                                    ? 'bg-[#f3eef8] border-[#E8E0F0] text-[#7a3f91] font-semibold'
+                                                    : 'bg-white border-[#E8E0F0] text-[#666666] hover:border-[#d9c9e8]' }}">
                                     {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
                                 </button>
                                 @endforeach
@@ -1031,7 +1025,7 @@ new class extends Component {
                              style="background:#f3eef8;">
                             <i class="fa-solid fa-comments text-4xl" style="color:#7a3f91;"></i>
                         </div>
-                        <p class="text-base font-bold text-[#666666]">No messages yet</p>
+                        <p class="text-base font-semibold text-[#666666]">No messages yet</p>
                         <p class="text-sm text-[#999999] mt-1">Be the first to say hi to your batchmates! 👋</p>
                     </div>
                 @endforelse
@@ -1040,13 +1034,13 @@ new class extends Component {
             {{-- ── Typing indicator ────────────────────────────────────── --}}
             <div wire:poll.3000ms="refreshTyping" class="flex-shrink-0">
                 @if(! empty($typingUsers))
-                <div class="flex items-center gap-2.5 px-4 py-2 bg-gray-50 border-t border-gray-100">
+                <div class="flex items-center gap-2.5 px-4 py-2 bg-[#fafafa] border-t border-[#E8E0F0]">
                     <div class="flex items-end gap-0.5 h-4">
-                        <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce"
+                        <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce"
                               style="animation-delay:0ms; animation-duration:900ms;"></span>
-                        <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce"
+                        <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce"
                               style="animation-delay:180ms; animation-duration:900ms;"></span>
-                        <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce"
+                        <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce"
                               style="animation-delay:360ms; animation-duration:900ms;"></span>
                     </div>
                     <p class="text-xs text-[#666666] font-medium">
@@ -1054,7 +1048,7 @@ new class extends Component {
                             $visible = array_slice($typingUsers, 0, 3);
                             $extra   = count($typingUsers) - count($visible);
                         @endphp
-                        <span class="font-bold text-purple-700">
+                        <span class="font-semibold text-[#7a3f91]">
                             {{ implode(', ', $visible) }}{{ $extra > 0 ? " +{$extra}" : '' }}
                         </span>
                         {{ count($typingUsers) === 1 ? 'is' : 'are' }} typing…
@@ -1065,29 +1059,29 @@ new class extends Component {
 
             {{-- ── Reply preview bar ──────────────────────────────────── --}}
             @if($replyTo)
-            <div class="flex items-center gap-3 px-4 py-2.5 border-t border-purple-200 bg-purple-50 flex-shrink-0">
+            <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0">
                 <div class="w-1 h-10 rounded-full flex-shrink-0" style="background:#7a3f91;"></div>
                 <div class="flex-1 min-w-0">
-                    <p class="text-xs font-bold text-purple-700 truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
+                    <p class="text-xs font-semibold text-[#7a3f91] truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
                     <p class="text-xs text-[#666666] truncate">{{ Str::limit($replyTo['body'], 90) }}</p>
                 </div>
                 <button wire:click="clearReply"
                         class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999]
-                               hover:text-red-500 hover:bg-red-50 transition flex-shrink-0">
+                               hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
                     <i class="fa-solid fa-xmark text-base"></i>
                 </button>
             </div>
             @endif
 
             {{-- ── Input area ─────────────────────────────────────────── --}}
-            <div class="px-4 py-3 border-t border-gray-200 bg-white flex-shrink-0" x-data>
+            <div class="px-4 py-3 border-t border-[#E8E0F0] bg-white flex-shrink-0" x-data>
 
                 {{-- @mention dropdown --}}
                 @if($showMentions && ! empty($mentionSuggestions))
-                <div class="mb-2 bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden">
+                <div class="mb-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-md overflow-hidden">
                     @foreach($mentionSuggestions as $sug)
                     <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
-                            class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-purple-50 transition-colors text-left">
+                            class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f3eef8] transition-colors text-left">
                         <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-black text-white"
                              style="background:{{ $sug['type'] === 'coordinator' ? '#2563eb' : '#7a3f91' }};">
                             @if($sug['name'] === 'everyone')
@@ -1097,11 +1091,11 @@ new class extends Component {
                             @endif
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-bold text-[#333333] truncate">&#64;{{ $sug['name'] }}</p>
+                            <p class="text-sm font-semibold text-[#333333] truncate">&#64;{{ $sug['name'] }}</p>
                             @if($sug['name'] === 'everyone')
-                                <p class="text-xs text-purple-600 font-semibold">Notify all members</p>
+                                <p class="text-xs text-[#7a3f91] font-medium">Notify all members</p>
                             @elseif($sug['type'] === 'coordinator')
-                                <p class="text-xs text-blue-600 font-semibold">Alumni Coordinator</p>
+                                <p class="text-xs text-blue-600 font-medium">Alumni Coordinator</p>
                             @endif
                         </div>
                     </button>
@@ -1125,10 +1119,10 @@ new class extends Component {
                                     this.style.height = Math.min(this.scrollHeight, 120) + 'px';
                                 });
                             "
-                            class="w-full resize-none rounded-lg border border-gray-300 bg-gray-50
-                                   px-4 py-2.5 text-sm leading-relaxed
-                                   focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100
-                                   transition"
+                            class="w-full resize-none rounded-lg border border-[#E8E0F0] bg-[#fafafa]
+                                   px-4 py-2.5 text-sm leading-relaxed text-[#333333]
+                                   focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/20
+                                   transition placeholder-[#999999]"
                             style="max-height:120px; overflow-y:auto;"></textarea>
                     </div>
 
@@ -1141,24 +1135,25 @@ new class extends Component {
                 </div>
 
                 <p class="text-xs text-[#999999] text-center mt-1.5">
-                    <kbd class="bg-gray-100 border border-gray-200 rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
-                    <kbd class="bg-gray-100 border border-gray-200 rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
-                    <kbd class="bg-gray-100 border border-gray-200 rounded px-1 py-0.5 text-xs">@</kbd> mention
+                    <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
+                    <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
+                    <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">@</kbd> mention
                 </p>
             </div>
         </div>
 
         {{-- ── SIDE PANEL ──────────────────────────────────────────────── --}}
         @if($showBatchmates || $showPins)
-        <div class="w-72 border-l border-gray-200 flex flex-col flex-shrink-0 bg-white">
+        <div class="w-72 border-l border-[#E8E0F0] flex flex-col flex-shrink-0 bg-white">
 
-            <div class="flex items-center gap-2.5 px-4 py-3 border-b border-gray-200 flex-shrink-0 bg-gray-50">
+            <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#E8E0F0] flex-shrink-0"
+                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
                 @if($showPins)
-                    <i class="fa-solid fa-thumbtack text-amber-500"></i>
-                    <p class="text-sm font-bold text-[#333333] flex-1">Pinned Messages</p>
+                    <i class="fa-solid fa-thumbtack text-amber-600"></i>
+                    <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Pinned Messages</p>
                 @else
-                    <i class="fa-solid fa-user-group text-purple-700"></i>
-                    <p class="text-sm font-bold text-[#333333] flex-1">
+                    <i class="fa-solid fa-user-group text-[#7a3f91]"></i>
+                    <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">
                         Members
                         <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($batchmates) }})</span>
                         @if($onlineCount > 0)
@@ -1168,7 +1163,7 @@ new class extends Component {
                 @endif
                 <button wire:click="{{ $showPins ? 'togglePins' : 'toggleBatchmates' }}"
                         class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999]
-                               hover:text-[#333333] hover:bg-gray-200 transition">
+                               hover:text-[#333333] hover:bg-[#f5f5f5] transition">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
@@ -1177,24 +1172,24 @@ new class extends Component {
 
                 @if($showBatchmates)
 
-                    <div class="px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
+                    <div class="px-3 py-2.5 border-b border-[#E8E0F0] flex-shrink-0">
                         <div class="relative">
                             <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2
                                       text-[#999999] text-xs pointer-events-none"></i>
                             <input wire:model.live.debounce.300ms="batchSearch"
                                    type="text"
                                    placeholder="Search members…"
-                                   class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-gray-200
-                                          bg-gray-50 focus:outline-none focus:border-purple-400
-                                          focus:ring-1 focus:ring-purple-100 transition"/>
+                                   class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#E8E0F0]
+                                          bg-[#fafafa] focus:outline-none focus:border-[#7a3f91]
+                                          focus:ring-1 focus:ring-[#7a3f91]/20 transition placeholder-[#999999]"/>
                         </div>
                     </div>
 
                     {{-- Coordinators section --}}
                     @if(! empty($coordinators) && $batchSearch === '')
                     <div class="px-3 pt-3 pb-1 flex-shrink-0">
-                        <p class="text-xs font-bold text-blue-600 uppercase tracking-widest mb-2 px-1">
-                            <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Alumni Coordinators
+                        <p class="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-2 px-1">
+                            <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Coordinators
                         </p>
                         @foreach($coordinators as $coord)
                         <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-blue-50 border border-blue-100">
@@ -1209,15 +1204,15 @@ new class extends Component {
                                 @endif
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs font-bold text-[#333333] truncate">{{ $coord['name'] }}</p>
-                                <p class="text-xs text-blue-600 font-semibold">Alumni Coordinator</p>
+                                <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}</p>
+                                <p class="text-xs text-blue-600 font-medium">Coordinator</p>
                             </div>
                         </div>
                         @endforeach
                     </div>
 
                     <div class="px-3 pb-1 flex-shrink-0">
-                        <p class="text-xs font-bold text-[#999999] uppercase tracking-widest mb-2 px-1">
+                        <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-2 px-1">
                             <i class="fa-solid fa-users text-xs mr-1"></i>Batchmates
                         </p>
                     </div>
@@ -1226,8 +1221,8 @@ new class extends Component {
                     {{-- Batchmates list --}}
                     <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
                         @forelse($batchmates as $bm)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-gray-100
-                                    hover:border-purple-200 hover:bg-purple-50/50 transition-all">
+                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
+                                    hover:border-[#d9c9e8] hover:bg-[#f3eef8] transition-all">
                             <div class="relative flex-shrink-0">
                                 <div class="w-9 h-9 rounded-full flex items-center justify-center
                                             text-xs font-black text-white overflow-hidden"
@@ -1245,13 +1240,13 @@ new class extends Component {
                                 @endif
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs font-bold text-[#333333] truncate">
+                                <p class="text-xs font-semibold text-[#333333] truncate">
                                     {{ $bm['name'] }}
                                     @if($bm['is_me'])
-                                        <span class="text-xs text-purple-500 font-semibold">(You)</span>
+                                        <span class="text-xs text-[#7a3f91] font-medium">(You)</span>
                                     @endif
                                 </p>
-                                <p class="text-xs font-semibold
+                                <p class="text-xs font-medium
                                     {{ ($bm['is_online'] || $bm['is_me']) ? 'text-emerald-600' : 'text-[#999999]' }}">
                                     {{ ($bm['is_online'] || $bm['is_me']) ? 'Online' : 'Offline' }}
                                 </p>
@@ -1259,7 +1254,7 @@ new class extends Component {
                         </div>
                         @empty
                         <div class="flex flex-col items-center justify-center py-10 text-[#999999]">
-                            <i class="fa-solid fa-user-slash text-3xl text-gray-200 mb-2"></i>
+                            <i class="fa-solid fa-user-slash text-3xl text-[#E8E0F0] mb-2"></i>
                             <p class="text-sm font-semibold">No results</p>
                             <p class="text-xs mt-1">Try a different name</p>
                         </div>
@@ -1269,15 +1264,15 @@ new class extends Component {
                 @elseif($showPins)
                 <div class="flex-1 overflow-y-auto p-3 space-y-2">
                     @forelse($pinnedMessages as $pin)
-                    <div class="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                    <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
                         <div class="flex items-start justify-between gap-2 mb-1.5">
                             <div class="flex items-center gap-1.5 min-w-0">
-                                <i class="fa-solid fa-thumbtack text-amber-500 text-xs flex-shrink-0"></i>
-                                <p class="text-xs font-bold text-amber-700 truncate">{{ $pin['from'] }}</p>
+                                <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
+                                <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
                             </div>
                             <button wire:click="togglePin({{ $pin['id'] }})"
                                     class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999]
-                                           hover:text-red-500 hover:bg-red-50 transition flex-shrink-0">
+                                           hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
                                 <i class="fa-solid fa-xmark text-xs"></i>
                             </button>
                         </div>
@@ -1288,7 +1283,7 @@ new class extends Component {
                     </div>
                     @empty
                     <div class="flex flex-col items-center justify-center py-12 text-[#999999]">
-                        <i class="fa-solid fa-thumbtack text-4xl text-gray-200 mb-3"></i>
+                        <i class="fa-solid fa-thumbtack text-4xl text-[#E8E0F0] mb-3"></i>
                         <p class="text-sm font-semibold">No pinned messages</p>
                         <p class="text-xs mt-1 text-center">Tap a message then 📌 to pin it.</p>
                     </div>

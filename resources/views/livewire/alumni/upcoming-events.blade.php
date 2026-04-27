@@ -28,18 +28,23 @@ new class extends Component {
     public array  $alumniCourses = [];
 
     // ── Share modal ───────────────────────────────────────────────────────────
-    public bool   $showShareModal   = false;
-    public ?int   $shareEventId     = null;
-    public string $shareEventType   = '';
-    public string $shareEventTitle  = '';
-    public string $shareVenue       = '';
-    public string $shareDate        = '';
-    public string $shareTime        = '';
-    public string $shareEndTime     = '';
-    public string $shareDescription = '';
-    public string $shareOrganizer   = '';
-    public string $shareTargetParts = '';
-    public string $sharePhotoUrl    = '';
+    public bool   $showShareModal    = false;
+    public ?int   $shareEventId      = null;
+    public string $shareEventType    = '';
+    public string $shareEventTitle   = '';
+    public string $shareVenue        = '';
+    public string $shareDate         = '';
+    public string $shareTime         = '';
+    public string $shareEndTime      = '';
+    public string $shareDescription  = '';
+    public string $shareOrganizer    = '';
+    public string $shareTargetParts  = '';
+    public string $sharePhotoUrl     = '';
+    public bool   $shareIsCompleted  = false;
+
+    // Alumni identity for batch chat
+    public int    $alumniId     = 0;
+    public int    $alumniRoomId = 0;
 
     public function mount(): void
     {
@@ -47,8 +52,17 @@ new class extends Component {
         $user = Auth::user();
         if (!$user || !$user->alumni) abort(403, 'Access denied.');
         $alumni = $user->alumni;
+
+        $this->alumniId      = $alumni->id;
         $this->alumniCourses = $alumni->course ? [$alumni->course->code] : [];
         $this->alumniCollege = $alumni->course?->college ?? '';
+
+        // Resolve batch chat room
+        $room = DB::table('chat_rooms')
+            ->where('course_code', $alumni->course_code)
+            ->where('batch', $alumni->batch)
+            ->first();
+        $this->alumniRoomId = $room ? (int) $room->id : 0;
     }
 
     public function resetFilters(): void
@@ -58,7 +72,6 @@ new class extends Component {
         $this->filterSort   = 'recent';
     }
 
-    // ── FIX 5: No pagination — returns plain sorted Collection ───────────────
     #[Computed]
     public function events()
     {
@@ -112,7 +125,6 @@ new class extends Component {
                 'rsvps as tentative_count' => fn($r) => $r->where('response', 'TENTATIVE'),
             ]);
 
-        // Status filter
         if ($this->filterStatus === 'upcoming') {
             $adminQ->where(function ($q) use ($now) {
                 $q->where('event_date', '>', $now)
@@ -133,7 +145,6 @@ new class extends Component {
             });
         }
 
-        // Search
         if ($this->search !== '') {
             $s = trim($this->search);
             $adminQ->where(fn($sub) => $sub->where('title', 'like', "%{$s}%")->orWhere('venue', 'like', "%{$s}%"));
@@ -233,107 +244,40 @@ new class extends Component {
 
         $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
                        (!$event->event_end_date && $event->event_date <= now('UTC'));
-        if ($isCompleted) {
-            $this->dispatch('flash-message', type: 'warning', message: 'This event can no longer be shared — it has already ended.');
-            return;
-        }
 
         $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
         $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
 
-        $this->shareEventId     = $id;
-        $this->shareEventType   = $type;
-        $this->shareEventTitle  = $event->title;
-        $this->shareVenue       = $event->venue ?? '';
-        $this->shareDate        = $eventDatePH->format('F d, Y');
-        $this->shareTime        = $eventDatePH->format('g:i A');
-        $this->shareEndTime     = $eventEndPH ? $eventEndPH->format('g:i A') : '';
-        $this->shareDescription = $event->description ?? '';
-        $this->shareTargetParts = $event->target_participants ?? '';
-        $this->sharePhotoUrl    = $event->photo_url ?? '';
-        $this->shareOrganizer   = $type === 'ADMIN' ? 'PHILCST Admin' : ($event->organizer?->name ?? 'Organizer');
-
-        $this->showShareModal = true;
+        $this->shareEventId      = $id;
+        $this->shareEventType    = $type;
+        $this->shareEventTitle   = $event->title;
+        $this->shareVenue        = $event->venue ?? '';
+        $this->shareDate         = $eventDatePH->format('F d, Y');
+        $this->shareTime         = $eventDatePH->format('g:i A');
+        $this->shareEndTime      = $eventEndPH ? $eventEndPH->format('g:i A') : '';
+        $this->shareDescription  = $event->description ?? '';
+        $this->shareTargetParts  = $event->target_participants ?? '';
+        $this->sharePhotoUrl     = $event->photo_url ?? '';
+        $this->shareOrganizer    = $type === 'ADMIN' ? 'PHILCST Admin' : ($event->organizer?->name ?? 'Organizer');
+        $this->shareIsCompleted  = $isCompleted;
+        $this->showShareModal    = true;
     }
 
     public function closeShareModal(): void
     {
-        $this->showShareModal   = false;
-        $this->shareEventId     = null;
-        $this->shareEventType   = '';
-        $this->shareEventTitle  = '';
-        $this->shareVenue       = '';
-        $this->shareDate        = '';
-        $this->shareTime        = '';
-        $this->shareEndTime     = '';
-        $this->shareDescription = '';
-        $this->shareOrganizer   = '';
-        $this->shareTargetParts = '';
-        $this->sharePhotoUrl    = '';
-    }
-
-    // ── FIX 2: Post to Batch Chat ─────────────────────────────────────────────
-    public function postToBatchChat(int $id, string $type): void
-    {
-        $user   = Auth::user();
-        $alumni = $user?->alumni;
-        if (!$alumni) {
-            $this->dispatch('flash-message', type: 'error', message: 'Unable to post to batch chat.');
-            return;
-        }
-
-        $event = $type === 'ADMIN'
-            ? AdminEvent::withoutTrashed()->where('id', $id)->where('status', 'APPROVED')->first()
-            : OrganizerEvent::where('id', $id)->where('status', 'APPROVED')->first();
-
-        if (!$event) { $this->dispatch('flash-message', type: 'error', message: 'Event not found.'); return; }
-
-        $room = DB::table('chat_rooms')
-            ->where('course_code', $alumni->course_code)
-            ->where('batch', $alumni->batch)
-            ->first();
-
-        if (!$room) {
-            $this->dispatch('flash-message', type: 'error', message: 'Batch chat room not found. Please contact your coordinator.');
-            return;
-        }
-
-        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
-        $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
-        $timeStr     = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
-
-        $lines = [
-            "📢 @everyone — Event Alert!",
-            "",
-            "📅 {$event->title}",
-            "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
-        ];
-        if ($event->venue)              $lines[] = "📍 {$event->venue}";
-        if ($event->target_participants) $lines[] = "👥 Open for: {$event->target_participants}";
-        $lines[] = "";
-        $lines[] = "Check it out on the Events page! 🎉";
-
-        $msgId = DB::table('chat_messages')->insertGetId([
-            'room_id'     => $room->id,
-            'sender_type' => 'alumni',
-            'sender_id'   => $alumni->id,
-            'body'        => implode("\n", $lines),
-            'reply_to_id' => null,
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-
-        // Register @everyone mention so coordinators & batchmates are notified
-        DB::table('chat_mentions')->insert([
-            'message_id'   => $msgId,
-            'mention_type' => 'everyone',
-            'mentioned_id' => null,
-            'created_at'   => now(),
-            'updated_at'   => now(),
-        ]);
-
-        $this->dispatch('flash-message', type: 'success', message: 'Event posted to your batch chat! 🎉');
-        $this->closeShareModal();
+        $this->showShareModal    = false;
+        $this->shareEventId      = null;
+        $this->shareEventType    = '';
+        $this->shareEventTitle   = '';
+        $this->shareVenue        = '';
+        $this->shareDate         = '';
+        $this->shareTime         = '';
+        $this->shareEndTime      = '';
+        $this->shareDescription  = '';
+        $this->shareOrganizer    = '';
+        $this->shareTargetParts  = '';
+        $this->sharePhotoUrl     = '';
+        $this->shareIsCompleted  = false;
     }
 
     public function eventsBaseUrl(): string
@@ -342,13 +286,81 @@ new class extends Component {
         try { $path = route('upcoming.events', [], false); } catch (\Throwable) { $path = '/upcoming/events'; }
         return $base . $path;
     }
+
+    // ── Post to Batch Chat ────────────────────────────────────────────────────
+    public function postToBatchChat(): void
+    {
+        if (!$this->shareEventId || !$this->alumniRoomId) {
+            $this->dispatch('flash-message', type: 'error', message: 'Could not find your batch chat room.');
+            return;
+        }
+
+        $type  = $this->shareEventType;
+        $event = $type === 'ADMIN'
+            ? AdminEvent::withoutTrashed()->where('id', $this->shareEventId)->where('status', 'APPROVED')->first()
+            : OrganizerEvent::where('id', $this->shareEventId)->where('status', 'APPROVED')->first();
+
+        if (!$event) { $this->dispatch('flash-message', type: 'error', message: 'Event not found.'); return; }
+
+        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
+        $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
+        $timeStr     = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
+        $isCompleted = $this->shareIsCompleted;
+
+        if ($isCompleted) {
+            $lines = [
+                "🏆 Event Highlights",
+                "━━━━━━━━━━━━━━━━━━━━━━━━",
+                "✅ {$event->title}",
+                "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
+            ];
+            if ($event->venue)               $lines[] = "📍 {$event->venue}";
+            if ($event->target_participants) $lines[] = "👥 {$event->target_participants}";
+            $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
+            $lines[] = "Thanks to everyone who joined! 🎉 Check the Events page for more → " . $this->eventsBaseUrl();
+        } else {
+            $lines = [
+                "📢 @everyone — Event Alert!",
+                "",
+                "📅 {$event->title}",
+                "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
+            ];
+            if ($event->venue)               $lines[] = "📍 {$event->venue}";
+            if ($event->target_participants) $lines[] = "👥 Open for: {$event->target_participants}";
+            $lines[] = "";
+            $lines[] = "Check it out & RSVP on the Events page! 🎉 → " . $this->eventsBaseUrl();
+        }
+
+        $msgId = DB::table('chat_messages')->insertGetId([
+            'room_id'     => $this->alumniRoomId,
+            'sender_type' => 'alumni',
+            'sender_id'   => $this->alumniId,
+            'body'        => implode("\n", $lines),
+            'reply_to_id' => null,
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        if (!$isCompleted) {
+            DB::table('chat_mentions')->insert([
+                'message_id'   => $msgId,
+                'mention_type' => 'everyone',
+                'mentioned_id' => null,
+                'created_at'   => now(),
+                'updated_at'   => now(),
+            ]);
+        }
+
+        $label = $isCompleted ? 'Event highlights posted to your Batch Chat! 🏆' : 'Event posted to your batch chat! 🎉';
+        $this->dispatch('flash-message', type: 'success', message: $label);
+        $this->closeShareModal();
+    }
 };
 ?>
 
 <div class="flex flex-col" style="min-height: calc(100vh - 120px);">
 
 <style>
-/* ── Base tokens ─────────────────────────────────────────────────── */
 :root {
     --brand:       #7a3f91;
     --brand-light: #f9f7fc;
@@ -404,7 +416,6 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-    {{-- Inner flex column: header + filters + cards grow --}}
     <div class="flex flex-col flex-1 gap-5">
 
         {{-- ══ PAGE HEADER ═══════════════════════════════════════════════════ --}}
@@ -416,7 +427,6 @@ new class extends Component {
                     <span class="font-semibold">{{ $alumniCollege ?: 'your college' }}</span>
                 </p>
             </div>
-
             <div class="flex items-center gap-2 flex-wrap">
                 <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 uppercase tracking-widest">
                     <i class="fa-solid fa-circle-check text-emerald-600"></i>
@@ -482,17 +492,17 @@ new class extends Component {
                                     <h3 class="text-base font-bold text-[#333333] leading-snug mt-0.5 line-clamp-2">{{ $event->title }}</h3>
                                 </div>
                                 @if($isCompleted)
-                                    <span class="inline-flex shrink-0 items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-green-200 bg-green-50 text-green-700 mt-0.5">
+                                    <span class="inline-flex shrink-0 items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-xl border border-green-200 bg-green-50 text-green-700 mt-0.5">
                                         <i class="fa-solid fa-check text-xs"></i> Done
                                     </span>
                                 @else
-                                    <span class="inline-flex shrink-0 items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 mt-0.5">
+                                    <span class="inline-flex shrink-0 items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 mt-0.5">
                                         <i class="fa-solid fa-calendar-check text-xs"></i> Soon
                                     </span>
                                 @endif
                             </div>
 
-                            {{-- Date Pill --}}
+                            {{-- Date --}}
                             <div class="flex items-center gap-1.5 text-sm text-[#666666]">
                                 <i class="fa-solid fa-calendar text-[#999999] text-xs"></i>
                                 <span>{{ $eventDate->format('M d, Y') }}</span>
@@ -512,18 +522,20 @@ new class extends Component {
                                     <span class="text-xs text-[#999999]">{{ $postedAgo }}</span>
                                     <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
                                         <i class="fa-solid fa-circle-check text-xs"></i>
-                                        {{ $event->confirmed_count }} Going
+                                        {{ $event->confirmed_count }} Attending
                                     </span>
                                 </div>
                                 <div class="flex items-center gap-1.5">
-                                    @if(!$isCompleted)
+                                    {{-- Share / Highlights button --}}
                                     <button type="button"
                                             wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
-                                            class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
-                                        <i class="fas fa-share-nodes text-xs"></i>
-                                        <span class="hidden sm:inline">Share</span>
+                                            class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold border transition cursor-pointer
+                                                   {{ $isCompleted
+                                                       ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-white hover:border-amber-500'
+                                                       : 'bg-sky-100 text-sky-700 border-sky-300 hover:bg-white hover:border-sky-500' }}">
+                                        <i class="fas {{ $isCompleted ? 'fa-trophy' : 'fa-share-nodes' }} text-xs"></i>
+                                        <span class="hidden sm:inline">{{ $isCompleted ? 'Highlights' : 'Share' }}</span>
                                     </button>
-                                    @endif
                                     <button type="button"
                                             wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')"
                                             class="card-view-hint inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white cursor-pointer"
@@ -571,7 +583,7 @@ new class extends Component {
     </div>{{-- end inner flex column --}}
 
 
-    {{-- ══ VIEW DETAILS MODAL ════════════════════════════════════════════════════ --}}
+    {{-- ══ VIEW DETAILS MODAL ════════════════════════════════════════════════ --}}
     @if($showViewModal && $this->viewingEvent)
     @php
         $event        = $this->viewingEvent;
@@ -643,10 +655,12 @@ new class extends Component {
                                 {{ $alumniRsvp->response }}
                             </span>
                         </div>
+                        @if(!$isCompleted)
                         <button wire:click="openRsvpModal" class="px-4 py-2 rounded-lg text-sm font-semibold text-white transition"
                                 style="background-color:#7a3f91;">
                             <i class="fa-solid fa-pen-to-square text-sm mr-1.5"></i> Change
                         </button>
+                        @endif
                     </div>
                 </div>
                 @endif
@@ -767,12 +781,17 @@ new class extends Component {
 
             {{-- Modal Footer --}}
             <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-2">
-                @if(!$isCompleted)
+                {{-- Share / Highlights button — always visible --}}
                 <button type="button"
                         wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
-                        class="px-4 py-2.5 bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-sm font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
-                    <i class="fas fa-share-nodes text-xs mr-1.5"></i> Share
+                        class="px-4 py-2.5 rounded-lg text-sm font-bold border transition cursor-pointer
+                               {{ $isCompleted
+                                   ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-white hover:border-amber-500'
+                                   : 'bg-sky-100 text-sky-700 border-sky-300 hover:bg-white hover:border-sky-500' }}">
+                    <i class="fas {{ $isCompleted ? 'fa-trophy' : 'fa-share-nodes' }} text-xs mr-1.5"></i>
+                    {{ $isCompleted ? 'Share Highlights' : 'Share' }}
                 </button>
+                @if(!$isCompleted)
                 <button type="button" wire:click="openRsvpModal"
                         class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition flex items-center gap-2 cursor-pointer"
                         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
@@ -789,7 +808,7 @@ new class extends Component {
     @endif
 
 
-    {{-- ══ RSVP MODAL ═══════════════════════════════════════════════════════════ --}}
+    {{-- ══ RSVP MODAL ═══════════════════════════════════════════════════════ --}}
     @if($showRsvpModal)
     <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
          wire:keydown.escape.window="closeRsvpModal">
@@ -856,7 +875,7 @@ new class extends Component {
     @endif
 
 
-    {{-- ══ SHARE MODAL ════════════════════════════════════════════════════════ --}}
+    {{-- ══ SHARE / HIGHLIGHTS MODAL ═══════════════════════════════════════════ --}}
     @if($showShareModal)
     @php
         $shareBaseUrl     = $this->eventsBaseUrl();
@@ -864,26 +883,33 @@ new class extends Component {
             ? mb_substr($shareDescription, 0, 140) . '…'
             : $shareDescription;
         $timeStr = $shareTime . ($shareEndTime ? ' – ' . $shareEndTime : '');
+        $shareHost = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
 
-        $fbPostLines   = [];
-        $fbPostLines[] = "📅 Event: {$shareEventTitle}";
-        if ($shareDate)        $fbPostLines[] = "🗓️  {$shareDate}" . ($timeStr ? " · {$timeStr}" : '');
-        if ($shareVenue)       $fbPostLines[] = "📍 {$shareVenue}";
-        if ($shareOrganizer)   $fbPostLines[] = "🏫 Organized by: {$shareOrganizer}";
-        if ($shareTargetParts) $fbPostLines[] = "👥 Open for: {$shareTargetParts}";
-        $fbPostLines[] = '';
-        $fbPostLines[] = "See full details & RSVP on the PHILCST Alumni Portal 👇";
-        $fbPostLines[] = $shareBaseUrl;
-        if ($sharePhotoUrl) {
+        $fbPostLines = [];
+        if ($shareIsCompleted) {
+            $fbPostLines[] = "🏆 Event Highlights: {$shareEventTitle}";
+            if ($shareDate)        $fbPostLines[] = "🗓️  {$shareDate}" . ($timeStr ? " · {$timeStr}" : '');
+            if ($shareVenue)       $fbPostLines[] = "📍 {$shareVenue}";
+            if ($shareOrganizer)   $fbPostLines[] = "🏫 Organized by: {$shareOrganizer}";
+            if ($shareTargetParts) $fbPostLines[] = "👥 {$shareTargetParts}";
             $fbPostLines[] = '';
-            $fbPostLines[] = "📸 Event cover: {$sharePhotoUrl}";
+            $fbPostLines[] = "🎉 Thank you to everyone who attended! See the full recap on the PHILCST Alumni Portal 👇";
+        } else {
+            $fbPostLines[] = "📅 Event: {$shareEventTitle}";
+            if ($shareDate)        $fbPostLines[] = "🗓️  {$shareDate}" . ($timeStr ? " · {$timeStr}" : '');
+            if ($shareVenue)       $fbPostLines[] = "📍 {$shareVenue}";
+            if ($shareOrganizer)   $fbPostLines[] = "🏫 Organized by: {$shareOrganizer}";
+            if ($shareTargetParts) $fbPostLines[] = "👥 Open for: {$shareTargetParts}";
+            $fbPostLines[] = '';
+            $fbPostLines[] = "See full details & RSVP on the PHILCST Alumni Portal 👇";
         }
-        $fbPostText = implode("\n", $fbPostLines);
-        $fbShareUrl = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
-        $shareHost  = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+        $fbPostLines[] = $shareBaseUrl;
+        $fbPostText    = implode("\n", $fbPostLines);
+        $fbShareUrl    = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
     @endphp
 
-    <div class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+    {{-- ══ SHARE MODAL OVERLAY ══ --}}
+    <div class="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm"
          wire:keydown.escape="closeShareModal"
          x-data="{
              copied: false,
@@ -891,9 +917,10 @@ new class extends Component {
              messengerCopied: false,
              showFallback: false,
              fallbackText: '',
-             fbText:   {{ json_encode($fbPostText) }},
-             baseUrl:  {{ json_encode($shareBaseUrl) }},
-             fbUrl:    {{ json_encode($fbShareUrl) }},
+             fbText:      {{ json_encode($fbPostText) }},
+             baseUrl:     {{ json_encode($shareBaseUrl) }},
+             fbUrl:       {{ json_encode($fbShareUrl) }},
+             isCompleted: {{ $shareIsCompleted ? 'true' : 'false' }},
 
              async copyText(text) {
                  try {
@@ -949,15 +976,20 @@ new class extends Component {
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100">
 
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden"
+        {{-- ══ MODAL CONTAINER — max-w-5xl so both columns are fully visible ══ --}}
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden"
              x-transition:enter="transition ease-out duration-200"
              x-transition:enter-start="opacity-0 scale-95"
              x-transition:enter-end="opacity-100 scale-100">
 
-            {{-- Header --}}
-            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            {{-- ── STICKY HEADER ── --}}
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
                 <h2 class="text-lg font-bold text-[#333333] flex items-center gap-2">
-                    <i class="fas fa-share-nodes text-sky-600"></i> Share Event
+                    @if($shareIsCompleted)
+                        <i class="fas fa-trophy text-amber-500"></i> Share Event Highlights
+                    @else
+                        <i class="fas fa-share-nodes text-sky-600"></i> Share Event
+                    @endif
                 </h2>
                 <button wire:click="closeShareModal" type="button"
                         class="w-8 h-8 rounded-full flex items-center justify-center text-[#999999] hover:text-[#333333] hover:bg-gray-100 transition cursor-pointer">
@@ -965,8 +997,18 @@ new class extends Component {
                 </button>
             </div>
 
-            {{-- Manual-copy fallback --}}
-            <div x-show="showFallback" x-cloak class="px-6 py-3 border-b border-amber-200 bg-amber-50">
+            {{-- ── COMPLETED BANNER (sticky, shrink-0) ── --}}
+            @if($shareIsCompleted)
+            <div class="px-6 py-3 border-b border-amber-200 bg-amber-50 flex items-center gap-2.5 flex-shrink-0">
+                <i class="fas fa-circle-info text-amber-500 text-sm flex-shrink-0"></i>
+                <p class="text-xs text-amber-800 leading-snug">
+                    This event has already ended. You can still share the <strong>highlights</strong> with your batchmates on Facebook, Messenger, or your Batch Chat!
+                </p>
+            </div>
+            @endif
+
+            {{-- ── MANUAL-COPY FALLBACK (sticky, shrink-0) ── --}}
+            <div x-show="showFallback" x-cloak class="px-6 py-3 border-b border-amber-200 bg-amber-50 flex-shrink-0">
                 <p class="text-xs font-bold text-amber-800 mb-2 flex items-center gap-1.5">
                     <i class="fas fa-triangle-exclamation"></i>
                     Auto-copy blocked. Please copy manually:
@@ -977,162 +1019,184 @@ new class extends Component {
                 <button @click="showFallback=false" class="mt-1 text-xs text-amber-700 font-semibold hover:underline">Dismiss</button>
             </div>
 
-            {{-- Two-column body --}}
-            <div class="flex flex-col lg:flex-row">
+            {{-- ══ SCROLLABLE BODY — two-column layout ══ --}}
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-c">
+                <div class="flex flex-col lg:flex-row min-h-full">
 
-                {{-- LEFT: Preview --}}
-                <div class="flex-1 px-6 py-5 border-b lg:border-b-0 lg:border-r border-gray-100 flex flex-col gap-4">
+                    {{-- ── LEFT: Preview ── --}}
+                    <div class="flex-1 px-6 py-5 border-b lg:border-b-0 lg:border-r border-gray-100 flex flex-col gap-4">
 
-                    <p class="text-xs font-bold text-[#999999] uppercase tracking-widest">What recipients will see</p>
+                        <p class="text-xs font-bold text-[#999999] uppercase tracking-widest">What recipients will see</p>
 
-                    {{-- Preview card --}}
-                    <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-                        <div class="bg-[#f9f7fc] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
-                            <div class="w-14 h-14 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#6a3080] flex items-center justify-center flex-shrink-0 shadow">
-                                <i class="fas fa-calendar-check text-white text-xl"></i>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="font-bold text-[#333333] text-sm leading-tight truncate">{{ $shareEventTitle }}</p>
-                                <p class="text-xs text-[#666666] mt-0.5 font-semibold">
-                                    {{ $shareOrganizer }}
-                                </p>
-                                <div class="flex flex-wrap gap-1 mt-1.5">
-                                    @if($shareDate)
-                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-calendar text-[8px]"></i>{{ $shareDate }}</span>
-                                    @endif
-                                    @if($shareTime)
-                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-clock text-[8px]"></i>{{ $shareTime }}{{ $shareEndTime ? ' – '.$shareEndTime : '' }}</span>
-                                    @endif
-                                    @if($shareVenue)
-                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareVenue }}</span>
-                                    @endif
+                        {{-- Preview card --}}
+                        <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+                            <div class="border-b border-gray-200 px-4 py-3 flex items-start gap-3"
+                                 style="background-color: {{ $shareIsCompleted ? '#fffbeb' : '#f9f7fc' }};">
+                                <div class="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 shadow"
+                                     style="background: {{ $shareIsCompleted ? 'linear-gradient(135deg,#f59e0b,#d97706)' : 'linear-gradient(135deg,#7a3f91,#6a3080)' }};">
+                                    <i class="fas {{ $shareIsCompleted ? 'fa-trophy' : 'fa-calendar-check' }} text-white text-xl"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-bold text-[#333333] text-sm leading-tight truncate">
+                                        {{ $shareIsCompleted ? '🏆 ' : '' }}{{ $shareEventTitle }}
+                                    </p>
+                                    <p class="text-xs text-[#666666] mt-0.5 font-semibold">{{ $shareOrganizer }}</p>
+                                    <div class="flex flex-wrap gap-1 mt-1.5">
+                                        @if($shareDate)
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-calendar text-[8px]"></i>{{ $shareDate }}</span>
+                                        @endif
+                                        @if($shareTime)
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-clock text-[8px]"></i>{{ $shareTime }}{{ $shareEndTime ? ' – '.$shareEndTime : '' }}</span>
+                                        @endif
+                                        @if($shareVenue)
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200 text-[#333333]"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareVenue }}</span>
+                                        @endif
+                                        @if($shareIsCompleted)
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700"><i class="fas fa-check text-[8px]"></i>Completed</span>
+                                        @endif
+                                    </div>
                                 </div>
                             </div>
+                            @if($shareDescPreview)
+                            <div class="px-4 py-2.5 bg-white border-b border-gray-100">
+                                <p class="text-xs text-[#666666] leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
+                            </div>
+                            @endif
+                            <div class="px-4 py-2 bg-[#f9f7fc] flex items-center gap-2">
+                                <i class="fas fa-globe text-[#999999] text-[10px]"></i>
+                                <span class="text-[10px] text-[#666666] uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+                            </div>
                         </div>
-                        @if($shareDescPreview)
-                        <div class="px-4 py-2.5 bg-white border-b border-gray-100">
-                            <p class="text-xs text-[#666666] leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
-                        </div>
-                        @endif
-                        <div class="px-4 py-2 bg-[#f9f7fc] flex items-center gap-2">
-                            <i class="fas fa-globe text-[#999999] text-[10px]"></i>
-                            <span class="text-[10px] text-[#666666] uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+
+                        {{-- Info box --}}
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
+                            <i class="fas fa-circle-info text-blue-500 text-xs flex-shrink-0 mt-0.5"></i>
+                            <p class="text-xs text-blue-800 leading-snug">
+                                <strong>How it works:</strong> Click a share button — the
+                                {{ $shareIsCompleted ? 'highlights text' : 'event text' }}
+                                is copied to your clipboard and the platform opens. Just paste
+                                (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>) in your post or chat!
+                            </p>
                         </div>
                     </div>
 
-                    {{-- Info box --}}
-                    <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
-                        <i class="fas fa-circle-info text-blue-500 text-xs flex-shrink-0 mt-0.5"></i>
-                        <p class="text-xs text-blue-800 leading-snug">
-                            <strong>How it works:</strong> Click a share button — the event text is copied to your clipboard and the platform opens. Just paste
-                            (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>) in your post or chat!
+                    {{-- ── RIGHT: Share buttons ── --}}
+                    <div class="w-full lg:w-80 px-6 py-5 flex flex-col gap-3 flex-shrink-0">
+
+                        <p class="text-xs font-bold text-[#999999] uppercase tracking-widest">Share via</p>
+
+                        {{-- Copied banners --}}
+                        <div x-show="fbCopied" x-cloak
+                             x-transition:enter="transition ease-out duration-300"
+                             x-transition:enter-start="opacity-0 -translate-y-2"
+                             x-transition:enter-end="opacity-100 translate-y-0"
+                             class="bg-emerald-50 border border-emerald-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
+                            <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
+                            <p class="text-xs font-bold text-emerald-800">Text copied! Paste in Facebook popup.</p>
+                        </div>
+
+                        <div x-show="messengerCopied" x-cloak
+                             x-transition:enter="transition ease-out duration-300"
+                             x-transition:enter-start="opacity-0 -translate-y-2"
+                             x-transition:enter-end="opacity-100 translate-y-0"
+                             class="bg-blue-50 border border-blue-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
+                            <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
+                            <p class="text-xs font-bold text-blue-800">Text copied! Paste in Messenger.</p>
+                        </div>
+
+                        {{-- ── Facebook ── --}}
+                        <button type="button" @click="shareOnFacebook()"
+                                class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                            <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
+                                    <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
+                                </svg>
+                            </span>
+                            <span class="flex-1 text-left text-sm">
+                                <span x-show="!fbCopied">Share on Facebook</span>
+                                <span x-show="fbCopied" x-cloak><i class="fas fa-check mr-1"></i> Paste in popup!</span>
+                            </span>
+                            <i class="fas fa-arrow-up-right-from-square text-white/60 text-xs group-hover:text-white transition"></i>
+                        </button>
+
+                        {{-- ── Messenger ── --}}
+                        <button type="button" @click="shareOnMessenger()"
+                                class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                            <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
+                                    <defs><linearGradient id="mgr_ev" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
+                                    <path fill="url(#mgr_ev)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                                </svg>
+                            </span>
+                            <span class="flex-1 text-left text-sm">
+                                <span x-show="!messengerCopied">Share via Messenger</span>
+                                <span x-show="messengerCopied" x-cloak><i class="fas fa-check mr-1"></i> Paste in Messenger!</span>
+                            </span>
+                            <i class="fas fa-arrow-up-right-from-square text-white/60 text-xs group-hover:text-white transition"></i>
+                        </button>
+                        <p class="text-[10px] text-[#999999] text-center -mt-1">
+                            <i class="fas fa-users text-[9px] mr-0.5"></i> Works for private chats & group chats.
                         </p>
-                    </div>
-                </div>
 
-                {{-- RIGHT: Share buttons --}}
-                <div class="w-full lg:w-72 px-6 py-5 flex flex-col gap-3 flex-shrink-0">
-
-                    <p class="text-xs font-bold text-[#999999] uppercase tracking-widest">Share via</p>
-
-                    {{-- Copied banners --}}
-                    <div x-show="fbCopied" x-cloak
-                         x-transition:enter="transition ease-out duration-300"
-                         x-transition:enter-start="opacity-0 -translate-y-2"
-                         x-transition:enter-end="opacity-100 translate-y-0"
-                         class="bg-emerald-50 border border-emerald-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
-                        <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
-                        <p class="text-xs font-bold text-emerald-800">Text copied! Paste in Facebook popup.</p>
-                    </div>
-
-                    <div x-show="messengerCopied" x-cloak
-                         x-transition:enter="transition ease-out duration-300"
-                         x-transition:enter-start="opacity-0 -translate-y-2"
-                         x-transition:enter-end="opacity-100 translate-y-0"
-                         class="bg-blue-50 border border-blue-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
-                        <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
-                        <p class="text-xs font-bold text-blue-800">Text copied! Paste in Messenger.</p>
-                    </div>
-
-                    {{-- Facebook --}}
-                    <button type="button" @click="shareOnFacebook()"
-                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
-                        <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
-                                <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
-                            </svg>
-                        </span>
-                        <span class="flex-1 text-left">
-                            <span x-show="!fbCopied" class="block text-sm">Facebook</span>
-                            <span x-show="fbCopied" x-cloak class="block text-xs"><i class="fas fa-check mr-1"></i>Paste!</span>
-                        </span>
-                    </button>
-
-                    {{-- Messenger --}}
-                    <button type="button" @click="shareOnMessenger()"
-                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
-                        <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
-                                <defs>
-                                    <linearGradient id="mgr_ev" x1="0%" y1="100%" x2="100%" y2="0%">
-                                        <stop offset="0%" style="stop-color:#00B2FF"/>
-                                        <stop offset="100%" style="stop-color:#006AFF"/>
-                                    </linearGradient>
-                                </defs>
-                                <path fill="url(#mgr_ev)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
-                            </svg>
-                        </span>
-                        <span class="flex-1 text-left">
-                            <span x-show="!messengerCopied" class="block text-sm">Messenger</span>
-                            <span x-show="messengerCopied" x-cloak class="block text-xs"><i class="fas fa-check mr-1"></i>Paste!</span>
-                        </span>
-                    </button>
-
-                    {{-- Post to Batch Chat --}}
-                    <button type="button"
-                            wire:click="postToBatchChat({{ $shareEventId }}, '{{ $shareEventType }}')"
-                            wire:loading.attr="disabled"
-                            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-300 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200"
-                            style="color:#7a3f91;">
-                        <span class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform"
-                              style="background:#7a3f91;">
-                            <i class="fa-solid fa-users text-white text-sm"></i>
-                        </span>
-                        <span class="flex-1 text-left">
-                            <span wire:loading.remove wire:target="postToBatchChat" class="block text-sm">Post to Batch Chat</span>
-                            <span wire:loading wire:target="postToBatchChat" class="block text-xs"><i class="fas fa-spinner fa-spin mr-1"></i>Posting…</span>
-                            <span class="block text-xs font-semibold mt-0.5">Share directly to your batchmates</span>
-                        </span>
-                        <i class="fas fa-paper-plane text-xs transition" style="color:#7a3f91;"></i>
-                    </button>
-
-                    {{-- Dividers & Copy Link --}}
-                    <div class="relative">
-                        <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-                        <div class="relative flex justify-center">
-                            <span class="bg-white px-2 text-[10px] font-bold text-[#999999] uppercase tracking-widest">or copy link</span>
+                        {{-- Divider --}}
+                        <div class="relative">
+                            <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                            <div class="relative flex justify-center">
+                                <span class="bg-white px-2 text-[10px] font-bold text-[#999999] uppercase tracking-widest">or post directly</span>
+                            </div>
                         </div>
-                    </div>
 
-                    <button type="button" @click="copyLinkFn()"
-                            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 text-[#333333] font-bold text-sm transition cursor-pointer group">
-                        <span class="w-9 h-9 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
-                            <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-[#999999]'" class="text-sm"></i>
-                        </span>
-                        <div class="flex-1 text-left min-w-0">
-                            <p :class="copied ? 'text-emerald-600' : 'text-[#333333]'" class="font-bold text-sm"
-                               x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
-                            <p class="text-[10px] text-[#999999] font-mono mt-0.5 truncate">{{ $shareBaseUrl }}</p>
+                        {{-- ── Batch Chat ── --}}
+                        <button type="button"
+                                wire:click="postToBatchChat"
+                                wire:loading.attr="disabled"
+                                class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-300 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200"
+                                style="color:#7a3f91;">
+                            <span class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform"
+                                  style="background:#7a3f91;">
+                                <i class="fas fa-users text-white text-sm"></i>
+                            </span>
+                            <span class="flex-1 text-left">
+                                <span wire:loading.remove wire:target="postToBatchChat">
+                                    {{ $shareIsCompleted ? 'Post Highlights to Batch Chat' : 'Post to Batch Chat' }}
+                                </span>
+                                <span wire:loading wire:target="postToBatchChat"><i class="fas fa-spinner fa-spin mr-1"></i> Posting…</span>
+                                <span class="block text-xs font-semibold mt-0.5" style="color:#7a3f91;">
+                                    {{ $shareIsCompleted ? 'Sends highlights to your batchmates' : 'Sends directly to your batchmates' }}
+                                </span>
+                            </span>
+                            <i class="fas fa-paper-plane text-xs transition" style="color:#7a3f91;"></i>
+                        </button>
+
+                        {{-- Divider + Copy Link --}}
+                        <div class="relative">
+                            <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                            <div class="relative flex justify-center">
+                                <span class="bg-white px-2 text-[10px] font-bold text-[#999999] uppercase tracking-widest">or copy link</span>
+                            </div>
                         </div>
-                    </button>
 
-                    <p class="text-[10px] text-[#999999] text-center leading-snug pt-1">
-                        Sharing is disabled for events that have ended.
-                    </p>
-                </div>
-            </div>
-        </div>
-    </div>
+                        <button type="button" @click="copyLinkFn()"
+                                class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 text-[#333333] font-bold text-sm transition cursor-pointer group">
+                            <span class="w-9 h-9 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
+                                <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-[#999999]'" class="text-sm"></i>
+                            </span>
+                            <div class="flex-1 text-left min-w-0">
+                                <p :class="copied ? 'text-emerald-600' : 'text-[#333333]'" class="font-bold text-sm"
+                                   x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
+                                <p class="text-[10px] text-[#999999] font-mono mt-0.5 truncate">{{ $shareBaseUrl }}</p>
+                            </div>
+                        </button>
+
+                        <p class="text-[10px] text-[#999999] text-center leading-snug pt-1">
+                            {{ $shareIsCompleted ? 'Sharing highlights is always available for completed events.' : 'Sharing is disabled once an event ends.' }}
+                        </p>
+
+                    </div>{{-- end RIGHT col --}}
+                </div>{{-- end two-col --}}
+            </div>{{-- end scrollable body --}}
+
+        </div>{{-- end modal container --}}
+    </div>{{-- end overlay --}}
     @endif
-
-</div>
+    {{-- END SHARE MODAL --}}

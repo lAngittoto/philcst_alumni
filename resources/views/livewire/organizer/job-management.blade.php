@@ -9,6 +9,7 @@
  *  - All create / edit / delete actions are written to the audit log
  *  - Share to Facebook: copies full post text to clipboard THEN opens FB
  *  - Share to Messenger: copies full post text to clipboard THEN opens Messenger
+ *  - Share to Alumni Batch Chats: posts directly to all batch rooms for this college
  */
 
 use Livewire\Volt\Component;
@@ -20,6 +21,7 @@ use App\Models\AuditLog;
 use App\Http\Controllers\JobController;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\DB;
 
 new class extends Component {
     use WithPagination;
@@ -216,7 +218,7 @@ new class extends Component {
     public function jobPostings()
     {
         $org = auth()->user()?->organizer;
-        if (!$org) return JobPosting::whereRaw('0=1')->paginate(20);
+        if (!$org) return JobPosting::whereRaw('0=1')->paginate(12);
 
         $orgCollege = $this->organizerCollege;
         $today      = now('Asia/Manila')->startOfDay()->toDateString();
@@ -281,7 +283,7 @@ new class extends Component {
 
         $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
 
-        $paginated = $q->paginate(20);
+        $paginated = $q->paginate(12);
 
         $nowDate = now('Asia/Manila')->startOfDay();
         $paginated->getCollection()->transform(function ($job) use ($nowDate) {
@@ -759,6 +761,85 @@ new class extends Component {
         $this->shareCollege     = '';
     }
 
+    public function shareToAlumniChats(): void
+    {
+        $this->guardAuth();
+        if (! $this->shareJobId) {
+            $this->dispatch('flash-message', type: 'error', message: 'No job selected to share.');
+            return;
+        }
+
+        $deadlinePassed = $this->shareDeadline
+            && \Carbon\Carbon::parse($this->shareDeadline)
+                ->setTimezone('Asia/Manila')->startOfDay()
+                ->lt(now('Asia/Manila')->startOfDay());
+
+        if ($deadlinePassed) {
+            $this->dispatch('flash-message', type: 'warning', message: 'Hindi na maaaring i-share ang job posting na ito — deadline na.');
+            return;
+        }
+
+        // Find all chat rooms for alumni belonging to this college
+        $college = $this->shareCollege ?: $this->organizerCollege;
+
+        $courseCodes = \App\Models\Course::where('college', $college)->pluck('code')->toArray();
+
+        if (empty($courseCodes)) {
+            $this->dispatch('flash-message', type: 'error', message: 'No alumni batch chats found for your college.');
+            return;
+        }
+
+        $roomIds = DB::table('chat_rooms')
+            ->whereIn('course_code', $courseCodes)
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($roomIds)) {
+            $this->dispatch('flash-message', type: 'error', message: 'No batch chat rooms found for this college.');
+            return;
+        }
+
+        $dl = $this->shareDeadline
+            ? \Carbon\Carbon::parse($this->shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
+            : null;
+
+        $org     = auth()->user()?->organizer;
+        $orgName = auth()->user()?->name ?? 'Organizer';
+
+        $lines   = [];
+        $lines[] = "📢 Job Opportunity — Posted by {$orgName}";
+        $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
+        $lines[] = "🎯 {$this->shareJobTitle}";
+        $lines[] = "🏢 {$this->shareCompany}";
+        if ($this->shareLocation)  $lines[] = "📍 {$this->shareLocation}";
+        if ($this->shareEmpType)   $lines[] = "💼 {$this->shareEmpType}";
+        if ($this->shareExpLevel)  $lines[] = "📊 {$this->shareExpLevel}";
+        if ($this->shareSalary)    $lines[] = "💰 {$this->shareSalary}";
+        if ($dl)                   $lines[] = "📅 Deadline: {$dl}";
+        if ($this->shareCollege)   $lines[] = "🏫 For: {$this->shareCollege}";
+        $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
+        $lines[] = "👀 Check it out on the Alumni Portal → " . $this->jobsBaseUrl();
+
+        $body = implode("\n", $lines);
+        $now  = now();
+
+        $inserts = array_map(fn($roomId) => [
+            'room_id'     => $roomId,
+            'sender_type' => 'organizer',
+            'sender_id'   => $org?->id ?? 0,
+            'body'        => $body,
+            'reply_to_id' => null,
+            'created_at'  => $now,
+            'updated_at'  => $now,
+        ], $roomIds);
+
+        DB::table('chat_messages')->insert($inserts);
+
+        $count = count($roomIds);
+        $this->closeShareModal();
+        $this->dispatch('flash-message', type: 'success', message: "Job shared to {$count} alumni batch chat" . ($count > 1 ? 's' : '') . "!");
+    }
+
     public function jobsBaseUrl(): string
     {
         $base = rtrim(config('app.url'), '/');
@@ -772,7 +853,44 @@ new class extends Component {
 };
 ?>
 
-<div class="min-h-screen bg-gray-50">
+<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+
+<style>
+:root {
+    --brand:       #7a3f91;
+    --brand-dark:  #5e2f72;
+    --brand-light: #f9f7fc;
+    --brand-mid:   #ede9fe;
+    --text-primary:   #333333;
+    --text-secondary: #666666;
+    --text-muted:     #999999;
+}
+@keyframes modalIn {
+    from { opacity:0; transform:translateY(14px) scale(.97); }
+    to   { opacity:1; transform:none; }
+}
+.m-in { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
+
+.job-card { transition: box-shadow .18s, transform .18s; }
+.job-card:hover {
+    box-shadow: 0 8px 28px rgba(122,63,145,.18), 0 2px 8px rgba(0,0,0,.07);
+    transform: translateY(-1px);
+}
+.job-card:hover .card-view-btn { background-color: var(--brand-dark) !important; }
+
+.scroll-c::-webkit-scrollbar { width: 5px; }
+.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+.filter-input {
+    border: 1.5px solid #e8e0f0;
+    transition: border-color .15s, box-shadow .15s;
+    color: var(--text-primary);
+}
+.filter-input:hover  { border-color: var(--brand); }
+.filter-input:focus  { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
+</style>
 
 {{-- FLASH TOAST --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
@@ -798,257 +916,306 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto">
+<div class="flex flex-col flex-1 gap-5 px-4 sm:px-6 lg:px-8 pt-6 pb-8 max-w-screen-2xl mx-auto w-full">
 
-    {{-- HEADER --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div class="flex items-center gap-4">
-            <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-[#7a3f91] flex items-center justify-center shadow-lg flex-shrink-0"
-                 style="box-shadow:0 4px 14px rgba(122,63,145,.35);">
-                <i class="fas fa-briefcase text-white text-lg sm:text-xl"></i>
-            </div>
-            <div>
-                <h1 class="text-2xl sm:text-3xl font-extrabold text-gray-800 tracking-tight">My Job Posts</h1>
-                <p class="text-gray-500 text-sm sm:text-base mt-1">
-                    Post and manage job listings for your alumni.
-                    @if($this->organizerCollege)
-                        <span class="inline-flex items-center gap-1 ml-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-sm font-bold">
-                            <i class="fas fa-building-columns text-[10px]"></i> {{ $this->organizerCollege }}
-                        </span>
-                    @endif
-                </p>
-            </div>
+    {{-- ══ PAGE HEADER ══════════════════════════════════════════════════════ --}}
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-semibold tracking-tight" style="color:#333333;">My Job Posts</h1>
+            <p class="text-base leading-relaxed mt-2 font-normal" style="color:#666666;">
+                Post and manage job listings for your alumni.
+                @if($this->organizerCollege)
+                    &middot;
+                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-sm">
+                        <i class="fas fa-building-columns text-[10px]"></i> {{ $this->organizerCollege }}
+                    </span>
+                @endif
+            </p>
         </div>
-        <button wire:click="openPostModal"
-                class="bg-[#7a3f91] text-white shadow-md hover:bg-[#5e2f72] active:shadow-sm transition-all inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-base shrink-0 cursor-pointer">
-            <i class="fas fa-plus text-base"></i> Post a Job
+        <div class="flex items-center gap-3 flex-wrap">
+            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-widest">
+                <i class="fas fa-briefcase text-purple-600"></i>
+                {{ $this->jobPostings->total() }} {{ $this->jobPostings->total() !== 1 ? 'Jobs' : 'Job' }}
+            </span>
+            <button wire:click="openPostModal"
+                    class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-md transition cursor-pointer"
+                    style="background-color:#7a3f91;"
+                    onmouseover="this.style.backgroundColor='#5e2f72'"
+                    onmouseout="this.style.backgroundColor='#7a3f91'">
+                <i class="fas fa-plus text-sm"></i> Post a Job
+            </button>
+        </div>
+    </div>
+
+    {{-- ══ FILTER BAR ═══════════════════════════════════════════════════════ --}}
+    <div class="flex flex-wrap gap-2 items-center">
+        <div class="relative flex-1 min-w-[180px] max-w-xs"
+             wire:ignore
+             x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style="color:#999999;"></i>
+            <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
+                   placeholder="Search title or company…"
+                   class="filter-input w-full pl-9 pr-4 py-2.5 rounded-xl text-sm bg-white"
+                   autocomplete="off" maxlength="100">
+        </div>
+        <select wire:model.live="filterStatus"
+                class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white">
+            <option value="">All Statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+        </select>
+        <select wire:model.live="filterType"
+                class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white hidden sm:block">
+            <option value="">All Types</option>
+            @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
+                <option value="{{ $opt->label }}">{{ $opt->label }}</option>
+            @endforeach
+        </select>
+        <select wire:model.live="filterSort"
+                class="filter-input px-3 py-2.5 rounded-xl text-sm bg-white hidden sm:block">
+            <option value="recent">Newest First</option>
+            <option value="oldest">Oldest First</option>
+        </select>
+        <button wire:click="resetFilters"
+                class="filter-input px-3 py-2.5 rounded-xl bg-white text-sm font-semibold flex items-center gap-1.5 transition uppercase tracking-widest hover:bg-gray-50 cursor-pointer"
+                style="color:#666666;">
+            <i class="fas fa-rotate-left text-xs"></i>
+            <span class="hidden sm:inline">Reset</span>
         </button>
     </div>
 
-    {{-- TABLE CARD --}}
-    <div class="bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden"
-         style="min-height:0; height:calc(100vh - 210px);">
+    {{-- Mobile row 2 --}}
+    <div class="flex gap-2 sm:hidden -mt-3">
+        <select wire:model.live="filterType"
+                class="filter-input flex-1 px-3 py-2.5 rounded-xl text-sm bg-white">
+            <option value="">All Types</option>
+            @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
+                <option value="{{ $opt->label }}">{{ $opt->label }}</option>
+            @endforeach
+        </select>
+        <select wire:model.live="filterSort"
+                class="filter-input flex-1 px-3 py-2.5 rounded-xl text-sm bg-white">
+            <option value="recent">Newest First</option>
+            <option value="oldest">Oldest First</option>
+        </select>
+    </div>
 
-        {{-- FILTER BAR --}}
-        <div class="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-wrap gap-2 items-center">
-            <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
-                       placeholder="Search title or company…"
-                       class="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 text-gray-800 transition"
-                       autocomplete="off">
-            </div>
-            <select wire:model.live="filterStatus"
-                    class="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 text-gray-700 transition">
-                <option value="">All Statuses</option>
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-            </select>
-            <select wire:model.live="filterType"
-                    class="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 text-gray-700 hidden sm:block transition">
-                <option value="">All Employment Types</option>
-                @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
-                    <option value="{{ $opt->label }}">{{ $opt->label }}</option>
-                @endforeach
-            </select>
-            <select wire:model.live="filterSort"
-                    class="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 text-gray-700 hidden sm:block transition">
-                <option value="recent">Recent First</option>
-                <option value="oldest">Oldest First</option>
-            </select>
-            <button wire:click="resetFilters"
-                    class="bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-1.5 cursor-pointer">
-                <i class="fas fa-rotate-left text-sm"></i>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-        </div>
+    {{-- ══ CARDS / EMPTY STATE ══════════════════════════════════════════════ --}}
+    <div wire:loading.class="opacity-50 pointer-events-none"
+         wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage,executeDelete">
 
-        {{-- Mobile row 2 --}}
-        <div class="px-4 py-2 border-b border-gray-100 bg-gray-50/80 flex gap-2 sm:hidden">
-            <select wire:model.live="filterType"
-                    class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-[#7a3f91] text-gray-700 transition">
-                <option value="">All Types</option>
-                @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
-                    <option value="{{ $opt->label }}">{{ $opt->label }}</option>
-                @endforeach
-            </select>
-            <select wire:model.live="filterSort"
-                    class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-[#7a3f91] text-gray-700 transition">
-                <option value="recent">Recent First</option>
-                <option value="oldest">Oldest First</option>
-            </select>
-        </div>
+        @if($this->jobPostings->count() > 0)
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                @foreach($this->jobPostings as $job)
+                @php
+                    $dl               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                    $today            = now('Asia/Manila')->startOfDay();
+                    $daysLeft         = (int) $today->diffInDays($dl->copy()->startOfDay(), false);
+                    $isUrgent         = $daysLeft <= 7 && !($job->_isDeadlinePassed ?? false);
+                    $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
+                    $postedAgo        = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila')->diffForHumans();
+                    $deadlineStr      = $dl->format('M d, Y');
+                    $isAdminPosted    = is_null($job->organizer_id);
+                    $isActive         = $job->status === 'ACTIVE';
+                    $canShare         = !$isDeadlinePassed;
+                    $displayType      = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
+                @endphp
+                <div class="job-card bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="p-5 flex flex-col gap-3">
 
-        {{-- TABLE --}}
-        <div class="relative flex-1 min-h-0">
-            <div class="h-full overflow-y-auto overflow-x-auto"
-                 wire:loading.class="opacity-45 pointer-events-none"
-                 wire:target="search,filterStatus,filterType,filterSort,resetFilters,previousPage,nextPage,executeDelete">
-                <table class="w-full border-collapse min-w-[640px]">
-                    <thead>
-                        <tr class="bg-gray-100 border-b-2 border-gray-200 sticky top-0 z-10">
-                            <th class="px-4 sm:px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Job Title</th>
-                            <th class="px-4 sm:px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider">Organization</th>
-                            <th class="px-4 sm:px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider hidden md:table-cell">Employment Type</th>
-                            <th class="px-4 sm:px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider hidden lg:table-cell">Deadline</th>
-                            <th class="px-4 sm:px-6 py-4 text-left text-sm font-bold text-gray-700 uppercase tracking-wider hidden xl:table-cell">Posted By</th>
-                            <th class="px-4 sm:px-6 py-4 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-6 py-4 text-center text-sm font-bold text-gray-700 uppercase tracking-wider">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-200">
-                        @forelse($this->jobPostings as $job)
-                        @php
-                            $dl               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-                            $isAdminPosted    = is_null($job->organizer_id);
-                            $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
-                            $isInactive       = $job->status === 'INACTIVE';
-                            $canShare         = !$isDeadlinePassed;
-                        @endphp
-                        <tr class="border-b border-gray-100 hover:bg-gray-50 transition">
-                            <td class="px-4 sm:px-6 py-4 max-w-[160px] sm:max-w-[200px]">
-                                <p class="font-semibold text-base text-gray-900 truncate">
-                                    {{ $job->job_title }}
-                                </p>
-                            </td>
-                            <td class="px-4 sm:px-6 py-4 max-w-[150px]">
-                                <p class="font-semibold text-base text-gray-800 truncate">
-                                    {{ $job->company_name }}
-                                </p>
-                            </td>
-                            <td class="px-4 sm:px-6 py-4 hidden md:table-cell">
-                                <span class="inline-block px-3 py-1.5 rounded-full text-sm font-semibold bg-purple-50 text-purple-700 border border-purple-100">
-                                    {{ $job->employment_type }}
-                                </span>
-                            </td>
-                            <td class="px-4 sm:px-6 py-4 hidden lg:table-cell whitespace-nowrap">
-                                <span class="text-sm font-semibold text-gray-800">
-                                    {{ $dl->format('M d, Y') }}
-                                </span>
-                                @if($isDeadlinePassed)
-                                    <span class="block text-xs text-red-600 font-bold mt-0.5">Deadline passed</span>
+                        {{-- Company + status --}}
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-xs font-semibold truncate uppercase tracking-widest" style="color:#999999;">{{ $job->company_name }}</p>
+                                <h3 class="text-base font-bold leading-snug mt-0.5 line-clamp-2" style="color:#333333;">{{ $job->job_title }}</h3>
+                            </div>
+                            <div class="flex flex-col items-end gap-1.5 flex-shrink-0 mt-0.5">
+                                @if($isActive)
+                                    <span class="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold">Active</span>
+                                @else
+                                    <span class="inline-block px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-bold">Inactive</span>
                                 @endif
-                            </td>
-                            <td class="px-4 sm:px-6 py-4 hidden xl:table-cell whitespace-nowrap">
                                 @if($isAdminPosted)
-                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-bold bg-purple-50 text-purple-700 border border-purple-100">
-                                        <i class="fas fa-shield-halved text-xs"></i> Admin
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-bold bg-green-50 text-green-700 border border-green-200">
-                                        <i class="fas fa-check text-xs"></i> You
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-100 rounded-full text-[10px] font-bold">
+                                        <i class="fas fa-shield-halved text-[8px]"></i> Admin
                                     </span>
                                 @endif
-                            </td>
-                            <td class="px-4 sm:px-6 py-4 text-center whitespace-nowrap">
-                                @if($job->status === 'ACTIVE')
-                                    <span class="inline-block px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-sm font-bold">Active</span>
-                                @else
-                                    <span class="inline-block px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-sm font-bold">Inactive</span>
-                                @endif
-                            </td>
-                            <td class="px-4 sm:px-6 py-4 text-center">
-                                <div class="flex items-center justify-center gap-2 flex-wrap">
-                                    <button wire:click="viewJob({{ $job->id }})"
-                                            class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold bg-purple-100 text-purple-700 border border-purple-300 hover:bg-white hover:border-purple-500 transition cursor-pointer">
-                                        <i class="fas fa-eye text-sm"></i>
-                                        <span class="hidden sm:inline">View</span>
-                                    </button>
-                                    @if($canShare)
-                                        <button wire:click="openShareModal({{ $job->id }})"
-                                                title="Share this job"
-                                                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
-                                            <i class="fas fa-share-nodes text-sm"></i>
-                                            <span class="hidden sm:inline">Share</span>
-                                        </button>
-                                    @else
-                                        <span title="Deadline passed — sharing disabled"
-                                              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed select-none">
-                                            <i class="fas fa-share-nodes text-sm"></i>
-                                            <span class="hidden sm:inline">Share</span>
-                                        </span>
-                                    @endif
-                                    @if(!$isAdminPosted)
-                                        <button wire:click="openEditModal({{ $job->id }})"
-                                                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold bg-blue-100 text-blue-700 border border-blue-300 hover:bg-white hover:border-blue-500 transition cursor-pointer">
-                                            <i class="fas fa-pen-to-square text-sm"></i>
-                                            <span class="hidden sm:inline">Edit</span>
-                                        </button>
-                                        <button wire:click="confirmDelete({{ $job->id }})"
-                                                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold bg-red-100 text-red-700 border border-red-300 hover:bg-white hover:border-red-500 transition cursor-pointer">
-                                            <i class="fas fa-trash text-sm"></i>
-                                            <span class="hidden lg:inline">Delete</span>
-                                        </button>
-                                    @endif
-                                </div>
-                            </td>
-                        </tr>
-                        @empty
-                        <tr>
-                            <td colspan="7" class="py-20 text-center">
-                                <div class="flex flex-col items-center gap-3">
-                                    <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
-                                        <i class="fas fa-briefcase text-2xl text-gray-300"></i>
-                                    </div>
-                                    <p class="font-semibold text-gray-500 text-lg">No job postings found</p>
-                                    <p class="text-base text-gray-400">
-                                        @if($search || $filterStatus || $filterType)
-                                            Try adjusting your filters.
-                                        @else
-                                            No postings yet. Click <strong>Post a Job</strong> to create one.
-                                        @endif
-                                    </p>
-                                </div>
-                            </td>
-                        </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                            </div>
+                        </div>
 
-        {{-- PAGINATION FOOTER --}}
-        <div class="px-4 sm:px-6 py-4 border-t border-gray-100 bg-[#2b0d3e] shrink-0 rounded-b-2xl">
-            @php
-                $total = $this->jobPostings->total();
-                $pp    = $this->jobPostings->perPage();
-                $cp    = $this->jobPostings->currentPage();
-                $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
-                $to    = min($cp * $pp, $total);
-            @endphp
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <p class="text-white text-sm sm:text-base">
-                    Showing <span class="font-bold">{{ $from }}&ndash;{{ $to }}</span>
-                    of <span class="font-bold">{{ $total }}</span> jobs
-                </p>
-                <div class="flex items-center gap-2">
-                    @if($this->jobPostings->onFirstPage())
-                        <button disabled class="px-4 py-2.5 bg-gray-100 text-gray-400 rounded-lg text-sm font-semibold cursor-not-allowed">&larr; Prev</button>
-                    @else
-                        <button wire:click="previousPage" class="bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition px-4 py-2.5 rounded-lg text-sm font-semibold cursor-pointer">&larr; Prev</button>
-                    @endif
-                    <span class="px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-600 text-sm font-semibold shadow-sm">
-                        {{ $cp }} / {{ $this->jobPostings->lastPage() }}
-                    </span>
-                    @if($this->jobPostings->hasMorePages())
-                        <button wire:click="nextPage" class="bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition px-4 py-2.5 rounded-lg text-sm font-semibold cursor-pointer">Next &rarr;</button>
-                    @else
-                        <button disabled class="px-4 py-2.5 bg-gray-100 text-gray-400 rounded-lg text-sm font-semibold cursor-not-allowed">Next &rarr;</button>
-                    @endif
+                        {{-- Pills --}}
+                        <div class="flex flex-wrap gap-1.5">
+                            <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
+                                <i class="fas fa-clock text-[10px]"></i> {{ $job->employment_type }}
+                            </span>
+                            <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-gray-100 border border-gray-200" style="color:#666666;">
+                                <i class="fas fa-layer-group text-[10px]"></i> {{ Str::limit($job->experience_level, 22) }}
+                            </span>
+                            <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-gray-100 border border-gray-200" style="color:#666666;">
+                                {{ Str::limit($displayType, 14) }}
+                            </span>
+                        </div>
+
+                        {{-- Location --}}
+                        @if($job->location)
+                        <div class="flex items-center gap-1.5 text-sm" style="color:#666666;">
+                            <i class="fas fa-location-dot text-xs" style="color:#999999;"></i>
+                            <span class="truncate">{{ $job->location }}</span>
+                        </div>
+                        @endif
+
+                        {{-- Salary --}}
+                        @if($job->salary)
+                        <div class="flex items-center gap-1.5 text-sm font-semibold text-emerald-700">
+                            <i class="fas fa-money-bill-wave text-xs"></i>
+                            <span class="truncate">{{ $job->salary }}</span>
+                        </div>
+                        @else
+                        <div class="flex items-center gap-1.5 text-sm italic" style="color:#999999;">
+                            <i class="fas fa-money-bill-wave text-xs"></i>
+                            Salary not disclosed
+                        </div>
+                        @endif
+
+                        {{-- Deadline --}}
+                        <div class="flex items-center gap-1.5">
+                            @if($isDeadlinePassed)
+                                <span class="inline-flex items-center gap-1 text-xs font-bold text-red-600">
+                                    <i class="fas fa-calendar-xmark text-[10px]"></i>
+                                    Deadline passed ({{ $deadlineStr }})
+                                </span>
+                            @elseif($isUrgent)
+                                <span class="inline-flex items-center gap-1 text-xs font-bold text-red-600">
+                                    <i class="fas fa-fire text-[10px]"></i>
+                                    Closes {{ $deadlineStr }} ({{ $daysLeft === 0 ? 'today' : ($daysLeft === 1 ? 'tomorrow' : 'in '.$daysLeft.' days') }})
+                                </span>
+                            @else
+                                <span class="inline-flex items-center gap-1 text-xs" style="color:#999999;">
+                                    <i class="fas fa-calendar-xmark text-[10px]"></i>
+                                    Closes {{ $deadlineStr }}
+                                </span>
+                            @endif
+                        </div>
+
+                        {{-- Footer --}}
+                        <div class="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-0.5">
+                            <span class="text-xs" style="color:#999999;">{{ $postedAgo }}</span>
+                            <div class="flex items-center gap-1.5">
+                                {{-- View --}}
+                                <button wire:click="viewJob({{ $job->id }})"
+                                        class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200 hover:bg-white hover:border-purple-400 transition cursor-pointer">
+                                    <i class="fas fa-eye text-xs"></i>
+                                    <span class="hidden sm:inline">View</span>
+                                </button>
+                                {{-- Share --}}
+                                @if($canShare)
+                                    <button wire:click.stop="openShareModal({{ $job->id }})"
+                                            class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-sky-100 text-sky-700 border border-sky-300 hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                                        <i class="fas fa-share-nodes text-xs"></i>
+                                        <span class="hidden sm:inline">Share</span>
+                                    </button>
+                                @else
+                                    <span title="Deadline passed — sharing disabled"
+                                          class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed select-none">
+                                        <i class="fas fa-share-nodes text-xs"></i>
+                                        <span class="hidden sm:inline">Share</span>
+                                    </span>
+                                @endif
+                                {{-- Edit / Delete — only for organizer-owned --}}
+                                @if(!$isAdminPosted)
+                                    <button wire:click="openEditModal({{ $job->id }})"
+                                            class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-blue-100 text-blue-700 border border-blue-300 hover:bg-white hover:border-blue-500 transition cursor-pointer">
+                                        <i class="fas fa-pen-to-square text-xs"></i>
+                                        <span class="hidden sm:inline">Edit</span>
+                                    </button>
+                                    <button wire:click="confirmDelete({{ $job->id }})"
+                                            class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-red-100 text-red-700 border border-red-300 hover:bg-white hover:border-red-500 transition cursor-pointer">
+                                        <i class="fas fa-trash text-xs"></i>
+                                    </button>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
                 </div>
+                @endforeach
             </div>
+
+        @else
+            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm py-20 flex flex-col items-center gap-4 text-center px-6">
+                <div class="w-16 h-16 rounded-2xl flex items-center justify-center bg-gray-100">
+                    <i class="fas fa-briefcase text-2xl" style="color:#999999;"></i>
+                </div>
+                <div>
+                    <p class="font-bold text-lg" style="color:#333333;">
+                        @if($search || $filterStatus || $filterType)
+                            No jobs match your filters
+                        @else
+                            No job postings yet
+                        @endif
+                    </p>
+                    <p class="text-sm mt-1" style="color:#999999;">
+                        @if($search || $filterStatus || $filterType)
+                            Try clearing your filters to see all postings.
+                        @else
+                            Click <strong>Post a Job</strong> to create your first listing.
+                        @endif
+                    </p>
+                </div>
+                @if($search || $filterStatus || $filterType)
+                    <button wire:click="resetFilters"
+                            class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer"
+                            style="background-color:#7a3f91;">
+                        <i class="fas fa-rotate-left mr-1.5"></i> Clear Filters
+                    </button>
+                @endif
+            </div>
+        @endif
+    </div>
+
+    {{-- ══ PAGINATION ════════════════════════════════════════════════════════ --}}
+    <div class="mt-auto rounded-2xl px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0"
+         style="background:#7a3f91;">
+        @php
+            $total = $this->jobPostings->total();
+            $pp    = $this->jobPostings->perPage();
+            $cp    = $this->jobPostings->currentPage();
+            $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+            $to    = min($cp * $pp, $total);
+        @endphp
+        <p class="text-sm font-normal" style="color:rgba(255,255,255,.75);">
+            Showing <span class="font-semibold text-white">{{ $from }}&ndash;{{ $to }}</span>
+            of <span class="font-semibold text-white">{{ $total }}</span> job{{ $total !== 1 ? 's' : '' }}
+        </p>
+        <div class="flex items-center gap-1.5">
+            @if($this->jobPostings->onFirstPage())
+                <button disabled class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold cursor-not-allowed" style="color:rgba(255,255,255,.3);background:rgba(255,255,255,.08);">&larr; Prev</button>
+            @else
+                <button wire:click="previousPage"
+                        class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition cursor-pointer hover:opacity-80"
+                        style="background:rgba(255,255,255,.15);">&larr; Prev</button>
+            @endif
+            <span class="px-3 py-1.5 text-sm font-semibold rounded-lg" style="background:#fff;color:#333333;">{{ $cp }} / {{ $this->jobPostings->lastPage() }}</span>
+            @if($this->jobPostings->hasMorePages())
+                <button wire:click="nextPage"
+                        class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition cursor-pointer hover:opacity-80"
+                        style="background:rgba(255,255,255,.15);">Next &rarr;</button>
+            @else
+                <button disabled class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold cursor-not-allowed" style="color:rgba(255,255,255,.3);background:rgba(255,255,255,.08);">Next &rarr;</button>
+            @endif
         </div>
     </div>
-</div>
 
-{{-- POST MODAL --}}
+</div>{{-- end inner flex column --}}
+
+
+{{-- ══════════════════════════════════════════════════════════════════════════
+     POST MODAL
+══════════════════════════════════════════════════════════════════════════ --}}
 @if($showPostModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closePostModal">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden relative">
-        <button wire:click="closePostModal" type="button" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/20 transition text-white cursor-pointer"><i class="fas fa-xmark text-lg"></i></button>
-        <div class="flex items-center px-7 py-5 bg-[#7a3f91] flex-shrink-0">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden relative m-in">
+        <button wire:click="closePostModal" type="button" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/20 transition text-white cursor-pointer z-10"><i class="fas fa-xmark text-lg"></i></button>
+        <div class="flex items-center px-7 py-5 flex-shrink-0" style="background:#7a3f91;">
             <h2 class="text-2xl font-extrabold text-white flex items-center gap-3"><i class="fas fa-briefcase"></i> Post a New Job</h2>
         </div>
         @if(count($postErrors))
@@ -1059,35 +1226,39 @@ new class extends Component {
             </ul>
         </div>
         @endif
-        <div class="flex-1 overflow-y-auto px-7 py-6 space-y-5">
+        <div class="flex-1 overflow-y-auto scroll-c px-7 py-6 space-y-5">
             {{-- Job Title --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Job Title <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Job Title <span class="text-red-500">*</span></label>
                 <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
-                       class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postJobTitle'])?'border-red-400 bg-red-50':'' }}">
+                       class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postJobTitle'])?'border-red-400 bg-red-50':'' }}"
+                       style="color:#333333;">
                 @if(isset($postErrors['postJobTitle']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
             </div>
 
             {{-- Organization --}}
             <div class="rounded-xl border border-gray-200 overflow-hidden">
                 <div class="bg-gray-50 px-5 py-3 border-b border-gray-200 flex items-center gap-2">
-                    <i class="fas fa-building text-[#7a3f91] text-base"></i>
-                    <span class="text-base font-bold text-gray-700">Organization Details</span>
+                    <i class="fas fa-building text-sm" style="color:#7a3f91;"></i>
+                    <span class="text-base font-bold" style="color:#333333;">Organization Details</span>
                 </div>
                 <div class="p-5 space-y-4">
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Category <span class="text-red-500">*</span></label>
+                        <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Category <span class="text-red-500">*</span></label>
                         <div class="flex gap-3">
                             <button type="button" wire:click="$set('postOrgCategory','philcst')"
-                                    class="flex-1 px-3 py-3 border-2 rounded-lg bg-white cursor-pointer transition text-center text-sm font-bold flex flex-col items-center gap-1.5 {{ $postOrgCategory==='philcst'?'border-[#7a3f91] bg-gradient-to-br from-[#7a3f91] to-[#6a3580] text-white shadow-md':'border-gray-200 text-gray-600 hover:border-[#7a3f91] hover:text-[#7a3f91] hover:bg-purple-50' }}">
+                                    class="flex-1 px-3 py-3 border-2 rounded-lg bg-white cursor-pointer transition text-center text-sm font-bold flex flex-col items-center gap-1.5 {{ $postOrgCategory==='philcst'?'border-[#7a3f91] text-white shadow-md':'border-gray-200 hover:border-[#7a3f91] hover:bg-purple-50' }}"
+                                    style="{{ $postOrgCategory==='philcst'?'background:linear-gradient(135deg,#7a3f91,#6a3580);color:#fff;':'color:#666666;' }}">
                                 <i class="fas fa-school text-lg"></i><span>PHILCST Campus</span>
                             </button>
                             <button type="button" wire:click="$set('postOrgCategory','partner')"
-                                    class="flex-1 px-3 py-3 border-2 rounded-lg bg-white cursor-pointer transition text-center text-sm font-bold flex flex-col items-center gap-1.5 {{ $postOrgCategory==='partner'?'border-[#7a3f91] bg-gradient-to-br from-[#7a3f91] to-[#6a3580] text-white shadow-md':'border-gray-200 text-gray-600 hover:border-[#7a3f91] hover:text-[#7a3f91] hover:bg-purple-50' }}">
+                                    class="flex-1 px-3 py-3 border-2 rounded-lg bg-white cursor-pointer transition text-center text-sm font-bold flex flex-col items-center gap-1.5 {{ $postOrgCategory==='partner'?'border-[#7a3f91] text-white shadow-md':'border-gray-200 hover:border-[#7a3f91] hover:bg-purple-50' }}"
+                                    style="{{ $postOrgCategory==='partner'?'background:linear-gradient(135deg,#7a3f91,#6a3580);color:#fff;':'color:#666666;' }}">
                                 <i class="fas fa-handshake text-lg"></i><span>Partner Company</span>
                             </button>
                             <button type="button" wire:click="$set('postOrgCategory','custom')"
-                                    class="flex-1 px-3 py-3 border-2 rounded-lg bg-white cursor-pointer transition text-center text-sm font-bold flex flex-col items-center gap-1.5 {{ $postOrgCategory==='custom'?'border-[#7a3f91] bg-gradient-to-br from-[#7a3f91] to-[#6a3580] text-white shadow-md':'border-gray-200 text-gray-600 hover:border-[#7a3f91] hover:text-[#7a3f91] hover:bg-purple-50' }}">
+                                    class="flex-1 px-3 py-3 border-2 rounded-lg bg-white cursor-pointer transition text-center text-sm font-bold flex flex-col items-center gap-1.5 {{ $postOrgCategory==='custom'?'border-[#7a3f91] text-white shadow-md':'border-gray-200 hover:border-[#7a3f91] hover:bg-purple-50' }}"
+                                    style="{{ $postOrgCategory==='custom'?'background:linear-gradient(135deg,#7a3f91,#6a3580);color:#fff;':'color:#666666;' }}">
                                 <i class="fas fa-pen-to-square text-lg"></i><span>Other / Custom</span>
                             </button>
                         </div>
@@ -1096,7 +1267,7 @@ new class extends Component {
                     @if($postOrgCategory==='philcst')
                         @if($philcstName)
                         <div class="bg-purple-50 border-2 border-purple-300 rounded-lg px-4 py-3 flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#6a3580] text-white flex items-center justify-center flex-shrink-0"><i class="fas fa-school text-sm"></i></div>
+                            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-white" style="background:linear-gradient(135deg,#7a3f91,#6a3580);"><i class="fas fa-school text-sm"></i></div>
                             <div><div class="text-base font-bold text-[#4c1d95]">PHILCST</div>@if($philcstLocation)<div class="text-sm mt-0.5 text-[#7c3aed]"><i class="fas fa-location-dot mr-1"></i>{{ $philcstLocation }}</div>@endif</div>
                             <span class="inline-flex items-center gap-1 text-sm font-bold text-purple-700 bg-white border border-purple-300 px-2.5 py-1 rounded-full shrink-0"><i class="fas fa-lock text-[9px]"></i> Auto-filled</span>
                         </div>
@@ -1105,56 +1276,44 @@ new class extends Component {
                         <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),syncName(v){$wire.set('postPartnerName',v,false)},syncType(v){$wire.set('postPartnerType',v,false)}}">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Organization Name <span class="text-red-500">*</span></label>
-                                    <input x-model="pName" @input.debounce.300ms="syncName(pName)" type="text" placeholder="e.g. Acme Corporation" maxlength="150" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postPartnerName'])?'border-red-400 bg-red-50':'' }}">
+                                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Org Name <span class="text-red-500">*</span></label>
+                                    <input x-model="pName" @input.debounce.300ms="syncName(pName)" type="text" placeholder="e.g. Acme Corporation" maxlength="150" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postPartnerName'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Organization Type <span class="text-red-500">*</span></label>
-                                    <input x-model="pType" @input.debounce.300ms="syncType(pType)" type="text" placeholder="e.g. Private Company, NGO" maxlength="100" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postPartnerType'])?'border-red-400 bg-red-50':'' }}">
+                                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Org Type <span class="text-red-500">*</span></label>
+                                    <input x-model="pType" @input.debounce.300ms="syncType(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postPartnerType'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                                     @if(isset($postErrors['postPartnerType']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
                                 </div>
                             </div>
                         </div>
                         <div wire:ignore x-data="{loc:@js($postLocation),syncLoc(v){$wire.set('postLocation',v,false)}}">
-                            <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Location <span class="text-red-500">*</span></label>
-                            <input x-model="loc" @input.debounce.300ms="syncLoc(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postLocation'])?'border-red-400 bg-red-50':'' }}">
+                            <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Location <span class="text-red-500">*</span></label>
+                            <input x-model="loc" @input.debounce.300ms="syncLoc(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postLocation'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                             @if(isset($postErrors['postLocation']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postLocation'] }}</p>@endif
                         </div>
-                        @if(trim($postPartnerName))
-                        <div class="bg-blue-50 border-2 border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center flex-shrink-0"><i class="fas fa-handshake text-sm"></i></div>
-                            <div><div class="text-base font-bold text-blue-900">{{ $postPartnerName }}</div>@if(trim($postPartnerType))<div class="text-sm text-blue-700 mt-0.5">{{ $postPartnerType }}</div>@endif@if(trim($postLocation))<div class="text-sm text-gray-600 mt-0.5"><i class="fas fa-location-dot mr-1"></i>{{ $postLocation }}</div>@endif</div>
-                        </div>
-                        @endif
                     @elseif($postOrgCategory==='custom')
                         <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),syncName(v){$wire.set('postCustomName',v,false)},syncType(v){$wire.set('postCustomType',v,false)}}">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Organization Name <span class="text-red-500">*</span></label>
-                                    <input x-model="cName" @input.debounce.300ms="syncName(cName)" type="text" placeholder="e.g. Department of Labor" maxlength="150" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postCustomName'])?'border-red-400 bg-red-50':'' }}">
+                                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Org Name <span class="text-red-500">*</span></label>
+                                    <input x-model="cName" @input.debounce.300ms="syncName(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postCustomName'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Organization Type <span class="text-red-500">*</span></label>
-                                    <input x-model="cType" @input.debounce.300ms="syncType(cType)" type="text" placeholder="e.g. Government Agency, NGO" maxlength="100" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postCustomType'])?'border-red-400 bg-red-50':'' }}">
+                                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Org Type <span class="text-red-500">*</span></label>
+                                    <input x-model="cType" @input.debounce.300ms="syncType(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postCustomType'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                                     @if(isset($postErrors['postCustomType']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postCustomType'] }}</p>@endif
                                 </div>
                             </div>
                         </div>
                         <div wire:ignore x-data="{loc:@js($postLocation),syncLoc(v){$wire.set('postLocation',v,false)}}">
-                            <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Location <span class="text-red-500">*</span></label>
-                            <input x-model="loc" @input.debounce.300ms="syncLoc(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postLocation'])?'border-red-400 bg-red-50':'' }}">
+                            <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Location <span class="text-red-500">*</span></label>
+                            <input x-model="loc" @input.debounce.300ms="syncLoc(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postLocation'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                             @if(isset($postErrors['postLocation']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postLocation'] }}</p>@endif
                         </div>
-                        @if(trim($postCustomName))
-                        <div class="bg-gray-50 border-2 border-gray-300 rounded-lg px-4 py-3 flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-lg bg-gray-600 text-white flex items-center justify-center flex-shrink-0"><i class="fas fa-pen-to-square text-sm"></i></div>
-                            <div><div class="text-base font-bold text-gray-900">{{ $postCustomName }}</div>@if(trim($postCustomType))<div class="text-sm text-gray-700 mt-0.5">{{ $postCustomType }}</div>@endif@if(trim($postLocation))<div class="text-sm text-gray-600 mt-0.5"><i class="fas fa-location-dot mr-1"></i>{{ $postLocation }}</div>@endif</div>
-                        </div>
-                        @endif
                     @else
-                        <div class="text-center py-5 text-gray-400 text-base"><i class="fas fa-arrow-up text-gray-300 text-2xl block mb-2"></i>Select a category above to continue.</div>
+                        <div class="text-center py-5 text-base" style="color:#999999;"><i class="fas fa-arrow-up text-2xl block mb-2" style="color:#d1d5db;"></i>Select a category above to continue.</div>
                     @endif
                 </div>
             </div>
@@ -1162,17 +1321,17 @@ new class extends Component {
             {{-- Employment Type + Experience Level --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Employment Type <span class="text-red-500">*</span></label>
-                    <select wire:model.defer="postEmpType" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postEmpType'])?'border-red-400 bg-red-50':'' }}">
-                        <option value="">Select Employment Type</option>
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Employment Type <span class="text-red-500">*</span></label>
+                    <select wire:model.defer="postEmpType" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postEmpType'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
+                        <option value="">Select Type</option>
                         @foreach($this->jobOptions->get('employment_type', collect()) as $opt)<option value="{{ $opt->label }}">{{ $opt->label }}</option>@endforeach
                     </select>
                     @if(isset($postErrors['postEmpType']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postEmpType'] }}</p>@endif
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Experience Level <span class="text-red-500">*</span></label>
-                    <select wire:model.defer="postExpLevel" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postExpLevel'])?'border-red-400 bg-red-50':'' }}">
-                        <option value="">Select Experience Level</option>
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Experience Level <span class="text-red-500">*</span></label>
+                    <select wire:model.defer="postExpLevel" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postExpLevel'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
+                        <option value="">Select Level</option>
                         @foreach($this->orderedExpLevels as $lvl)<option value="{{ $lvl }}">{{ $lvl }}</option>@endforeach
                     </select>
                     @if(isset($postErrors['postExpLevel']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postExpLevel'] }}</p>@endif
@@ -1182,20 +1341,20 @@ new class extends Component {
             {{-- Salary + Deadline --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Salary <span class="text-gray-400 font-normal">(Optional)</span></label>
-                    <input wire:model.defer="postSalary" type="text" placeholder="e.g. &#8369;25,000 &ndash; &#8369;35,000 / month" maxlength="100" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition">
-                    <p class="text-gray-400 text-sm mt-1"><i class="fas fa-circle-info mr-1"></i>Leave blank if not disclosed.</p>
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Salary <span class="font-normal" style="color:#999999;">(Optional)</span></label>
+                    <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000 – ₱35,000 / month" maxlength="100" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition" style="color:#333333;">
+                    <p class="text-sm mt-1" style="color:#999999;"><i class="fas fa-circle-info mr-1"></i>Leave blank if not disclosed.</p>
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Application Deadline <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="postDeadline" type="date" min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postDeadline'])?'border-red-400 bg-red-50':'' }}">
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Deadline <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="postDeadline" type="date" min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($postErrors['postDeadline'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                     @if(isset($postErrors['postDeadline']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                 </div>
             </div>
 
             {{-- Target College --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Target College <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Target College <span class="text-red-500">*</span></label>
                 <div class="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
                     <div class="flex items-center gap-2 mb-2">
                         <i class="fas fa-lock text-blue-500 text-base"></i>
@@ -1208,42 +1367,39 @@ new class extends Component {
 
             {{-- Job Description --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Job Description <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Job Description <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="postDescription" rows="6" placeholder="Describe the role, responsibilities…" maxlength="5000"
-                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postDescription'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postDescription'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;"></textarea>
                 @if(isset($postErrors['postDescription']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postDescription'] }}</p>@endif
             </div>
 
             {{-- Qualifications --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">
-                    <i class="fas fa-list-check text-[#7a3f91] mr-1"></i>Qualifications <span class="text-red-500">*</span>
-                </label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;"><i class="fas fa-list-check mr-1" style="color:#7a3f91;"></i>Qualifications <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="postQualifications" rows="5"
                           placeholder="e.g. Bachelor's degree in IT or related field&#10;At least 1 year of relevant experience&#10;Strong communication skills"
                           maxlength="3000"
-                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postQualifications'])?'border-red-400 bg-red-50':'' }}"></textarea>
-                <p class="text-gray-400 text-sm mt-1"><i class="fas fa-circle-info mr-1"></i>List required qualifications, one per line if preferred.</p>
+                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postQualifications'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;"></textarea>
+                <p class="text-sm mt-1" style="color:#999999;"><i class="fas fa-circle-info mr-1"></i>List required qualifications, one per line if preferred.</p>
                 @if(isset($postErrors['postQualifications']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postQualifications'] }}</p>@endif
             </div>
 
             {{-- Application Instructions --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">
-                    <i class="fas fa-paper-plane text-[#7a3f91] mr-1"></i>Application Instructions <span class="text-red-500">*</span>
-                </label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;"><i class="fas fa-paper-plane mr-1" style="color:#7a3f91;"></i>Application Instructions <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="postApplicationInstructions" rows="5"
-                          placeholder="e.g. Send your resume and cover letter to hr@company.com&#10;Subject: Application – [Your Name] – [Position]&#10;Deadline: see above"
+                          placeholder="e.g. Send your resume and cover letter to hr@company.com&#10;Subject: Application – [Your Name] – [Position]"
                           maxlength="3000"
-                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postApplicationInstructions'])?'border-red-400 bg-red-50':'' }}"></textarea>
-                <p class="text-gray-400 text-sm mt-1"><i class="fas fa-circle-info mr-1"></i>Explain how applicants should apply — email, walk-in, online form, etc.</p>
+                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($postErrors['postApplicationInstructions'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;"></textarea>
+                <p class="text-sm mt-1" style="color:#999999;"><i class="fas fa-circle-info mr-1"></i>Explain how applicants should apply — email, walk-in, online form, etc.</p>
                 @if(isset($postErrors['postApplicationInstructions']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postApplicationInstructions'] }}</p>@endif
             </div>
         </div>
         <div class="px-7 py-5 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex gap-3">
-            <button wire:click="closePostModal" class="flex-1 px-4 py-3 bg-white text-gray-700 border border-gray-200 rounded-xl text-base font-bold hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+            <button wire:click="closePostModal" class="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-xl text-base font-bold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">Cancel</button>
             <button wire:click="savePost" wire:loading.attr="disabled" wire:target="savePost"
-                    class="flex-1 px-4 py-3 bg-[#7a3f91] text-white rounded-xl text-base font-extrabold hover:bg-[#5e2f72] disabled:opacity-50 transition shadow-md flex items-center justify-center gap-2 cursor-pointer">
+                    class="flex-1 px-4 py-3 text-white rounded-xl text-base font-extrabold disabled:opacity-50 transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    style="background:#7a3f91;">
                 <span wire:loading wire:target="savePost"><i class="fas fa-spinner animate-spin"></i> Saving&hellip;</span>
                 <span wire:loading.remove wire:target="savePost"><i class="fas fa-paper-plane"></i> Post Job</span>
             </button>
@@ -1252,12 +1408,17 @@ new class extends Component {
 </div>
 @endif
 
-{{-- VIEW MODAL --}}
+
+{{-- ══════════════════════════════════════════════════════════════════════════
+     VIEW MODAL
+══════════════════════════════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingJob)
 @php
     $job            = $this->viewingJob;
     $dl             = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+    $daysLeft       = (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false);
     $isExp          = now('Asia/Manila')->startOfDay()->gt($dl->copy()->startOfDay());
+    $isUrgentView   = $daysLeft <= 7 && !$isExp;
     $createdPH      = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
     $viewDepts      = $job->target_college ? \App\Models\Course::whereIn('college', explode(',', $job->target_college))->orderBy('code')->pluck('code')->toArray() : [];
     $displayType    = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
@@ -1266,139 +1427,140 @@ new class extends Component {
     $viewCanShare   = !$isExp;
 @endphp
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeViewModal">
-    <div class="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[92vh] overflow-hidden relative">
-        <button wire:click="closeViewModal" type="button" class="absolute top-4 right-4 w-7 h-7 rounded-full hover:bg-gray-100 transition text-gray-500 hover:text-gray-800 flex items-center justify-center cursor-pointer"><i class="fas fa-xmark text-lg"></i></button>
-        <div class="px-8 py-6 border-b border-gray-200 flex-shrink-0">
-            <div class="text-3xl font-extrabold text-gray-900 mb-2 pr-8">{{ $job->job_title }}</div>
-            <div class="flex items-center gap-2 mb-4 flex-wrap">
-                <strong class="text-gray-800 text-lg">{{ $job->company_name }}</strong>
-                <span class="text-sm font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded">{{ $displayType }}</span>
+    <div class="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[92vh] overflow-hidden relative m-in">
+
+        <button wire:click="closeViewModal" type="button"
+                class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/25 hover:bg-white/40 transition text-white z-10 cursor-pointer">
+            <i class="fas fa-xmark text-base"></i>
+        </button>
+
+        {{-- Header --}}
+        <div class="px-6 pt-6 pb-5 flex-shrink-0 text-white" style="background:linear-gradient(135deg,#7a3f91,#6a3080);">
+            <div class="flex items-center gap-3 mb-2 flex-wrap pr-8">
+                <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-building text-white text-base"></i>
+                </div>
+                <div>
+                    <p class="text-sm font-semibold text-white/75">{{ $job->company_name }}</p>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/20 text-white">{{ $displayType }}</span>
+                </div>
                 @if($job->status === 'ACTIVE')
-                    <span class="text-sm font-bold bg-green-100 text-green-700 px-2 py-1 rounded">Active</span>
+                    <span class="text-xs font-bold bg-emerald-500/80 text-white px-2.5 py-1 rounded-full">Active</span>
                 @else
-                    <span class="text-sm font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">Inactive</span>
+                    <span class="text-xs font-bold bg-amber-500/80 text-white px-2.5 py-1 rounded-full">Inactive</span>
                 @endif
                 @if($isInactiveView)
-                    <span class="text-sm font-bold bg-red-50 text-red-600 border border-red-200 px-2 py-1 rounded inline-flex items-center gap-1">
-                        <i class="fas fa-shield-halved text-xs"></i> Only Admin can activate
+                    <span class="text-xs font-bold bg-white/20 text-white border border-white/30 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+                        <i class="fas fa-shield-halved text-[9px]"></i> Only Admin can activate
                     </span>
                 @endif
             </div>
-            <ul class="space-y-2">
-                <li class="flex items-start gap-2.5 text-base text-gray-800"><span class="text-[#7a3f91] mt-0.5 flex-shrink-0"><i class="fas fa-location-dot text-sm"></i></span><span>{{ $job->location ?? 'Not specified' }}</span></li>
-                <li class="flex items-start gap-2.5 text-base text-gray-800"><span class="text-[#7a3f91] mt-0.5 flex-shrink-0"><i class="fas fa-clock text-sm"></i></span><span>{{ $job->employment_type }}</span></li>
-                <li class="flex items-start gap-2.5 text-base text-gray-800"><span class="text-[#7a3f91] mt-0.5 flex-shrink-0"><i class="fas fa-layer-group text-sm"></i></span><span>{{ $job->experience_level }}</span></li>
-                <li class="flex items-start gap-2.5 text-base text-gray-800"><span class="text-[#7a3f91] mt-0.5 flex-shrink-0"><i class="fas fa-money-bill-wave text-sm"></i></span>
-                    @if($job->salary)<span>{{ $job->salary }}</span>@else<span class="text-gray-500 italic">Salary not disclosed</span>@endif
-                </li>
-                <li class="flex items-start gap-2.5 text-base text-gray-800"><span class="text-[#7a3f91] mt-0.5 flex-shrink-0"><i class="fas fa-calendar-xmark text-sm"></i></span>
-                    <span>Deadline: {{ $dl->format('F d, Y') }}
-                        @if($isExp)<span class="font-bold text-red-700 ml-1">(Passed)</span>
-                        @else<span class="text-gray-500 ml-1">&middot; {{ $dl->diffForHumans() }}</span>@endif
+            <h2 class="text-2xl font-bold text-white leading-snug mb-3">{{ $job->job_title }}</h2>
+            <div class="flex flex-wrap gap-2">
+                <span class="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg bg-white/20 text-white"><i class="fas fa-clock text-xs"></i> {{ $job->employment_type }}</span>
+                <span class="inline-flex items-center gap-1 text-sm font-semibold px-3 py-1.5 rounded-lg bg-white/20 text-white"><i class="fas fa-layer-group text-xs"></i> {{ $job->experience_level }}</span>
+                @if($isUrgentView)
+                    <span class="inline-flex items-center gap-1 text-sm font-bold px-3 py-1.5 rounded-lg bg-red-500/80 text-white">
+                        <i class="fas fa-fire text-xs"></i>
+                        {{ $daysLeft === 0 ? 'Closing today!' : ($daysLeft === 1 ? '1 day left' : $daysLeft.' days left') }}
                     </span>
-                </li>
-                @if($job->target_college)
-                <li class="flex items-start gap-2.5 text-base text-gray-800"><span class="text-[#7a3f91] mt-0.5 flex-shrink-0"><i class="fas fa-building-columns text-sm"></i></span><span>For: {{ str_replace(',', ', ', $job->target_college) }}</span></li>
                 @endif
-            </ul>
-            <p class="text-sm text-gray-500 mt-3">Posted {{ $createdPH->diffForHumans() }} &middot; by {{ $isAdminPosted ? 'Admin' : 'You' }}</p>
+            </div>
         </div>
-        <div class="flex-1 overflow-y-auto">
-            {{-- Description --}}
-            <div class="px-8 py-5 border-b border-gray-200">
-                <div class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
-                    <i class="fas fa-align-left text-[#7a3f91] text-sm"></i> Job Description
+
+        {{-- Body --}}
+        <div class="flex-1 min-h-0 overflow-y-auto scroll-c">
+            {{-- Key details --}}
+            <div class="px-6 py-5 border-b border-gray-100">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0 mt-0.5"><i class="fas fa-location-dot text-base" style="color:#999999;"></i></div>
+                        <div><p class="text-xs font-semibold uppercase tracking-widest" style="color:#999999;">Location</p><p class="text-sm font-semibold mt-0.5" style="color:#333333;">{{ $job->location ?? 'Not specified' }}</p></div>
+                    </div>
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 mt-0.5"><i class="fas fa-money-bill-wave text-base text-emerald-600"></i></div>
+                        <div><p class="text-xs font-semibold uppercase tracking-widest" style="color:#999999;">Salary</p>
+                        @if($job->salary)<p class="text-sm font-semibold text-emerald-700 mt-0.5">{{ $job->salary }}</p>@else<p class="text-sm italic mt-0.5" style="color:#999999;">Not disclosed</p>@endif</div>
+                    </div>
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0 mt-0.5"><i class="fas fa-calendar-xmark text-base text-amber-600"></i></div>
+                        <div><p class="text-xs font-semibold uppercase tracking-widest" style="color:#999999;">Deadline</p>
+                        <p class="text-sm font-bold mt-0.5 {{ $isExp?'text-red-600':($isUrgentView?'text-red-600':'') }}" style="{{ (!$isExp&&!$isUrgentView)?'color:#333333;':'' }}">{{ $dl->format('F d, Y') }}</p>
+                        <p class="text-xs mt-0.5 {{ $isExp?'text-red-500':($isUrgentView?'text-red-500 font-semibold':'') }}" style="{{ (!$isExp&&!$isUrgentView)?'color:#999999;':'' }}">
+                            @if($isExp) Passed @elseif($daysLeft === 0) Closing today! @elseif($daysLeft === 1) Tomorrow @else {{ $daysLeft }} days left @endif
+                        </p></div>
+                    </div>
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5"><i class="fas fa-calendar-plus text-base text-blue-600"></i></div>
+                        <div><p class="text-xs font-semibold uppercase tracking-widest" style="color:#999999;">Date Posted</p>
+                        <p class="text-sm font-semibold mt-0.5" style="color:#333333;">{{ $createdPH->format('F d, Y') }}</p>
+                        <p class="text-xs mt-0.5" style="color:#999999;">{{ $createdPH->diffForHumans() }} · by {{ $isAdminPosted ? 'Admin' : 'You' }}</p></div>
+                    </div>
                 </div>
-                <div class="text-base text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->description }}</div>
+                @if($job->target_college)
+                <div class="mt-4 flex items-center gap-2 flex-wrap">
+                    <i class="fas fa-building-columns text-sm" style="color:#999999;"></i>
+                    <span class="text-sm font-semibold" style="color:#666666;">For:</span>
+                    @foreach(explode(',', $job->target_college) as $col)
+                        <span class="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-100">{{ trim($col) }}</span>
+                    @endforeach
+                </div>
+                @endif
+            </div>
+
+            {{-- Description --}}
+            <div class="px-6 py-5 border-b border-gray-100">
+                <h3 class="text-base font-bold mb-3 flex items-center gap-2" style="color:#333333;"><i class="fas fa-file-lines text-sm" style="color:#999999;"></i> Job Description</h3>
+                <div class="text-sm leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-xl p-4 border border-gray-100" style="color:#666666;">{{ $job->description }}</div>
             </div>
 
             {{-- Qualifications --}}
             @if($job->qualifications)
-            <div class="px-8 py-5 border-b border-gray-200">
-                <div class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
-                    <i class="fas fa-list-check text-[#7a3f91] text-sm"></i> Qualifications
-                </div>
-                <div class="text-base text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->qualifications }}</div>
+            <div class="px-6 py-5 border-b border-gray-100">
+                <h3 class="text-base font-bold mb-3 flex items-center gap-2" style="color:#333333;"><i class="fas fa-list-check text-sm" style="color:#7a3f91;"></i> Qualifications</h3>
+                <div class="text-sm leading-relaxed whitespace-pre-wrap bg-purple-50 rounded-xl p-4 border border-purple-100" style="color:#666666;">{{ $job->qualifications }}</div>
             </div>
             @endif
 
             {{-- Application Instructions --}}
             @if($job->application_instructions)
-            <div class="px-8 py-5 border-b border-gray-200">
-                <div class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
-                    <i class="fas fa-paper-plane text-[#7a3f91] text-sm"></i> How to Apply
-                </div>
-                <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
-                    <div class="text-base text-gray-700 leading-relaxed whitespace-pre-wrap">{{ $job->application_instructions }}</div>
+            <div class="px-6 py-5 border-b border-gray-100">
+                <h3 class="text-base font-bold mb-3 flex items-center gap-2" style="color:#333333;"><i class="fas fa-paper-plane text-sm" style="color:#7a3f91;"></i> How to Apply</h3>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                    <div class="text-sm leading-relaxed whitespace-pre-wrap" style="color:#666666;">{{ $job->application_instructions }}</div>
                 </div>
             </div>
             @endif
-
-            {{-- Target Colleges --}}
-            @if($job->target_college && count($viewDepts))
-            <div class="px-8 py-5 border-b border-gray-200">
-                <div class="text-base font-bold text-gray-900 mb-3">Target Colleges</div>
-                <div class="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3">
-                    <div class="text-base font-bold text-gray-900">{{ str_replace(',', ', ', $job->target_college) }}</div>
-                    <div class="flex flex-wrap gap-1.5 mt-2">
-                        @foreach($viewDepts as $dc)<span class="text-sm font-bold font-mono bg-white border border-purple-300 text-purple-700 px-2 py-1 rounded">{{ $dc }}</span>@endforeach
-                    </div>
-                </div>
-            </div>
-            @endif
-
-            {{-- Posting Details --}}
-            <div class="px-8 py-5">
-                <div class="text-sm font-bold text-gray-500 uppercase mb-3 tracking-wider">Posting Details</div>
-                <div class="border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="grid grid-cols-3 divide-x divide-gray-200">
-                        <div class="px-4 py-4">
-                            <div class="text-sm font-bold text-gray-500 uppercase mb-1.5 tracking-wider">Posted On</div>
-                            <div class="text-base font-bold text-gray-900">{{ $createdPH->format('M d, Y') }}</div>
-                        </div>
-                        <div class="px-4 py-4">
-                            <div class="text-sm font-bold text-gray-500 uppercase mb-1.5 tracking-wider">Posted By</div>
-                            @if($isAdminPosted)<div class="text-base font-bold text-gray-900">Admin</div><div class="text-sm text-gray-500">System admin</div>
-                            @else<div class="text-base font-bold text-gray-900">You</div><div class="text-sm text-gray-500">Organization</div>@endif
-                        </div>
-                        <div class="px-4 py-4">
-                            <div class="text-sm font-bold text-gray-500 uppercase mb-1.5 tracking-wider">Deadline</div>
-                            <div class="text-base font-bold {{ $isExp?'text-red-700':'text-gray-900' }}">{{ $dl->format('M d, Y') }}</div>
-                            <div class="text-sm {{ $isExp?'text-red-600':'text-gray-500' }}">{{ $isExp?'Passed':$dl->diffForHumans() }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
 
-        {{-- Footer actions --}}
-        <div class="px-8 py-5 border-t border-gray-200 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-2 flex-wrap">
-            <button wire:click="closeViewModal" type="button" class="px-5 py-3 bg-white text-gray-700 border border-gray-200 rounded-lg text-base font-bold hover:bg-gray-50 transition cursor-pointer">
-                <i class="fas fa-xmark text-sm mr-1"></i> Close
+        {{-- Footer --}}
+        <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex items-center justify-end gap-2 flex-wrap">
+            <button wire:click="closeViewModal" type="button"
+                    class="px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm font-bold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">
+                <i class="fas fa-xmark text-xs mr-1"></i> Close
             </button>
             @if($viewCanShare)
                 <button wire:click="openShareModal({{ $job->id }})" type="button"
-                        class="px-5 py-3 bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-base font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
-                    <i class="fas fa-share-nodes text-sm mr-1"></i> Share
+                        class="px-4 py-2.5 bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-sm font-bold hover:bg-white hover:border-sky-500 transition cursor-pointer">
+                    <i class="fas fa-share-nodes text-xs mr-1.5"></i> Share
                 </button>
             @else
-                <span class="px-5 py-3 bg-gray-100 text-gray-400 border border-gray-200 rounded-lg text-base font-bold cursor-not-allowed select-none"
-                      title="Deadline passed — sharing disabled">
-                    <i class="fas fa-share-nodes text-sm mr-1"></i> Share
+                <span class="px-4 py-2.5 bg-gray-100 text-gray-400 border border-gray-200 rounded-lg text-sm font-bold cursor-not-allowed select-none">
+                    <i class="fas fa-share-nodes text-xs mr-1.5"></i> Share
                 </span>
             @endif
             @if(!$isAdminPosted)
                 <button wire:click="confirmDelete({{ $job->id }})" type="button"
-                        class="px-5 py-3 bg-red-100 text-red-700 border border-red-300 rounded-lg text-base font-bold hover:bg-white hover:border-red-500 transition cursor-pointer">
-                    <i class="fas fa-trash text-sm mr-1"></i> Delete
+                        class="px-4 py-2.5 bg-red-100 text-red-700 border border-red-300 rounded-lg text-sm font-bold hover:bg-white hover:border-red-500 transition cursor-pointer">
+                    <i class="fas fa-trash text-xs mr-1"></i> Delete
                 </button>
                 <button wire:click="openEditModal({{ $job->id }})" type="button"
-                        class="px-5 py-3 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg text-base font-bold hover:bg-white hover:border-blue-500 transition cursor-pointer">
-                    <i class="fas fa-pen-to-square text-sm mr-1"></i> Edit
+                        class="px-4 py-2.5 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg text-sm font-bold hover:bg-white hover:border-blue-500 transition cursor-pointer">
+                    <i class="fas fa-pen-to-square text-xs mr-1"></i> Edit
                 </button>
             @else
-                <span class="inline-flex items-center gap-2 px-5 py-3 text-base font-bold text-gray-500 bg-gray-100 rounded-lg border border-gray-200">
-                    <i class="fas fa-lock text-sm"></i> Posted by Admin
+                <span class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold bg-gray-100 rounded-lg border border-gray-200" style="color:#666666;">
+                    <i class="fas fa-lock text-xs"></i> Posted by Admin
                 </span>
             @endif
         </div>
@@ -1406,21 +1568,22 @@ new class extends Component {
 </div>
 @endif
 
-{{-- EDIT MODAL --}}
+
+{{-- ══════════════════════════════════════════════════════════════════════════
+     EDIT MODAL
+══════════════════════════════════════════════════════════════════════════ --}}
 @if($showEditModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="closeEditModal">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden relative">
-        <button wire:click="closeEditModal" type="button" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/20 transition text-white cursor-pointer"><i class="fas fa-xmark text-lg"></i></button>
-        <div class="flex items-center px-7 py-5 bg-[#7a3f91] flex-shrink-0">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden relative m-in">
+        <button wire:click="closeEditModal" type="button" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/20 transition text-white cursor-pointer z-10"><i class="fas fa-xmark text-lg"></i></button>
+        <div class="flex items-center px-7 py-5 flex-shrink-0" style="background:#7a3f91;">
             <h2 class="text-2xl font-extrabold text-white flex items-center gap-3"><i class="fas fa-pen-to-square"></i> Edit Job Posting</h2>
         </div>
         @php $editingJob = $editingJobId ? \App\Models\JobPosting::find($editingJobId) : null; @endphp
         @if($editingJob && $editingJob->status === 'INACTIVE')
         <div class="bg-amber-50 border-b border-amber-200 px-7 py-3 flex-shrink-0 flex items-center gap-3">
             <i class="fas fa-shield-halved text-amber-500 text-base flex-shrink-0"></i>
-            <p class="text-amber-800 text-sm font-semibold">
-                This job is currently <strong>Inactive</strong>. You can edit the details, but only an Admin can re-activate it.
-            </p>
+            <p class="text-amber-800 text-sm font-semibold">This job is currently <strong>Inactive</strong>. You can edit the details, but only an Admin can re-activate it.</p>
         </div>
         @endif
         @if(count($editErrors))
@@ -1431,19 +1594,20 @@ new class extends Component {
             </ul>
         </div>
         @endif
-        <div class="flex-1 overflow-y-auto px-7 py-6 space-y-5">
+        <div class="flex-1 overflow-y-auto scroll-c px-7 py-6 space-y-5">
             {{-- Job Title --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Job Title <span class="text-red-500">*</span></label>
-                <input wire:model.defer="editJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editJobTitle'])?'border-red-400 bg-red-50':'' }}">
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Job Title <span class="text-red-500">*</span></label>
+                <input wire:model.defer="editJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
+                       class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editJobTitle'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                 @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
             </div>
 
             {{-- Org Type + Company Name --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Organization Type <span class="text-red-500">*</span></label>
-                    <select wire:model.live="editCompanyType" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editCompanyType'])?'border-red-400 bg-red-50':'' }}">
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Organization Type <span class="text-red-500">*</span></label>
+                    <select wire:model.live="editCompanyType" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editCompanyType'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                         <option value="">Select Organization</option>
                         @foreach($this->jobOptions->get('company_type', collect()) as $opt)<option value="{{ $opt->label }}" @selected($editCompanyType===$opt->label)>{{ $opt->label }}</option>@endforeach
                     </select>
@@ -1451,33 +1615,37 @@ new class extends Component {
                 </div>
                 <div>
                     @php $editIsPhilcst = str_contains(strtoupper($editCompanyType), 'PHILCST'); @endphp
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Company Name <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editCompany'])?'border-red-400 bg-red-50':'' }} {{ $editIsPhilcst?'bg-gray-100 text-gray-500 cursor-not-allowed':'' }}">
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Company Name <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
+                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editCompany'])?'border-red-400 bg-red-50':'' }} {{ $editIsPhilcst?'bg-gray-100 cursor-not-allowed':'' }}"
+                           style="{{ $editIsPhilcst?'color:#999999;':'color:#333333;' }}">
                     @if(isset($editErrors['editCompany']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editCompany'] }}</p>@endif
                 </div>
             </div>
 
             {{-- Location --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Location <span class="text-red-500">*</span></label>
-                <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editLocation'])?'border-red-400 bg-red-50':'' }} {{ $editIsPhilcst?'bg-gray-100 text-gray-500 cursor-not-allowed':'' }}">
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Location <span class="text-red-500">*</span></label>
+                <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
+                       class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editLocation'])?'border-red-400 bg-red-50':'' }} {{ $editIsPhilcst?'bg-gray-100 cursor-not-allowed':'' }}"
+                       style="{{ $editIsPhilcst?'color:#999999;':'color:#333333;' }}">
                 @if(isset($editErrors['editLocation']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editLocation'] }}</p>@endif
             </div>
 
             {{-- Employment Type + Experience Level --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Employment Type <span class="text-red-500">*</span></label>
-                    <select wire:model.defer="editEmpType" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editEmpType'])?'border-red-400 bg-red-50':'' }}">
-                        <option value="">Select Employment Type</option>
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Employment Type <span class="text-red-500">*</span></label>
+                    <select wire:model.defer="editEmpType" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editEmpType'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
+                        <option value="">Select Type</option>
                         @foreach($this->jobOptions->get('employment_type', collect()) as $opt)<option value="{{ $opt->label }}" @selected($editEmpType===$opt->label)>{{ $opt->label }}</option>@endforeach
                     </select>
                     @if(isset($editErrors['editEmpType']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editEmpType'] }}</p>@endif
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Experience Level <span class="text-red-500">*</span></label>
-                    <select wire:model.defer="editExpLevel" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editExpLevel'])?'border-red-400 bg-red-50':'' }}">
-                        <option value="">Select Experience Level</option>
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Experience Level <span class="text-red-500">*</span></label>
+                    <select wire:model.defer="editExpLevel" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editExpLevel'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
+                        <option value="">Select Level</option>
                         @foreach($this->orderedExpLevels as $lvl)<option value="{{ $lvl }}" @selected($editExpLevel===$lvl)>{{ $lvl }}</option>@endforeach
                     </select>
                     @if(isset($editErrors['editExpLevel']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editExpLevel'] }}</p>@endif
@@ -1487,20 +1655,22 @@ new class extends Component {
             {{-- Salary + Deadline --}}
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Salary <span class="text-gray-400 font-normal">(Optional)</span></label>
-                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. &#8369;25,000 &ndash; &#8369;35,000 / month" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition">
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Salary <span class="font-normal" style="color:#999999;">(Optional)</span></label>
+                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25,000 – ₱35,000 / month"
+                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition" style="color:#333333;">
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Application Deadline <span class="text-red-500">*</span></label>
-                    <input wire:model.defer="editDeadline" type="date" min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editDeadline'])?'border-red-400 bg-red-50':'' }}">
+                    <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Deadline <span class="text-red-500">*</span></label>
+                    <input wire:model.defer="editDeadline" type="date" min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}"
+                           class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition {{ isset($editErrors['editDeadline'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;">
                     @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editDeadline'] }}</p>@endif
-                    <p class="text-xs text-amber-600 mt-1.5"><i class="fas fa-shield-halved mr-1"></i>Status is managed by Admin only.</p>
+                    <p class="text-xs mt-1.5 text-amber-600"><i class="fas fa-shield-halved mr-1"></i>Status is managed by Admin only.</p>
                 </div>
             </div>
 
             {{-- Target College --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Target College <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Target College <span class="text-red-500">*</span></label>
                 <div class="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
                     <div class="flex items-center gap-2 mb-2">
                         <i class="fas fa-lock text-blue-500 text-base"></i>
@@ -1513,39 +1683,37 @@ new class extends Component {
 
             {{-- Job Description --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">Job Description <span class="text-red-500">*</span></label>
-                <textarea wire:model.defer="editDescription" rows="6" maxlength="5000" class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editDescription'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;">Job Description <span class="text-red-500">*</span></label>
+                <textarea wire:model.defer="editDescription" rows="6" maxlength="5000"
+                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editDescription'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;"></textarea>
                 @if(isset($editErrors['editDescription']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editDescription'] }}</p>@endif
             </div>
 
             {{-- Qualifications --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">
-                    <i class="fas fa-list-check text-[#7a3f91] mr-1"></i>Qualifications <span class="text-red-500">*</span>
-                </label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;"><i class="fas fa-list-check mr-1" style="color:#7a3f91;"></i>Qualifications <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="editQualifications" rows="5"
                           placeholder="e.g. Bachelor's degree in IT or related field&#10;At least 1 year of relevant experience"
                           maxlength="3000"
-                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editQualifications'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editQualifications'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;"></textarea>
                 @if(isset($editErrors['editQualifications']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editQualifications'] }}</p>@endif
             </div>
 
             {{-- Application Instructions --}}
             <div>
-                <label class="block text-sm font-bold text-gray-700 uppercase mb-2 tracking-wider">
-                    <i class="fas fa-paper-plane text-[#7a3f91] mr-1"></i>Application Instructions <span class="text-red-500">*</span>
-                </label>
+                <label class="block text-sm font-bold uppercase mb-2 tracking-wider" style="color:#333333;"><i class="fas fa-paper-plane mr-1" style="color:#7a3f91;"></i>Application Instructions <span class="text-red-500">*</span></label>
                 <textarea wire:model.defer="editApplicationInstructions" rows="5"
                           placeholder="e.g. Send your resume to hr@company.com&#10;Subject: Application – [Position]"
                           maxlength="3000"
-                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base text-gray-800 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editApplicationInstructions'])?'border-red-400 bg-red-50':'' }}"></textarea>
+                          class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg text-base bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-purple-200 transition resize-none {{ isset($editErrors['editApplicationInstructions'])?'border-red-400 bg-red-50':'' }}" style="color:#333333;"></textarea>
                 @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 text-sm mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
             </div>
         </div>
         <div class="px-7 py-5 border-t border-gray-100 bg-gray-50 flex-shrink-0 flex gap-3">
-            <button wire:click="closeEditModal" class="flex-1 px-4 py-3 bg-white text-gray-700 border border-gray-200 rounded-xl text-base font-bold hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+            <button wire:click="closeEditModal" class="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-xl text-base font-bold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">Cancel</button>
             <button wire:click="saveEditJob" wire:loading.attr="disabled" wire:target="saveEditJob"
-                    class="flex-1 px-4 py-3 bg-[#7a3f91] text-white rounded-xl text-base font-extrabold hover:bg-[#5e2f72] disabled:opacity-50 transition shadow-md flex items-center justify-center gap-2 cursor-pointer">
+                    class="flex-1 px-4 py-3 text-white rounded-xl text-base font-extrabold disabled:opacity-50 transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    style="background:#7a3f91;">
                 <span wire:loading wire:target="saveEditJob"><i class="fas fa-spinner animate-spin"></i> Saving&hellip;</span>
                 <span wire:loading.remove wire:target="saveEditJob"><i class="fas fa-floppy-disk"></i> Save Changes</span>
             </button>
@@ -1554,10 +1722,13 @@ new class extends Component {
 </div>
 @endif
 
-{{-- DELETE MODAL --}}
+
+{{-- ══════════════════════════════════════════════════════════════════════════
+     DELETE MODAL
+══════════════════════════════════════════════════════════════════════════ --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" wire:keydown.escape="cancelDelete">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in">
         <div class="px-6 py-5 bg-red-50 border-b border-red-200">
             <h2 class="text-lg font-extrabold text-red-800 flex items-center gap-2.5">
                 <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center"><i class="fas fa-triangle-exclamation text-red-600 text-base"></i></div>
@@ -1565,14 +1736,14 @@ new class extends Component {
             </h2>
         </div>
         <div class="p-6">
-            <p class="text-gray-700 text-base mb-1">You are about to delete:</p>
+            <p class="text-base mb-1" style="color:#666666;">You are about to delete:</p>
             <p class="font-extrabold text-red-700 text-lg mb-4">"{{ $deleteJobTitle }}"</p>
-            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 text-sm text-gray-700 flex items-start gap-2">
+            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 text-sm flex items-start gap-2" style="color:#666666;">
                 <i class="fas fa-info-circle text-amber-500 mt-0.5 flex-shrink-0"></i>
                 <span>The job will be removed from your list. <strong>Admin can still see and restore it</strong> if needed.</span>
             </div>
             <div class="flex gap-3">
-                <button wire:click="cancelDelete" class="flex-1 px-4 py-3 bg-white text-gray-700 border border-gray-200 rounded-lg text-base font-bold hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+                <button wire:click="cancelDelete" class="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-lg text-base font-bold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">Cancel</button>
                 <button wire:click="executeDelete" wire:loading.attr="disabled" wire:target="executeDelete"
                         class="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-lg text-base font-extrabold flex items-center justify-center gap-2 transition shadow-md cursor-pointer">
                     <span wire:loading wire:target="executeDelete"><i class="fas fa-spinner animate-spin"></i></span>
@@ -1584,16 +1755,20 @@ new class extends Component {
 </div>
 @endif
 
-{{-- SHARE MODAL --}}
+
+{{-- ══════════════════════════════════════════════════════════════════════════
+     SHARE MODAL
+══════════════════════════════════════════════════════════════════════════ --}}
 @if($showShareModal)
 @php
-    $shareBaseUrl  = $this->jobsBaseUrl();
+    $shareBaseUrl     = $this->jobsBaseUrl();
     $shareDlFormatted = $shareDeadline
         ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
         : '';
-    $shareDescPreview = mb_strlen($shareDescription) > 120
-        ? mb_substr($shareDescription, 0, 120) . '…'
+    $shareDescPreview = mb_strlen($shareDescription) > 140
+        ? mb_substr($shareDescription, 0, 140) . '…'
         : $shareDescription;
+
     $fbPostLines   = [];
     $fbPostLines[] = "🎯 Job Opening: {$shareJobTitle}";
     $fbPostLines[] = "🏢 {$shareCompany}";
@@ -1607,50 +1782,40 @@ new class extends Component {
     $fbPostLines[] = "Apply now through the PHILCST Alumni Portal 👇";
     $fbPostLines[] = $shareBaseUrl;
     $fbPostText    = implode("\n", $fbPostLines);
-    $fbShareUrl    = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
-    $shareHost     = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+
+    $fbShareUrl  = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
+    $shareHost   = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
 @endphp
 
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
      wire:keydown.escape="closeShareModal"
      x-data="{
-         copied:          false,
-         fbCopied:        false,
-         messengerCopied: false,
-         fbText:          {{ json_encode($fbPostText) }},
-         baseUrl:         {{ json_encode($shareBaseUrl) }},
-         fbUrl:           {{ json_encode($fbShareUrl) }},
+         copied:false, fbCopied:false, messengerCopied:false,
+         fbText:  {{ json_encode($fbPostText) }},
+         baseUrl: {{ json_encode($shareBaseUrl) }},
+         fbUrl:   {{ json_encode($fbShareUrl) }},
          shareOnFacebook() {
              navigator.clipboard.writeText(this.fbText).then(() => {
-                 this.fbCopied = true;
-                 setTimeout(() => this.fbCopied = false, 6000);
+                 this.fbCopied = true; setTimeout(() => this.fbCopied = false, 6000);
              }).catch(() => {});
-             const w = 620, h = 520;
-             const left = Math.round((screen.width  - w) / 2);
-             const top  = Math.round((screen.height - h) / 2);
-             window.open(
-                 this.fbUrl, 'fb_share',
-                 'width='+w+',height='+h+',left='+left+',top='+top
-                 +',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1'
-             );
+             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             window.open(this.fbUrl,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
          },
          shareOnMessenger() {
              navigator.clipboard.writeText(this.fbText).then(() => {
-                 this.messengerCopied = true;
-                 setTimeout(() => this.messengerCopied = false, 6000);
+                 this.messengerCopied = true; setTimeout(() => this.messengerCopied = false, 6000);
              }).catch(() => {});
              const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
              if (isMobile) {
                  window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
-                 setTimeout(() => { window.open('https://www.messenger.com/', '_blank'); }, 1500);
+                 setTimeout(() => window.open('https://www.messenger.com/','_blank'), 1500);
              } else {
-                 window.open('https://www.messenger.com/', '_blank');
+                 window.open('https://www.messenger.com/','_blank');
              }
          },
          copyLinkFn() {
              navigator.clipboard.writeText(this.baseUrl).then(() => {
-                 this.copied = true;
-                 setTimeout(() => this.copied = false, 2500);
+                 this.copied = true; setTimeout(() => this.copied = false, 2500);
              });
          }
      }"
@@ -1658,159 +1823,184 @@ new class extends Component {
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100">
 
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+    {{-- max-w-3xl for wide two-column layout --}}
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden m-in"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100">
 
-        <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-            <h2 class="text-lg font-extrabold text-gray-800 flex items-center gap-2">
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h2 class="text-lg font-bold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-sky-600"></i> Share Job Posting
             </h2>
             <button wire:click="closeShareModal" type="button"
-                    class="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer">
+                    class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100 transition cursor-pointer" style="color:#999999;">
                 <i class="fas fa-xmark text-base"></i>
             </button>
         </div>
 
-        <div class="px-6 pt-5 pb-5 space-y-4">
+        {{-- Two-column body --}}
+        <div class="flex flex-col lg:flex-row">
 
-            {{-- FB copied banner --}}
-            <div x-show="fbCopied" x-cloak
-                 x-transition:enter="transition ease-out duration-300"
-                 x-transition:enter-start="opacity-0 -translate-y-2"
-                 x-transition:enter-end="opacity-100 translate-y-0"
-                 class="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-start gap-3">
-                <div class="w-7 h-7 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <i class="fas fa-check text-emerald-600 text-sm"></i>
-                </div>
-                <div>
-                    <p class="text-sm font-extrabold text-emerald-800">Job text copied!</p>
-                    <p class="text-sm text-emerald-700 mt-0.5 leading-snug">
-                        Sa Facebook popup, i-click ang text box tapos
-                        <strong>i-paste (Ctrl+V / ⌘V)</strong> — tapos na, ready to post!
-                    </p>
-                </div>
-            </div>
+            {{-- LEFT: Preview --}}
+            <div class="flex-1 px-6 py-5 border-b lg:border-b-0 lg:border-r border-gray-100 flex flex-col gap-4">
 
-            {{-- Messenger copied banner --}}
-            <div x-show="messengerCopied" x-cloak
-                 x-transition:enter="transition ease-out duration-300"
-                 x-transition:enter-start="opacity-0 -translate-y-2"
-                 x-transition:enter-end="opacity-100 translate-y-0"
-                 class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-3">
-                <div class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <i class="fas fa-check text-blue-600 text-sm"></i>
-                </div>
-                <div>
-                    <p class="text-sm font-extrabold text-blue-800">Job text copied!</p>
-                    <p class="text-sm text-blue-700 mt-0.5 leading-snug">
-                        Bukas na ang Messenger. I-paste ang text
-                        (<kbd class="bg-blue-100 px-1 rounded font-mono text-xs">Ctrl+V</kbd>)
-                        sa GC o private message mo!
-                    </p>
-                </div>
-            </div>
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#999999;">What recipients will see</p>
 
-            <p class="text-xs font-bold text-gray-500 uppercase tracking-widest">Preview — What people will see</p>
-
-            {{-- Preview card --}}
-            <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
-                <div class="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
-                    <div class="w-14 h-14 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#4c1d95] flex items-center justify-center flex-shrink-0 shadow">
-                        <i class="fas fa-briefcase text-white text-xl"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="font-extrabold text-gray-900 text-base leading-tight truncate">{{ $shareJobTitle }}</p>
-                        <p class="text-sm text-gray-700 mt-0.5 font-semibold">
-                            {{ $shareCompany }}
-                            @if($shareEmpType) &middot; <span class="text-purple-700">{{ $shareEmpType }}</span>@endif
-                        </p>
-                        <div class="flex flex-wrap gap-1 mt-1.5">
-                            @if($shareLocation)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-gray-200 text-gray-700"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}</span>@endif
-                            @if($shareExpLevel)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-700"><i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}</span>@endif
-                            @if($shareSalary)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700"><i class="fas fa-money-bill-wave text-[8px]"></i>{{ $shareSalary }}</span>@endif
-                            @if($shareDlFormatted)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-red-50 text-red-600"><i class="fas fa-calendar-xmark text-[8px]"></i>Deadline: {{ $shareDlFormatted }}</span>@endif
-                            @if($shareCollege)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700"><i class="fas fa-building-columns text-[8px]"></i>{{ $shareCollege }}</span>@endif
+                {{-- Preview card --}}
+                <div class="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+                    <div class="bg-[#f9f7fc] border-b border-gray-200 px-4 py-3 flex items-start gap-3">
+                        <div class="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 shadow" style="background:linear-gradient(135deg,#7a3f91,#6a3080);">
+                            <i class="fas fa-briefcase text-white text-xl"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-sm leading-tight truncate" style="color:#333333;">{{ $shareJobTitle }}</p>
+                            <p class="text-xs mt-0.5 font-semibold" style="color:#666666;">
+                                {{ $shareCompany }}@if($shareEmpType) &middot; <span style="color:#7a3f91;">{{ $shareEmpType }}</span>@endif
+                            </p>
+                            <div class="flex flex-wrap gap-1 mt-1.5">
+                                @if($shareLocation)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-200" style="color:#333333;"><i class="fas fa-location-dot text-[8px]"></i>{{ $shareLocation }}</span>@endif
+                                @if($shareExpLevel)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100" style="color:#7a3f91;"><i class="fas fa-layer-group text-[8px]"></i>{{ $shareExpLevel }}</span>@endif
+                                @if($shareSalary)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700"><i class="fas fa-money-bill-wave text-[8px]"></i>{{ $shareSalary }}</span>@endif
+                                @if($shareDlFormatted)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-600"><i class="fas fa-calendar-xmark text-[8px]"></i>Deadline: {{ $shareDlFormatted }}</span>@endif
+                                @if($shareCollege)<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700"><i class="fas fa-building-columns text-[8px]"></i>{{ $shareCollege }}</span>@endif
+                            </div>
                         </div>
                     </div>
+                    @if($shareDescPreview)
+                    <div class="px-4 py-2.5 bg-white border-b border-gray-100">
+                        <p class="text-xs leading-relaxed line-clamp-3" style="color:#666666;">{{ $shareDescPreview }}</p>
+                    </div>
+                    @endif
+                    <div class="px-4 py-2 bg-[#f9f7fc] flex items-center gap-2">
+                        <i class="fas fa-globe text-[10px]" style="color:#999999;"></i>
+                        <span class="text-[10px] uppercase tracking-wide font-semibold" style="color:#666666;">{{ strtoupper($shareHost) }}</span>
+                    </div>
                 </div>
-                @if($shareDescPreview)
-                <div class="px-4 py-3 bg-white border-b border-gray-100">
-                    <p class="text-sm text-gray-600 leading-relaxed line-clamp-3">{{ $shareDescPreview }}</p>
-                </div>
-                @endif
-                <div class="px-4 py-2 bg-[#f0f2f5] flex items-center gap-2">
-                    <i class="fas fa-globe text-gray-400 text-xs"></i>
-                    <span class="text-xs text-gray-500 uppercase tracking-wide font-semibold">{{ strtoupper($shareHost) }}</span>
+
+                {{-- Info box --}}
+                <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
+                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+                    <p class="text-xs text-blue-800 leading-snug">
+                        <strong>How it works:</strong> Click a share button — the full job text is automatically copied to your clipboard and the platform opens. Just paste
+                        (<kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd>) in your post or message!
+                    </p>
                 </div>
             </div>
 
-            {{-- How it works --}}
-            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
-                <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
-                <p class="text-sm text-blue-800 leading-snug">
-                    <strong>How it works:</strong> I-click ang share button —
-                    awtomatiko nang mako-kopya ang buong job text,
-                    tapos mag-o-open ang FB o Messenger. I-paste lang
-                    (<kbd class="bg-blue-100 px-1 rounded font-mono text-xs">Ctrl+V</kbd>)
-                    sa post o GC mo, tapos done!
+            {{-- RIGHT: Share buttons --}}
+            <div class="w-full lg:w-72 px-6 py-5 flex flex-col gap-3 flex-shrink-0">
+
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#999999;">Share via</p>
+
+                {{-- FB copied banner --}}
+                <div x-show="fbCopied" x-cloak
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 -translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="bg-emerald-50 border border-emerald-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
+                    <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
+                    <p class="text-xs font-bold text-emerald-800">Text copied! I-paste sa Facebook popup.</p>
+                </div>
+
+                {{-- Messenger copied banner --}}
+                <div x-show="messengerCopied" x-cloak
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 -translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="bg-blue-50 border border-blue-300 rounded-xl px-3 py-2.5 flex items-start gap-2">
+                    <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
+                    <p class="text-xs font-bold text-blue-800">Text copied! I-paste sa Messenger.</p>
+                </div>
+
+                {{-- Facebook --}}
+                <button type="button" @click="shareOnFacebook()"
+                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
+                    <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
+                            <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
+                        </svg>
+                    </span>
+                    <span class="flex-1 text-left text-sm">
+                        <span x-show="!fbCopied">Share on Facebook</span>
+                        <span x-show="fbCopied" x-cloak><i class="fas fa-check mr-1"></i> Paste sa FB popup!</span>
+                    </span>
+                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-xs group-hover:text-white transition"></i>
+                </button>
+
+                {{-- Messenger --}}
+                <button type="button" @click="shareOnMessenger()"
+                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group"
+                        style="background:linear-gradient(to right,#00B2FF,#006AFF);">
+                    <span class="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
+                            <defs><linearGradient id="mgr2" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
+                            <path fill="url(#mgr2)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
+                    </span>
+                    <span class="flex-1 text-left text-sm">
+                        <span x-show="!messengerCopied">Share via Messenger</span>
+                        <span x-show="messengerCopied" x-cloak><i class="fas fa-check mr-1"></i> Paste sa Messenger!</span>
+                    </span>
+                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-xs group-hover:text-white transition"></i>
+                </button>
+                <p class="text-[10px] text-center -mt-1" style="color:#999999;">
+                    <i class="fas fa-users text-[9px] mr-0.5"></i> Works for private chats & group chats.
+                </p>
+
+                {{-- Divider --}}
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="bg-white px-2 text-[10px] font-bold uppercase tracking-widest" style="color:#999999;">or post directly</span>
+                    </div>
+                </div>
+
+                {{-- Share to Alumni Batch Chats --}}
+                <button type="button"
+                        wire:click="shareToAlumniChats"
+                        wire:loading.attr="disabled"
+                        wire:target="shareToAlumniChats"
+                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-300 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200"
+                        style="color:#7a3f91;">
+                    <span class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform"
+                          style="background:#7a3f91;">
+                        <i class="fas fa-users text-white text-sm"></i>
+                    </span>
+                    <span class="flex-1 text-left">
+                        <span wire:loading.remove wire:target="shareToAlumniChats">Post to Alumni Batch Chats</span>
+                        <span wire:loading wire:target="shareToAlumniChats"><i class="fas fa-spinner fa-spin mr-1"></i> Posting…</span>
+                        <span class="block text-xs font-semibold mt-0.5" style="color:#7a3f91;">Sends to all batch rooms in your college</span>
+                    </span>
+                    <i class="fas fa-paper-plane text-xs transition" style="color:#7a3f91;"></i>
+                </button>
+
+                {{-- Divider then Copy Link --}}
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="bg-white px-2 text-[10px] font-bold uppercase tracking-widest" style="color:#999999;">or copy link</span>
+                    </div>
+                </div>
+
+                <button type="button" @click="copyLinkFn()"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 font-bold text-sm transition cursor-pointer group" style="color:#333333;">
+                    <span class="w-9 h-9 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" style="color:#999999;"></i>
+                    </span>
+                    <div class="flex-1 text-left min-w-0">
+                        <p :class="copied ? 'text-emerald-600' : ''" class="font-bold text-sm"
+                           style="color:#333333;"
+                           x-text="copied ? '✓ Link copied!' : 'Copy Jobs Page Link'"></p>
+                        <p class="text-[10px] font-mono mt-0.5 truncate" style="color:#999999;">{{ $shareBaseUrl }}</p>
+                    </div>
+                </button>
+
+                <p class="text-[10px] text-center leading-snug pt-1" style="color:#999999;">
+                    Sharing is disabled for postings past their deadline.
                 </p>
             </div>
-
-            <p class="text-xs font-bold text-gray-500 uppercase tracking-widest pt-1">Share via</p>
-
-            {{-- Facebook --}}
-            <button type="button" @click="shareOnFacebook()"
-                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] active:bg-[#1464d8] text-white font-extrabold text-base shadow hover:shadow-md transition-all duration-150 cursor-pointer group">
-                <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2">
-                        <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
-                    </svg>
-                </span>
-                <span class="flex-1 text-left">
-                    <span x-show="!fbCopied">Share on Facebook</span>
-                    <span x-show="fbCopied" x-cloak><i class="fas fa-check mr-1"></i> Bukas na! I-paste ang text sa FB</span>
-                </span>
-                <i class="fas fa-arrow-up-right-from-square text-white/70 text-sm group-hover:text-white transition"></i>
-            </button>
-
-            {{-- Messenger --}}
-            <button type="button" @click="shareOnMessenger()"
-                    class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl bg-gradient-to-r from-[#00B2FF] to-[#006AFF] hover:from-[#00a0e6] hover:to-[#005ee6] text-white font-extrabold text-base shadow hover:shadow-md transition-all duration-150 cursor-pointer group">
-                <span class="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
-                        <defs><linearGradient id="mgr" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
-                        <path fill="url(#mgr)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
-                    </svg>
-                </span>
-                <span class="flex-1 text-left">
-                    <span x-show="!messengerCopied">Share on Messenger</span>
-                    <span x-show="messengerCopied" x-cloak><i class="fas fa-check mr-1"></i> Bukas na! I-paste sa Messenger</span>
-                </span>
-                <i class="fas fa-arrow-up-right-from-square text-white/70 text-sm group-hover:text-white transition"></i>
-            </button>
-            <p class="text-xs text-gray-400 text-center -mt-2">
-                <i class="fas fa-users text-[9px] mr-1"></i>Works sa private chat, GC, at group pages ng Messenger.
-            </p>
-
-            {{-- Copy Link --}}
-            <button type="button" @click="copyLinkFn()"
-                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 text-gray-700 font-bold text-base transition-all duration-150 cursor-pointer group">
-                <span class="w-8 h-8 bg-gray-100 group-hover:bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0 transition">
-                    <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-sm"></i>
-                </span>
-                <div class="flex-1 text-left">
-                    <p :class="copied ? 'text-emerald-600' : 'text-gray-700'" class="font-bold text-base"
-                       x-text="copied ? '✓ Link copied!' : 'Copy Jobs Page Link'"></p>
-                    <p class="text-xs text-gray-400 font-mono mt-0.5">{{ $shareBaseUrl }}</p>
-                </div>
-            </button>
-
-            <p class="text-xs text-gray-400 text-center leading-snug pb-1">
-                Make sure the posting is <strong class="text-gray-500">Active</strong> before sharing.
-                Sharing is disabled for expired postings.
-            </p>
         </div>
     </div>
 </div>

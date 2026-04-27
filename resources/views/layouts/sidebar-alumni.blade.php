@@ -165,7 +165,7 @@
                     [
                         'route'   => 'alumni.yearbook',
                         'icon' => 'book-open',
-                        'label'   => 'Messages',
+                        'label'   => 'Yearbook',
                         'pattern' => 'alumni/yearbook*',
                     ],
                   
