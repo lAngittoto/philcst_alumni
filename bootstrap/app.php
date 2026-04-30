@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'alumni.onboarded'         => \App\Http\Middleware\EnsureAlumniOnboarded::class,
             'registrar'                => \App\Http\Middleware\RegistrarMiddleware::class,
             'director'                 => \App\Http\Middleware\DirectorMiddleware::class,
+            'director.password.ensure'  => \App\Http\Middleware\EnsureDirectorPasswordChanged::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

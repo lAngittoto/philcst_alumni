@@ -99,15 +99,22 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
 });
 
 // ===================================
+// Director — Password Change Wizard
+// ===================================
+Route::middleware(['auth', 'director.password.ensure'])->group(function () {
+    Volt::route('/director/change-password', 'director/change-password')
+        ->name('director.change-password');
+});
+
+// ===================================
 // Director Routes
 // ===================================
-Route::middleware(['auth', 'director'])->prefix('director')->name('director.')->group(function () {
-
+Route::middleware(['auth', 'director', 'director.password.ensure'])->prefix('director')->name('director.')->group(function () {
     Route::view('/dashboard',              'director.dashboard-wrapper')          ->name('dashboard');
     Route::view('/coordinator/management', 'director.manage-coordinator-wrapper') ->name('coordinator/management');
     Route::view('/event/management',       'director.manage-event-wrapper')       ->name('event/management');
     Route::view('/job/management',         'director.manage-job-wrapper')         ->name('job/management');
-    Route::view('/messenger', 'director.director-messenger-wrapper') ->name('director/messenger');
+    Route::view('/messenger',              'director.director-messenger-wrapper') ->name('director/messenger');
     Route::view('/manage/employment',      'director.manage-employment-wrapper')  ->name('manage/employment');
 });
 
