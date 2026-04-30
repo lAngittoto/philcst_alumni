@@ -49,6 +49,31 @@ new class extends Component {
     public int    $directorId        = 0;
     public string $directorName      = '';
     public string $directorFirstName = '';
+    public string $directorPhoto     = '';
+
+    // ── View Reactions popup ──────────────────────────────────────────────
+    public ?int  $reactionsPopupMsgId = null;
+    public array $reactionsPopupData  = [];
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Photo URL resolver (mirrors manage-coordinator logic)
+    // ─────────────────────────────────────────────────────────────────────
+private function resolvePhotoUrl(?string $path): string
+{
+    $default = asset('storage/alumni-photos/default.png');
+
+    if (! $path) return $default;
+
+    if (
+        str_starts_with($path, 'organizers/')    ||
+        str_starts_with($path, 'alumni-photos/') ||
+        str_starts_with($path, 'directors/')
+    ) {
+        return asset('storage/' . $path);
+    }
+
+    return $default;
+}
 
     // ─────────────────────────────────────────────────────────────────────
     // Boot
@@ -75,6 +100,7 @@ new class extends Component {
         $this->directorId        = $director->id;
         $this->directorName      = trim(($director->first_name ?? '') . ' ' . ($director->last_name ?? ''));
         $this->directorFirstName = $director->first_name ?? '';
+        $this->directorPhoto     = $this->resolvePhotoUrl($director->profile_photo ?? null) ?? '';
 
         $this->ensureRoomExists();
         $this->pingPresence();
@@ -99,7 +125,7 @@ new class extends Component {
 
             if (! $exists) {
                 DB::table('chat_rooms')->insert([
-                    'name'        => 'Directors & Coordinators',
+                    'name'        => 'Internal Staff Chat',
                     'course_code' => '__director__',
                     'batch'       => 0,
                     'department'  => 'ALL',
@@ -298,17 +324,23 @@ new class extends Component {
             ->get(['id', 'sender_type', 'sender_id', 'body'])
             ->keyBy('id');
 
-        $this->messages = collect($rows)->map(function ($m) use ($dMap, $oMap, $rxns, $pins, $rplyMap) {
+        $self = $this;
+
+        $this->messages = collect($rows)->map(function ($m) use ($dMap, $oMap, $rxns, $pins, $rplyMap, $self) {
 
             $isDir   = $m->sender_type === 'director';
             $isCoord = $m->sender_type === 'coordinator';
             $s       = $isDir ? $dMap->get($m->sender_id) : $oMap->get($m->sender_id);
             $sName   = $s ? trim(($s->first_name ?? '') . ' ' . ($s->last_name ?? '')) : 'Unknown';
 
+            // Pre-compute resolved photo URL
+            $photoUrl = $s ? $self->resolvePhotoUrl($s->profile_photo ?? null) : null;
+
             $msgRxns = $rxns->get($m->id, collect());
             $rxnGrps = $msgRxns->groupBy('reaction')->map(fn ($g) => $g->count())->toArray();
-            $myRxn   = $msgRxns->first(
-                fn ($r) => $r->reactor_type === 'director' && $r->reactor_id === $this->directorId
+
+            $myRxn = $msgRxns->first(
+                fn ($r) => $r->reactor_type === 'organizer' && (int) $r->reactor_id === $self->directorId
             );
 
             $reply = null;
@@ -325,14 +357,14 @@ new class extends Component {
                 ];
             }
 
-            $isMe = $m->sender_type === 'director' && $m->sender_id === $this->directorId;
+            $isMe = $m->sender_type === 'director' && $m->sender_id === $self->directorId;
 
             return [
                 'id'             => $m->id,
                 'sender_type'    => $m->sender_type,
                 'sender_id'      => $m->sender_id,
                 'sender_name'    => $sName,
-                'sender_photo'   => $s->profile_photo ?? null,
+                'sender_photo'   => $photoUrl,
                 'body'           => $m->body,
                 'edited'         => ! is_null($m->edited_at),
                 'is_mine'        => $isMe,
@@ -486,7 +518,7 @@ new class extends Component {
 
         $existing = DB::table('chat_reactions')
             ->where('message_id', $msgId)
-            ->where('reactor_type', 'director')
+            ->where('reactor_type', 'organizer')
             ->where('reactor_id', $this->directorId)
             ->first();
 
@@ -500,7 +532,7 @@ new class extends Component {
         } else {
             DB::table('chat_reactions')->insert([
                 'message_id'   => $msgId,
-                'reactor_type' => 'director',
+                'reactor_type' => 'organizer',
                 'reactor_id'   => $this->directorId,
                 'reaction'     => $reaction,
                 'created_at'   => now(),
@@ -509,6 +541,78 @@ new class extends Component {
         }
 
         $this->loadMessages();
+
+        if ($this->reactionsPopupMsgId === $msgId) {
+            $this->openReactionsPopup($msgId);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // View Reactions Popup
+    // ─────────────────────────────────────────────────────────────────────
+    public function openReactionsPopup(int $msgId): void
+    {
+        if ($this->reactionsPopupMsgId === $msgId) {
+            $this->reactionsPopupMsgId = null;
+            $this->reactionsPopupData  = [];
+            return;
+        }
+
+        $this->reactionsPopupMsgId = $msgId;
+
+        $rows = DB::table('chat_reactions')
+            ->where('message_id', $msgId)
+            ->get(['reactor_type', 'reactor_id', 'reaction']);
+
+        $data = [];
+        foreach ($rows as $r) {
+            if ($r->reactor_type === 'organizer') {
+                $dir = DB::table('director')
+                    ->where('id', $r->reactor_id)
+                    ->whereNull('deleted_at')
+                    ->first(['first_name', 'last_name', 'profile_photo']);
+
+                if ($dir) {
+                    $name  = trim(($dir->first_name ?? '') . ' ' . ($dir->last_name ?? ''));
+                    $photo = $this->resolvePhotoUrl($dir->profile_photo ?? null);
+                    $type  = 'director';
+                } else {
+                    $coord = DB::table('organizer')
+                        ->where('id', $r->reactor_id)
+                        ->first(['first_name', 'last_name', 'profile_photo']);
+                    $name  = $coord
+                        ? trim(($coord->first_name ?? '') . ' ' . ($coord->last_name ?? ''))
+                        : 'Unknown';
+                    $photo = $coord ? $this->resolvePhotoUrl($coord->profile_photo ?? null) : null;
+                    $type  = 'coordinator';
+                }
+            } else {
+                $al    = DB::table('alumni')
+                    ->where('id', $r->reactor_id)
+                    ->first(['first_name', 'last_name', 'profile_photo']);
+                $name  = $al
+                    ? trim(($al->first_name ?? '') . ' ' . ($al->last_name ?? ''))
+                    : 'Unknown';
+                $photo = $al ? $this->resolvePhotoUrl($al->profile_photo ?? null) : null;
+                $type  = 'alumni';
+            }
+
+            $data[] = [
+                'name'     => $name,
+                'photo'    => $photo,
+                'reaction' => $r->reaction,
+                'type'     => $type,
+                'is_me'    => $r->reactor_type === 'organizer' && (int) $r->reactor_id === $this->directorId,
+            ];
+        }
+
+        $this->reactionsPopupData = collect($data)->groupBy('reaction')->toArray();
+    }
+
+    public function closeReactionsPopup(): void
+    {
+        $this->reactionsPopupMsgId = null;
+        $this->reactionsPopupData  = [];
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -522,7 +626,7 @@ new class extends Component {
             DB::table('chat_pins')->insert([
                 'room_id'        => $this->roomId,
                 'message_id'     => $msgId,
-                'pinned_by_type' => 'director',
+                'pinned_by_type' => 'organizer',
                 'pinned_by_id'   => $this->directorId,
                 'created_at'     => now(),
                 'updated_at'     => now(),
@@ -587,14 +691,16 @@ new class extends Component {
             });
         }
 
+        $self = $this;
+
         $this->directors = $dirQuery
             ->orderBy('first_name')
             ->get(['id', 'first_name', 'last_name', 'profile_photo', 'last_seen_at'])
             ->map(fn ($d) => [
                 'id'        => $d->id,
                 'name'      => trim($d->first_name . ' ' . $d->last_name),
-                'photo'     => $d->profile_photo ?? null,
-                'is_me'     => $d->id === $this->directorId,
+                'photo'     => $self->resolvePhotoUrl($d->profile_photo ?? null),
+                'is_me'     => $d->id === $self->directorId,
                 'is_online' => isset($d->last_seen_at)
                                 && Carbon::parse($d->last_seen_at)->gte(now()->subMinutes(5)),
             ])->toArray();
@@ -616,7 +722,7 @@ new class extends Component {
             ->map(fn ($o) => [
                 'id'         => $o->id,
                 'name'       => trim($o->first_name . ' ' . $o->last_name),
-                'photo'      => $o->profile_photo ?? null,
+                'photo'      => $self->resolvePhotoUrl($o->profile_photo ?? null),
                 'department' => $o->department ?? '',
                 'is_online'  => isset($o->last_seen_at)
                                  && Carbon::parse($o->last_seen_at)->gte(now()->subMinutes(5)),
@@ -728,9 +834,9 @@ new class extends Component {
 }; ?>
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     DIRECTOR MESSENGER UI  —  Single global staff channel
+     DIRECTOR MESSENGER UI  —  Internal Staff Chat
      ════════════════════════════════════════════════════════════════════════ --}}
-<div class="flex rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
      style="height: calc(100vh - 90px);"
      wire:poll.8000ms="refreshAll">
 
@@ -738,69 +844,91 @@ new class extends Component {
     <div class="flex flex-1 min-w-0 flex-col">
 
         {{-- ── HEADER ──────────────────────────────────────────────────── --}}
-        <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-purple-900"
+        <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#E8E0F0]"
              style="background:#7a3f91;">
 
             {{-- Room icon --}}
             <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                  style="background:rgba(255,255,255,.18); border:1.5px solid rgba(255,255,255,.28);">
-                <i class="fa-solid fa-shield-halved text-white text-lg"></i>
+                <i class="fa-solid fa-comments text-white text-lg"></i>
             </div>
 
-            {{-- Room info --}}
             <div class="flex-1 min-w-0">
-                <p class="text-white font-black text-base sm:text-lg leading-tight">
-                    Directors &amp; Coordinators
+                <p class="text-white font-semibold text-base sm:text-lg leading-tight tracking-wide">
+                    Internal Staff Chat
                 </p>
-                <div class="flex items-center gap-2 flex-wrap">
+                <div class="flex items-center gap-2 flex-wrap mt-0.5">
                     @if($onlineCount > 0)
                     <div class="flex items-center gap-1">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
-                        <span class="text-white/80 text-xs font-bold">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
+                        <span class="text-white/75 text-xs font-semibold">
                             {{ $onlineCount }}/{{ $totalCount }} online
                         </span>
                     </div>
                     <span class="text-white/30 text-xs">·</span>
                     @endif
-                    <span class="text-white/55 text-xs font-semibold">
-                        <i class="fa-solid fa-lock text-[10px] mr-0.5"></i>Internal Staff Channel
+                    {{-- Directors & Coordinators label --}}
+                    <span class="flex items-center gap-1 text-white/60 text-xs font-semibold">
+                        <i class="fa-solid fa-shield-halved text-[10px]"></i>Directors
+                        <span class="text-white/30">+</span>
+                        <i class="fa-solid fa-users text-[10px]"></i>Coordinators
+                    </span>
+                    <span class="text-white/30 text-xs">·</span>
+                    <span class="text-white/60 text-xs font-semibold">
+                        <i class="fa-solid fa-lock text-[10px] mr-0.5"></i>Internal Only
                     </span>
                 </div>
             </div>
 
-            {{-- My badge (top-right of header) --}}
-            <div class="hidden sm:flex items-center gap-2 mr-2">
+            {{-- My badge (Director) --}}
+            <div class="hidden sm:flex items-center gap-2 mr-1">
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl"
                      style="background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.22);">
-                    <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white flex-shrink-0"
+                    {{-- Director avatar with photo support --}}
+                    <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden"
                          style="background:rgba(255,255,255,.25);">
-                        {{ strtoupper(substr($directorFirstName, 0, 1)) ?: 'D' }}
+                        @if($directorPhoto)
+                            <img src="{{ $directorPhoto }}"
+                                 class="w-full h-full object-cover"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                 alt="{{ $directorFirstName }}">
+                            <span style="display:none"
+                                  class="w-full h-full flex items-center justify-center text-xs font-semibold text-white">
+                                {{ strtoupper(substr($directorFirstName, 0, 1)) ?: 'D' }}
+                            </span>
+                        @else
+                            <span class="w-full h-full flex items-center justify-center text-xs font-semibold text-white">
+                                {{ strtoupper(substr($directorFirstName, 0, 1)) ?: 'D' }}
+                            </span>
+                        @endif
                     </div>
                     <div class="leading-none">
-                        <p class="text-white text-xs font-black truncate max-w-[100px]">{{ $directorFirstName }}</p>
-                        <p class="text-white/50 text-[10px] font-semibold">Director</p>
+                        <p class="text-white text-xs font-semibold truncate max-w-[100px]">{{ $directorFirstName }}</p>
+                        <p class="text-white/50 text-[10px] font-semibold flex items-center gap-1">
+                            <i class="fa-solid fa-shield-halved text-[8px]"></i>Director
+                        </p>
                     </div>
                     <span class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></span>
                 </div>
             </div>
 
             {{-- Action buttons --}}
-            <div class="flex items-center gap-2 flex-shrink-0">
+            <div class="flex items-center gap-1.5 flex-shrink-0">
                 <button wire:click="togglePins"
-                        class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold border transition"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
                         style="{{ $showPins
-                            ? 'background:rgba(255,255,255,.30);color:#fff;border-color:rgba(255,255,255,.40);'
-                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.80);border-color:rgba(255,255,255,.18);' }}">
+                            ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
+                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);' }}">
                     <i class="fa-solid fa-thumbtack text-xs"></i>
-                    <span class="hidden sm:inline">Pins</span>
+                    <span class="hidden sm:inline ml-1">Pins</span>
                 </button>
                 <button wire:click="toggleMembers"
-                        class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold border transition"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
                         style="{{ $showMembers
-                            ? 'background:rgba(255,255,255,.30);color:#fff;border-color:rgba(255,255,255,.40);'
-                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.80);border-color:rgba(255,255,255,.18);' }}">
+                            ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
+                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);' }}">
                     <i class="fa-solid fa-user-group text-xs"></i>
-                    <span class="hidden sm:inline">Members</span>
+                    <span class="hidden sm:inline ml-1">Members</span>
                 </button>
             </div>
         </div>
@@ -813,7 +941,7 @@ new class extends Component {
 
                 {{-- Message list --}}
                 <div id="msg-list"
-                     class="flex-1 overflow-y-auto px-5 py-5 space-y-0.5 bg-gray-50"
+                     class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 bg-[#fafafa]"
                      x-data
                      x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
                      @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })">
@@ -831,29 +959,34 @@ new class extends Component {
 
                         {{-- Date separator --}}
                         @if($dateChanged)
-                        <div class="flex items-center gap-3 my-5">
-                            <div class="flex-1 h-px bg-gray-200"></div>
-                            <span class="text-xs font-bold text-gray-400 tracking-wider uppercase px-2 whitespace-nowrap">
+                        <div class="flex items-center gap-3 my-4">
+                            <div class="flex-1 h-px bg-[#E8E0F0]"></div>
+                            <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">
                                 {{ $msg['date_label'] }}
                             </span>
-                            <div class="flex-1 h-px bg-gray-200"></div>
+                            <div class="flex-1 h-px bg-[#E8E0F0]"></div>
                         </div>
                         @endif
 
                         {{-- Message row --}}
-                        <div class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-1' : 'mt-4' }}"
+                        <div class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}"
                              x-data="{ open: false, confirmUnsend: false }"
                              @click.outside="open = false; confirmUnsend = false">
 
                             {{-- Avatar – others --}}
                             @if(! $msg['is_mine'])
-                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center
-                                        text-xs font-black text-white overflow-hidden mb-1 self-end"
-                                 style="background:#7a3f91;"
+                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden
+                                        flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
+                                 style="{{ $msg['is_director'] ? 'background:#7a3f91;' : 'background:#2563eb;' }}"
                                  title="{{ $msg['sender_name'] }}">
                                 @if($msg['sender_photo'])
-                                    <img src="{{ asset('storage/' . $msg['sender_photo']) }}"
-                                         class="w-full h-full object-cover" alt="">
+                                    <img src="{{ $msg['sender_photo'] }}"
+                                         class="w-full h-full object-cover"
+                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                         alt="{{ $msg['sender_name'] }}">
+                                    <span style="display:none">
+                                        {{ strtoupper(substr($msg['sender_name'], 0, 1)) }}
+                                    </span>
                                 @else
                                     {{ strtoupper(substr($msg['sender_name'], 0, 1)) }}
                                 @endif
@@ -861,18 +994,19 @@ new class extends Component {
                             @endif
 
                             {{-- Bubble wrapper --}}
-                            <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[75%] sm:max-w-[68%]">
+                            <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[70%]">
 
                                 {{-- Sender name --}}
                                 @if(! $msg['is_mine'] && ! $sameGroup)
-                                <p class="text-xs font-bold px-1 mb-1 text-gray-600">
+                                <p class="text-xs font-semibold px-1 mb-0.5
+                                    {{ $msg['is_director'] ? 'text-[#7a3f91]' : 'text-blue-600' }}">
                                     {{ $msg['sender_name'] }}
                                     @if($msg['is_director'])
                                         <span class="ml-1 text-[10px] font-semibold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
                                             <i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director
                                         </span>
                                     @else
-                                        <span class="ml-1 text-[10px] font-semibold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                                        <span class="ml-1 text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                                             Coordinator
                                         </span>
                                     @endif
@@ -881,38 +1015,38 @@ new class extends Component {
 
                                 {{-- Pinned indicator --}}
                                 @if($msg['is_pinned'])
-                                <div class="flex items-center gap-1 text-xs text-amber-600 font-bold mb-0.5 px-1">
-                                    <i class="fa-solid fa-thumbtack text-[10px]"></i> Pinned
+                                <div class="flex items-center gap-1 text-xs text-amber-600 font-semibold mb-0.5 px-1">
+                                    <i class="fa-solid fa-thumbtack text-xs"></i> Pinned
                                 </div>
                                 @endif
 
                                 {{-- Reply quote --}}
                                 @if($msg['reply_to'])
-                                <div class="text-xs rounded-xl px-3 py-2 mb-1.5 max-w-full border-l-[3px] leading-snug
+                                <div class="text-xs rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug
                                     {{ $msg['is_mine']
                                         ? 'bg-purple-200/60 border-white/70 text-purple-900'
-                                        : 'bg-white border-gray-400 text-gray-600' }}">
-                                    <span class="font-bold block truncate">{{ $msg['reply_to']['name'] }}</span>
+                                        : 'bg-white border-[#E8E0F0] text-[#666666]' }}">
+                                    <span class="font-semibold block truncate">{{ $msg['reply_to']['name'] }}</span>
                                     <span class="truncate block">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
                                 </div>
                                 @endif
 
                                 {{-- Edit mode --}}
                                 @if($editingId === $msg['id'])
-                                <div class="flex flex-col gap-2 min-w-[240px]">
+                                <div class="flex flex-col gap-1.5 min-w-[220px]">
                                     <textarea wire:model="editBody"
                                               rows="2"
-                                              class="text-sm rounded-xl border border-purple-400 px-3 py-2 resize-none
-                                                     focus:outline-none focus:ring-2 focus:ring-purple-300 w-full bg-white shadow-sm"
+                                              class="text-sm rounded-lg border border-[#7a3f91] px-3 py-2 resize-none
+                                                     focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/30 w-full bg-white shadow-sm"
                                               wire:keydown.escape="cancelEdit"></textarea>
-                                    <div class="flex gap-2 justify-end">
+                                    <div class="flex gap-1.5 justify-end">
                                         <button wire:click="cancelEdit"
-                                                class="text-sm px-4 py-1.5 rounded-lg border border-gray-300
-                                                       text-gray-600 hover:bg-gray-100 transition font-semibold">
+                                                class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0]
+                                                       text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">
                                             Cancel
                                         </button>
                                         <button wire:click="saveEdit"
-                                                class="text-sm px-4 py-1.5 rounded-lg text-white font-bold
+                                                class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold
                                                        hover:opacity-90 transition"
                                                 style="background:#7a3f91;">
                                             Save
@@ -925,8 +1059,8 @@ new class extends Component {
                                 @php
                                     $safe         = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
                                     $mentionClass = $msg['is_mine']
-                                        ? 'font-bold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
-                                        : 'font-bold text-purple-700 bg-purple-100 px-0.5 rounded';
+                                        ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
+                                        : 'font-semibold text-[#7a3f91] bg-[#f3eef8] px-0.5 rounded';
                                     $formatted    = preg_replace(
                                         '/@(everyone|\w+(?:\s\w+)?)/u',
                                         '<span class="' . $mentionClass . '">@$1</span>',
@@ -934,18 +1068,16 @@ new class extends Component {
                                     );
                                 @endphp
                                 <div @click.stop="open = !open; confirmUnsend = false"
-                                     class="px-4 py-3 rounded-2xl text-sm leading-relaxed break-words
+                                     class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
                                             shadow-sm cursor-pointer select-none transition-opacity active:opacity-80
                                             {{ $msg['is_mine']
                                                 ? 'text-white rounded-br-none'
-                                                : ($msg['is_director']
-                                                    ? 'text-white rounded-bl-none'
-                                                    : 'bg-white border border-gray-200 text-gray-900 rounded-bl-none') }}"
+                                                : 'text-white rounded-bl-none' }}"
                                      style="{{ $msg['is_mine']
                                          ? 'background:#7a3f91;'
                                          : ($msg['is_director']
                                              ? 'background:#9333ea;'
-                                             : '') }}">
+                                             : 'background:#2563eb;') }}">
                                     {!! $formatted !!}
                                     @if($msg['edited'])
                                         <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
@@ -953,115 +1085,199 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- Inline action bar --}}
+                                {{-- ── Inline action bar ──────────────────────────────── --}}
                                 <div x-show="open"
                                      x-transition:enter="transition ease-out duration-150"
                                      x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
                                      x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                                      x-cloak
-                                     class="flex flex-wrap items-center gap-2 mt-2 bg-white border border-gray-200
-                                            rounded-2xl px-3.5 py-2.5 shadow-xl z-10 w-auto">
+                                     class="flex flex-wrap items-center gap-1.5 mt-2 bg-white border border-[#E8E0F0]
+                                            rounded-2xl px-3 py-2 shadow-lg z-10 w-auto">
 
                                     @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎'] as $rk => $re)
                                     <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
                                             @click.stop
-                                            class="text-xl leading-none transition-transform hover:scale-125 active:scale-110
+                                            class="text-[1.3rem] leading-none transition-transform hover:scale-125 active:scale-110
                                                    {{ $msg['my_reaction'] === $rk ? 'opacity-100 scale-110' : 'opacity-50 hover:opacity-100' }}"
                                             title="{{ ucfirst($rk) }}">{{ $re }}</button>
                                     @endforeach
 
-                                    <span class="w-px h-5 bg-gray-200 block"></span>
+                                    <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                     <button wire:click="setReply({{ $msg['id'] }})"
                                             @click.stop="open = false"
-                                            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-gray-500
-                                                   hover:text-purple-700 hover:bg-purple-50 transition text-xs font-semibold">
-                                        <i class="fa-solid fa-reply"></i>
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
+                                                   hover:text-[#7a3f91] hover:bg-[#f3eef8] transition text-xs font-semibold">
+                                        <i class="fa-solid fa-reply text-xs"></i>
                                         <span class="hidden sm:inline">Reply</span>
                                     </button>
 
                                     <button wire:click="togglePin({{ $msg['id'] }})"
                                             @click.stop
-                                            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition text-xs font-semibold
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
                                                    {{ $msg['is_pinned']
-                                                        ? 'text-amber-500 bg-amber-50 hover:bg-amber-100'
-                                                        : 'text-gray-500 hover:text-amber-500 hover:bg-amber-50' }}">
-                                        <i class="fa-solid fa-thumbtack"></i>
+                                                        ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                                                        : 'text-[#666666] hover:text-amber-600 hover:bg-amber-50' }}">
+                                        <i class="fa-solid fa-thumbtack text-xs"></i>
                                         <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
                                     </button>
 
+                                    {{-- View Reactions button --}}
+                                    @if(! empty($msg['reactions']))
+                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})"
+                                            @click.stop
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
+                                                   {{ $reactionsPopupMsgId === $msg['id']
+                                                        ? 'text-[#7a3f91] bg-[#f3eef8]'
+                                                        : 'text-[#666666] hover:text-[#7a3f91] hover:bg-[#f3eef8]' }}">
+                                        <i class="fa-solid fa-face-smile text-xs"></i>
+                                        <span class="hidden sm:inline">Reactions</span>
+                                    </button>
+                                    @endif
+
                                     @if($msg['is_mine'])
-                                    <span class="w-px h-5 bg-gray-200 block"></span>
+                                    <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                     <button wire:click="startEdit({{ $msg['id'] }})"
                                             @click.stop="open = false"
-                                            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-gray-500
-                                                   hover:text-purple-600 hover:bg-purple-50 transition text-xs font-semibold">
-                                        <i class="fa-solid fa-pen"></i>
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
+                                                   hover:text-blue-600 hover:bg-blue-50 transition text-xs font-semibold">
+                                        <i class="fa-solid fa-pen text-xs"></i>
                                         <span class="hidden sm:inline">Edit</span>
                                     </button>
 
                                     <div x-show="!confirmUnsend">
                                         <button @click.stop="confirmUnsend = true"
-                                                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-gray-500
-                                                       hover:text-red-500 hover:bg-red-50 transition text-xs font-semibold">
-                                            <i class="fa-solid fa-trash-can"></i>
+                                                class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
+                                                       hover:text-red-600 hover:bg-red-50 transition text-xs font-semibold">
+                                            <i class="fa-solid fa-trash-can text-xs"></i>
                                             <span class="hidden sm:inline">Unsend</span>
                                         </button>
                                     </div>
-                                    <div x-show="confirmUnsend" class="flex items-center gap-1.5">
-                                        <span class="text-xs text-red-600 font-bold">Delete?</span>
+                                    <div x-show="confirmUnsend" class="flex items-center gap-1">
+                                        <span class="text-xs text-red-600 font-semibold">Delete?</span>
                                         <button wire:click="unsend({{ $msg['id'] }})"
                                                 @click.stop
-                                                class="text-xs px-2.5 py-1.5 rounded-lg bg-red-500 text-white font-bold hover:bg-red-600 transition">
+                                                class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">
                                             Yes
                                         </button>
                                         <button @click.stop="confirmUnsend = false"
-                                                class="text-xs px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 transition">
+                                                class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#666666] font-semibold hover:bg-[#E8E0F0] transition">
                                             No
                                         </button>
                                     </div>
                                     @endif
                                 </div>
 
+                                {{-- ── View Reactions Popup ────────────────────────────── --}}
+                                @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
+                                <div class="mt-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-xl z-20 w-64 overflow-hidden"
+                                     @click.stop>
+
+                                    <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#fafafa]">
+                                        <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
+                                            <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
+                                        </p>
+                                        <button wire:click="closeReactionsPopup"
+                                                class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999]
+                                                       hover:text-[#333333] hover:bg-[#f5f5f5] transition">
+                                            <i class="fa-solid fa-xmark text-xs"></i>
+                                        </button>
+                                    </div>
+
+                                    <div class="max-h-52 overflow-y-auto">
+                                        @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
+                                        @foreach($reactionsPopupData as $rKey => $rGroup)
+                                        <div class="px-3.5 py-2 border-b border-[#E8E0F0] last:border-0">
+                                            <div class="flex items-center gap-1.5 mb-1.5">
+                                                <span class="text-base">{{ $emojiMap[$rKey] ?? '👍' }}</span>
+                                                <span class="text-xs font-semibold text-[#666666]">
+                                                    {{ count($rGroup) }} {{ count($rGroup) === 1 ? 'person' : 'people' }}
+                                                </span>
+                                            </div>
+                                            @foreach($rGroup as $reactor)
+                                            <div class="flex items-center gap-2 py-1">
+                                                <div class="w-6 h-6 rounded-full flex-shrink-0 overflow-hidden
+                                                            flex items-center justify-center text-xs font-semibold text-white"
+                                                     style="{{ $reactor['type'] === 'director' ? 'background:#7a3f91;' : ($reactor['type'] === 'coordinator' ? 'background:#2563eb;' : 'background:#9333ea;') }}">
+                                                    @if($reactor['photo'] ?? null)
+                                                        <img src="{{ $reactor['photo'] }}"
+                                                             class="w-full h-full object-cover"
+                                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                                             alt="">
+                                                        <span style="display:none">{{ strtoupper(substr($reactor['name'], 0, 1)) }}</span>
+                                                    @else
+                                                        {{ strtoupper(substr($reactor['name'], 0, 1)) }}
+                                                    @endif
+                                                </div>
+                                                <div class="flex-1 min-w-0">
+                                                    <p class="text-xs font-semibold text-[#333333] truncate">
+                                                        {{ $reactor['name'] }}
+                                                        @if($reactor['is_me'])
+                                                            <span class="text-[#7a3f91] font-semibold">(You)</span>
+                                                        @endif
+                                                    </p>
+                                                    <p class="text-[10px] font-medium
+                                                        {{ $reactor['type'] === 'director' ? 'text-purple-600' : ($reactor['type'] === 'coordinator' ? 'text-blue-600' : 'text-[#999999]') }}">
+                                                        {{ ucfirst($reactor['type']) }}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            @endforeach
+                                        </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                                @endif
+
                                 {{-- Reaction pills --}}
                                 @if(! empty($msg['reactions']))
-                                <div class="flex gap-1 mt-1.5 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
+                                <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk => $cnt)
                                     @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍' }; @endphp
                                     <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
-                                            class="inline-flex items-center gap-1 text-sm px-2 py-0.5 rounded-full border transition-all
+                                            class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all
                                                    {{ $msg['my_reaction'] === $rk
-                                                        ? 'bg-purple-100 border-purple-300 text-purple-800 font-bold'
-                                                        : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200' }}">
-                                        {{ $emoji }}<span class="font-semibold">{{ $cnt }}</span>
+                                                        ? 'bg-[#f3eef8] border-[#d9c9e8] text-[#7a3f91] font-semibold'
+                                                        : 'bg-white border-[#E8E0F0] text-[#666666] hover:border-[#d9c9e8]' }}">
+                                        {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
                                     </button>
                                     @endforeach
                                 </div>
                                 @endif
 
                                 {{-- Timestamp --}}
-                                <p class="text-xs text-gray-400 mt-1 px-1">{{ $msg['time'] }}</p>
+                                <p class="text-xs text-[#999999] mt-0.5 px-1">{{ $msg['time'] }}</p>
                             </div>
 
                             {{-- Avatar – mine (director) --}}
                             @if($msg['is_mine'])
-                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center
-                                        text-xs font-black text-white overflow-hidden mb-1 self-end"
+                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden
+                                        flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
                                  style="background:#7a3f91;">
-                                {{ strtoupper(substr($directorFirstName, 0, 1)) ?: '?' }}
+                                @if($directorPhoto)
+                                    <img src="{{ $directorPhoto }}"
+                                         class="w-full h-full object-cover"
+                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                         alt="">
+                                    <span style="display:none">
+                                        {{ strtoupper(substr($directorFirstName, 0, 1)) ?: '?' }}
+                                    </span>
+                                @else
+                                    {{ strtoupper(substr($directorFirstName, 0, 1)) ?: '?' }}
+                                @endif
                             </div>
                             @endif
                         </div>
 
                     @empty
-                        <div class="flex flex-col items-center justify-center h-full py-24 text-gray-400 select-none">
-                            <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5"
+                        <div class="flex flex-col items-center justify-center h-full py-20 text-[#999999] select-none">
+                            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
                                  style="background:#f3eef8;">
-                                <i class="fa-solid fa-shield-halved text-4xl" style="color:#7a3f91;"></i>
+                                <i class="fa-solid fa-comments text-4xl" style="color:#7a3f91;"></i>
                             </div>
-                            <p class="text-lg font-bold text-gray-500">No messages yet</p>
-                            <p class="text-sm text-gray-400 mt-1">Start the internal staff conversation! 👋</p>
+                            <p class="text-base font-semibold text-[#666666]">No messages yet</p>
+                            <p class="text-sm text-[#999999] mt-1">Start the internal staff conversation! 👋</p>
                         </div>
                     @endforelse
                 </div>
@@ -1069,21 +1285,21 @@ new class extends Component {
                 {{-- Typing indicator --}}
                 <div wire:poll.3000ms="refreshTyping" class="flex-shrink-0">
                     @if(! empty($typingUsers))
-                    <div class="flex items-center gap-2.5 px-5 py-2.5 bg-gray-50 border-t border-gray-100">
+                    <div class="flex items-center gap-2.5 px-4 py-2 bg-[#fafafa] border-t border-[#E8E0F0]">
                         <div class="flex items-end gap-0.5 h-4">
-                            <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce"
+                            <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce"
                                   style="animation-delay:0ms; animation-duration:900ms;"></span>
-                            <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce"
+                            <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce"
                                   style="animation-delay:180ms; animation-duration:900ms;"></span>
-                            <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce"
+                            <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce"
                                   style="animation-delay:360ms; animation-duration:900ms;"></span>
                         </div>
-                        <p class="text-xs text-gray-500 font-medium">
+                        <p class="text-xs text-[#666666] font-medium">
                             @php
                                 $visible = array_slice($typingUsers, 0, 3);
                                 $extra   = count($typingUsers) - count($visible);
                             @endphp
-                            <span class="font-bold text-purple-700">
+                            <span class="font-semibold text-[#7a3f91]">
                                 {{ implode(', ', $visible) }}{{ $extra > 0 ? " +{$extra}" : '' }}
                             </span>
                             {{ count($typingUsers) === 1 ? 'is' : 'are' }} typing…
@@ -1094,31 +1310,33 @@ new class extends Component {
 
                 {{-- Reply preview bar --}}
                 @if($replyTo)
-                <div class="flex items-center gap-3 px-5 py-3 border-t border-purple-200 bg-purple-50 flex-shrink-0">
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0">
                     <div class="w-1 h-10 rounded-full flex-shrink-0" style="background:#7a3f91;"></div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-bold text-purple-700 truncate">Replying to {{ $replyTo['name'] }}</p>
-                        <p class="text-xs text-gray-600 truncate">{{ Str::limit($replyTo['body'], 90) }}</p>
+                        <p class="text-xs font-semibold text-[#7a3f91] truncate uppercase tracking-widest">
+                            Replying to {{ $replyTo['name'] }}
+                        </p>
+                        <p class="text-xs text-[#666666] truncate">{{ Str::limit($replyTo['body'], 90) }}</p>
                     </div>
                     <button wire:click="clearReply"
-                            class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400
-                                   hover:text-red-500 hover:bg-red-50 transition flex-shrink-0">
+                            class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999]
+                                   hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
                 @endif
 
                 {{-- Input area --}}
-                <div class="px-5 py-4 border-t border-gray-200 bg-white flex-shrink-0" x-data>
+                <div class="px-4 py-3 border-t border-[#E8E0F0] bg-white flex-shrink-0" x-data>
 
                     {{-- @mention dropdown --}}
                     @if($showMentions && ! empty($mentionSuggestions))
-                    <div class="mb-3 bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden">
+                    <div class="mb-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-md overflow-hidden">
                         @foreach($mentionSuggestions as $sug)
                         <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
-                                class="flex items-center gap-3 w-full px-4 py-3 hover:bg-purple-50 transition-colors text-left">
-                            <div class="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-black text-white"
-                                 style="background:#7a3f91;">
+                                class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f3eef8] transition-colors text-left">
+                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white"
+                                 style="background:{{ $sug['type'] === 'coordinator' ? '#2563eb' : '#7a3f91' }};">
                                 @if($sug['name'] === 'everyone')
                                     <i class="fa-solid fa-users text-xs"></i>
                                 @else
@@ -1126,15 +1344,15 @@ new class extends Component {
                                 @endif
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-sm font-bold text-gray-900 truncate">&#64;{{ $sug['name'] }}</p>
+                                <p class="text-sm font-semibold text-[#333333] truncate">&#64;{{ $sug['name'] }}</p>
                                 @if($sug['name'] === 'everyone')
-                                    <p class="text-xs text-purple-600 font-semibold">Notify all staff</p>
+                                    <p class="text-xs text-[#7a3f91] font-medium">Notify all staff</p>
                                 @elseif($sug['type'] === 'director')
-                                    <p class="text-xs text-purple-700 font-semibold">
+                                    <p class="text-xs text-purple-600 font-medium">
                                         <i class="fa-solid fa-shield-halved text-[10px] mr-0.5"></i>Director
                                     </p>
                                 @elseif($sug['type'] === 'coordinator')
-                                    <p class="text-xs text-purple-600 font-semibold">Alumni Coordinator</p>
+                                    <p class="text-xs text-blue-600 font-medium">Alumni Coordinator</p>
                                 @endif
                             </div>
                         </button>
@@ -1142,68 +1360,69 @@ new class extends Component {
                     </div>
                     @endif
 
-                    <div class="flex items-end gap-3">
+                    <div class="flex items-end gap-2">
                         <div class="flex-1 relative">
                             <textarea
                                 id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
-                                placeholder="Message Directors &amp; Coordinators… (@ to mention)"
+                                placeholder="Message Internal Staff Chat… (@ to mention)"
                                 rows="1"
                                 @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); $wire.sendMessage(); }"
                                 @focus-input.window="$el.focus()"
                                 x-init="
                                     $el.addEventListener('input', function () {
                                         this.style.height = 'auto';
-                                        this.style.height = Math.min(this.scrollHeight, 130) + 'px';
+                                        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
                                     });
                                 "
-                                class="w-full resize-none rounded-2xl border border-gray-300 bg-gray-50
-                                       px-4 py-3 text-sm leading-relaxed
-                                       focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100
-                                       transition"
-                                style="max-height:130px; overflow-y:auto;"></textarea>
+                                class="w-full resize-none rounded-lg border border-[#E8E0F0] bg-[#fafafa]
+                                       px-4 py-2.5 text-sm leading-relaxed text-[#333333]
+                                       focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/20
+                                       transition placeholder-[#999999]"
+                                style="max-height:120px; overflow-y:auto;"></textarea>
                         </div>
                         <button wire:click="sendMessage"
-                                class="w-11 h-11 rounded-full flex items-center justify-center text-white flex-shrink-0
+                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
                                        transition hover:opacity-90 active:scale-95 shadow-sm"
                                 style="background:#7a3f91;">
                             <i class="fa-solid fa-paper-plane text-base"></i>
                         </button>
                     </div>
 
-                    <p class="text-xs text-gray-400 text-center mt-2">
-                        <kbd class="bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
-                        <kbd class="bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
-                        <kbd class="bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 text-xs">@</kbd> mention &nbsp;·&nbsp;
-                        <span class="text-gray-300">tap message for actions</span>
+                    <p class="text-xs text-[#999999] text-center mt-1.5">
+                        <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
+                        <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
+                        <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">@</kbd> mention &nbsp;·&nbsp;
+                        <span class="text-[#E8E0F0]">tap message for actions</span>
                     </p>
                 </div>
             </div>
 
             {{-- ── SIDE PANEL ───────────────────────────────────────────── --}}
             @if($showMembers || $showPins)
-            <div class="w-72 border-l border-gray-200 flex flex-col flex-shrink-0 bg-white">
+            <div class="w-72 border-l border-[#E8E0F0] flex flex-col flex-shrink-0 bg-white">
 
-                <div class="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-200 flex-shrink-0 bg-gray-50">
+                <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#E8E0F0] flex-shrink-0"
+                     style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
                     @if($showPins)
-                        <i class="fa-solid fa-thumbtack text-amber-500 text-base"></i>
-                        <p class="text-sm font-black text-gray-800 flex-1">Pinned Messages</p>
+                        <i class="fa-solid fa-thumbtack text-amber-600"></i>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Pinned Messages</p>
                     @else
-                        <i class="fa-solid fa-user-group text-purple-700 text-base"></i>
-                        <p class="text-sm font-black text-gray-800 flex-1">
+                        <i class="fa-solid fa-user-group text-[#7a3f91]"></i>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">
                             Staff Members
-                            <span class="text-xs font-semibold text-gray-400 ml-1">
+                            <span class="text-xs font-semibold text-[#999999] ml-1">
                                 ({{ count($directors) + count($coordinators) }})
                             </span>
                             @if($onlineCount > 0)
-                            <span class="ml-1 text-xs font-bold text-emerald-600">· {{ $onlineCount }} online</span>
+                            <span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>
                             @endif
                         </p>
                     @endif
                     <button wire:click="{{ $showPins ? 'togglePins' : 'toggleMembers' }}"
-                            class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400
-                                   hover:text-gray-600 hover:bg-gray-200 transition">
+                            class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999]
+                                   hover:text-[#333333] hover:bg-[#f5f5f5] transition">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
@@ -1212,79 +1431,91 @@ new class extends Component {
 
                     @if($showMembers)
 
-                        {{-- Member search --}}
-                        <div class="px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
-                            <div class="relative">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2
-                                          text-gray-400 text-xs pointer-events-none"></i>
-                                <input wire:model.live.debounce.300ms="memberSearch"
-                                       type="text"
-                                       placeholder="Search staff…"
-                                       class="w-full pl-8 pr-3 py-2.5 text-sm rounded-xl border border-gray-200
-                                              bg-gray-50 focus:outline-none focus:border-purple-400
-                                              focus:ring-1 focus:ring-purple-100 transition"/>
-                            </div>
-                        </div>
-
-                        <div class="flex-1 overflow-y-auto px-3 pb-3 pt-3 space-y-1">
-
-                            {{-- Directors section --}}
-                            @if(! empty($directors))
-                            <p class="text-xs font-black uppercase tracking-widest px-1 pb-1.5 text-purple-700">
-                                <i class="fa-solid fa-shield-halved text-[10px] mr-1"></i>
-                                Directors — {{ count($directors) }}
+                        {{-- ── Directors section ────────────────────────────── --}}
+                        @if(! empty($directors))
+                        <div class="px-3 pt-3 pb-1 flex-shrink-0">
+                            <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest mb-2 px-1">
+                                <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Director{{ count($directors) > 1 ? 's' : '' }} — {{ count($directors) }}
                             </p>
-
                             @foreach($directors as $dir)
-                            <div class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 mb-1 border transition-all
-                                        {{ $dir['is_me']
-                                            ? 'border-purple-200'
-                                            : 'border-transparent hover:border-purple-100 hover:bg-purple-50/50' }}"
-                                 style="{{ $dir['is_me'] ? 'background:#f3eef8;' : '' }}">
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1
+                                        {{ $dir['is_me'] ? 'bg-[#f3eef8] border border-[#d9c9e8]' : 'border border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]' }}
+                                        transition-all">
                                 <div class="relative flex-shrink-0">
-                                    <div class="w-9 h-9 rounded-full flex items-center justify-center
-                                                text-sm font-black text-white overflow-hidden"
+                                    {{-- Director avatar with real photo --}}
+                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
+                                                text-xs font-semibold text-white"
                                          style="background:#7a3f91;">
                                         @if($dir['photo'])
-                                            <img src="{{ asset('storage/' . $dir['photo']) }}"
-                                                 class="w-full h-full object-cover" alt="">
+                                            <img src="{{ $dir['photo'] }}"
+                                                 class="w-full h-full object-cover"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                                 alt="{{ $dir['name'] }}">
+                                            <span style="display:none">{{ strtoupper(substr($dir['name'], 0, 1)) }}</span>
                                         @else
                                             {{ strtoupper(substr($dir['name'], 0, 1)) }}
                                         @endif
                                     </div>
-                                    {{-- Online dot --}}
+                                    {{-- Online / offline dot --}}
                                     @if($dir['is_online'] || $dir['is_me'])
-                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full
-                                                 bg-emerald-400 border-2 border-white"></span>
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                                     @else
-                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full
-                                                 bg-gray-300 border-2 border-white"></span>
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-gray-400 border-2 border-white"></span>
                                     @endif
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-bold text-gray-900 truncate">
+                                    <p class="text-xs font-semibold text-[#333333] truncate">
                                         {{ $dir['name'] }}
                                         @if($dir['is_me'])
-                                            <span class="text-xs text-purple-500 font-semibold">(You)</span>
+                                            <span class="text-xs text-[#7a3f91] font-semibold">(You)</span>
                                         @endif
                                     </p>
-                                    <p class="text-xs font-semibold {{ ($dir['is_online'] || $dir['is_me']) ? 'text-emerald-600' : 'text-gray-400' }}">
-                                        {{ ($dir['is_online'] || $dir['is_me']) ? '🟢 Online' : '⚫ Offline' }}
+                                    <p class="text-xs font-medium flex items-center gap-1
+                                              {{ ($dir['is_online'] || $dir['is_me']) ? 'text-emerald-600' : 'text-[#999999]' }}">
+                                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
+                                                     {{ ($dir['is_online'] || $dir['is_me']) ? 'bg-emerald-400' : 'bg-gray-400' }}"></span>
+                                        {{ ($dir['is_online'] || $dir['is_me']) ? 'Online' : 'Offline' }}
                                     </p>
                                 </div>
                             </div>
                             @endforeach
-                            @endif
+                        </div>
+                        @endif
 
-                            {{-- Coordinators section --}}
-                            @if(! empty($coordinators))
-                            <div class="pt-3 pb-1.5 px-1">
-                                <p class="text-xs font-black uppercase tracking-widest text-purple-600">
-                                    <i class="fa-solid fa-users text-[10px] mr-1"></i>
-                                    Coordinators — {{ count($coordinators) }}
+                        {{-- ── Coordinators header ──────────────────────────── --}}
+                        <div class="px-3 pt-2 pb-1 flex-shrink-0 border-t border-[#E8E0F0] mt-1">
+                            <div class="flex items-center justify-between mb-2 px-1">
+                                <p class="text-xs font-semibold text-blue-600 uppercase tracking-widest">
+                                    <i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($coordinators) }}
                                 </p>
+                                @php
+                                    $onlineCoordCount = collect($coordinators)->where('is_online', true)->count();
+                                @endphp
+                                @if($onlineCoordCount > 0)
+                                <span class="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                    {{ $onlineCoordCount }} online
+                                </span>
+                                @endif
                             </div>
+                        </div>
 
+                        {{-- Member search --}}
+                        <div class="px-3 pb-2.5 flex-shrink-0">
+                            <div class="relative">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2
+                                          text-[#999999] text-xs pointer-events-none"></i>
+                                <input wire:model.live.debounce.300ms="memberSearch"
+                                       type="text"
+                                       placeholder="Search staff…"
+                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#E8E0F0]
+                                              bg-[#fafafa] focus:outline-none focus:border-[#7a3f91]
+                                              focus:ring-1 focus:ring-[#7a3f91]/20 transition placeholder-[#999999]"/>
+                            </div>
+                        </div>
+
+                        {{-- Coordinator list --}}
+                        <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
                             @php
                                 $onlineCoords  = collect($coordinators)->where('is_online', true)->values();
                                 $offlineCoords = collect($coordinators)->where('is_online', false)->values();
@@ -1292,118 +1523,132 @@ new class extends Component {
 
                             {{-- Online coordinators --}}
                             @if(count($onlineCoords) > 0)
-                            <p class="text-xs font-black text-emerald-600 uppercase tracking-widest px-1 pb-1">
-                                <i class="fa-solid fa-circle text-[9px] mr-1"></i>Online — {{ count($onlineCoords) }}
+                            <p class="text-xs font-semibold text-emerald-600 uppercase tracking-widest px-1 pb-1 pt-0.5">
+                                <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 align-middle"></span>Online — {{ count($onlineCoords) }}
                             </p>
                             @foreach($onlineCoords as $coord)
-                            <div class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 border border-gray-100
-                                        hover:border-purple-200 hover:bg-purple-50/50 transition-all">
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
+                                        hover:border-[#d9c9e8] hover:bg-[#f3eef8] transition-all">
                                 <div class="relative flex-shrink-0">
-                                    <div class="w-9 h-9 rounded-full flex items-center justify-center
-                                                text-sm font-black text-white overflow-hidden"
-                                         style="background:#9333ea;">
+                                    {{-- Coordinator avatar with real photo --}}
+                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
+                                                text-xs font-semibold text-white"
+                                         style="background:#2563eb;">
                                         @if($coord['photo'])
-                                            <img src="{{ asset('storage/' . $coord['photo']) }}"
-                                                 class="w-full h-full object-cover" alt="">
+                                            <img src="{{ $coord['photo'] }}"
+                                                 class="w-full h-full object-cover"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                                 alt="{{ $coord['name'] }}">
+                                            <span style="display:none">{{ strtoupper(substr($coord['name'], 0, 1)) }}</span>
                                         @else
                                             {{ strtoupper(substr($coord['name'], 0, 1)) }}
                                         @endif
                                     </div>
-                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full
-                                                 bg-emerald-400 border-2 border-white"></span>
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-bold text-gray-900 truncate">{{ $coord['name'] }}</p>
-                                    @if($coord['department'])
-                                    <p class="text-xs text-purple-600 font-semibold truncate">{{ $coord['department'] }}</p>
-                                    @else
-                                    <p class="text-xs text-emerald-600 font-semibold">🟢 Online</p>
-                                    @endif
+                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}</p>
+                                    <div class="flex items-center gap-1.5 mt-0.5">
+                                        <span class="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>
+                                            Online
+                                        </span>
+                                        @if($coord['department'])
+                                        <span class="text-[#999999] text-xs">·</span>
+                                        <span class="text-xs text-blue-600 font-medium truncate">{{ $coord['department'] }}</span>
+                                        @endif
+                                    </div>
                                 </div>
                             </div>
                             @endforeach
                             @endif
 
-                            {{-- Offline label --}}
-                            @if(count($offlineCoords) > 0 && count($onlineCoords) > 0 && $memberSearch === '')
-                            <div class="pt-2 pb-1 px-1">
-                                <p class="text-xs font-black text-gray-400 uppercase tracking-widest">
-                                    <i class="fa-solid fa-circle text-[9px] mr-1 opacity-40"></i>Offline — {{ count($offlineCoords) }}
+                            {{-- Offline coordinators --}}
+                            @if(count($offlineCoords) > 0)
+                            <div class="pt-{{ count($onlineCoords) > 0 ? '2' : '0.5' }} pb-1 px-1">
+                                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">
+                                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-gray-400 mr-1 align-middle opacity-70"></span>
+                                    Offline — {{ count($offlineCoords) }}
                                 </p>
                             </div>
-                            @endif
-
-                            {{-- Offline coordinators --}}
                             @foreach($offlineCoords as $coord)
-                            <div class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 border border-gray-100
-                                        hover:border-gray-200 hover:bg-gray-50 transition-all opacity-70">
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
+                                        hover:bg-[#fafafa] transition-all opacity-70">
                                 <div class="relative flex-shrink-0">
-                                    <div class="w-9 h-9 rounded-full flex items-center justify-center
-                                                text-sm font-black text-white overflow-hidden"
+                                    {{-- Coordinator avatar with real photo --}}
+                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
+                                                text-xs font-semibold text-white"
                                          style="background:#c4a8d4;">
                                         @if($coord['photo'])
-                                            <img src="{{ asset('storage/' . $coord['photo']) }}"
-                                                 class="w-full h-full object-cover" alt="">
+                                            <img src="{{ $coord['photo'] }}"
+                                                 class="w-full h-full object-cover"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                                 alt="{{ $coord['name'] }}">
+                                            <span style="display:none">{{ strtoupper(substr($coord['name'], 0, 1)) }}</span>
                                         @else
                                             {{ strtoupper(substr($coord['name'], 0, 1)) }}
                                         @endif
                                     </div>
-                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full
-                                                 bg-gray-300 border-2 border-white"></span>
+                                    {{-- Gray dot = offline --}}
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-gray-400 border-2 border-white"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-bold text-gray-700 truncate">{{ $coord['name'] }}</p>
-                                    @if($coord['department'])
-                                    <p class="text-xs text-gray-400 font-semibold truncate">{{ $coord['department'] }}</p>
-                                    @else
-                                    <p class="text-xs text-gray-400 font-semibold">⚫ Offline</p>
-                                    @endif
+                                    <p class="text-xs font-semibold text-[#666666] truncate">{{ $coord['name'] }}</p>
+                                    <div class="flex items-center gap-1.5 mt-0.5">
+                                        <span class="text-xs text-[#999999] font-medium flex items-center gap-1">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block flex-shrink-0"></span>
+                                            Offline
+                                        </span>
+                                        @if($coord['department'])
+                                        <span class="text-[#E8E0F0] text-xs">·</span>
+                                        <span class="text-xs text-[#999999] font-medium truncate">{{ $coord['department'] }}</span>
+                                        @endif
+                                    </div>
                                 </div>
                             </div>
                             @endforeach
                             @endif
 
                             @if(empty($directors) && empty($coordinators))
-                            <div class="flex flex-col items-center justify-center py-10 text-gray-400">
-                                <i class="fa-solid fa-user-slash text-3xl text-gray-200 mb-3"></i>
+                            <div class="flex flex-col items-center justify-center py-10 text-[#999999]">
+                                <i class="fa-solid fa-user-slash text-3xl text-[#E8E0F0] mb-3"></i>
                                 <p class="text-sm font-semibold">No results</p>
                                 <p class="text-xs mt-1">Try a different name</p>
                             </div>
                             @endif
-
                         </div>
 
                     @elseif($showPins)
-                    <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
+                    <div class="flex-1 overflow-y-auto p-3 space-y-2">
                         @forelse($pinnedMessages as $pin)
-                        <div class="rounded-xl border border-amber-200 bg-amber-50/50 p-3.5">
-                            <div class="flex items-start justify-between gap-2 mb-2">
+                        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div class="flex items-start justify-between gap-2 mb-1.5">
                                 <div class="flex items-center gap-1.5 min-w-0">
-                                    <i class="fa-solid fa-thumbtack text-amber-500 text-xs flex-shrink-0"></i>
-                                    <p class="text-sm font-bold text-amber-700 truncate">{{ $pin['from'] }}</p>
+                                    <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
+                                    <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
                                     @if(isset($pin['sender_type']))
-                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0
+                                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0
                                         {{ $pin['sender_type'] === 'director'
                                             ? 'bg-purple-100 text-purple-700'
-                                            : 'bg-gray-100 text-gray-600' }}">
+                                            : 'bg-blue-100 text-blue-700' }}">
                                         {{ $pin['sender_type'] === 'director' ? 'Director' : 'Coordinator' }}
                                     </span>
                                     @endif
                                 </div>
                                 <button wire:click="togglePin({{ $pin['id'] }})"
-                                        class="w-6 h-6 flex items-center justify-center rounded-full text-gray-400
-                                               hover:text-red-500 hover:bg-red-50 transition flex-shrink-0">
+                                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999]
+                                               hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
                                     <i class="fa-solid fa-xmark text-xs"></i>
                                 </button>
                             </div>
-                            <p class="text-sm text-gray-800 leading-snug break-words">
+                            <p class="text-sm text-[#333333] leading-snug break-words">
                                 {{ Str::limit($pin['body'], 140) }}
                             </p>
-                            <p class="text-xs text-gray-400 mt-2">{{ $pin['pinned_at'] }}</p>
+                            <p class="text-xs text-[#999999] mt-1.5">{{ $pin['pinned_at'] }}</p>
                         </div>
                         @empty
-                        <div class="flex flex-col items-center justify-center py-14 text-gray-400">
-                            <i class="fa-solid fa-thumbtack text-4xl text-gray-200 mb-3"></i>
+                        <div class="flex flex-col items-center justify-center py-14 text-[#999999]">
+                            <i class="fa-solid fa-thumbtack text-4xl text-[#E8E0F0] mb-3"></i>
                             <p class="text-sm font-semibold">No pinned messages</p>
                             <p class="text-xs mt-1 text-center">Tap a message then 📌 to pin it.</p>
                         </div>
@@ -1419,17 +1664,17 @@ new class extends Component {
     </div>
 
     {{-- ══════════════════════════════════════════════════════════════════
-         FALLBACK — room not found (shouldn't happen normally)
+         FALLBACK — room not found
          ══════════════════════════════════════════════════════════════════ --}}
     @else
-    <div class="flex flex-1 items-center justify-center bg-gray-50">
+    <div class="flex flex-1 items-center justify-center bg-[#fafafa]">
         <div class="flex flex-col items-center text-center px-8">
-            <div class="w-24 h-24 rounded-2xl flex items-center justify-center mb-6"
+            <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5"
                  style="background:#f3eef8;">
-                <i class="fa-solid fa-shield-halved text-5xl" style="color:#7a3f91;"></i>
+                <i class="fa-solid fa-comments text-5xl" style="color:#7a3f91;"></i>
             </div>
-            <p class="text-xl font-black text-gray-700">Setting up the channel…</p>
-            <p class="text-sm text-gray-400 mt-2 max-w-xs leading-relaxed">
+            <p class="text-lg font-semibold text-[#333333]">Setting up the channel…</p>
+            <p class="text-sm text-[#999999] mt-2 max-w-xs leading-relaxed">
                 The staff channel is being initialized. Please refresh the page.
             </p>
         </div>

@@ -65,6 +65,7 @@ new class extends Component {
             ->select([
                 'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
                 'student_id', 'course_code', 'course_name', 'batch', 'year_level',
+                'email',    
                 'gender', 'date_of_birth',
                 'father_last_name', 'father_given_name', 'father_middle_name',
                 'mother_last_name',  'mother_given_name',  'mother_middle_name',
@@ -89,7 +90,7 @@ new class extends Component {
         $this->course_name        = $alumni->course_name    ?? '';
         $this->batch              = (string)($alumni->batch ?? '');
         $this->year_level         = $alumni->year_level     ?? '';
-        $this->email              = $user->email            ?? '';
+        $this->email              = $alumni->email          ?? '';
 
         $this->gender        = $alumni->gender ?? '';
         $this->date_of_birth = $alumni->date_of_birth

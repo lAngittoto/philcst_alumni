@@ -196,6 +196,7 @@ new class extends Component {
                 $latestTs   = Carbon::parse($latest->created_at);
                 $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
 
+                // FIX: DB stores 'alumni' or 'organizer' — never 'coordinator'
                 if ($latest->sender_type === 'alumni') {
                     $a            = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
                     $latestSender = $a ?? 'Alumni';
@@ -342,6 +343,8 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Typing indicator
+    // chat_typing.sender_type is a plain string column (no ENUM),
+    // so 'coordinator' is fine here — no change needed.
     // ─────────────────────────────────────────────────────────────────────
     public function pingTyping(): void
     {
@@ -409,7 +412,8 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Messages – Load  ← FIXED: int-cast keyBy so lookups never return null
+    // Messages – Load
+    // FIX: sender_type ENUM is 'organizer', not 'coordinator'
     // ─────────────────────────────────────────────────────────────────────
     public function loadMessages(): void
     {
@@ -426,9 +430,8 @@ new class extends Component {
             ->toArray();
 
         $aIds = collect($rows)->where('sender_type', 'alumni')->pluck('sender_id')->unique();
-        $oIds = collect($rows)->where('sender_type', 'coordinator')->pluck('sender_id')->unique();
+        $oIds = collect($rows)->where('sender_type', 'organizer')->pluck('sender_id')->unique(); // FIX
 
-        // ── FIX: key by int so ->get(int $id) always resolves correctly ──
         $aMap = DB::table('alumni')
             ->whereIn('id', $aIds)
             ->get(['id', 'first_name', 'last_name', 'profile_photo'])
@@ -461,11 +464,12 @@ new class extends Component {
 
         $this->messages = collect($rows)->map(function ($m) use ($aMap, $oMap, $rxns, $pins, $rplyMap) {
 
-            $isCoord = $m->sender_type === 'coordinator';
+            // FIX: DB stores 'organizer', not 'coordinator'
+            $isCoord = $m->sender_type === 'organizer';
             $sid     = (int) $m->sender_id;
             $s       = $isCoord ? $oMap->get($sid) : $aMap->get($sid);
 
-            // ── FIX: fallback to current coordinator name if own message ──
+            // Fallback to current coordinator name if own message not in map yet
             if (! $s && $isCoord && $sid === $this->coordinatorId) {
                 $sName = $this->coordinatorName;
             } else {
@@ -475,15 +479,16 @@ new class extends Component {
             $msgRxns = $rxns->get($m->id, collect());
             $rxnGrps = $msgRxns->groupBy('reaction')->map(fn ($g) => $g->count())->toArray();
 
-            // ── FIX: loose == comparison for reactor_id (string vs int) ──
+            // FIX: reactor_type ENUM is 'organizer', not 'coordinator'
             $myRxn = $msgRxns->first(
-                fn ($r) => $r->reactor_type === 'coordinator' && (int) $r->reactor_id === $this->coordinatorId
+                fn ($r) => $r->reactor_type === 'organizer' && (int) $r->reactor_id === $this->coordinatorId
             );
 
             $reply = null;
             if ($m->reply_to_id && $rplyMap->has((int) $m->reply_to_id)) {
                 $r  = $rplyMap->get((int) $m->reply_to_id);
-                $rs = $r->sender_type === 'coordinator'
+                // FIX: check 'organizer'
+                $rs = $r->sender_type === 'organizer'
                     ? $oMap->get((int) $r->sender_id)
                     : $aMap->get((int) $r->sender_id);
 
@@ -524,6 +529,7 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Send
+    // FIX: sender_type must be 'organizer' to match ENUM
     // ─────────────────────────────────────────────────────────────────────
     public function sendMessage(): void
     {
@@ -532,7 +538,7 @@ new class extends Component {
 
         $msgId = DB::table('chat_messages')->insertGetId([
             'room_id'     => $this->roomId,
-            'sender_type' => 'coordinator',
+            'sender_type' => 'organizer',         // FIX: was 'coordinator'
             'sender_id'   => $this->coordinatorId,
             'body'        => $body,
             'reply_to_id' => $this->replyTo['id'] ?? null,
@@ -577,7 +583,7 @@ new class extends Component {
                 if ($foundCoord) {
                     DB::table('chat_mentions')->insert([
                         'message_id'   => $msgId,
-                        'mention_type' => 'coordinator',
+                        'mention_type' => 'organizer',   // FIX: was 'coordinator'
                         'mentioned_id' => $foundCoord,
                         'created_at'   => now(),
                         'updated_at'   => now(),
@@ -598,6 +604,7 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Edit
+    // FIX: where clause must match 'organizer'
     // ─────────────────────────────────────────────────────────────────────
     public function startEdit(int $id): void
     {
@@ -614,7 +621,7 @@ new class extends Component {
 
         DB::table('chat_messages')
             ->where('id', $this->editingId)
-            ->where('sender_type', 'coordinator')
+            ->where('sender_type', 'organizer')   // FIX: was 'coordinator'
             ->where('sender_id', $this->coordinatorId)
             ->update([
                 'body'       => trim($this->editBody),
@@ -635,12 +642,13 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Unsend
+    // FIX: where clause must match 'organizer'
     // ─────────────────────────────────────────────────────────────────────
     public function unsend(int $id): void
     {
         DB::table('chat_messages')
             ->where('id', $id)
-            ->where('sender_type', 'coordinator')
+            ->where('sender_type', 'organizer')   // FIX: was 'coordinator'
             ->where('sender_id', $this->coordinatorId)
             ->update(['deleted_at' => now()]);
 
@@ -652,7 +660,8 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Reactions  ← FIXED: int cast on reactor_id comparison
+    // Reactions
+    // FIX: reactor_type ENUM is 'organizer' — 'coordinator' caused SQLSTATE 01000
     // ─────────────────────────────────────────────────────────────────────
     public function react(int $msgId, string $reaction): void
     {
@@ -660,7 +669,7 @@ new class extends Component {
 
         $existing = DB::table('chat_reactions')
             ->where('message_id', $msgId)
-            ->where('reactor_type', 'coordinator')
+            ->where('reactor_type', 'organizer')   // FIX: was 'coordinator'
             ->where('reactor_id', $this->coordinatorId)
             ->first();
 
@@ -674,7 +683,7 @@ new class extends Component {
         } else {
             DB::table('chat_reactions')->insert([
                 'message_id'   => $msgId,
-                'reactor_type' => 'coordinator',
+                'reactor_type' => 'organizer',     // FIX: was 'coordinator'
                 'reactor_id'   => $this->coordinatorId,
                 'reaction'     => $reaction,
                 'created_at'   => now(),
@@ -684,14 +693,14 @@ new class extends Component {
 
         $this->loadMessages();
 
-        // Refresh popup if it's open for this message
         if ($this->reactionsPopupMsgId === $msgId) {
             $this->openReactionsPopup($msgId);
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // View Reactions  ← NEW
+    // View Reactions Popup
+    // FIX: reactor_type check uses 'organizer'
     // ─────────────────────────────────────────────────────────────────────
     public function openReactionsPopup(int $msgId): void
     {
@@ -709,7 +718,8 @@ new class extends Component {
 
         $data = [];
         foreach ($rows as $r) {
-            if ($r->reactor_type === 'coordinator') {
+            // FIX: ENUM stores 'organizer', not 'coordinator'
+            if ($r->reactor_type === 'organizer') {
                 $coord = DB::table('organizer')
                     ->where('id', $r->reactor_id)
                     ->first(['first_name', 'last_name', 'profile_photo']);
@@ -731,12 +741,12 @@ new class extends Component {
                 'name'     => $name,
                 'photo'    => $photo,
                 'reaction' => $r->reaction,
-                'type'     => $r->reactor_type,
-                'is_me'    => $r->reactor_type === 'coordinator' && (int) $r->reactor_id === $this->coordinatorId,
+                // FIX: check 'organizer'
+                'type'     => $r->reactor_type === 'organizer' ? 'coordinator' : 'alumni', // display label
+                'is_me'    => $r->reactor_type === 'organizer' && (int) $r->reactor_id === $this->coordinatorId,
             ];
         }
 
-        // Group by reaction emoji for display
         $grouped = collect($data)->groupBy('reaction')->toArray();
         $this->reactionsPopupData = $grouped;
     }
@@ -749,6 +759,7 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Pin
+    // FIX: pinned_by_type ENUM is 'organizer'
     // ─────────────────────────────────────────────────────────────────────
     public function togglePin(int $msgId): void
     {
@@ -758,7 +769,7 @@ new class extends Component {
             DB::table('chat_pins')->insert([
                 'room_id'        => $this->roomId,
                 'message_id'     => $msgId,
-                'pinned_by_type' => 'coordinator',
+                'pinned_by_type' => 'organizer',   // FIX: was 'coordinator'
                 'pinned_by_id'   => $this->coordinatorId,
                 'created_at'     => now(),
                 'updated_at'     => now(),
@@ -884,7 +895,7 @@ new class extends Component {
             ->toArray();
 
         $aIds = collect($rows)->where('sender_type', 'alumni')->pluck('sender_id')->unique();
-        $oIds = collect($rows)->where('sender_type', 'coordinator')->pluck('sender_id')->unique();
+        $oIds = collect($rows)->where('sender_type', 'organizer')->pluck('sender_id')->unique(); // FIX
 
         $aMap = DB::table('alumni')
             ->whereIn('id', $aIds)
@@ -897,7 +908,8 @@ new class extends Component {
             ->keyBy(fn ($o) => (int) $o->id);
 
         $this->pinnedMessages = collect($rows)->map(function ($p) use ($aMap, $oMap) {
-            $s = $p->sender_type === 'coordinator'
+            // FIX: check 'organizer'
+            $s = $p->sender_type === 'organizer'
                 ? $oMap->get((int) $p->sender_id)
                 : $aMap->get((int) $p->sender_id);
 
@@ -974,7 +986,7 @@ new class extends Component {
 }; ?>
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     COORDINATOR MESSENGER — Design matched to Alumni Messenger
+     COORDINATOR MESSENGER
      ════════════════════════════════════════════════════════════════════════ --}}
 <div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
      style="height: calc(100vh - 90px);"
@@ -1450,7 +1462,7 @@ new class extends Component {
                                         <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
                                     </button>
 
-                                    {{-- View Reactions button ← NEW --}}
+                                    {{-- View Reactions button --}}
                                     @if(! empty($msg['reactions']))
                                     <button wire:click="openReactionsPopup({{ $msg['id'] }})"
                                             @click.stop
@@ -1497,7 +1509,7 @@ new class extends Component {
                                     @endif
                                 </div>
 
-                                {{-- ── View Reactions Popup ← NEW ─────────────────────── --}}
+                                {{-- ── View Reactions Popup ────────────────────────────── --}}
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
                                 <div class="mt-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-xl z-20 w-64 overflow-hidden"
                                      @click.stop>

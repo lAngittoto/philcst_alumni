@@ -77,6 +77,11 @@
                         'icon' => 'file-import',
                         'label' => 'Import Alumni',
                     ],
+                    [
+                        'route' => 'registrar.employment.tracking',
+                        'icon' => 'chart-line',
+                        'label' => 'Employment Tracking',
+                    ],
 
                 ];
 

@@ -149,7 +149,7 @@ new class extends Component {
                 ? $q->whereNull('et.employment_status')
                 : $q->where('et.employment_status', $this->filterStatus);
         }
-        if ($this->filterLocation)  $q->where('et.work_location',   $this->filterLocation);
+        if ($this->filterLocation)  $q->where('et.work_location',    $this->filterLocation);
         if ($this->filterRelevance) $q->where('et.course_relevance', $this->filterRelevance);
         if ($this->filterBatch)     $q->where('a.batch',             $this->filterBatch);
         if ($this->filterCourse)    $q->where('a.course_code',       $this->filterCourse);
@@ -414,6 +414,15 @@ new class extends Component {
                 <option value="abroad">Abroad (OFW)</option>
             </select>
 
+            {{-- ── Course Relevance Filter (NEW) ── --}}
+            <select wire:model.live="filterRelevance"
+                    class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
+                <option value="">All Relevance</option>
+                <option value="yes">Related to Course</option>
+                <option value="partially">Partially Related</option>
+                <option value="no">Not Related</option>
+            </select>
+
             {{-- Course --}}
             @if($courses->isNotEmpty())
                 <select wire:model.live="filterCourse"
@@ -453,7 +462,7 @@ new class extends Component {
                  style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9f7fc;"
                  wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,filterStatus,filterLocation,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
-                <table class="w-full border-collapse min-w-[700px]">
+                <table class="w-full border-collapse min-w-[820px]">
                     <thead>
                         <tr class="border-b border-[#E8E0F0] sticky top-0 z-10"
                             style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
@@ -463,6 +472,10 @@ new class extends Component {
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Company / Job Title</th>
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden lg:table-cell">Location</th>
                             <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider">Status</th>
+                            {{-- ── NEW COLUMN ── --}}
+                            <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider hidden xl:table-cell">
+                                Course Relevance
+                            </th>
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden lg:table-cell">Last Updated</th>
                             <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider">Actions</th>
                         </tr>
@@ -488,6 +501,15 @@ new class extends Component {
                                 'self_employed' => 'fa-store',
                                 'unemployed'    => 'fa-circle-pause',
                                 default         => 'fa-circle-question',
+                            };
+                            $isWorking = in_array($row->employment_status, ['employed', 'self_employed']);
+
+                            // Course relevance display config
+                            $relConfig = match($row->course_relevance ?? '') {
+                                'yes'       => ['Related',          'fa-check-circle',  'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
+                                'no'        => ['Not Related',      'fa-times-circle',  'text-red-600',     'bg-red-50 border-red-200'],
+                                'partially' => ['Partially',        'fa-adjust',        'text-amber-700',   'bg-amber-50 border-amber-200'],
+                                default     => null,
                             };
                         @endphp
 
@@ -524,6 +546,13 @@ new class extends Component {
                                 @if($row->job_title || $row->company_name)
                                     <p class="font-semibold text-[#333333] text-sm leading-snug uppercase">{{ $row->job_title ?? '—' }}</p>
                                     <p class="text-xs text-[#999999] mt-0.5">{{ $row->company_name ?? '' }}</p>
+                                    {{-- Relevance badge inline (shown on smaller screens where xl column is hidden) --}}
+                                    @if($relConfig)
+                                        <span class="xl:hidden inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $relConfig[2] }} {{ $relConfig[3] }}">
+                                            <i class="fa-solid {{ $relConfig[1] }} text-[9px]"></i>
+                                            {{ $relConfig[0] }}
+                                        </span>
+                                    @endif
                                 @elseif($row->employment_status === 'unemployed')
                                     <span class="text-sm text-[#999999] italic">
                                         {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
@@ -556,6 +585,20 @@ new class extends Component {
                                 </span>
                             </td>
 
+                            {{-- ── Course Relevance Column (xl+) ── --}}
+                            <td class="px-5 py-3.5 text-center hidden xl:table-cell">
+                                @if($isWorking && $relConfig)
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold border {{ $relConfig[2] }} {{ $relConfig[3] }}">
+                                        <i class="fa-solid {{ $relConfig[1] }} text-xs"></i>
+                                        {{ $relConfig[0] }}
+                                    </span>
+                                @elseif($isWorking)
+                                    <span class="text-xs text-[#CCCCCC]">—</span>
+                                @else
+                                    <span class="text-xs text-[#CCCCCC]">N/A</span>
+                                @endif
+                            </td>
+
                             {{-- Last Updated --}}
                             <td class="px-5 py-3.5 text-xs text-[#999999] hidden lg:table-cell">
                                 @if($row->emp_updated_at)
@@ -578,7 +621,7 @@ new class extends Component {
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="8" class="py-16 text-center">
+                            <td colspan="9" class="py-16 text-center">
                                 <div class="flex flex-col items-center gap-3">
                                     <div class="w-14 h-14 rounded-2xl flex items-center justify-center"
                                          style="background:#F9F7FC;">
@@ -600,7 +643,7 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ── PAGINATION BAR — purple, consistent with dashboard ── --}}
+        {{-- ── PAGINATION BAR ── --}}
         <div class="px-4 sm:px-5 py-3.5 border-t border-[#E8E0F0] shrink-0 rounded-b-2xl"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             @php
@@ -619,36 +662,17 @@ new class extends Component {
                     alumni
                 </p>
                 <div class="flex items-center gap-1.5">
-
                     @if($rows->onFirstPage())
-                        <button disabled
-                                class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white/40 cursor-not-allowed">
-                            ← Prev
-                        </button>
+                        <button disabled class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white/40 cursor-not-allowed">← Prev</button>
                     @else
-                        <button wire:click="previousPage"
-                                class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white hover:bg-white/30 transition active:scale-[.98]">
-                            ← Prev
-                        </button>
+                        <button wire:click="previousPage" class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white hover:bg-white/30 transition active:scale-[.98]">← Prev</button>
                     @endif
-
-                    <span class="px-4 py-2 bg-white rounded-xl text-sm font-semibold shadow"
-                          style="color:#7A3F91;">
-                        {{ $cp }} / {{ $rows->lastPage() }}
-                    </span>
-
+                    <span class="px-4 py-2 bg-white rounded-xl text-sm font-semibold shadow" style="color:#7A3F91;">{{ $cp }} / {{ $rows->lastPage() }}</span>
                     @if($rows->hasMorePages())
-                        <button wire:click="nextPage"
-                                class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white hover:bg-white/30 transition active:scale-[.98]">
-                            Next →
-                        </button>
+                        <button wire:click="nextPage" class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white hover:bg-white/30 transition active:scale-[.98]">Next →</button>
                     @else
-                        <button disabled
-                                class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white/40 cursor-not-allowed">
-                            Next →
-                        </button>
+                        <button disabled class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white/40 cursor-not-allowed">Next →</button>
                     @endif
-
                 </div>
             </div>
         </div>
@@ -659,6 +683,43 @@ new class extends Component {
 
 {{-- ══════════════════════════════════════════════════════ DETAIL MODAL ══ --}}
 @if($showModal && !empty($modalData))
+@php
+    $md        = $modalData;
+    $isEmp     = in_array($md['employment_status'] ?? '', ['employed','self_employed']);
+    $statusLbl = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'][$md['employment_status'] ?? ''] ?? 'Not Filled';
+    $statusCls = match($md['employment_status'] ?? '') {
+        'employed'      => 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+        'self_employed' => 'bg-blue-50 text-blue-700 border border-blue-200',
+        'unemployed'    => 'bg-amber-50 text-amber-700 border border-amber-200',
+        default         => 'bg-[#F9F7FC] text-[#999999] border border-[#E8E0F0]',
+    };
+    $empTypeMap = [
+        'full_time'     => 'Full-Time',
+        'part_time'     => 'Part-Time',
+        'contractual'   => 'Contractual',
+        'project_based' => 'Project-Based',
+        'internship'    => 'Internship',
+    ];
+    $eduMap = [
+        'none'               => 'None',
+        'pursuing_masteral'  => 'Pursuing Masteral',
+        'pursuing_doctorate' => 'Pursuing Doctorate',
+    ];
+    $careerLabels = [
+        'ofw'                   => ['fa-plane-departure', 'OFW'],
+        'freelancer'            => ['fa-laptop-code',     'Freelancer'],
+        'entrepreneur'          => ['fa-store',           'Entrepreneur'],
+        'career_shifter'        => ['fa-arrows-rotate',   'Career Shifter'],
+        'industry_professional' => ['fa-user-tie',        'Industry Professional'],
+    ];
+    // Course relevance config for modal
+    $relModalMap = [
+        'yes'       => ['Related to Course',   'fa-check-circle',   'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
+        'no'        => ['Not Related',          'fa-times-circle',   'text-red-600',     'bg-red-50 border-red-200'],
+        'partially' => ['Partially Related',   'fa-adjust',         'text-amber-700',   'bg-amber-50 border-amber-200'],
+    ];
+    $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
+@endphp
 <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4"
      @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl w-full max-w-lg max-h-[95vh] sm:max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]"
@@ -698,10 +759,10 @@ new class extends Component {
                 </p>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     @foreach([
-                        'Course'  => $modalData['course_code']    ?? '—',
-                        'Batch'   => $modalData['batch']          ?? '—',
-                        'Gender'  => $modalData['gender']         ?? '—',
-                        'Contact' => $modalData['contact_number'] ?? '—',
+                        'Course'  => $md['course_code']    ?? '—',
+                        'Batch'   => $md['batch']          ?? '—',
+                        'Gender'  => $md['gender']         ?? '—',
+                        'Contact' => $md['contact_number'] ?? '—',
                     ] as $label => $value)
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
                             <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">{{ $label }}</p>
@@ -712,43 +773,12 @@ new class extends Component {
             </div>
 
             {{-- Employment Info --}}
-            @php
-                $md        = $modalData;
-                $isEmp     = in_array($md['employment_status'] ?? '', ['employed','self_employed']);
-                $statusLbl = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'][$md['employment_status'] ?? ''] ?? 'Not Filled';
-                $statusCls = match($md['employment_status'] ?? '') {
-                    'employed'      => 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-                    'self_employed' => 'bg-blue-50 text-blue-700 border border-blue-200',
-                    'unemployed'    => 'bg-amber-50 text-amber-700 border border-amber-200',
-                    default         => 'bg-[#F9F7FC] text-[#999999] border border-[#E8E0F0]',
-                };
-                $empTypeMap = [
-                    'full_time'     => 'Full-Time',
-                    'part_time'     => 'Part-Time',
-                    'contractual'   => 'Contractual',
-                    'project_based' => 'Project-Based',
-                    'internship'    => 'Internship',
-                ];
-                $eduMap = [
-                    'none'               => 'None',
-                    'pursuing_masteral'  => 'Pursuing Masteral',
-                    'pursuing_doctorate' => 'Pursuing Doctorate',
-                ];
-                $careerLabels = [
-                    'ofw'                   => ['fa-plane-departure', 'OFW'],
-                    'freelancer'            => ['fa-laptop-code',     'Freelancer'],
-                    'entrepreneur'          => ['fa-store',           'Entrepreneur'],
-                    'career_shifter'        => ['fa-arrows-rotate',   'Career Shifter'],
-                    'industry_professional' => ['fa-user-tie',        'Industry Professional'],
-                ];
-            @endphp
-
             <div class="border-t border-[#E8E0F0] pt-4">
                 <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-3 flex items-center gap-2">
                     <i class="fa-solid fa-briefcase" style="color:#7A3F91;"></i> Employment Information
                 </p>
 
-                <div class="flex items-center gap-2 mb-4">
+                <div class="flex items-center gap-2 mb-4 flex-wrap">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold {{ $statusCls }}">
                         {{ $statusLbl }}
                     </span>
@@ -769,13 +799,28 @@ new class extends Component {
                             ['Location',   ucfirst($md['work_location'] ?? '—')],
                             ['Date Hired', $md['date_hired'] ? \Carbon\Carbon::parse($md['date_hired'])->format('M d, Y') : '—'],
                             ['Education',  $eduMap[$md['education_status'] ?? ''] ?? '—'],
-                            ['Relevance',  ['yes'=>'Yes','no'=>'No','partially'=>'Partially'][$md['course_relevance'] ?? ''] ?? '—'],
                         ] as [$lbl, $val])
                             <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
                                 <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">{{ $lbl }}</p>
                                 <p class="text-sm font-semibold text-[#333333]">{{ $val }}</p>
                             </div>
                         @endforeach
+
+                        {{-- ── Course Relevance — full card in modal (NEW) ── --}}
+                        <div class="bg-gray-50 rounded-xl px-3 py-2.5 border {{ $relModal ? $relModal[3] : 'border-[#E8E0F0]' }} sm:col-span-3">
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-1.5">
+                                <i class="fa-solid fa-graduation-cap mr-1" style="color:#7A3F91;"></i>
+                                Job Related to Course?
+                            </p>
+                            @if($relModal)
+                                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-bold border {{ $relModal[2] }} {{ $relModal[3] }}">
+                                    <i class="fa-solid {{ $relModal[1] }} text-xs"></i>
+                                    {{ $relModal[0] }}
+                                </span>
+                            @else
+                                <span class="text-sm text-[#999999]">— Not specified</span>
+                            @endif
+                        </div>
                     </div>
 
                     @if(!empty($md['career_path_arr']))
@@ -795,11 +840,17 @@ new class extends Component {
                     @endif
 
                 @elseif(($md['employment_status'] ?? '') === 'unemployed')
-                    <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                        <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">Unemployment Status</p>
-                        <p class="text-sm font-semibold text-[#333333]">
-                            {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
-                        </p>
+                    <div class="space-y-3">
+                        <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">Unemployment Status</p>
+                            <p class="text-sm font-semibold text-[#333333]">
+                                {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
+                            </p>
+                        </div>
+                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">Education Status</p>
+                            <p class="text-sm font-semibold text-[#333333]">{{ $eduMap[$md['education_status'] ?? ''] ?? '—' }}</p>
+                        </div>
                     </div>
                 @else
                     <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-8 text-center">

@@ -45,10 +45,10 @@
         {{-- Sidebar header --}}
         <div class="flex items-center justify-between h-24 px-6 border-b border-[#E8E0F0] shrink-0">
             <div class="text-left">
-                <h1 class="text-2xl font-black tracking-tighter uppercase text-[#333333] leading-tight">
-                    Coordinator<span class="font-light opacity-70 text-[#7A3F91]">Portal</span>
+                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
+                    Coordinator<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
                 </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-bold">
+                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
                     Event Management
                 </p>
             </div>
@@ -107,7 +107,7 @@
                     [
                         'route'   => 'organizer.event/organizer',
                         'icon'    => 'calendar-check',
-                        'label'   => 'Event Organizer',
+                        'label'   => 'Event Management',
                         'pattern' => 'organizer/event/organizer*',
                     ],
                     [

@@ -13,7 +13,13 @@
 </head>
 <body class="antialiased">
 
-<div x-data="{ open: false }" class="flex h-screen bg-gray-100 font-sans overflow-hidden">
+@php
+    $authDirector = auth()->user()?->director;
+@endphp
+
+<div
+    x-data="{ open: false }"
+    class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
     {{-- Mobile overlay --}}
     <div
@@ -28,47 +34,67 @@
         class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- Sidebar --}}
+    {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
     <aside
         :class="open ? 'translate-x-0' : '-translate-x-full'"
         class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
                shadow-2xl lg:translate-x-0 lg:static lg:inset-0
-               flex flex-col h-full text-white overflow-hidden shrink-0"
-        style="background-color: #2b0d3e;">
+               flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
+        style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
 
-        {{-- Logo / Branding --}}
-        <div class="flex items-center justify-between h-24 px-6 border-b border-white/10 shrink-0">
+        {{-- Sidebar header --}}
+        <div class="flex items-center justify-between h-24 px-6 border-b border-[#E8E0F0] shrink-0">
             <div class="text-left">
-                <h1 class="text-2xl font-black tracking-tighter uppercase text-white leading-tight">
-                    Alumni<span class="font-light opacity-70 text-[#7a3f91]">Director</span>
+                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
+                    Director<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
                 </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-50 text-white font-bold">
-                    Alumni Management System
+                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
+                    Alumni Management
                 </p>
             </div>
-            <button @click="open = false" class="lg:hidden text-white/70 hover:text-white transition-colors">
+            <button @click="open = false" class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors">
                 <i class="fa-solid fa-circle-xmark text-2xl"></i>
             </button>
         </div>
 
-        {{-- Director Info --}}
-        @php $director = auth()->user()?->director; @endphp
-        @if ($director)
-            <div class="px-6 py-4 border-b border-white/10 shrink-0">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-[#7a3f91] flex items-center justify-center font-bold text-lg text-white shrink-0">
-                        {{ strtoupper(substr($director->name, 0, 1)) }}
-                    </div>
-                    <div class="min-w-0">
-                        <p class="text-sm font-bold text-white truncate">{{ $director->name }}</p>
-                        <p class="text-xs text-white/50 truncate">{{ $director->department ?? 'Alumni Director' }}</p>
-                    </div>
+        {{-- Director info card --}}
+        @if($authDirector)
+        <div class="mx-4 mt-5 mb-1 rounded-xl p-4 border" 
+             style="background: linear-gradient(135deg, rgba(122,63,145,0.07), rgba(122,63,145,0.03)); border-color: rgba(122,63,145,0.2);">
+            <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-md"
+                     style="background: linear-gradient(135deg, #7A3F91, #6a3080); color: white;">
+                    {{ strtoupper(substr($authDirector->name, 0, 1)) }}
+                </div>
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-[#333333] truncate leading-tight">
+                        {{ $authDirector->name }}
+                    </p>
+                    <p class="text-[11px] text-[#666666] truncate">
+                        {{ $authDirector->department ?? 'Alumni Director' }}
+                    </p>
                 </div>
             </div>
+
+            {{-- Status badge --}}
+            <div class="mt-3 flex items-center gap-2 flex-wrap text-[10px]">
+                @if($authDirector->status === 'ACTIVE')
+                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
+                          style="background: rgba(5, 150, 105, 0.1); color: #059669;">
+                        <i class="fa-solid fa-circle-check text-[8px]"></i> Active
+                    </span>
+                @elseif($authDirector->status === 'INACTIVE')
+                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
+                          style="background: rgba(107, 114, 128, 0.1); color: #6B7280;">
+                        <i class="fa-solid fa-circle text-[8px]"></i> Inactive
+                    </span>
+                @endif
+            </div>
+        </div>
         @endif
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-1 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
 
             @php
                 $sidebarLinks = [
@@ -81,97 +107,93 @@
                     [
                         'route'   => 'director.coordinator/management',
                         'icon'    => 'users-gear',
-                        'label'   => 'Manage Coordinator',
+                        'label'   => 'Coordinator Management',
                         'pattern' => 'director/coordinator/management*',
                     ],
                     [
                         'route'   => 'director.event/management',
                         'icon'    => 'calendar-check',
-                        'label'   => 'Manage Event',
+                        'label'   => 'Events Overview',
                         'pattern' => 'director/event/management*',
                     ],
                     [
                         'route'   => 'director.job/management',
                         'icon'    => 'briefcase',
-                        'label'   => 'Manage Job',
+                        'label'   => 'Jobs Overview',
                         'pattern' => 'director/job/management*',
                     ],
                     [
                         'route'   => 'director.director/messenger',
                         'icon'    => 'comments',
-                        'label'   => 'Messenger',
+                        'label'   => 'Staff Chat',
                         'pattern' => 'director/messenger*',
                     ],
-                    [
-                        'route'   => 'director.manage/employment',
-                        'icon'    => 'chart-line',
-                        'label'   => 'Manage Employment',
-                        'pattern' => 'manage/employment*',
-                    ],
+
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php
-                    $url = route($link['route']);
+                    $url      = route($link['route']);
                     $isActive = request()->is($link['pattern']);
                 @endphp
+
                 <a href="{{ $url }}"
                    wire:navigate
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive ? 'bg-white/10 border border-white/20 shadow-lg' : 'hover:bg-white/5' }}">
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg mr-4 shrink-0 transition-transform duration-300 group-hover:scale-110
-                                {{ $isActive ? 'bg-[#7a3f91]' : 'bg-white/5' }}">
-                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-80"></i>
+                          {{ $isActive ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md' : 'hover:bg-[#F9F7FC]' }}">
+                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
+                         :style="'background-color: ' + ('{{ $isActive }}' === '1' ? '#F5F5F5' : '#F9F7FC') + '; color: #7A3F91;'">
+                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
-                    <span class="font-medium tracking-wide">{{ $link['label'] }}</span>
-
-                    @if ($isActive)
-                        <i class="fa-solid fa-chevron-right ml-auto text-xs opacity-50"></i>
-                    @endif
+                    <span class="font-medium tracking-wide text-[#333333]">{{ $link['label'] }}</span>
                 </a>
             @endforeach
 
         </nav>
 
         {{-- Logout --}}
-        <div class="p-4 mt-auto border-t border-white/10 shrink-0">
+        <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit"
                         class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background-color: #7a3f91;">
+                        style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
             </form>
         </div>
     </aside>
 
-    {{-- Main content area --}}
+    {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
         {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 lg:hidden shrink-0 z-30">
-            <button @click="open = !open" class="text-[#2b0d3e] focus:outline-none p-2 rounded-lg hover:bg-gray-100 transition-colors">
+        <header class="flex items-center justify-between px-6 py-4 bg-[#FFFFFF] border-b border-[#E8E0F0] lg:hidden shrink-0 z-30">
+            <button @click="open = !open"
+                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="open ? 'rotate-45 translate-y-2' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300 origin-center"></span>
-                    <span :class="open ? 'opacity-0' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300"></span>
-                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 bg-[#2b0d3e] transition-all duration-300 origin-center"></span>
+                    <span :class="open ? 'rotate-45 translate-y-2' : ''"
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                    <span :class="open ? 'opacity-0' : ''"
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
+                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#2b0d3e]">Director Panel</h2>
+            <h2 class="text-lg font-bold text-[#333333]">Director Portal</h2>
             <div class="w-10"></div>
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto min-h-0 bg-[#f8f9fa] p-4 lg:p-8 no-scrollbar">
+        <div class="flex-1 overflow-y-auto min-h-0 bg-[#F5F5F5] p-4 lg:p-8 no-scrollbar">
             <div class="container mx-auto">
                 @yield('content')
             </div>
         </div>
     </main>
 
-</div>
+</div>{{-- /x-data shell --}}
 
 @livewireScripts
 

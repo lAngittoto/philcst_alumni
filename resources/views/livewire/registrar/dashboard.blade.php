@@ -446,10 +446,8 @@ new class extends Component {
                             </div>
                         </div>
                         @if($row['count'] > 0 && $row['filter'] !== '')
-                        <div class="h-1.5 rounded-full overflow-hidden" style="background:white;">
-                            <div class="h-full rounded-full" style="width:{{ $barPct }}%; background:{{ $row['color'] }};"></div>
-                        </div>
-                        <p class="text-xs mt-0.5 font-normal" style="color:{{ $row['color'] }};">{{ $barPct }}% of submitted</p>
+
+                      
                         @endif
                     </div>
                     @endforeach

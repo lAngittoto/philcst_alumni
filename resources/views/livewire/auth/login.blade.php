@@ -163,6 +163,74 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ── 1. ORGANIZER CHECK (first — before alumni) ─────────────────────────
+        $organizer = Organizer::where('id_number', $this->name)->first();
+
+        if ($organizer && $organizer->user) {
+            $user = $organizer->user;
+
+            if (!Hash::check($this->password, $user->password)) {
+                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+                $attempts = $this->recordFailedAttempt();
+
+                AuditLog::logLogin([
+                    'id'    => $user->id,
+                    'name'  => $organizer->name,
+                    'email' => $organizer->email,
+                    'role'  => 'organizer',
+                ], false, 'Incorrect password');
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    AuditLog::logAccountLocked($this->name, $attempts, $user->id);
+                    $this->password = '';
+                    $this->addError('invalid',
+                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                        . " after {$attempts} failed attempts."
+                    );
+                    return;
+                }
+
+                $remaining = self::MAX_ATTEMPTS - $attempts;
+                $this->password = '';
+                $this->addError('invalid',
+                    'Username/ID or password is invalid. '
+                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
+                return;
+            }
+
+            if ($organizer->status !== 'ACTIVE' && $organizer->password_changed_at !== null) {
+                $this->password = '';
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($organizer->status) . '. Please contact the administrator.'
+                );
+                return;
+            }
+
+            Auth::login($user, false);
+            $this->clearAttempts();
+            session()->regenerate();
+            $organizer->update(['last_login' => now()]);
+
+            AuditLog::logLogin([
+                'id'    => $user->id,
+                'name'  => $organizer->name,
+                'email' => $organizer->email,
+                'role'  => 'organizer',
+            ], true);
+
+            if ($organizer->password_changed_at === null) {
+                session()->forget(['pending_password_plain', 'password_reset_step']);
+                session()->put('organizer_requires_password_change', true);
+                $this->redirectRoute('organizer.change-password', navigate: true);
+                return;
+            }
+
+            $this->redirectRoute('organizer.dashboard', navigate: true);
+            return;
+        }
+
+        // ── 2. ALUMNI CHECK ────────────────────────────────────────────────────
         $rawId    = ltrim(preg_replace('/[^0-9]/', '', $this->name), '0') ?: '0';
         $paddedId = str_pad($rawId, 8, '0', STR_PAD_LEFT);
 
@@ -202,15 +270,12 @@ new #[Layout('app')] class extends Component {
             $alumni = Alumni::where('user_id', $user->id)->first();
 
             if (!$alumni || $alumni->needsAccountSetup() || $alumni->hasTemporaryPassword()) {
-
                 if ($alumni && !$alumni->needsAccountSetup() && $alumni->hasTemporaryPassword()) {
                     DB::table('alumni')
                         ->where('id', $alumni->id)
                         ->update(['password_changed_at' => null]);
-
                     $alumni->password_changed_at = null;
                 }
-
                 session()->forget([
                     'alumni_pending_email',
                     'alumni_pending_password',
@@ -230,72 +295,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $organizer = Organizer::where('id_number', $this->name)->first();
-
-        if ($organizer && $organizer->user) {
-            $user = $organizer->user;
-
-            if (!Hash::check($this->password, $user->password)) {
-                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
-                $attempts = $this->recordFailedAttempt();
-
-                AuditLog::logLogin([
-                    'id'    => $user->id,
-                    'name'  => $organizer->name,
-                    'email' => $organizer->email,
-                    'role'  => 'organizer',
-                ], false, 'Incorrect password');
-
-                if ($attempts >= self::MAX_ATTEMPTS) {
-                    AuditLog::logAccountLocked($this->name, $attempts, $user->id);
-                    $this->password = '';
-                    $this->addError('invalid',
-                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
-                        . " after {$attempts} failed attempts."
-                    );
-                    return;
-                }
-
-                $remaining = self::MAX_ATTEMPTS - $attempts;
-                $this->password = '';
-                $this->addError('invalid',
-                    'Username/ID or password is invalid. '
-                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
-                );
-                return;
-            }
-
-            if ($organizer->status !== 'ACTIVE') {
-                $this->password = '';
-                $this->addError('invalid',
-                    'Your account is ' . strtolower($organizer->status) . '. Please contact the administrator.'
-                );
-                return;
-            }
-
-            Auth::login($user, false);
-            $this->clearAttempts();
-            session()->regenerate();
-            $organizer->update(['last_login' => now()]);
-
-            AuditLog::logLogin([
-                'id'    => $user->id,
-                'name'  => $organizer->name,
-                'email' => $organizer->email,
-                'role'  => 'organizer',
-            ], true);
-
-            if ($organizer->password_changed_at === null) {
-                session()->forget(['pending_password_plain', 'password_reset_step']);
-                session()->put('organizer_requires_password_change', true);
-                $this->redirectRoute('organizer.change-password', navigate: true);
-                return;
-            }
-
-            $this->redirectRoute('organizer.dashboard', navigate: true);
-            return;
-        }
-
+        // ── 3. ADMIN / REGISTRAR / DIRECTOR CHECK ─────────────────────────────
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
             RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
             $attempts = $this->recordFailedAttempt();
@@ -331,14 +331,7 @@ new #[Layout('app')] class extends Component {
         if ($user->role === 'registrar') {
             $this->clearAttempts();
             session()->regenerate();
-
-            AuditLog::logLogin([
-                'id'    => $user->id,
-                'name'  => $user->name,
-                'email' => $user->email,
-                'role'  => 'registrar',
-            ], true);
-
+            AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'registrar'], true);
             $this->redirectRoute('registrar.dashboard', navigate: true);
             return;
         }
@@ -346,14 +339,7 @@ new #[Layout('app')] class extends Component {
         if ($user->role === 'director') {
             $this->clearAttempts();
             session()->regenerate();
-
-            AuditLog::logLogin([
-                'id'    => $user->id,
-                'name'  => $user->name,
-                'email' => $user->email,
-                'role'  => 'director',
-            ], true);
-
+            AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'director'], true);
             $this->redirectRoute('director.dashboard', navigate: true);
             return;
         }
@@ -368,14 +354,7 @@ new #[Layout('app')] class extends Component {
         $this->clearAttempts();
         RateLimiter::clear($this->throttleKey());
         session()->regenerate();
-
-        AuditLog::logLogin([
-            'id'    => $user->id,
-            'name'  => $user->name,
-            'email' => $user->email,
-            'role'  => 'admin',
-        ], true);
-
+        AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'admin'], true);
         $this->redirectRoute('admin.dashboard', navigate: true);
     }
 
@@ -512,6 +491,21 @@ new #[Layout('app')] class extends Component {
         .lg-no-account:hover {
             opacity: 0.8;
             text-decoration-color: #7A3F91;
+        }
+
+        .lg-forgot {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: rgba(255,255,255,0.75);
+            text-decoration: underline;
+            text-decoration-color: transparent;
+            text-underline-offset: 3px;
+            transition: color 0.2s, text-decoration-color 0.2s;
+        }
+        .lg-forgot:hover {
+            color: #FFFFFF;
+            text-decoration-color: rgba(255,255,255,0.7);
         }
 
         .lg-back-label {
@@ -697,10 +691,12 @@ new #[Layout('app')] class extends Component {
 
             {{-- Password --}}
             <div class="space-y-2" x-data="{ show: false }">
-                <label class="lg-field-label">
-                    <i class="fa-solid fa-lock text-[#7A3F91]"></i>
-                    Password
-                </label>
+                <div class="flex items-center justify-between">
+                    <label class="lg-field-label">
+                        <i class="fa-solid fa-lock text-[#7A3F91]"></i>
+                        Password
+                    </label>
+                </div>
                 <div class="relative">
                     <input wire:model="password" :type="show ? 'text' : 'password'"
                            placeholder="Enter your password"
@@ -738,11 +734,32 @@ new #[Layout('app')] class extends Component {
 
         </form>
 
-        {{-- Don't have account --}}
-        <div class="mt-6 text-center">
-            <button type="button" @click="showGuide = true" class="lg-no-account">
-                Don't have an account yet?
-            </button>
+        {{-- Bottom links --}}
+        <div class="mt-6 space-y-3 text-center">
+
+            {{-- Forgot Password — alumni only --}}
+            <div>
+                <a href="{{ route('alumni.forgot-password') }}" wire:navigate class="lg-no-account"
+                   style="font-size:0.9rem; color:#7A3F91;">
+                    <i class="fa-solid fa-key mr-1" style="font-size:0.75rem;"></i>
+                    Forgot your password?
+                </a>
+            </div>
+
+            {{-- Divider --}}
+            <div class="flex items-center justify-center gap-3">
+                <div class="h-px flex-1" style="background:#E8E0F0;"></div>
+                <span style="font-family:'Inter',sans-serif; font-size:0.8rem; color:#BBBBBB; white-space:nowrap;"></span>
+                <div class="h-px flex-1" style="background:#E8E0F0;"></div>
+            </div>
+
+            {{-- First-time login guide --}}
+            <div>
+                <button type="button" @click="showGuide = true" class="lg-no-account">
+                    Don't have an account yet?
+                </button>
+            </div>
+
         </div>
 
     </div>
@@ -773,7 +790,7 @@ new #[Layout('app')] class extends Component {
              x-transition:leave-end="opacity-0 scale-90 translate-y-4"
              class="relative w-full max-w-2xl bg-white rounded-[2rem] shadow-[0_30px_80px_rgba(122,63,145,0.3)] overflow-hidden">
 
-            {{-- Modal header (flat background) --}}
+            {{-- Modal header --}}
             <div class="bg-[#F5F5F5] px-10 pt-8 pb-7 border-b border-[#E8E0F0]">
                 <div class="flex items-start justify-between gap-4">
                     <div>

@@ -31,6 +31,12 @@ Route::get('/jobs/{id}', function ($id) {
 Volt::route('/login', 'auth/login')->name('login');
 
 // ===================================
+// Alumni — Forgot Password (PUBLIC — no auth required)
+// ===================================
+Volt::route('/alumni/forgot-password', 'alumni/forgot-password')
+    ->name('alumni.forgot-password');
+
+// ===================================
 // Organizer — Password Change Wizard
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
@@ -89,6 +95,7 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
     Route::view('/alumni/import',          'registrar.import-wrapper')                 ->name('alumni.import');
     Route::view('/information-management', 'registrar.information-management-wrapper') ->name('information-management');
     Route::view('/courses',                'registrar.courses-wrapper')                ->name('courses');
+    Route::view('/employment/tracking',     'registrar.employment-tracking-wrapper')   ->name('employment.tracking');
 });
 
 // ===================================
@@ -96,22 +103,11 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
 // ===================================
 Route::middleware(['auth', 'director'])->prefix('director')->name('director.')->group(function () {
 
-    // ── Dashboard ─────────────────────────────────────────────────────────────
     Route::view('/dashboard',              'director.dashboard-wrapper')          ->name('dashboard');
-
-    // ── Coordinator Management ────────────────────────────────────────────────
     Route::view('/coordinator/management', 'director.manage-coordinator-wrapper') ->name('coordinator/management');
-
-    // ── Event Management ──────────────────────────────────────────────────────
     Route::view('/event/management',       'director.manage-event-wrapper')       ->name('event/management');
-
-    // ── Job Management ────────────────────────────────────────────────────────
     Route::view('/job/management',         'director.manage-job-wrapper')         ->name('job/management');
-
-    // ── Messenger ─────────────────────────────────────────────────────────────
     Route::view('/messenger', 'director.director-messenger-wrapper') ->name('director/messenger');
-
-    // ── Employment Management ─────────────────────────────────────────────────
     Route::view('/manage/employment',      'director.manage-employment-wrapper')  ->name('manage/employment');
 });
 
