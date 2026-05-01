@@ -133,6 +133,12 @@
                         'label'   => 'Audit Logs',
                         'pattern' => 'audit/logs*',
                     ],
+                    [
+                        'route'   => 'course',
+                        'icon'    => 'clipboard-list',
+                        'label'   => 'Courses',
+                        'pattern' => 'course*',
+                    ],
                 ];
             @endphp
 

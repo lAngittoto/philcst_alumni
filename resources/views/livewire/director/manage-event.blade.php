@@ -71,10 +71,6 @@ new class extends Component {
     public ?int   $deleteEventId     = null;
     public string $deleteEventTitle  = '';
 
-    public bool   $showRestoreModal   = false;
-    public ?int   $restoreEventId     = null;
-    public string $restoreEventTitle  = '';
-
     public array  $formErrors = [];
 
     // ── Share Modal ───────────────────────────────────────────────────────────
@@ -166,8 +162,10 @@ new class extends Component {
     #[Computed]
     public function events()
     {
+        // FIX 1: Exclude ORGANIZER_DELETED events — director should not see events the organizer deleted
+        // FIX 2: Use withTrashed() on organizer relationship so deactivated coordinators still show their name
         $q = AdminEvent::withTrashed()
-            ->with(['organizer:id,name,department,email'])
+            ->with(['organizer' => fn($q) => $q->withTrashed()->select('id','name','department','email')])
             ->select([
                 'id','title','description','event_date','event_end_date',
                 'venue','venue_address','contact_person','contact_email',
@@ -175,7 +173,8 @@ new class extends Component {
                 'organizer_id','review_remarks','reviewed_at',
                 'updated_by','updated_by_role','deleted_by','deleted_by_role',
                 'created_at','updated_at','deleted_at',
-            ]);
+            ])
+            ->where('status', '!=', 'ORGANIZER_DELETED'); // ← HIDE organizer-deleted events from director
 
         if ($this->search !== '') {
             $s = $this->search;
@@ -197,8 +196,9 @@ new class extends Component {
     public function viewingEvent(): ?AdminEvent
     {
         if (!$this->viewingEventId) return null;
+        // FIX 2: withTrashed on organizer so deactivated coordinator name still loads
         return AdminEvent::withTrashed()
-            ->with(['organizer:id,name,department,email'])
+            ->with(['organizer' => fn($q) => $q->withTrashed()->select('id','name','department','email')])
             ->withCount([
                 'rsvps as confirmed_count' => fn($r) => $r->where('response', 'CONFIRMED'),
                 'rsvps as declined_count'  => fn($r) => $r->where('response', 'DECLINED'),
@@ -218,7 +218,9 @@ new class extends Component {
     public function organizersForSelectedColleges(): array
     {
         if ($this->targetMode !== 'college' || empty($this->selectedColleges)) return [];
-        return Organizer::whereIn('department', $this->selectedColleges)
+        // FIX 2: withTrashed so deactivated organizers still appear
+        return Organizer::withTrashed()
+            ->whereIn('department', $this->selectedColleges)
             ->orderBy('name')
             ->get(['id', 'name', 'department', 'email'])
             ->toArray();
@@ -588,50 +590,6 @@ new class extends Component {
 
     public function cancelDelete(): void { $this->showDeleteModal = false; $this->deleteEventId = null; $this->deleteEventTitle = ''; }
 
-    public function confirmRestore(int $id): void
-    {
-        abort_unless(auth()->user()->role === 'director', 403);
-        $event = app(AdminEventController::class)->getEvent($id);
-        $this->restoreEventId    = $id;
-        $this->restoreEventTitle = $event->title;
-        $this->showRestoreModal  = true;
-    }
-
-    public function executeRestore(): void
-    {
-        abort_unless(auth()->user()->role === 'director', 403);
-        if ($this->restoreEventId) {
-            $event = app(AdminEventController::class)->getEvent($this->restoreEventId);
-            if ($event->trashed()) $event->restore();
-            $event->update([
-                'status'          => 'PENDING',
-                'deleted_by'      => null,
-                'deleted_by_role' => null,
-                'updated_by'      => $this->myDisplayName,
-                'updated_by_role' => 'director',
-            ]);
-            AuditLog::create([
-                'action'        => 'updated',
-                'module'        => 'event',
-                'user_name'     => $this->myDisplayName,
-                'user_email'    => auth()->user()?->email,
-                'user_role'     => 'director',
-                'subject_label' => $this->restoreEventTitle,
-                'description'   => "Director restored event: {$this->restoreEventTitle} — Status reset to PENDING",
-                'old_values'    => ['status' => 'ORGANIZER_DELETED'],
-                'new_values'    => ['status' => 'PENDING'],
-                'severity'      => 'info',
-                'ip_address'    => request()->ip(),
-                'user_agent'    => request()->userAgent(),
-            ]);
-            $this->dispatch('flash-message', type: 'success', message: "'{$this->restoreEventTitle}' restored!");
-        }
-        $this->showRestoreModal = false; $this->restoreEventId = null; $this->restoreEventTitle = '';
-        if ($this->showViewModal) { $this->showViewModal = false; $this->viewingEventId = null; }
-    }
-
-    public function cancelRestore(): void { $this->showRestoreModal = false; $this->restoreEventId = null; $this->restoreEventTitle = ''; }
-
     // ── Share Modal Methods ───────────────────────────────────────────────────
 
     public function openShareModal(int $id): void
@@ -741,9 +699,9 @@ new class extends Component {
         $coordinatorMentionLine = '';
 
         if ($event->organizer_id) {
+            // FIX 2: Remove whereNull('deleted_at') so deactivated coordinators are still found
             $org = DB::table('organizer')
                 ->where('id', $event->organizer_id)
-                ->whereNull('deleted_at')
                 ->first(['id', 'first_name', 'last_name', 'department']);
 
             if ($org) {
@@ -862,18 +820,15 @@ new class extends Component {
 .dir-filter-select:hover  { border-color: #7a3f91 !important; }
 .dir-filter-select:focus  { outline: none; border-color: #7a3f91 !important; box-shadow: 0 0 0 3px rgba(122,63,145,.12) !important; }
 
-/* Small modal pop-in */
 @keyframes dirModalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
 }
 .d-m-in { animation: dirModalIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
-/* Fade backdrop */
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 .fade-in { animation: fadeIn .2s ease both; }
 
-/* Smooth panel transitions */
 [x-cloak] { display: none !important; }
 </style>
 
@@ -995,8 +950,7 @@ new class extends Component {
                  style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
                  wire:loading.class="opacity-50 pointer-events-none"
                  wire:target="search,filterStatus,filterCollege,filterSort,resetFilters,
-                              previousPage,nextPage,executeApprove,executeReject,
-                              executeDelete,executeRestore">
+                              previousPage,nextPage,executeApprove,executeReject,executeDelete">
                 <table class="w-full border-collapse min-w-[650px]">
                     <thead>
                         <tr class="bg-[#f5f0fa] border-b border-[#e2d3ef] sticky top-0 z-10">
@@ -1011,9 +965,9 @@ new class extends Component {
                     <tbody class="divide-y divide-gray-100">
                         @forelse($this->events as $event)
                         @php
-                            $isOrgDeleted = $event->status === 'ORGANIZER_DELETED';
                             $isCompleted  = $event->status === 'COMPLETED';
                             $isApproved   = $event->status === 'APPROVED';
+                            // FIX 2: organizer loaded with withTrashed(), so name shows even if deactivated
                             if ($event->organizer_id && $event->organizer) {
                                 $displayCollege = $event->organizer->department ?? '—';
                             } else {
@@ -1027,7 +981,7 @@ new class extends Component {
 
                             {{-- Title --}}
                             <td class="px-4 sm:px-5 py-4 max-w-[180px] sm:max-w-[220px]">
-                                <p class="font-semibold text-sm truncate {{ $isOrgDeleted ? 'line-through opacity-60' : '' }}" style="color:#333333;">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm truncate" style="color:#333333;">{{ $event->title }}</p>
                                 <p class="text-xs mt-0.5" style="color:#999999;">{{ $event->created_at->diffForHumans() }}</p>
                             </td>
 
@@ -1040,7 +994,7 @@ new class extends Component {
                                 </p>
                             </td>
 
-                            {{-- Coordinator --}}
+                            {{-- Coordinator — FIX 2: shows even if organizer is deactivated --}}
                             <td class="px-4 sm:px-5 py-4 hidden md:table-cell">
                                 @if($event->organizer)
                                     <p class="text-sm font-semibold" style="color:#333333;">{{ $event->organizer->name }}</p>
@@ -1061,8 +1015,6 @@ new class extends Component {
                                     <span class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-green-100 text-green-800 border border-green-300 rounded-full text-xs font-semibold">
                                         <i class="fas fa-circle-check text-xs"></i> Completed
                                     </span>
-                                @elseif($isOrgDeleted)
-                                    <span class="inline-block px-2.5 py-1.5 bg-red-100 text-red-700 border border-red-300 rounded-full text-xs font-semibold">Deleted by Org.</span>
                                 @elseif($event->status === 'PENDING')
                                     <span class="inline-block px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-semibold">Pending</span>
                                 @elseif($isApproved)
@@ -1072,7 +1024,7 @@ new class extends Component {
                                 @endif
                             </td>
 
-                            {{-- Actions --}}
+                            {{-- Actions — FIX 1: removed all ORGANIZER_DELETED (restore/delete) logic --}}
                             <td class="px-4 sm:px-5 py-4 text-center">
                                 <div class="flex items-center justify-center gap-1.5 flex-wrap">
                                     <button wire:click="viewEvent({{ $event->id }})"
@@ -1090,16 +1042,6 @@ new class extends Component {
                                         <button wire:click="openShareModal({{ $event->id }})"
                                                 class="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 hover:bg-white hover:border-sky-400 rounded-lg transition">
                                             <i class="fas fa-share-nodes text-xs"></i><span>Share</span>
-                                        </button>
-
-                                    @elseif($isOrgDeleted)
-                                        <button wire:click="confirmRestore({{ $event->id }})"
-                                                class="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 hover:bg-orange-100 rounded-lg transition">
-                                            <i class="fas fa-rotate-left text-xs"></i><span>Restore</span>
-                                        </button>
-                                        <button wire:click="confirmDelete({{ $event->id }})"
-                                                class="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-red-600 bg-white border border-red-200 hover:bg-red-50 rounded-lg transition">
-                                            <i class="fas fa-trash text-xs"></i><span>Delete</span>
                                         </button>
 
                                     @elseif($event->status === 'PENDING')
@@ -1193,7 +1135,6 @@ new class extends Component {
      x-init="requestAnimationFrame(() => { open = true })"
      @keydown.escape.window="open = false; setTimeout(() => $wire.closeFormModal(), 290)">
 
-    {{-- Backdrop --}}
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0"
@@ -1204,7 +1145,6 @@ new class extends Component {
          class="absolute inset-0 bg-black/60 backdrop-blur-sm"
          @click="open = false; setTimeout(() => $wire.closeFormModal(), 290)"></div>
 
-    {{-- Panel --}}
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="translate-x-full"
@@ -1216,7 +1156,6 @@ new class extends Component {
          x-data="{}"
          x-effect="if($wire.formErrors && Object.keys($wire.formErrors).length > 0){$nextTick(()=>{const el=$refs.panelBody;if(el)el.scrollTo({top:0,behavior:'smooth'});});}">
 
-        {{-- ── Panel Header ── --}}
         <div class="flex items-center justify-between px-6 py-4 bg-[#7a3f91] text-white flex-shrink-0">
             <h2 class="text-lg font-semibold flex items-center gap-2.5">
                 <i class="fas fa-pen-to-square"></i> Edit Event
@@ -1227,7 +1166,6 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- ── Validation Errors Banner ── --}}
         @if(count($formErrors))
         <div class="bg-red-50 border-b border-red-200 px-6 py-4 flex-shrink-0">
             <p class="font-semibold text-red-800 text-sm mb-2 flex items-center gap-2">
@@ -1241,12 +1179,10 @@ new class extends Component {
         </div>
         @endif
 
-        {{-- ── Scrollable Body ── --}}
         <div class="flex-1 min-h-0 overflow-y-auto px-6 py-6 space-y-5"
              x-ref="panelBody"
              style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
 
-            {{-- Photo --}}
             <div>
                 <label class="block text-sm font-semibold uppercase tracking-wide mb-2" style="color:#333333;">
                     Event Photo <span class="font-normal normal-case" style="color:#999999;">(Optional)</span>
@@ -1298,7 +1234,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Event Details Section --}}
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-[#f5f0fa] px-4 py-3 border-b border-[#e2d3ef] flex items-center gap-2">
                     <i class="fas fa-circle-info text-[#7a3f91] text-sm"></i>
@@ -1384,7 +1319,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Target Participants Section --}}
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-[#f5f0fa] px-4 py-3 border-b border-[#e2d3ef] flex items-center gap-2">
                     <i class="fas fa-users text-[#7a3f91] text-sm"></i>
@@ -1478,7 +1412,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Contact Person Section --}}
             <div class="border border-gray-200 rounded-xl overflow-hidden">
                 <div class="bg-[#f5f0fa] px-4 py-3 border-b border-[#e2d3ef] flex items-center gap-2 flex-wrap">
                     <i class="fas fa-address-card text-[#7a3f91] text-sm"></i>
@@ -1518,7 +1451,6 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ── Panel Footer ── --}}
         <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0 flex gap-3">
             <button type="button" @click="open = false; setTimeout(() => $wire.closeFormModal(), 290)"
                     class="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm font-semibold hover:bg-gray-100 transition"
@@ -1541,10 +1473,10 @@ new class extends Component {
 @php
     $ev           = $this->viewingEvent;
     $totalRsvp    = $ev->confirmed_count + $ev->declined_count + $ev->tentative_count;
-    $isOrgDeleted = $ev->status === 'ORGANIZER_DELETED';
     $isCompleted  = $ev->status === 'COMPLETED';
     $isApproved   = $ev->status === 'APPROVED';
 
+    // FIX 2: organizer loaded with withTrashed() so name still shows if deactivated
     if ($ev->organizer_id && $ev->organizer) {
         $displayCollege = $ev->organizer->department ?? '—';
     } else {
@@ -1582,7 +1514,6 @@ new class extends Component {
      x-init="requestAnimationFrame(() => { open = true })"
      @keydown.escape.window="open = false; setTimeout(() => $wire.closeViewModal(), 290)">
 
-    {{-- Backdrop --}}
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0"
@@ -1593,7 +1524,6 @@ new class extends Component {
          class="absolute inset-0 bg-black/60 backdrop-blur-sm"
          @click="open = false; setTimeout(() => $wire.closeViewModal(), 290)"></div>
 
-    {{-- Panel --}}
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="translate-x-full"
@@ -1603,7 +1533,6 @@ new class extends Component {
          x-transition:leave-end="translate-x-full"
          class="absolute inset-y-0 right-0 w-full max-w-3xl bg-white shadow-2xl flex flex-col will-change-transform">
 
-        {{-- ── Panel Header ── --}}
         <div class="flex items-center justify-between px-6 py-4 bg-[#7a3f91] text-white flex-shrink-0">
             <div class="flex items-center gap-3 min-w-0">
                 <div class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
@@ -1620,10 +1549,8 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- ── Scrollable Body ── --}}
         <div class="flex-1 min-h-0 overflow-y-auto" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
 
-            {{-- Hero Photo --}}
             <div class="relative w-full bg-gray-100 flex items-center justify-center" style="min-height:180px; max-height:340px;">
                 <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
                      class="w-full object-contain {{ $isCompleted ? 'brightness-90' : '' }}"
@@ -1633,8 +1560,6 @@ new class extends Component {
                         <span class="inline-flex items-center gap-1 px-3 py-1.5 bg-green-700/90 backdrop-blur text-white rounded-full text-xs font-semibold shadow">
                             <i class="fas fa-circle-check text-xs"></i> Completed
                         </span>
-                    @elseif($isOrgDeleted)
-                        <span class="inline-block px-3 py-1.5 bg-red-700/90 backdrop-blur text-white rounded-full text-xs font-semibold shadow">Deleted by Org.</span>
                     @elseif($ev->status === 'PENDING')
                         <span class="inline-block px-3 py-1.5 bg-amber-600/90 backdrop-blur text-white rounded-full text-xs font-semibold shadow">Pending</span>
                     @elseif($isApproved)
@@ -1645,15 +1570,6 @@ new class extends Component {
                 </div>
             </div>
 
-            @if($isOrgDeleted)
-            <div class="mx-5 mt-4 flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-700">
-                <i class="fas fa-trash text-red-500 shrink-0"></i>
-                Deleted by <strong>{{ $ev->deleted_by ?? $ev->organizer?->name ?? 'Coordinator' }}</strong>
-                · {{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}
-            </div>
-            @endif
-
-            {{-- Core Info --}}
             <div class="px-6 py-5 border-b border-gray-100">
                 <ul class="space-y-3">
                     <li class="flex items-start gap-3">
@@ -1687,13 +1603,13 @@ new class extends Component {
                     </li>
                     @endif
                     <li class="flex items-start gap-3">
+                        {{-- FIX 2: organizer name shows even if deactivated --}}
                         <i class="fas fa-{{ $ev->organizer ? 'user-tie' : 'shield-halved' }} text-[#7a3f91] mt-0.5 w-4 flex-shrink-0 text-base"></i>
                         <span class="text-base font-semibold" style="color:#333333;">{{ $postedByLabel }}</span>
                     </li>
                 </ul>
             </div>
 
-            {{-- RSVPs --}}
             <div class="px-6 py-5 border-b border-gray-100">
                 <h3 class="text-xs font-semibold uppercase tracking-widest mb-3 flex items-center gap-2" style="color:#333333;">
                     <i class="fas fa-users text-xs"></i> Attendee Responses
@@ -1725,18 +1641,12 @@ new class extends Component {
                 @endif
             </div>
 
-            {{-- Status --}}
             <div class="px-6 py-5 border-b border-gray-100">
                 <h3 class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#333333;">Status</h3>
                 @if($isCompleted)
                     <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3">
                         <p class="text-sm font-semibold text-green-800"><i class="fas fa-circle-check mr-2 text-green-500"></i>Event Completed</p>
                         <p class="text-sm text-green-700 mt-1">This event has already taken place successfully.</p>
-                    </div>
-                @elseif($isOrgDeleted)
-                    <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-                        <p class="text-sm font-semibold text-red-800"><i class="fas fa-trash mr-2 text-red-500"></i>Deleted by Coordinator</p>
-                        <p class="text-sm text-red-600 mt-1">You can restore this event to put it back to Pending review.</p>
                     </div>
                 @elseif($ev->status==='PENDING')
                     <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
@@ -1794,7 +1704,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Posting Details --}}
             <div class="px-6 py-5">
                 <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#999999;">Posting Details</p>
                 <div class="grid grid-cols-2 sm:grid-cols-3 border border-gray-200 rounded-xl overflow-hidden divide-x divide-y divide-gray-100">
@@ -1814,7 +1723,6 @@ new class extends Component {
                     <div class="px-4 py-3">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:#999999;">Status</p>
                         @if($isCompleted)<p class="text-sm font-semibold text-green-700">Completed</p>
-                        @elseif($isOrgDeleted)<p class="text-sm font-semibold text-red-600">Deleted by Org.</p>
                         @elseif($ev->status==='PENDING')<p class="text-sm font-semibold text-amber-600">Pending</p>
                         @elseif($isApproved)<p class="text-sm font-semibold text-emerald-600">Approved</p>
                         @else<p class="text-sm font-semibold text-red-600">Rejected</p>@endif
@@ -1823,7 +1731,7 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ── Panel Footer ── --}}
+        {{-- FIX 1: removed all ORGANIZER_DELETED handling from footer --}}
         <div class="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-2 flex-wrap bg-white flex-shrink-0">
             <button @click="open = false; setTimeout(() => $wire.closeViewModal(), 290)"
                     class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border border-gray-300 bg-white hover:bg-gray-50 rounded-xl transition"
@@ -1840,15 +1748,6 @@ new class extends Component {
                 <button wire:click="openShareModal({{ $ev->id }})"
                         class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-sky-700 bg-sky-50 border border-sky-200 hover:bg-white hover:border-sky-400 rounded-xl transition">
                     <i class="fas fa-share-nodes text-sm"></i> Share
-                </button>
-            @elseif($isOrgDeleted)
-                <button wire:click="confirmDelete({{ $ev->id }})"
-                        class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-red-600 border border-red-200 bg-white hover:bg-red-50 rounded-xl transition">
-                    <i class="fas fa-trash text-sm"></i> Delete
-                </button>
-                <button wire:click="confirmRestore({{ $ev->id }})"
-                        class="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-orange-600 border border-orange-200 bg-white hover:bg-orange-50 rounded-xl transition">
-                    <i class="fas fa-rotate-left text-sm"></i> Restore
                 </button>
             @elseif($ev->status==='PENDING')
                 <button wire:click="confirmDelete({{ $ev->id }})"
@@ -1957,40 +1856,6 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ════ MODAL: Restore ════ --}}
-@if($showRestoreModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @keydown.escape.window="$wire.cancelRestore()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden d-m-in">
-        <div class="px-6 py-5 bg-orange-50 border-b border-orange-100">
-            <h2 class="text-lg font-semibold text-orange-800 flex items-center gap-2.5">
-                <div class="w-9 h-9 bg-orange-100 rounded-xl flex items-center justify-center">
-                    <i class="fas fa-rotate-left text-orange-500 text-base"></i>
-                </div>
-                Restore Event
-            </h2>
-        </div>
-        <div class="p-6">
-            <p class="text-sm mb-1" style="color:#666666;">You are about to restore:</p>
-            <p class="font-semibold text-orange-700 text-base mb-4">"{{ $restoreEventTitle }}"</p>
-            <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-5 text-sm text-blue-800 flex items-start gap-2">
-                <i class="fas fa-info-circle text-blue-500 mt-0.5 shrink-0"></i>
-                <span>The event will be set back to <strong>PENDING</strong> for review. The coordinator will see it in their list again.</span>
-            </div>
-            <div class="flex gap-3">
-                <button wire:click="cancelRestore"
-                        class="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm font-semibold hover:bg-gray-50 transition"
-                        style="color:#333333;">Cancel</button>
-                <button wire:click="executeRestore" wire:loading.attr="disabled" wire:target="executeRestore"
-                        class="flex-1 px-4 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition">
-                    <span wire:loading wire:target="executeRestore"><i class="fas fa-spinner animate-spin"></i></span>
-                    <span wire:loading.remove wire:target="executeRestore"><i class="fas fa-rotate-left mr-1"></i> Yes, Restore</span>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-@endif
-
 {{-- ════ MODAL: Delete ════ --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @keydown.escape.window="$wire.cancelDelete()">
@@ -2034,8 +1899,6 @@ new class extends Component {
 
 {{-- ════════════════════════════════════════════════════════════════════════
      SLIDE-OVER: Share / Highlights
-     FIX: wire:ignore added to prevent Livewire from evaluating Alpine
-          expressions (fbCopyFailed, etc.) during FontAwesome DOM mutations
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showShareModal)
 @php
@@ -2076,13 +1939,6 @@ new class extends Component {
         && str_contains($shareEventPhotoUrl, '/storage/');
 @endphp
 
-{{-- ────────────────────────────────────────────────────────────────────────
-     wire:ignore prevents Livewire's DOM morphing from trying to evaluate
-     Alpine expressions like `fbCopyFailed` during FontAwesome SVG-swap
-     mutations. The @if($showShareModal) above still controls whether the
-     entire element exists; wire:ignore only stops Livewire from touching
-     its children while it does exist.
-──────────────────────────────────────────────────────────────────────── --}}
 <div wire:ignore
      class="fixed inset-0 z-[70] overflow-hidden"
      x-data="{
@@ -2168,7 +2024,6 @@ new class extends Component {
      x-init="requestAnimationFrame(() => { open = true })"
      @keydown.escape.window="close()">
 
-    {{-- Backdrop --}}
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0"
@@ -2179,7 +2034,6 @@ new class extends Component {
          class="absolute inset-0 bg-black/60 backdrop-blur-sm"
          @click="close()"></div>
 
-    {{-- ── Slide Panel ── --}}
     <div x-show="open" x-cloak
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="translate-x-full"
@@ -2189,7 +2043,6 @@ new class extends Component {
          x-transition:leave-end="translate-x-full"
          class="absolute inset-y-0 right-0 w-full max-w-4xl bg-white shadow-2xl flex flex-col will-change-transform">
 
-        {{-- ── Panel Header ── --}}
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-lg font-semibold flex items-center gap-2" style="color:#333333;">
                 @if($isShCompleted)
@@ -2207,15 +2060,12 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- ── Two-column body ── --}}
         <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
 
-            {{-- LEFT: Preview ── --}}
             <div class="flex-1 px-6 py-5 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-4 overflow-y-auto"
                  style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
                 <p class="text-xs font-semibold uppercase tracking-widest flex-shrink-0" style="color:#999999;">Post preview</p>
 
-                {{-- Preview card with FULL photo --}}
                 <div class="rounded-2xl border border-gray-200 overflow-hidden shadow-sm flex-shrink-0">
                     @if($shareEventPhotoUrl)
                     <div class="w-full bg-gray-100 flex items-center justify-center" style="max-height:220px; overflow:hidden;">
@@ -2254,7 +2104,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- How it works --}}
                 <div class="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 flex items-start gap-3 flex-shrink-0">
                     <i class="fas fa-circle-info text-blue-500 text-base flex-shrink-0 mt-0.5"></i>
                     <div>
@@ -2268,7 +2117,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Staff chat info --}}
                 <div class="bg-[#f5eef9] border border-[#d4aaeb] rounded-xl px-5 py-4 flex items-start gap-3 flex-shrink-0">
                     <i class="fas fa-shield-halved text-[#7a3f91] text-base flex-shrink-0 mt-0.5"></i>
                     <div>
@@ -2277,9 +2125,10 @@ new class extends Component {
                             Posts the event photo + caption directly to the <strong>Directors &amp; Coordinators</strong> chat
                             @if($shareEventId)
                                 @php
+                                    // FIX 2: no whereNull filter so deactivated coordinators still found
                                     $orgIdForInfo = AdminEvent::withoutTrashed()->find($shareEventId)?->organizer_id;
                                     $orgForInfo   = $orgIdForInfo
-                                        ? DB::table('organizer')->where('id', $orgIdForInfo)->first(['first_name','last_name'])
+                                        ? DB::table('organizer')->where('id', $orgIdForInfo)->first(['id', 'first_name','last_name'])
                                         : null;
                                 @endphp
                                 @if($orgForInfo)
@@ -2291,12 +2140,10 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- RIGHT: Share buttons ── --}}
             <div class="w-full md:w-80 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto"
                  style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
                 <p class="text-xs font-semibold uppercase tracking-widest" style="color:#999999;">Share via</p>
 
-                {{-- Facebook feedback --}}
                 <div x-show="fbCopied" x-cloak
                      x-transition:enter="transition ease-out duration-300"
                      x-transition:enter-start="opacity-0 -translate-y-2"
@@ -2317,7 +2164,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Messenger feedback --}}
                 <div x-show="messengerCopied" x-cloak
                      x-transition:enter="transition ease-out duration-300"
                      x-transition:enter-start="opacity-0 -translate-y-2"
@@ -2330,7 +2176,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Facebook button --}}
                 <button type="button" @click="shareOnFacebook()"
                         class="w-full flex items-center gap-4 px-5 py-4 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
                     <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
@@ -2345,7 +2190,6 @@ new class extends Component {
                     <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
                 </button>
 
-                {{-- Messenger button --}}
                 <button type="button" @click="shareOnMessenger()"
                         class="w-full flex items-center gap-4 px-5 py-4 rounded-xl text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group"
                         style="background:linear-gradient(to right,#00B2FF,#006AFF);">
@@ -2362,7 +2206,6 @@ new class extends Component {
                     <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
                 </button>
 
-                {{-- Divider --}}
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
@@ -2370,7 +2213,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Staff Chat button --}}
                 <button type="button"
                         wire:click="postToBatchChat"
                         wire:loading.attr="disabled"
@@ -2395,7 +2237,6 @@ new class extends Component {
                     <i class="fas fa-paper-plane text-sm" style="color:#7a3f91;"></i>
                 </button>
 
-                {{-- Divider --}}
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
@@ -2403,7 +2244,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Copy Link button --}}
                 <button type="button" @click="copyLinkFn()"
                         class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 font-semibold text-sm transition cursor-pointer group bg-white"
                         style="color:#333333;">
@@ -2417,7 +2257,6 @@ new class extends Component {
                     </div>
                 </button>
 
-                {{-- Close button at bottom --}}
                 <button type="button" @click="close()"
                         class="w-full px-5 py-3 rounded-xl border border-gray-200 text-sm font-semibold hover:bg-gray-50 transition mt-1"
                         style="color:#666666;">

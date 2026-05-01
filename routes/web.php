@@ -138,6 +138,8 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::post('/alumni/import', [AlumniController::class, 'import'])->name('alumni.import');
 
+    Route::view('/course',                'admin.course-wrapper')                ->name('course');
+
     Route::get('/courses',             [CourseController::class, 'index'])  ->name('courses.index');
     Route::post('/courses',            [CourseController::class, 'store'])  ->name('courses.store');
     Route::put('/courses/{course}',    [CourseController::class, 'update']) ->name('courses.update');

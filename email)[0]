@@ -1,0 +1,1 @@
+"\nUsername : " . explode('@', $user- . "\n";

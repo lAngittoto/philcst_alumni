@@ -331,12 +331,46 @@ new class extends Component {
     public function saveUpdateEmail(): void {
         $this->ueErrors = []; $this->ueSave = true;
         try {
-            if (!trim($this->ueEmail) || !filter_var(trim($this->ueEmail), FILTER_VALIDATE_EMAIL))
-                throw new \Exception('Please enter a valid email address.');
+            $email = trim($this->ueEmail);
+
+            if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $this->ueErrors = ['general' => ['Please enter a valid email address.']];
+                return;
+            }
+
+            // Friendly duplicate check before hitting the DB constraint
+            $duplicate = DB::table('alumni')
+                ->where('email', $email)
+                ->where('user_id', '!=', $this->ueId)
+                ->exists();
+
+            if ($duplicate) {
+                $this->ueErrors = ['general' => [
+                    "The email address \"{$email}\" is already registered to another alumni account. Please use a different email address."
+                ]];
+                return;
+            }
+
+            // Update email AND reset password_changed_at so wizard runs on next login
             DB::table('alumni')->where('user_id', $this->ueId)
-                ->update(['email' => trim($this->ueEmail), 'updated_at' => now()]);
-            $this->flash('success', 'Email updated for ' . $this->ueName . '!');
+                ->update([
+                    'email'               => $email,
+                    'password_changed_at' => null,
+                    'updated_at'          => now(),
+                ]);
+
+            $this->flash('success', "Email updated for {$this->ueName}. They will be required to reset their password on next login.");
             $this->closeModal();
+
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Safety net: catch DB-level duplicate key error
+            if (($e->errorInfo[1] ?? null) === 1062) {
+                $this->ueErrors = ['general' => [
+                    'That email address is already in use by another alumni account. Please choose a different one.'
+                ]];
+            } else {
+                $this->ueErrors = ['general' => ['A database error occurred. Please try again.']];
+            }
         } catch (\Exception $e) {
             $this->ueErrors = ['general' => [$e->getMessage()]];
         } finally { $this->ueSave = false; }
@@ -354,13 +388,38 @@ new class extends Component {
     }
 
     public function saveChangePassword(): void {
-        $this->cpErrs=[]; $this->cpSave=true;
+        $this->cpErrs = []; $this->cpSave = true;
         try {
-            if (strlen(trim($this->cpNew)) < 8) throw new \Exception('Password must be at least 8 characters.');
-            if ($this->cpNew !== $this->cpConfirm) throw new \Exception('Passwords do not match.');
-            DB::table('users')->where('id',$this->cpId)
+            if (strlen(trim($this->cpNew)) < 8)
+                throw new \Exception('Password must be at least 8 characters long.');
+            if ($this->cpNew !== $this->cpConfirm)
+                throw new \Exception('Passwords do not match. Please re-enter and try again.');
+
+            $user = DB::table('users')->find($this->cpId);
+
+            // Update the password
+            DB::table('users')->where('id', $this->cpId)
                 ->update(['password' => Hash::make($this->cpNew), 'updated_at' => now()]);
-            $this->flash('success','Password updated for '.$this->cpName.'!');
+
+            // Reset password_changed_at in the role table so the user is forced
+            // through the change-password wizard on their very next login
+            match($user->role ?? '') {
+                'alumni'    => DB::table('alumni')
+                                    ->where('user_id', $this->cpId)
+                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'organizer' => DB::table('organizer')
+                                    ->where('user_id', $this->cpId)
+                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'director'  => DB::table('director')
+                                    ->where('user_id', $this->cpId)
+                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'registrar' => DB::table('users')
+                                    ->where('id', $this->cpId)
+                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
+                default     => null,
+            };
+
+            $this->flash('success', "Password updated for {$this->cpName}. They will be required to change it on next login.");
             $this->closeModal();
         } catch (\Exception $e) {
             $this->cpErrs = ['general' => [$e->getMessage()]];
@@ -539,7 +598,6 @@ new class extends Component {
                            style="border-color:#d1d5db;color:#333;" autocomplete="off">
                 </div>
 
-                {{-- ── STATUS FILTER: Active / Inactive only ── --}}
                 <select wire:model.live="statusFilter"
                         class="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:border-[#7A3F91]"
                         style="border-color:#d1d5db;color:#333;">
@@ -584,7 +642,6 @@ new class extends Component {
                             <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden sm:table-cell" style="color:#374151;">Email</th>
                             <th class="px-5 py-3.5 text-center text-sm font-bold uppercase tracking-wider" style="color:#374151;">Status</th>
                         @else
-                            {{-- all tab --}}
                             <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden sm:table-cell" style="color:#374151;">Email</th>
                             <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider" style="color:#374151;">Role</th>
                         @endif
@@ -672,7 +729,6 @@ new class extends Component {
                                 </span>
                             </td>
                         @else
-                            {{-- all tab --}}
                             <td class="px-5 py-3.5 hidden sm:table-cell">
                                 <span class="text-sm" style="color:#4b5563;">
                                     {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
@@ -722,7 +778,7 @@ new class extends Component {
                                 </button>
                                 @endif
 
-                                {{-- ACTIVATE / DEACTIVATE — director and registrar ONLY (coordinators excluded) --}}
+                                {{-- ACTIVATE / DEACTIVATE — director and registrar ONLY --}}
                                 @if(in_array($u->role, ['director','registrar']))
                                 @if($rowStatus === 'ACTIVE')
                                 <button wire:click="confirmToggle({{ $u->id }},'deactivate')"
@@ -949,7 +1005,6 @@ new class extends Component {
 
 {{-- ══════════════════════════════════════════════════════════
      VIEW PROFILE MODAL
-     Widened to max-w-5xl — no scroll needed for alumni view.
      ══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'viewProfile' && $vData)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto"
@@ -1034,9 +1089,7 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ══════════════════════════════════════════
-                 UPLOAD PROFILE PHOTO
-                 ══════════════════════════════════════════ --}}
+            {{-- ── UPLOAD PROFILE PHOTO ── --}}
             @if(in_array($vData['role'], ['alumni','organizer','director','registrar']))
             <div class="rounded-xl overflow-hidden" style="border:1px solid #e9d5f3;">
                 <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#f5eef9;border-color:#e9d5f3;">
@@ -1106,9 +1159,7 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- ══════════════════════════════════════════
-                 ALUMNI: Two-column layout for sections
-                 ══════════════════════════════════════════ --}}
+            {{-- ── ALUMNI: Two-column layout ── --}}
             @if($vData['role'] === 'alumni')
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
@@ -1315,58 +1366,99 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── UPDATE ALUMNI EMAIL ── --}}
+{{-- ══════════════════════════════════════════════════════════
+     UPDATE ALUMNI EMAIL MODAL
+     ══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'updateAlumniEmail' && $ueId)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div class="flex items-center justify-between px-6 py-4" style="background:#c2410c;">
-            <h2 class="text-white font-bold text-lg flex items-center gap-2">
-                <i class="fas fa-envelope-open-text"></i> Update Email Address
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-6 py-5" style="background:#c2410c;">
+            <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
+                <i class="fas fa-envelope-open-text text-lg"></i> Update Email Address
             </h2>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white text-xl transition">
+            <button wire:click="closeModal" class="text-white/60 hover:text-white text-2xl transition">
                 <i class="fas fa-xmark"></i>
             </button>
         </div>
+
+        {{-- Alumni chip --}}
         <div class="px-6 pt-5">
-            <div class="flex items-center gap-3 p-3 rounded-xl" style="background:#fff7ed;border:1px solid #fed7aa;">
-                <i class="fas fa-user-graduate text-orange-600 shrink-0"></i>
+            <div class="flex items-center gap-3 p-4 rounded-xl" style="background:#fff7ed;border:1px solid #fed7aa;">
+                <i class="fas fa-user-graduate text-orange-600 text-lg shrink-0"></i>
                 <div>
-                    <p class="text-sm font-semibold" style="color:#9a3412;">{{ $ueName }}</p>
-                    <p class="text-xs font-medium mt-0.5" style="color:#b45309;">Alumni</p>
+                    <p class="text-base font-bold leading-tight" style="color:#9a3412;">{{ $ueName }}</p>
+                    <p class="text-sm font-semibold mt-0.5" style="color:#b45309;">Alumni Account</p>
                 </div>
             </div>
         </div>
+
+        {{-- Validation Errors --}}
         @if(count($ueErrors))
-        <div class="mx-6 mt-4 p-4 rounded-xl bg-red-50 border border-red-200">
-            @foreach($ueErrors as $msgs) @foreach($msgs as $msg)
-            <p class="text-sm text-red-700 flex items-center gap-2"><i class="fas fa-circle-exclamation shrink-0"></i>{{ $msg }}</p>
-            @endforeach @endforeach
+        <div class="mx-6 mt-4 p-4 rounded-xl bg-red-50 border border-red-200 space-y-2">
+            @foreach($ueErrors as $msgs)
+                @foreach($msgs as $msg)
+                <p class="text-base font-semibold text-red-700 flex items-start gap-2.5 leading-snug">
+                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-base"></i>
+                    <span>{{ $msg }}</span>
+                </p>
+                @endforeach
+            @endforeach
         </div>
         @endif
-        <div class="p-6 space-y-4">
+
+        <div class="p-6 space-y-5">
+
+            {{-- Input --}}
             <div>
-                <label class="block text-sm font-bold mb-2" style="color:#1a1a1a;">New Email Address <span class="text-red-500">*</span></label>
+                <label class="block text-base font-bold mb-2.5" style="color:#1a1a1a;">
+                    New Email Address <span class="text-red-500">*</span>
+                </label>
                 <div class="relative">
-                    <i class="fas fa-envelope absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                    <input wire:model.defer="ueEmail" type="email" placeholder="e.g. alumni@email.com"
-                           class="w-full pl-9 pr-3.5 py-2.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
+                    <i class="fas fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
+                    <input wire:model.defer="ueEmail" type="email"
+                           placeholder="e.g. alumni@email.com"
+                           class="w-full pl-11 pr-4 py-3.5 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
                            style="border-color:#d1d5db;color:#111;" autocomplete="off">
                 </div>
             </div>
-            <div class="flex items-start gap-2.5 p-3.5 rounded-xl" style="background:#fef2f2;border:1px solid #fecaca;">
-                <i class="fas fa-triangle-exclamation text-red-500 text-sm mt-0.5 shrink-0"></i>
-                <p class="text-xs font-medium" style="color:#991b1b;">This will overwrite the current email address on file for this alumni.</p>
+
+            {{-- Warning boxes --}}
+            <div class="space-y-3">
+                <div class="flex items-start gap-3 p-4 rounded-xl" style="background:#fef2f2;border:1px solid #fecaca;">
+                    <i class="fas fa-triangle-exclamation text-red-500 text-base mt-0.5 shrink-0"></i>
+                    <p class="text-sm font-semibold leading-snug" style="color:#991b1b;">
+                        This will overwrite the current email address on file for this alumni.
+                    </p>
+                </div>
+                <div class="flex items-start gap-3 p-4 rounded-xl" style="background:#fffbeb;border:1px solid #fde68a;">
+                    <i class="fas fa-key text-amber-500 text-base mt-0.5 shrink-0"></i>
+                    <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
+                        The alumni's password will be <strong>reset</strong> and they will be required to set a new one on their next login.
+                    </p>
+                </div>
             </div>
+
+            {{-- Actions --}}
             <div class="flex gap-3 pt-1">
                 <button type="button" wire:click="closeModal"
-                        class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
-                        style="color:#374151;border-color:#d1d5db;"><i class="fas fa-xmark mr-1.5"></i>Cancel</button>
-                <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                        class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
+                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold border transition hover:bg-gray-50"
+                        style="color:#374151;border-color:#d1d5db;">
+                    <i class="fas fa-xmark mr-1.5"></i>Cancel
+                </button>
+                <button wire:click="saveUpdateEmail"
+                        wire:loading.attr="disabled"
+                        wire:target="saveUpdateEmail"
+                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
                         style="background:#c2410c;">
-                    <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin"></i> Updating…</span>
-                    <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check mr-1"></i>Confirm Update</span>
+                    <span wire:loading wire:target="saveUpdateEmail">
+                        <i class="fas fa-spinner animate-spin"></i> Updating…
+                    </span>
+                    <span wire:loading.remove wire:target="saveUpdateEmail">
+                        <i class="fas fa-check mr-1"></i>Confirm Update
+                    </span>
                 </button>
             </div>
         </div>
@@ -1374,54 +1466,89 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── CHANGE PASSWORD ── --}}
+{{-- ══════════════════════════════════════════════════════════
+     CHANGE PASSWORD MODAL
+     ══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'changePassword' && $cpId)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div class="flex items-center justify-between px-6 py-4" style="background:#c2410c;">
-            <h2 class="text-white font-bold text-lg flex items-center gap-2">
-                <i class="fas fa-key"></i> Change Password
+
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-6 py-5" style="background:#c2410c;">
+            <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
+                <i class="fas fa-key text-lg"></i> Change Password
             </h2>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white text-xl transition">
+            <button wire:click="closeModal" class="text-white/60 hover:text-white text-2xl transition">
                 <i class="fas fa-xmark"></i>
             </button>
         </div>
+
+        {{-- User chip --}}
         <div class="px-6 pt-5 pb-2">
-            <div class="flex items-center gap-3 p-3 rounded-xl" style="background:#fff7ed;border:1px solid #fed7aa;">
-                <i class="fas fa-user text-orange-600 shrink-0"></i>
-                <p class="text-sm font-semibold" style="color:#9a3412;">{{ $cpName }}</p>
+            <div class="flex items-center gap-3 p-4 rounded-xl" style="background:#fff7ed;border:1px solid #fed7aa;">
+                <i class="fas fa-user text-orange-600 text-lg shrink-0"></i>
+                <p class="text-base font-bold" style="color:#9a3412;">{{ $cpName }}</p>
             </div>
         </div>
+
+        {{-- Errors --}}
         @if(count($cpErrs))
-        <div class="mx-6 mt-3 p-4 rounded-xl bg-red-50 border border-red-200">
-            @foreach($cpErrs as $msgs) @foreach($msgs as $msg)
-            <p class="text-sm text-red-700 flex items-center gap-2"><i class="fas fa-circle-exclamation shrink-0"></i>{{ $msg }}</p>
-            @endforeach @endforeach
+        <div class="mx-6 mt-3 p-4 rounded-xl bg-red-50 border border-red-200 space-y-2">
+            @foreach($cpErrs as $msgs)
+                @foreach($msgs as $msg)
+                <p class="text-base font-semibold text-red-700 flex items-start gap-2.5 leading-snug">
+                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-base"></i>
+                    <span>{{ $msg }}</span>
+                </p>
+                @endforeach
+            @endforeach
         </div>
         @endif
-        <div class="p-6 space-y-4">
+
+        <div class="p-6 space-y-5">
+
+            {{-- Warning box --}}
+            <div class="flex items-start gap-3 p-4 rounded-xl" style="background:#fffbeb;border:1px solid #fde68a;">
+                <i class="fas fa-rotate-left text-amber-500 text-base mt-0.5 shrink-0"></i>
+                <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
+                    After saving, this user will be required to <strong>change their password</strong> on their next login.
+                </p>
+            </div>
+
             <div>
-                <label class="block text-sm font-bold mb-2" style="color:#1a1a1a;">New Password <span class="text-red-500">*</span></label>
+                <label class="block text-base font-bold mb-2.5" style="color:#1a1a1a;">
+                    New Password <span class="text-red-500">*</span>
+                </label>
                 <input wire:model.defer="cpNew" type="password" placeholder="Min. 8 characters"
-                       class="w-full px-3.5 py-2.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
+                       class="w-full px-4 py-3.5 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
                        style="border-color:#d1d5db;color:#111;" autocomplete="new-password">
             </div>
+
             <div>
-                <label class="block text-sm font-bold mb-2" style="color:#1a1a1a;">Confirm New Password <span class="text-red-500">*</span></label>
+                <label class="block text-base font-bold mb-2.5" style="color:#1a1a1a;">
+                    Confirm New Password <span class="text-red-500">*</span>
+                </label>
                 <input wire:model.defer="cpConfirm" type="password" placeholder="Repeat new password"
-                       class="w-full px-3.5 py-2.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
+                       class="w-full px-4 py-3.5 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
                        style="border-color:#d1d5db;color:#111;" autocomplete="new-password">
             </div>
+
             <div class="flex gap-3 pt-1">
                 <button type="button" wire:click="closeModal"
-                        class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
+                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold border transition hover:bg-gray-50"
                         style="color:#374151;border-color:#d1d5db;">Cancel</button>
-                <button wire:click="saveChangePassword" wire:loading.attr="disabled" wire:target="saveChangePassword"
-                        class="flex-1 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
+                <button wire:click="saveChangePassword"
+                        wire:loading.attr="disabled"
+                        wire:target="saveChangePassword"
+                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
                         style="background:#c2410c;">
-                    <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin"></i> Saving…</span>
-                    <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-key"></i> Update Password</span>
+                    <span wire:loading wire:target="saveChangePassword">
+                        <i class="fas fa-spinner animate-spin"></i> Saving…
+                    </span>
+                    <span wire:loading.remove wire:target="saveChangePassword">
+                        <i class="fas fa-key"></i> Update Password
+                    </span>
                 </button>
             </div>
         </div>
@@ -1429,7 +1556,9 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── TOGGLE CONFIRM ── --}}
+{{-- ══════════════════════════════════════════════════════════
+     TOGGLE CONFIRM MODAL
+     ══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'toggleConfirm' && $tId)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeModal()">

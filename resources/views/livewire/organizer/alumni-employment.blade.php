@@ -5,6 +5,7 @@
 use Livewire\Volt\Component;
 use Livewire\WithPagination;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
 
@@ -27,6 +28,8 @@ new class extends Component {
     public int $totalSelf       = 0;
     public int $totalUnemployed = 0;
     public int $totalNotFilled  = 0;
+    public int $totalLocal      = 0;
+    public int $totalOFW        = 0;
 
     public bool  $showModal = false;
     public array $modalData = [];
@@ -84,6 +87,16 @@ new class extends Component {
         $this->totalNotFilled  = max(0,
             $this->totalAlumni - $this->totalEmployed - $this->totalSelf - $this->totalUnemployed
         );
+
+        $this->totalLocal = (clone $withEmp)
+            ->whereIn('et.employment_status', ['employed', 'self_employed'])
+            ->where('et.work_location', 'local')
+            ->count();
+
+        $this->totalOFW = (clone $withEmp)
+            ->whereIn('et.employment_status', ['employed', 'self_employed'])
+            ->where('et.work_location', 'abroad')
+            ->count();
     }
 
     private function baseAlumniQuery(): \Illuminate\Database\Query\Builder
@@ -100,6 +113,19 @@ new class extends Component {
         return $q;
     }
 
+    private function getAlumniPhotoUrl(?string $path): string
+    {
+        if (!$path || str_contains($path, 'default.png')) {
+            return asset('storage/alumni-photos/default.png');
+        }
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/')) {
+            return Storage::disk('public')->exists($path)
+                ? asset('storage/' . $path)
+                : asset('storage/alumni-photos/default.png');
+        }
+        return asset('storage/alumni-photos/default.png');
+    }
+
     public function with(): array
     {
         $q = DB::table('alumni as a')
@@ -110,6 +136,7 @@ new class extends Component {
             ->select([
                 'a.id',
                 'a.student_id',
+                'a.profile_photo',
                 DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
                 'a.course_code',
                 'a.course_name',
@@ -157,7 +184,7 @@ new class extends Component {
         $q->orderByRaw("CASE WHEN et.employment_status IS NULL THEN 1 ELSE 0 END")
           ->orderBy('a.last_name');
 
-        $rows = $q->paginate(15);
+        $rows = $q->paginate(20);
 
         $rows->getCollection()->transform(function ($row) {
             $row->career_path_arr = $row->career_path
@@ -206,6 +233,7 @@ new class extends Component {
             ->where('a.id', $alumniId)
             ->select([
                 'a.student_id',
+                'a.profile_photo',
                 DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.middle_initial,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
                 'a.suffix', 'a.course_name', 'a.course_code', 'a.batch',
                 'a.gender', 'a.civil_status', 'a.contact_number',
@@ -258,13 +286,13 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-{{-- ══ PAGE WRAPPER ══ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-8 max-w-screen-2xl mx-auto" style="min-height:90vh;">
+{{-- ══ PAGE WRAPPER — 90VH FLEX COLUMN ══ --}}
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-2 max-w-screen-2xl mx-auto" style="height:90vh;">
 
     {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex items-center gap-3 mb-6">
+    <div class="flex items-center gap-3 mb-4 shrink-0">
         <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+             style="background:#7A3F91;">
             <i class="fas fa-chart-line text-white text-base"></i>
         </div>
         <div>
@@ -287,14 +315,14 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ══ STAT CARDS ══ --}}
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+    {{-- ══ STAT CARDS — 7 cards ══ --}}
+    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4 shrink-0">
 
         {{-- Total --}}
         <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                     style="background:#7A3F91;">
                     <i class="fa-solid fa-users text-white text-base"></i>
                 </div>
                 <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">All</span>
@@ -358,7 +386,7 @@ new class extends Component {
         </div>
 
         {{-- Not Filled --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow col-span-2 lg:col-span-1">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
                     <i class="fa-solid fa-circle-question text-white text-base"></i>
@@ -375,15 +403,49 @@ new class extends Component {
             @endif
         </div>
 
+        {{-- Local --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
+                    <i class="fa-solid fa-house text-white text-base"></i>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-100 uppercase">PH</span>
+            </div>
+            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalLocal }}</p>
+            <p class="text-sm text-[#666666] mt-1 font-normal">Local</p>
+            @if($totalAlumni > 0)
+                <div class="mt-2 h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-teal-500 rounded-full"
+                         style="width:{{ min(($totalLocal / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                </div>
+            @endif
+        </div>
+
+        {{-- OFW --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+            <div class="flex items-start justify-between mb-3">
+                <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
+                    <i class="fa-solid fa-plane-departure text-white text-base"></i>
+                </div>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-100 uppercase">OFW</span>
+            </div>
+            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalOFW }}</p>
+            <p class="text-sm text-[#666666] mt-1 font-normal">Abroad (OFW)</p>
+            @if($totalAlumni > 0)
+                <div class="mt-2 h-1.5 bg-orange-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-orange-500 rounded-full"
+                         style="width:{{ min(($totalOFW / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                </div>
+            @endif
+        </div>
+
     </div>
 
-    {{-- ══ TABLE CARD ══ --}}
-    <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm flex flex-col overflow-hidden"
-         style="min-height:0;height:calc(100vh - 310px);">
+    {{-- ══ TABLE CARD — fills remaining height ══ --}}
+    <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm flex flex-col overflow-hidden flex-1 min-h-0">
 
         {{-- ── Filter Bar ── --}}
-        <div class="px-4 sm:px-5 py-3 border-b border-[#E8E0F0] flex flex-wrap gap-2 items-center"
-             style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+        <div class="px-4 sm:px-5 py-3 border-b border-[#E8E0F0] flex flex-wrap gap-2 items-center bg-[#F9F7FC] shrink-0">
 
             {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
@@ -414,7 +476,7 @@ new class extends Component {
                 <option value="abroad">Abroad (OFW)</option>
             </select>
 
-            {{-- ── Course Relevance Filter (NEW) ── --}}
+            {{-- Course Relevance --}}
             <select wire:model.live="filterRelevance"
                     class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
                 <option value="">All Relevance</option>
@@ -464,15 +526,13 @@ new class extends Component {
                  wire:target="search,filterStatus,filterLocation,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
                 <table class="w-full border-collapse min-w-[820px]">
                     <thead>
-                        <tr class="border-b border-[#E8E0F0] sticky top-0 z-10"
-                            style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+                        <tr class="border-b border-[#E8E0F0] sticky top-0 z-10 bg-[#F9F7FC]">
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Alumni</th>
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Course</th>
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden md:table-cell">Batch</th>
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Company / Job Title</th>
+                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Job Title</th>
                             <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden lg:table-cell">Location</th>
                             <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider">Status</th>
-                            {{-- ── NEW COLUMN ── --}}
                             <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider hidden xl:table-cell">
                                 Course Relevance
                             </th>
@@ -504,13 +564,22 @@ new class extends Component {
                             };
                             $isWorking = in_array($row->employment_status, ['employed', 'self_employed']);
 
-                            // Course relevance display config
                             $relConfig = match($row->course_relevance ?? '') {
                                 'yes'       => ['Related',          'fa-check-circle',  'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
                                 'no'        => ['Not Related',      'fa-times-circle',  'text-red-600',     'bg-red-50 border-red-200'],
                                 'partially' => ['Partially',        'fa-adjust',        'text-amber-700',   'bg-amber-50 border-amber-200'],
                                 default     => null,
                             };
+
+                            // Photo URL
+                            $photoPath = $row->profile_photo ?? null;
+                            $photoUrl  = (!$photoPath || str_contains($photoPath, 'default.png'))
+                                ? asset('storage/alumni-photos/default.png')
+                                : (
+                                    (str_starts_with($photoPath, 'alumni-photos/') || str_starts_with($photoPath, 'organizers/'))
+                                    ? asset('storage/' . $photoPath)
+                                    : asset('storage/alumni-photos/default.png')
+                                );
                         @endphp
 
                         <tr class="bg-white hover:bg-[#faf7ff] transition-colors duration-100">
@@ -518,10 +587,9 @@ new class extends Component {
                             {{-- Alumni --}}
                             <td class="px-5 py-3.5">
                                 <div class="flex items-center gap-3">
-                                    <div class="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm font-bold shadow"
-                                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                                        {{ strtoupper(substr($row->full_name, 0, 1)) }}
-                                    </div>
+                                    <img src="{{ $photoUrl }}"
+                                         alt="{{ $row->full_name }}"
+                                         class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                     <div class="min-w-0">
                                         <p class="font-semibold text-[#333333] text-sm leading-snug truncate uppercase">{{ $row->full_name }}</p>
                                         <p class="text-xs text-[#999999] font-mono mt-0.5">{{ $row->student_id }}</p>
@@ -541,11 +609,10 @@ new class extends Component {
                                 {{ $row->batch ?? '—' }}
                             </td>
 
-                            {{-- Company / Job --}}
+                            {{-- Job Title Only --}}
                             <td class="px-5 py-3.5">
-                                @if($row->job_title || $row->company_name)
-                                    <p class="font-semibold text-[#333333] text-sm leading-snug uppercase">{{ $row->job_title ?? '—' }}</p>
-                                    <p class="text-xs text-[#999999] mt-0.5">{{ $row->company_name ?? '' }}</p>
+                                @if($row->job_title)
+                                    <p class="font-semibold text-[#333333] text-sm leading-snug uppercase">{{ $row->job_title }}</p>
                                     {{-- Relevance badge inline (shown on smaller screens where xl column is hidden) --}}
                                     @if($relConfig)
                                         <span class="xl:hidden inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $relConfig[2] }} {{ $relConfig[3] }}">
@@ -565,11 +632,11 @@ new class extends Component {
                             {{-- Location --}}
                             <td class="px-5 py-3.5 hidden lg:table-cell">
                                 @if($row->work_location === 'abroad')
-                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
-                                        <i class="fa-solid fa-plane-departure text-xs"></i> Abroad
+                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-orange-600">
+                                        <i class="fa-solid fa-plane-departure text-xs"></i> Abroad (OFW)
                                     </span>
                                 @elseif($row->work_location === 'local')
-                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-teal-600">
                                         <i class="fa-solid fa-house text-xs"></i> Local
                                     </span>
                                 @else
@@ -585,7 +652,7 @@ new class extends Component {
                                 </span>
                             </td>
 
-                            {{-- ── Course Relevance Column (xl+) ── --}}
+                            {{-- Course Relevance (xl+) --}}
                             <td class="px-5 py-3.5 text-center hidden xl:table-cell">
                                 @if($isWorking && $relConfig)
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold border {{ $relConfig[2] }} {{ $relConfig[3] }}">
@@ -612,7 +679,7 @@ new class extends Component {
                             <td class="px-5 py-3.5 text-center">
                                 <button wire:click="viewDetail({{ $row->id }})"
                                         class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl text-white shadow transition hover:opacity-90 active:scale-[.98]"
-                                        style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                                        style="background:#7A3F91;">
                                     <i class="fa-solid fa-eye text-xs"></i>
                                     <span class="hidden sm:inline">View</span>
                                 </button>
@@ -645,7 +712,7 @@ new class extends Component {
 
         {{-- ── PAGINATION BAR ── --}}
         <div class="px-4 sm:px-5 py-3.5 border-t border-[#E8E0F0] shrink-0 rounded-b-2xl"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+             style="background:#7A3F91;">
             @php
                 $total = $rows->total();
                 $pp    = $rows->perPage();
@@ -712,13 +779,22 @@ new class extends Component {
         'career_shifter'        => ['fa-arrows-rotate',   'Career Shifter'],
         'industry_professional' => ['fa-user-tie',        'Industry Professional'],
     ];
-    // Course relevance config for modal
     $relModalMap = [
         'yes'       => ['Related to Course',   'fa-check-circle',   'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
         'no'        => ['Not Related',          'fa-times-circle',   'text-red-600',     'bg-red-50 border-red-200'],
         'partially' => ['Partially Related',   'fa-adjust',         'text-amber-700',   'bg-amber-50 border-amber-200'],
     ];
     $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
+
+    // Modal profile photo
+    $modalPhotoPath = $md['profile_photo'] ?? null;
+    $modalPhotoUrl  = (!$modalPhotoPath || str_contains($modalPhotoPath, 'default.png'))
+        ? asset('storage/alumni-photos/default.png')
+        : (
+            (str_starts_with($modalPhotoPath, 'alumni-photos/') || str_starts_with($modalPhotoPath, 'organizers/'))
+            ? asset('storage/' . $modalPhotoPath)
+            : asset('storage/alumni-photos/default.png')
+        );
 @endphp
 <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4"
      @keydown.escape.window="$wire.closeModal()">
@@ -729,11 +805,11 @@ new class extends Component {
 
         {{-- Modal Header --}}
         <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+             style="background:#7A3F91;">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-white/20 text-white font-bold text-sm flex-shrink-0">
-                    {{ strtoupper(substr($modalData['full_name'] ?? '?', 0, 1)) }}
-                </div>
+                <img src="{{ $modalPhotoUrl }}"
+                     alt="{{ $modalData['full_name'] ?? '' }}"
+                     class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
                 <div>
                     <p class="font-semibold text-white text-sm leading-snug uppercase">
                         {{ $modalData['full_name'] ?? '—' }}
@@ -806,7 +882,7 @@ new class extends Component {
                             </div>
                         @endforeach
 
-                        {{-- ── Course Relevance — full card in modal (NEW) ── --}}
+                        {{-- Course Relevance --}}
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border {{ $relModal ? $relModal[3] : 'border-[#E8E0F0]' }} sm:col-span-3">
                             <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-1.5">
                                 <i class="fa-solid fa-graduation-cap mr-1" style="color:#7A3F91;"></i>
@@ -866,10 +942,9 @@ new class extends Component {
         </div>
 
         {{-- Modal Footer --}}
-        <div class="px-5 py-4 border-t border-[#E8E0F0] flex justify-end flex-shrink-0"
-             style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+        <div class="px-5 py-4 border-t border-[#E8E0F0] flex justify-end flex-shrink-0 bg-[#F9F7FC]">
             <button wire:click="closeModal"
-                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[#E8E0F0] text-[#666666] hover:bg-[#F9F7FC] transition">
+                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[#E8E0F0] text-[#666666] hover:bg-white transition">
                 <i class="fa-solid fa-xmark"></i> Close
             </button>
         </div>
