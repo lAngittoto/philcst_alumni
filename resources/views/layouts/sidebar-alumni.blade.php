@@ -5,11 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ config('app.name', 'Philcst') }} - Alumni</title>
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-
     @livewireStyles
 </head>
 <body class="antialiased">
@@ -51,10 +48,10 @@
         {{-- Sidebar header --}}
         <div class="flex items-center justify-between h-24 px-6 border-b border-[#E8E0F0] shrink-0">
             <div class="text-left">
-                <h1 class="text-2xl font-black tracking-tighter uppercase text-[#333333] leading-tight">
-                    Alumni<span class="font-light opacity-70 text-[#7A3F91]">Portal</span>
+                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
+                    Alumni<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
                 </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-bold">
+                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
                     Graduate Network
                 </p>
             </div>
@@ -62,64 +59,6 @@
                 <i class="fa-solid fa-circle-xmark text-2xl"></i>
             </button>
         </div>
-
-        {{-- Alumni info card --}}
-        @if($authAlumni)
-        <div class="mx-4 mt-5 mb-1 rounded-xl p-4 border" 
-             style="background: linear-gradient(135deg, rgba(122,63,145,0.07), rgba(122,63,145,0.03)); border-color: rgba(122,63,145,0.2);">
-            <div class="flex items-center gap-3">
-                <div class="w-11 h-11 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-md"
-                     style="background: linear-gradient(135deg, #7A3F91, #6a3080); color: white;">
-                    @if($authAlumni->profile_photo && !str_contains($authAlumni->profile_photo, 'default.png'))
-                        <img src="{{ $authAlumni->getProfilePhotoUrl() }}"
-                             class="w-11 h-11 rounded-full object-cover" alt="avatar">
-                    @else
-                        {{ $authAlumni->getAvatarLetter() }}
-                    @endif
-                </div>
-                <div class="min-w-0">
-                    <p class="text-sm font-bold text-[#333333] truncate leading-tight">
-                        {{ $authAlumni->first_name }} {{ $authAlumni->last_name }}
-                    </p>
-                    <p class="text-[11px] text-[#666666] truncate">
-                        {{ $authAlumni->course_code }} · Batch {{ $authAlumni->batch }}
-                    </p>
-                </div>
-            </div>
-
-            {{-- Profile completion badge --}}
-            <div class="mt-3 flex items-center gap-2 flex-wrap text-[10px]">
-                @if($authAlumni->status === 'VERIFIED')
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(5, 150, 105, 0.1); color: #059669;">
-                        <i class="fa-solid fa-circle-check text-[8px]"></i> Verified
-                    </span>
-                @elseif($authAlumni->status === 'PENDING')
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(217, 119, 6, 0.1); color: #D97706;">
-                        <i class="fa-solid fa-clock text-[8px]"></i> Pending
-                    </span>
-                @endif
-
-                {{-- Profile status badge — reactive via Alpine --}}
-                <template x-if="!profileComplete">
-                    <a href="{{ route('alumni.information') }}"
-                       class="inline-flex items-center gap-1 font-bold uppercase tracking-widest
-                              px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                       style="background: rgba(217, 119, 6, 0.1); color: #D97706;">
-                        <i class="fa-solid fa-triangle-exclamation text-[8px]"></i>
-                        Complete Profile
-                    </a>
-                </template>
-                <template x-if="profileComplete">
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(5, 150, 105, 0.1); color: #059669;">
-                        <i class="fa-solid fa-circle-check text-[8px]"></i> Profile Complete
-                    </span>
-                </template>
-            </div>
-        </div>
-        @endif
 
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
@@ -152,7 +91,7 @@
                     ],
                     [
                         'route'   => 'alumni.employment',
-                        'icon'    => 'briefcase',
+                        'icon'    => 'chart-line',
                         'label'   => 'Employment',
                         'pattern' => 'alumni/employment*',
                     ],
@@ -164,29 +103,40 @@
                     ],
                     [
                         'route'   => 'alumni.yearbook',
-                        'icon' => 'book-open',
+                        'icon'    => 'book-open',
                         'label'   => 'Yearbook',
                         'pattern' => 'alumni/yearbook*',
                     ],
-                  
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php
-                    $url      = route($link['route']);
                     $isActive = request()->is($link['pattern']);
                 @endphp
 
-                <a href="{{ $url }}"
+                <a href="{{ route($link['route']) }}"
                    wire:navigate
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md' : 'hover:bg-[#F9F7FC]' }}">
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         :style="'background-color: ' + ('{{ $isActive }}' === '1' ? '#F5F5F5' : '#F9F7FC') + '; color: #7A3F91;'">
+                          {{ $isActive
+                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
+                              : 'hover:bg-[#F9F7FC]' }}">
+
+                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300
+                                group-hover:scale-110 shrink-0 mr-4"
+                         style="background-color: {{ $isActive ? '#EDE9F8' : '#F9F7FC' }};
+                                color: #7A3F91;">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
-                    <span class="font-medium tracking-wide text-[#333333]">{{ $link['label'] }}</span>
+
+                    <span class="font-medium tracking-wide
+                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                        {{ $link['label'] }}
+                    </span>
+
+                    @if($isActive)
+                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                    @endif
                 </a>
             @endforeach
 
@@ -197,7 +147,8 @@
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
+                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
+                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
                         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
@@ -233,7 +184,7 @@
         </div>
     </main>
 
-</div>{{-- /x-data shell --}}
+</div>
 
 @livewireScripts
 

@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ config('app.name', 'Philcst') }} - Coordinator</title>
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
@@ -12,10 +13,6 @@
     @livewireStyles
 </head>
 <body class="antialiased">
-
-@php
-    $authOrganizer = auth()->user()?->organizer;
-@endphp
 
 <div
     x-data="{ open: false }"
@@ -57,42 +54,6 @@
             </button>
         </div>
 
-        {{-- Organizer info card --}}
-        @if($authOrganizer)
-        <div class="mx-4 mt-5 mb-1 rounded-xl p-4 border" 
-             style="background: linear-gradient(135deg, rgba(122,63,145,0.07), rgba(122,63,145,0.03)); border-color: rgba(122,63,145,0.2);">
-            <div class="flex items-center gap-3">
-                <div class="w-11 h-11 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-md"
-                     style="background: linear-gradient(135deg, #7A3F91, #6a3080); color: white;">
-                    {{ strtoupper(substr($authOrganizer->name, 0, 1)) }}
-                </div>
-                <div class="min-w-0">
-                    <p class="text-sm font-bold text-[#333333] truncate leading-tight">
-                        {{ $authOrganizer->name }}
-                    </p>
-                    <p class="text-[11px] text-[#666666] truncate">
-                        {{ $authOrganizer->department ?? 'No Department' }}
-                    </p>
-                </div>
-            </div>
-
-            {{-- Status badge --}}
-            <div class="mt-3 flex items-center gap-2 flex-wrap text-[10px]">
-                @if($authOrganizer->status === 'ACTIVE')
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(5, 150, 105, 0.1); color: #059669;">
-                        <i class="fa-solid fa-circle-check text-[8px]"></i> Active
-                    </span>
-                @elseif($authOrganizer->status === 'INACTIVE')
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(107, 114, 128, 0.1); color: #6B7280;">
-                        <i class="fa-solid fa-circle text-[8px]"></i> Inactive
-                    </span>
-                @endif
-            </div>
-        </div>
-        @endif
-
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
 
@@ -125,27 +86,45 @@
                     [
                         'route'   => 'organizer.chat/alumni',
                         'icon'    => 'comments',
-                        'label'   => 'Messenger',
+                        'label'   => 'Message Hub',
                         'pattern' => 'organizer/chat/alumni*',
+                    ],
+                    [
+                        'route'   => 'organizer.yearbook',
+                        'icon'    => 'book-open',
+                        'label'   => 'Alumni Yearbook',
+                        'pattern' => 'organizer/yearbook*',
                     ],
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php
-                    $url      = route($link['route']);
                     $isActive = request()->is($link['pattern']);
                 @endphp
 
-                <a href="{{ $url }}"
+                <a href="{{ route($link['route']) }}"
                    wire:navigate
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md' : 'hover:bg-[#F9F7FC]' }}">
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         :style="'background-color: ' + ('{{ $isActive }}' === '1' ? '#F5F5F5' : '#F9F7FC') + '; color: #7A3F91;'">
+                          {{ $isActive
+                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
+                              : 'hover:bg-[#F9F7FC]' }}">
+
+                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300
+                                group-hover:scale-110 shrink-0 mr-4"
+                         style="background-color: {{ $isActive ? '#EDE9F8' : '#F9F7FC' }};
+                                color: #7A3F91;">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
-                    <span class="font-medium tracking-wide text-[#333333]">{{ $link['label'] }}</span>
+
+                    <span class="font-medium tracking-wide
+                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                        {{ $link['label'] }}
+                    </span>
+
+                    @if($isActive)
+                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                    @endif
                 </a>
             @endforeach
 
@@ -156,7 +135,8 @@
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
+                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
+                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
                         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
@@ -192,7 +172,7 @@
         </div>
     </main>
 
-</div>{{-- /x-data shell --}}
+</div>
 
 @livewireScripts
 

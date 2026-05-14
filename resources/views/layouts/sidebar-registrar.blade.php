@@ -14,10 +14,12 @@
 </head>
 <body class="antialiased">
 
-<div x-data="{ open: false }" class="flex h-screen bg-[#F5F5F5] font-xl sans overflow-hidden">
+<div
+    x-data="{ open: false }"
+    class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile Overlay --}}
-    <div 
+    {{-- Mobile overlay --}}
+    <div
         x-show="open"
         x-transition:enter="transition opacity-ease-out duration-300"
         x-transition:enter-start="opacity-0"
@@ -29,82 +31,89 @@
         class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- Sidebar --}}
-    <aside 
+    {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
+    <aside
         :class="open ? 'translate-x-0' : '-translate-x-full'"
-        class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300 
-               shadow-2xl lg:translate-x-0 lg:static lg:inset-0 
+        class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
+               shadow-2xl lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
 
-        {{-- Logo --}}
+        {{-- Sidebar header --}}
         <div class="flex items-center justify-between h-24 px-6 border-b border-[#E8E0F0] shrink-0">
             <div class="text-left">
-                <h1 class="text-2xl font-black tracking-tighter uppercase text-[#333333] leading-tight">
-                    Registrar<span class="font-light opacity-70 text-[#7A3F91]">Portal</span>
+                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
+                    Registrar<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
                 </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-bold">
+                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
                     Records Management
                 </p>
             </div>
-
             <button @click="open = false" class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors">
                 <i class="fa-solid fa-circle-xmark text-2xl"></i>
             </button>
         </div>
 
-        {{-- Nav --}}
+        {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+
             @php
                 $sidebarLinks = [
                     [
-                        'route' => 'registrar.dashboard',
-                        'icon' => 'gauge-high',
-                        'label' => 'Dashboard',
+                        'route'   => 'registrar.dashboard',
+                        'icon'    => 'gauge-high',
+                        'label'   => 'Dashboard',
                     ],
                     [
-                        'route' => 'registrar.alumni',
-                        'icon' => 'users',
-                        'label' => 'Alumni Records',
+                        'route'   => 'registrar.alumni',
+                        'icon'    => 'users',
+                        'label'   => 'Alumni Records',
                     ],
                     [
-                        'route' => 'registrar.alumni.register',
-                        'icon' => 'user-plus',
-                        'label' => 'Register Alumni',
+                        'route'   => 'registrar.alumni.register',
+                        'icon'    => 'user-plus',
+                        'label'   => 'Register Alumni',
                     ],
                     [
-                        'route' => 'registrar.alumni.import',
-                        'icon' => 'file-import',
-                        'label' => 'Import Alumni',
+                        'route'   => 'registrar.employment.tracking',
+                        'icon'    => 'chart-line',
+                        'label'   => 'Employment Tracking',
                     ],
-                    [
-                        'route' => 'registrar.employment.tracking',
-                        'icon' => 'chart-line',
-                        'label' => 'Employment Tracking',
-                    ],
-
                 ];
-
-                $currentRoute = request()->route()?->getName();
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php
-                    $url = route($link['route']);
-                    $isActive = $currentRoute === $link['route'];
+                    // routeIs() = exact route-name match, prevents
+                    // registrar.alumni also matching registrar.alumni.register
+                    $isActive = request()->routeIs($link['route']);
                 @endphp
 
-                <a href="{{ $url }}"
+                <a href="{{ route($link['route']) }}"
                    wire:navigate
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md' : 'hover:bg-[#F9F7FC]' }}">
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         :style="'background-color: ' + ('{{ $isActive }}' === '1' ? '#F5F5F5' : '#F9F7FC') + '; color: #7A3F91;'">
+                          {{ $isActive
+                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
+                              : 'hover:bg-[#F9F7FC]' }}">
+
+                    <div class="w-10 h-10 flex items-center justify-center rounded-lg transition-transform duration-300
+                                group-hover:scale-110 shrink-0 mr-4"
+                         style="background-color: {{ $isActive ? '#EDE9F8' : '#F9F7FC' }};
+                                color: #7A3F91;">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
-                    <span class="font-medium tracking-wide text-[#333333]">{{ $link['label'] }}</span>
+
+                    <span class="font-medium tracking-wide
+                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                        {{ $link['label'] }}
+                    </span>
+
+                    @if($isActive)
+                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                    @endif
                 </a>
             @endforeach
+
         </nav>
 
         {{-- Logout --}}
@@ -112,7 +121,8 @@
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
+                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
+                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
                         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
@@ -120,23 +130,27 @@
         </div>
     </aside>
 
-    {{-- Main --}}
+    {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-        
-        {{-- Mobile Top Bar --}}
+
+        {{-- Mobile top bar --}}
         <header class="flex items-center justify-between px-6 py-4 bg-[#FFFFFF] border-b border-[#E8E0F0] lg:hidden shrink-0 z-30">
-            <button @click="open = !open" class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
+            <button @click="open = !open"
+                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="open ? 'rotate-45 translate-y-2' : ''" class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
-                    <span :class="open ? 'opacity-0' : ''" class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
-                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''" class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                    <span :class="open ? 'rotate-45 translate-y-2' : ''"
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                    <span :class="open ? 'opacity-0' : ''"
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
+                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#333333]">Registrar Panel</h2>
+            <h2 class="text-lg font-bold text-[#333333]">Registrar Portal</h2>
             <div class="w-10"></div>
         </header>
 
-        {{-- Page Content --}}
+        {{-- Page content --}}
         <div class="flex-1 overflow-y-auto min-h-0 bg-[#F5F5F5] p-4 lg:p-8 no-scrollbar">
             <div class="container mx-auto">
                 @yield('content')

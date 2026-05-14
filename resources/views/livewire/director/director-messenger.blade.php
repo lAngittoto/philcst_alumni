@@ -56,24 +56,24 @@ new class extends Component {
     public array $reactionsPopupData  = [];
 
     // ─────────────────────────────────────────────────────────────────────
-    // Photo URL resolver (mirrors manage-coordinator logic)
+    // Photo URL resolver
     // ─────────────────────────────────────────────────────────────────────
-private function resolvePhotoUrl(?string $path): string
-{
-    $default = asset('storage/alumni-photos/default.png');
+    private function resolvePhotoUrl(?string $path): string
+    {
+        $default = asset('storage/alumni-photos/default.png');
 
-    if (! $path) return $default;
+        if (! $path) return $default;
 
-    if (
-        str_starts_with($path, 'organizers/')    ||
-        str_starts_with($path, 'alumni-photos/') ||
-        str_starts_with($path, 'directors/')
-    ) {
-        return asset('storage/' . $path);
+        if (
+            str_starts_with($path, 'organizers/')    ||
+            str_starts_with($path, 'alumni-photos/') ||
+            str_starts_with($path, 'directors/')
+        ) {
+            return asset('storage/' . $path);
+        }
+
+        return $default;
     }
-
-    return $default;
-}
 
     // ─────────────────────────────────────────────────────────────────────
     // Boot
@@ -259,7 +259,7 @@ private function resolvePhotoUrl(?string $path): string
 
             $names = [];
             foreach ($rows as $row) {
-                if ($row->sender_type === 'coordinator') {
+                if (in_array($row->sender_type, ['coordinator', 'organizer'])) {
                     $name = DB::table('organizer')->where('id', $row->sender_id)->value('first_name');
                     if ($name) $names[] = $name . ' (Coordinator)';
                 } elseif ($row->sender_type === 'director') {
@@ -276,23 +276,31 @@ private function resolvePhotoUrl(?string $path): string
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Load
+    // FIX: Include deleted messages (show unsent placeholder)
+    // FIX: Handle both 'coordinator' and 'organizer' sender_type
     // ─────────────────────────────────────────────────────────────────────
     public function loadMessages(): void
     {
         if (! $this->roomId) return;
 
+        // FIX: removed whereNull('m.deleted_at') — we load ALL messages
+        // including deleted ones so we can show the "unsent" placeholder
         $rows = DB::table('chat_messages as m')
             ->where('m.room_id', $this->roomId)
-            ->whereNull('m.deleted_at')
             ->orderBy('m.created_at')
             ->get([
                 'm.id', 'm.sender_type', 'm.sender_id', 'm.body',
-                'm.reply_to_id', 'm.edited_at', 'm.created_at',
+                'm.reply_to_id', 'm.edited_at', 'm.created_at', 'm.deleted_at',
             ])
             ->toArray();
 
         $dIds = collect($rows)->where('sender_type', 'director')->pluck('sender_id')->unique();
-        $oIds = collect($rows)->where('sender_type', 'coordinator')->pluck('sender_id')->unique();
+
+        // FIX: collect coordinator IDs from BOTH 'coordinator' and 'organizer' sender_type
+        $oIds = collect($rows)
+            ->filter(fn($r) => in_array($r->sender_type, ['coordinator', 'organizer']))
+            ->pluck('sender_id')
+            ->unique();
 
         $dMap = DB::table('director')
             ->whereIn('id', $dIds)
@@ -320,8 +328,7 @@ private function resolvePhotoUrl(?string $path): string
 
         $rplyMap = DB::table('chat_messages')
             ->whereIn('id', $rplyIds)
-            ->whereNull('deleted_at')
-            ->get(['id', 'sender_type', 'sender_id', 'body'])
+            ->get(['id', 'sender_type', 'sender_id', 'body', 'deleted_at'])
             ->keyBy('id');
 
         $self = $this;
@@ -329,11 +336,11 @@ private function resolvePhotoUrl(?string $path): string
         $this->messages = collect($rows)->map(function ($m) use ($dMap, $oMap, $rxns, $pins, $rplyMap, $self) {
 
             $isDir   = $m->sender_type === 'director';
-            $isCoord = $m->sender_type === 'coordinator';
+            // FIX: treat both 'coordinator' and 'organizer' as coordinator
+            $isCoord = in_array($m->sender_type, ['coordinator', 'organizer']);
             $s       = $isDir ? $dMap->get($m->sender_id) : $oMap->get($m->sender_id);
             $sName   = $s ? trim(($s->first_name ?? '') . ' ' . ($s->last_name ?? '')) : 'Unknown';
 
-            // Pre-compute resolved photo URL
             $photoUrl = $s ? $self->resolvePhotoUrl($s->profile_photo ?? null) : null;
 
             $msgRxns = $rxns->get($m->id, collect());
@@ -350,14 +357,21 @@ private function resolvePhotoUrl(?string $path): string
                     ? $dMap->get($r->sender_id)
                     : $oMap->get($r->sender_id);
 
+                // FIX: if reply was deleted, show placeholder text
+                $replyBody = !is_null($r->deleted_at)
+                    ? '🚫 This message was unsent.'
+                    : $r->body;
+
                 $reply = [
-                    'id'   => $r->id,
-                    'body' => $r->body,
-                    'name' => $rs ? trim(($rs->first_name ?? '') . ' ' . ($rs->last_name ?? '')) : 'Unknown',
+                    'id'      => $r->id,
+                    'body'    => $replyBody,
+                    'name'    => $rs ? trim(($rs->first_name ?? '') . ' ' . ($rs->last_name ?? '')) : 'Unknown',
+                    'deleted' => !is_null($r->deleted_at),
                 ];
             }
 
-            $isMe = $m->sender_type === 'director' && $m->sender_id === $self->directorId;
+            $isMe      = $m->sender_type === 'director' && $m->sender_id === $self->directorId;
+            $isDeleted = !is_null($m->deleted_at);
 
             return [
                 'id'             => $m->id,
@@ -367,12 +381,13 @@ private function resolvePhotoUrl(?string $path): string
                 'sender_photo'   => $photoUrl,
                 'body'           => $m->body,
                 'edited'         => ! is_null($m->edited_at),
+                'deleted'        => $isDeleted,
                 'is_mine'        => $isMe,
                 'is_director'    => $isDir,
                 'is_coordinator' => $isCoord,
                 'is_pinned'      => isset($pins[$m->id]),
-                'reactions'      => $rxnGrps,
-                'my_reaction'    => $myRxn ? $myRxn->reaction : null,
+                'reactions'      => $isDeleted ? [] : $rxnGrps,
+                'my_reaction'    => $isDeleted ? null : ($myRxn ? $myRxn->reaction : null),
                 'reply_to'       => $reply,
                 'time'           => Carbon::parse($m->created_at)->setTimezone('Asia/Manila')->format('h:i A'),
                 'date'           => Carbon::parse($m->created_at)->setTimezone('Asia/Manila')->format('Y-m-d'),
@@ -461,7 +476,7 @@ private function resolvePhotoUrl(?string $path): string
     public function startEdit(int $id): void
     {
         $msg = collect($this->messages)->firstWhere('id', $id);
-        if (! $msg || ! $msg['is_mine']) return;
+        if (! $msg || ! $msg['is_mine'] || $msg['deleted']) return;
 
         $this->editingId = $id;
         $this->editBody  = $msg['body'];
@@ -475,6 +490,7 @@ private function resolvePhotoUrl(?string $path): string
             ->where('id', $this->editingId)
             ->where('sender_type', 'director')
             ->where('sender_id', $this->directorId)
+            ->whereNull('deleted_at')
             ->update([
                 'body'       => trim($this->editBody),
                 'edited_at'  => now(),
@@ -493,7 +509,7 @@ private function resolvePhotoUrl(?string $path): string
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Messages – Unsend
+    // Messages – Unsend (soft-delete → shows placeholder)
     // ─────────────────────────────────────────────────────────────────────
     public function unsend(int $id): void
     {
@@ -503,7 +519,11 @@ private function resolvePhotoUrl(?string $path): string
             ->where('sender_id', $this->directorId)
             ->update(['deleted_at' => now()]);
 
+        // Remove from pins (pinned unsent messages make no sense)
         DB::table('chat_pins')->where('message_id', $id)->delete();
+
+        // Remove reactions on the deleted message
+        DB::table('chat_reactions')->where('message_id', $id)->delete();
 
         $this->loadMessages();
         if ($this->showPins) $this->loadPins();
@@ -515,6 +535,10 @@ private function resolvePhotoUrl(?string $path): string
     public function react(int $msgId, string $reaction): void
     {
         if (! in_array($reaction, ['heart', 'purple', 'like', 'dislike'], true)) return;
+
+        // Don't react to deleted messages
+        $msg = collect($this->messages)->firstWhere('id', $msgId);
+        if (! $msg || $msg['deleted']) return;
 
         $existing = DB::table('chat_reactions')
             ->where('message_id', $msgId)
@@ -620,6 +644,10 @@ private function resolvePhotoUrl(?string $path): string
     // ─────────────────────────────────────────────────────────────────────
     public function togglePin(int $msgId): void
     {
+        // Don't pin deleted messages
+        $msg = collect($this->messages)->firstWhere('id', $msgId);
+        if (! $msg || $msg['deleted']) return;
+
         if (DB::table('chat_pins')->where('message_id', $msgId)->exists()) {
             DB::table('chat_pins')->where('message_id', $msgId)->delete();
         } else {
@@ -643,7 +671,7 @@ private function resolvePhotoUrl(?string $path): string
     public function setReply(int $id): void
     {
         $msg = collect($this->messages)->firstWhere('id', $id);
-        if (! $msg) return;
+        if (! $msg || $msg['deleted']) return;
 
         $this->replyTo = [
             'id'   => $msg['id'],
@@ -748,7 +776,10 @@ private function resolvePhotoUrl(?string $path): string
             ->toArray();
 
         $dIds = collect($rows)->where('sender_type', 'director')->pluck('sender_id')->unique();
-        $oIds = collect($rows)->where('sender_type', 'coordinator')->pluck('sender_id')->unique();
+        $oIds = collect($rows)
+            ->filter(fn($r) => in_array($r->sender_type, ['coordinator', 'organizer']))
+            ->pluck('sender_id')
+            ->unique();
 
         $dMap = DB::table('director')
             ->whereIn('id', $dIds)
@@ -867,7 +898,6 @@ private function resolvePhotoUrl(?string $path): string
                     </div>
                     <span class="text-white/30 text-xs">·</span>
                     @endif
-                    {{-- Directors & Coordinators label --}}
                     <span class="flex items-center gap-1 text-white/60 text-xs font-semibold">
                         <i class="fa-solid fa-shield-halved text-[10px]"></i>Directors
                         <span class="text-white/30">+</span>
@@ -884,7 +914,6 @@ private function resolvePhotoUrl(?string $path): string
             <div class="hidden sm:flex items-center gap-2 mr-1">
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl"
                      style="background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.22);">
-                    {{-- Director avatar with photo support --}}
                     <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden"
                          style="background:rgba(255,255,255,.25);">
                         @if($directorPhoto)
@@ -977,7 +1006,7 @@ private function resolvePhotoUrl(?string $path): string
                             @if(! $msg['is_mine'])
                             <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden
                                         flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
-                                 style="{{ $msg['is_director'] ? 'background:#7a3f91;' : 'background:#2563eb;' }}"
+                                 style="background:#7a3f91;"
                                  title="{{ $msg['sender_name'] }}">
                                 @if($msg['sender_photo'])
                                     <img src="{{ $msg['sender_photo'] }}"
@@ -998,23 +1027,23 @@ private function resolvePhotoUrl(?string $path): string
 
                                 {{-- Sender name --}}
                                 @if(! $msg['is_mine'] && ! $sameGroup)
-                                <p class="text-xs font-semibold px-1 mb-0.5
-                                    {{ $msg['is_director'] ? 'text-[#7a3f91]' : 'text-blue-600' }}">
+                                <p class="text-xs font-semibold px-1 mb-0.5 text-[#7a3f91]">
                                     {{ $msg['sender_name'] }}
                                     @if($msg['is_director'])
                                         <span class="ml-1 text-[10px] font-semibold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
                                             <i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director
                                         </span>
-                                    @else
-                                        <span class="ml-1 text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                                            Coordinator
+                                    @elseif($msg['is_coordinator'])
+                                        {{-- FIX: Coordinator badge also purple --}}
+                                        <span class="ml-1 text-[10px] font-semibold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                                            <i class="fa-solid fa-users text-[9px] mr-0.5"></i>Coordinator
                                         </span>
                                     @endif
                                 </p>
                                 @endif
 
                                 {{-- Pinned indicator --}}
-                                @if($msg['is_pinned'])
+                                @if($msg['is_pinned'] && !$msg['deleted'])
                                 <div class="flex items-center gap-1 text-xs text-amber-600 font-semibold mb-0.5 px-1">
                                     <i class="fa-solid fa-thumbtack text-xs"></i> Pinned
                                 </div>
@@ -1027,12 +1056,29 @@ private function resolvePhotoUrl(?string $path): string
                                         ? 'bg-purple-200/60 border-white/70 text-purple-900'
                                         : 'bg-white border-[#E8E0F0] text-[#666666]' }}">
                                     <span class="font-semibold block truncate">{{ $msg['reply_to']['name'] }}</span>
-                                    <span class="truncate block">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
+                                    <span class="truncate block {{ ($msg['reply_to']['deleted'] ?? false) ? 'italic opacity-60' : '' }}">
+                                        {{ Str::limit($msg['reply_to']['body'], 70) }}
+                                    </span>
                                 </div>
                                 @endif
 
-                                {{-- Edit mode --}}
-                                @if($editingId === $msg['id'])
+                                {{-- ══ DELETED / UNSENT PLACEHOLDER ══════════════════ --}}
+                                @if($msg['deleted'])
+                                <div class="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs italic
+                                            {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
+                                     style="background:rgba(0,0,0,0.05); border:1px dashed #d1d5db; color:#9ca3af;">
+                                    <i class="fa-solid fa-ban text-[11px] opacity-60"></i>
+                                    <span>
+                                        @if($msg['is_mine'])
+                                            You unsent a message.
+                                        @else
+                                            {{ $msg['sender_name'] }} unsent a message.
+                                        @endif
+                                    </span>
+                                </div>
+
+                                {{-- ══ EDIT MODE ════════════════════════════════════ --}}
+                                @elseif($editingId === $msg['id'])
                                 <div class="flex flex-col gap-1.5 min-w-[220px]">
                                     <textarea wire:model="editBody"
                                               rows="2"
@@ -1054,19 +1100,20 @@ private function resolvePhotoUrl(?string $path): string
                                     </div>
                                 </div>
 
-                                {{-- Normal bubble --}}
+                                {{-- ══ NORMAL BUBBLE ════════════════════════════════ --}}
                                 @else
                                 @php
                                     $safe         = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
                                     $mentionClass = $msg['is_mine']
                                         ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
-                                        : 'font-semibold text-[#7a3f91] bg-[#f3eef8] px-0.5 rounded';
+                                        : 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded';
                                     $formatted    = preg_replace(
                                         '/@(everyone|\w+(?:\s\w+)?)/u',
                                         '<span class="' . $mentionClass . '">@$1</span>',
                                         $safe
                                     );
                                 @endphp
+                                {{-- FIX: All bubbles (director + coordinator) are purple --}}
                                 <div @click.stop="open = !open; confirmUnsend = false"
                                      class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
                                             shadow-sm cursor-pointer select-none transition-opacity active:opacity-80
@@ -1075,9 +1122,7 @@ private function resolvePhotoUrl(?string $path): string
                                                 : 'text-white rounded-bl-none' }}"
                                      style="{{ $msg['is_mine']
                                          ? 'background:#7a3f91;'
-                                         : ($msg['is_director']
-                                             ? 'background:#9333ea;'
-                                             : 'background:#2563eb;') }}">
+                                         : 'background:#9333ea;' }}">
                                     {!! $formatted !!}
                                     @if($msg['edited'])
                                         <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
@@ -1085,7 +1130,8 @@ private function resolvePhotoUrl(?string $path): string
                                 </div>
                                 @endif
 
-                                {{-- ── Inline action bar ──────────────────────────────── --}}
+                                {{-- ── Inline action bar (only for non-deleted) ──── --}}
+                                @if(!$msg['deleted'])
                                 <div x-show="open"
                                      x-transition:enter="transition ease-out duration-150"
                                      x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
@@ -1155,7 +1201,7 @@ private function resolvePhotoUrl(?string $path): string
                                         </button>
                                     </div>
                                     <div x-show="confirmUnsend" class="flex items-center gap-1">
-                                        <span class="text-xs text-red-600 font-semibold">Delete?</span>
+                                        <span class="text-xs text-red-600 font-semibold">Unsend?</span>
                                         <button wire:click="unsend({{ $msg['id'] }})"
                                                 @click.stop
                                                 class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">
@@ -1168,8 +1214,9 @@ private function resolvePhotoUrl(?string $path): string
                                     </div>
                                     @endif
                                 </div>
+                                @endif
 
-                                {{-- ── View Reactions Popup ────────────────────────────── --}}
+                                {{-- ── View Reactions Popup ────────────────────────── --}}
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
                                 <div class="mt-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-xl z-20 w-64 overflow-hidden"
                                      @click.stop>
@@ -1199,7 +1246,7 @@ private function resolvePhotoUrl(?string $path): string
                                             <div class="flex items-center gap-2 py-1">
                                                 <div class="w-6 h-6 rounded-full flex-shrink-0 overflow-hidden
                                                             flex items-center justify-center text-xs font-semibold text-white"
-                                                     style="{{ $reactor['type'] === 'director' ? 'background:#7a3f91;' : ($reactor['type'] === 'coordinator' ? 'background:#2563eb;' : 'background:#9333ea;') }}">
+                                                     style="background:#7a3f91;">
                                                     @if($reactor['photo'] ?? null)
                                                         <img src="{{ $reactor['photo'] }}"
                                                              class="w-full h-full object-cover"
@@ -1217,8 +1264,7 @@ private function resolvePhotoUrl(?string $path): string
                                                             <span class="text-[#7a3f91] font-semibold">(You)</span>
                                                         @endif
                                                     </p>
-                                                    <p class="text-[10px] font-medium
-                                                        {{ $reactor['type'] === 'director' ? 'text-purple-600' : ($reactor['type'] === 'coordinator' ? 'text-blue-600' : 'text-[#999999]') }}">
+                                                    <p class="text-[10px] font-medium text-purple-600">
                                                         {{ ucfirst($reactor['type']) }}
                                                     </p>
                                                 </div>
@@ -1230,8 +1276,8 @@ private function resolvePhotoUrl(?string $path): string
                                 </div>
                                 @endif
 
-                                {{-- Reaction pills --}}
-                                @if(! empty($msg['reactions']))
+                                {{-- Reaction pills (only for non-deleted) --}}
+                                @if(! empty($msg['reactions']) && !$msg['deleted'])
                                 <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk => $cnt)
                                     @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍' }; @endphp
@@ -1336,7 +1382,7 @@ private function resolvePhotoUrl(?string $path): string
                         <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
                                 class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f3eef8] transition-colors text-left">
                             <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white"
-                                 style="background:{{ $sug['type'] === 'coordinator' ? '#2563eb' : '#7a3f91' }};">
+                                 style="background:#7a3f91;">
                                 @if($sug['name'] === 'everyone')
                                     <i class="fa-solid fa-users text-xs"></i>
                                 @else
@@ -1352,7 +1398,9 @@ private function resolvePhotoUrl(?string $path): string
                                         <i class="fa-solid fa-shield-halved text-[10px] mr-0.5"></i>Director
                                     </p>
                                 @elseif($sug['type'] === 'coordinator')
-                                    <p class="text-xs text-blue-600 font-medium">Alumni Coordinator</p>
+                                    <p class="text-xs text-purple-600 font-medium">
+                                        <i class="fa-solid fa-users text-[10px] mr-0.5"></i>Alumni Coordinator
+                                    </p>
                                 @endif
                             </div>
                         </button>
@@ -1442,7 +1490,6 @@ private function resolvePhotoUrl(?string $path): string
                                         {{ $dir['is_me'] ? 'bg-[#f3eef8] border border-[#d9c9e8]' : 'border border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]' }}
                                         transition-all">
                                 <div class="relative flex-shrink-0">
-                                    {{-- Director avatar with real photo --}}
                                     <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
                                                 text-xs font-semibold text-white"
                                          style="background:#7a3f91;">
@@ -1456,7 +1503,6 @@ private function resolvePhotoUrl(?string $path): string
                                             {{ strtoupper(substr($dir['name'], 0, 1)) }}
                                         @endif
                                     </div>
-                                    {{-- Online / offline dot --}}
                                     @if($dir['is_online'] || $dir['is_me'])
                                     <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                                     @else
@@ -1485,7 +1531,7 @@ private function resolvePhotoUrl(?string $path): string
                         {{-- ── Coordinators header ──────────────────────────── --}}
                         <div class="px-3 pt-2 pb-1 flex-shrink-0 border-t border-[#E8E0F0] mt-1">
                             <div class="flex items-center justify-between mb-2 px-1">
-                                <p class="text-xs font-semibold text-blue-600 uppercase tracking-widest">
+                                <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest">
                                     <i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($coordinators) }}
                                 </p>
                                 @php
@@ -1521,7 +1567,6 @@ private function resolvePhotoUrl(?string $path): string
                                 $offlineCoords = collect($coordinators)->where('is_online', false)->values();
                             @endphp
 
-                            {{-- Online coordinators --}}
                             @if(count($onlineCoords) > 0)
                             <p class="text-xs font-semibold text-emerald-600 uppercase tracking-widest px-1 pb-1 pt-0.5">
                                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 align-middle"></span>Online — {{ count($onlineCoords) }}
@@ -1530,10 +1575,9 @@ private function resolvePhotoUrl(?string $path): string
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
                                         hover:border-[#d9c9e8] hover:bg-[#f3eef8] transition-all">
                                 <div class="relative flex-shrink-0">
-                                    {{-- Coordinator avatar with real photo --}}
                                     <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
                                                 text-xs font-semibold text-white"
-                                         style="background:#2563eb;">
+                                         style="background:#7a3f91;">
                                         @if($coord['photo'])
                                             <img src="{{ $coord['photo'] }}"
                                                  class="w-full h-full object-cover"
@@ -1555,7 +1599,7 @@ private function resolvePhotoUrl(?string $path): string
                                         </span>
                                         @if($coord['department'])
                                         <span class="text-[#999999] text-xs">·</span>
-                                        <span class="text-xs text-blue-600 font-medium truncate">{{ $coord['department'] }}</span>
+                                        <span class="text-xs text-[#7a3f91] font-medium truncate">{{ $coord['department'] }}</span>
                                         @endif
                                     </div>
                                 </div>
@@ -1563,7 +1607,6 @@ private function resolvePhotoUrl(?string $path): string
                             @endforeach
                             @endif
 
-                            {{-- Offline coordinators --}}
                             @if(count($offlineCoords) > 0)
                             <div class="pt-{{ count($onlineCoords) > 0 ? '2' : '0.5' }} pb-1 px-1">
                                 <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">
@@ -1575,7 +1618,6 @@ private function resolvePhotoUrl(?string $path): string
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
                                         hover:bg-[#fafafa] transition-all opacity-70">
                                 <div class="relative flex-shrink-0">
-                                    {{-- Coordinator avatar with real photo --}}
                                     <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
                                                 text-xs font-semibold text-white"
                                          style="background:#c4a8d4;">
@@ -1589,7 +1631,6 @@ private function resolvePhotoUrl(?string $path): string
                                             {{ strtoupper(substr($coord['name'], 0, 1)) }}
                                         @endif
                                     </div>
-                                    {{-- Gray dot = offline --}}
                                     <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-gray-400 border-2 border-white"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
@@ -1627,10 +1668,7 @@ private function resolvePhotoUrl(?string $path): string
                                     <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
                                     <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
                                     @if(isset($pin['sender_type']))
-                                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0
-                                        {{ $pin['sender_type'] === 'director'
-                                            ? 'bg-purple-100 text-purple-700'
-                                            : 'bg-blue-100 text-blue-700' }}">
+                                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0 bg-purple-100 text-purple-700">
                                         {{ $pin['sender_type'] === 'director' ? 'Director' : 'Coordinator' }}
                                     </span>
                                     @endif

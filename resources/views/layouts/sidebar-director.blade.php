@@ -125,7 +125,7 @@
                     [
                         'route'   => 'director.director/messenger',
                         'icon'    => 'comments',
-                        'label'   => 'Staff Chat',
+                        'label'   => 'Chat Room',
                         'pattern' => 'director/messenger*',
                     ],
 

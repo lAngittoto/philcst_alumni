@@ -65,7 +65,7 @@ new class extends Component {
             ->select([
                 'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
                 'student_id', 'course_code', 'course_name', 'batch', 'year_level',
-                'email',    
+                'email',
                 'gender', 'date_of_birth',
                 'father_last_name', 'father_given_name', 'father_middle_name',
                 'mother_last_name',  'mother_given_name',  'mother_middle_name',
@@ -166,10 +166,10 @@ new class extends Component {
             'date_of_birth'        => 'required|date|before:today',
             'father_last_name'     => 'required|string|max:100',
             'father_given_name'    => 'required|string|max:100',
-            'father_middle_name'   => 'nullable|string|max:100',
+            'father_middle_name'   => 'required|string|max:100',   // ← now required
             'mother_last_name'     => 'required|string|max:100',
             'mother_given_name'    => 'required|string|max:100',
-            'mother_middle_name'   => 'nullable|string|max:100',
+            'mother_middle_name'   => 'required|string|max:100',   // ← now required
             'dswd_household_no'    => 'nullable|string|max:50',
             'address_street'       => 'required|string|max:255',
             'address_barangay'     => 'required|string|max:255',
@@ -183,8 +183,10 @@ new class extends Component {
             'date_of_birth.before'          => 'Birth date must be in the past.',
             'father_last_name.required'     => "Father's last name is required.",
             'father_given_name.required'    => "Father's given name is required.",
+            'father_middle_name.required'   => "Father's middle name is required.",
             'mother_last_name.required'     => "Mother's last name is required.",
             'mother_given_name.required'    => "Mother's given name is required.",
+            'mother_middle_name.required'   => "Mother's middle name is required.",
             'address_street.required'       => 'Street is required.',
             'address_barangay.required'     => 'Barangay is required.',
             'address_municipality.required' => 'Town/City/Municipality is required.',
@@ -196,7 +198,9 @@ new class extends Component {
             $profileComplete =
                 !empty($this->gender) && !empty($this->date_of_birth)
                 && !empty($this->father_last_name) && !empty($this->father_given_name)
+                && !empty($this->father_middle_name)
                 && !empty($this->mother_last_name) && !empty($this->mother_given_name)
+                && !empty($this->mother_middle_name)
                 && !empty($this->address_street) && !empty($this->address_barangay)
                 && !empty($this->address_municipality) && !empty($this->address_province)
                 && !empty($this->contact_number);
@@ -227,7 +231,6 @@ new class extends Component {
                 ? 'Profile saved successfully!'
                 : 'Progress saved. Fill in all required fields to complete your profile.';
 
-            // Tell the layout to refresh the profileComplete state
             $this->dispatch('profile-updated', completed: $profileComplete);
 
             Log::info("Alumni profile saved | student_id: {$this->student_id} | complete: " . ($profileComplete ? 'yes' : 'no'));
@@ -318,6 +321,18 @@ input[type="search"] {
     text-transform: uppercase; color: #999999;
 }
 
+/* ── Required star ───────────────────────────────────────────────── */
+.req { color: #ef4444; font-weight: 700; margin-left: 2px; font-size: .8rem; }
+
+/* ── Optional tag ────────────────────────────────────────────────── */
+.opt {
+    font-size: .68rem; font-weight: 500; color: #bbbbbb;
+    text-transform: none; letter-spacing: 0;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    padding: 1px 6px; border-radius: 99px; margin-left: 4px;
+    vertical-align: middle;
+}
+
 /* ── Error text ──────────────────────────────────────────────────── */
 .e-msg {
     font-size: .75rem; color: #ef4444;
@@ -339,8 +354,8 @@ input[type="search"] {
     <div>
         <h1 class="text-3xl font-semibold text-[#333333] tracking-tight">My Profile Information</h1>
         <p class="text-base leading-relaxed mt-2 text-[#666666] font-normal">
-            Complete your personal details to update your alumni profile. Fields marked with 
-            <span class="text-red-500 font-bold">*</span> are required.
+            Complete your personal details to update your alumni profile.
+            Fields marked with <span class="req">*</span> are required.
         </p>
     </div>
 
@@ -450,7 +465,7 @@ input[type="search"] {
             {{-- Sex / Gender --}}
             <div>
                 <label class="block s-label mb-2">
-                    Sex @if($editing)<span class="text-red-500 normal-case font-normal text-xs ml-1">*</span>@endif
+                    Sex <span class="req">*</span>
                 </label>
                 @if($editing)
                     <div class="flex gap-2 flex-wrap">
@@ -481,7 +496,7 @@ input[type="search"] {
             {{-- Birth Date --}}
             <div>
                 <label class="block s-label mb-2">
-                    Birth Date @if($editing)<span class="text-red-500 normal-case font-normal text-xs ml-1">*</span>@endif
+                    Birth Date <span class="req">*</span>
                 </label>
                 <input wire:model="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
                        {{ !$editing ? 'disabled' : '' }}
@@ -530,7 +545,7 @@ input[type="search"] {
             <div class="grid grid-cols-3 gap-3">
                 <div>
                     <label class="block s-label mb-1">
-                        Last Name @if($editing)<span class="text-red-500">*</span>@endif
+                        Last Name <span class="req">*</span>
                     </label>
                     <input wire:model="father_last_name" type="text" placeholder="DELA CRUZ"
                            oninput="this.value=this.value.toUpperCase()"
@@ -542,7 +557,7 @@ input[type="search"] {
                 </div>
                 <div>
                     <label class="block s-label mb-1">
-                        Given Name @if($editing)<span class="text-red-500">*</span>@endif
+                        Given Name <span class="req">*</span>
                     </label>
                     <input wire:model="father_given_name" type="text" placeholder="JUAN"
                            oninput="this.value=this.value.toUpperCase()"
@@ -553,11 +568,17 @@ input[type="search"] {
                     @enderror
                 </div>
                 <div>
-                    <label class="block s-label mb-1">Middle Name</label>
+                    {{-- CHANGED: optional → required (*) --}}
+                    <label class="block s-label mb-1">
+                        Middle Name <span class="req">*</span>
+                    </label>
                     <input wire:model="father_middle_name" type="text" placeholder="SANTOS"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_middle_name') ? ' err' : '') : 'f-view' }}">
+                    @error('father_middle_name')
+                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
+                    @enderror
                 </div>
             </div>
         </div>
@@ -581,7 +602,7 @@ input[type="search"] {
             <div class="grid grid-cols-3 gap-3">
                 <div>
                     <label class="block s-label mb-1">
-                        Last Name @if($editing)<span class="text-red-500">*</span>@endif
+                        Last Name <span class="req">*</span>
                     </label>
                     <input wire:model="mother_last_name" type="text" placeholder="REYES"
                            oninput="this.value=this.value.toUpperCase()"
@@ -593,7 +614,7 @@ input[type="search"] {
                 </div>
                 <div>
                     <label class="block s-label mb-1">
-                        Given Name @if($editing)<span class="text-red-500">*</span>@endif
+                        Given Name <span class="req">*</span>
                     </label>
                     <input wire:model="mother_given_name" type="text" placeholder="MARIA"
                            oninput="this.value=this.value.toUpperCase()"
@@ -604,11 +625,17 @@ input[type="search"] {
                     @enderror
                 </div>
                 <div>
-                    <label class="block s-label mb-1">Middle Name</label>
+                    {{-- CHANGED: optional → required (*) --}}
+                    <label class="block s-label mb-1">
+                        Middle Name <span class="req">*</span>
+                    </label>
                     <input wire:model="mother_middle_name" type="text" placeholder="CRUZ"
                            oninput="this.value=this.value.toUpperCase()"
                            {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
+                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_middle_name') ? ' err' : '') : 'f-view' }}">
+                    @error('mother_middle_name')
+                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
+                    @enderror
                 </div>
             </div>
         </div>
@@ -639,7 +666,7 @@ input[type="search"] {
         <div>
             <div class="div-lbl"><span>DSWD Household</span></div>
             <label class="block s-label mb-1">
-                DSWD Household No. <span class="normal-case font-normal text-[#999999] text-xs">(optional)</span>
+                DSWD Household No. <span class="opt">optional</span>
             </label>
             <input wire:model="dswd_household_no" type="text" placeholder="E.G. 004-0012345"
                    oninput="this.value=this.value.toUpperCase()"
@@ -660,7 +687,7 @@ input[type="search"] {
 
                 <div>
                     <label class="block s-label mb-1">
-                        Street @if($editing)<span class="text-red-500">*</span>@endif
+                        Street <span class="req">*</span>
                     </label>
                     <input wire:model="address_street" type="text" placeholder="E.G. 123 RIZAL ST."
                            oninput="this.value=this.value.toUpperCase()"
@@ -673,7 +700,7 @@ input[type="search"] {
 
                 <div>
                     <label class="block s-label mb-1">
-                        Barangay @if($editing)<span class="text-red-500">*</span>@endif
+                        Barangay <span class="req">*</span>
                     </label>
                     <input wire:model="address_barangay" type="text" placeholder="E.G. BAGONG SILANG"
                            oninput="this.value=this.value.toUpperCase()"
@@ -686,7 +713,7 @@ input[type="search"] {
 
                 <div>
                     <label class="block s-label mb-1">
-                        Town / City / Municipality @if($editing)<span class="text-red-500">*</span>@endif
+                        Town / City / Municipality <span class="req">*</span>
                     </label>
                     <input wire:model="address_municipality" type="text" placeholder="E.G. LIPA CITY"
                            oninput="this.value=this.value.toUpperCase()"
@@ -699,7 +726,7 @@ input[type="search"] {
 
                 <div>
                     <label class="block s-label mb-1">
-                        Province @if($editing)<span class="text-red-500">*</span>@endif
+                        Province <span class="req">*</span>
                     </label>
                     <input wire:model="address_province" type="text" placeholder="E.G. BATANGAS"
                            oninput="this.value=this.value.toUpperCase()"
@@ -717,7 +744,7 @@ input[type="search"] {
         <div>
             <div class="div-lbl"><span>Disability</span></div>
             <label class="block s-label mb-1">
-                Disability <span class="normal-case font-normal text-[#999999] text-xs">(optional)</span>
+                Disability <span class="opt">optional</span>
             </label>
             <input wire:model="disability" type="text" placeholder="E.G. NONE / VISUAL IMPAIRMENT / HEARING LOSS"
                    oninput="this.value=this.value.toUpperCase()"
@@ -738,7 +765,7 @@ input[type="search"] {
 
                 <div>
                     <label class="block s-label mb-1">
-                        Contact Number @if($editing)<span class="text-red-500">*</span>@endif
+                        Contact Number <span class="req">*</span>
                     </label>
                     <input wire:model="contact_number" type="tel" placeholder="09XX-XXX-XXXX"
                            oninput="this.value=this.value.toUpperCase()"
