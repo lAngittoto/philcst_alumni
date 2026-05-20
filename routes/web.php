@@ -1,12 +1,13 @@
 <?php
 
-use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\AlumniController;
-use App\Http\Controllers\AlumniPasswordChangeController;
 use App\Http\Controllers\AlumniInformationController;
+use App\Http\Controllers\AlumniPasswordChangeController;
+use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\CourseController;
 use App\Http\Controllers\MessengerController;
 use App\Http\Controllers\OrganizerController;
+use App\Http\Controllers\RegistrarNotificationController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
@@ -97,6 +98,12 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
     Route::view('/information-management', 'registrar.information-management-wrapper') ->name('information-management');
     Route::view('/courses',                'registrar.courses-wrapper')                ->name('courses');
     Route::view('/employment/tracking',     'registrar.employment-tracking-wrapper')   ->name('employment.tracking');
+    // Notification API (used by Alpine store via fetch)
+Route::get('/notifications',              [RegistrarNotificationController::class, 'index'])      ->name('notifications.index');
+Route::post('/notifications',             [RegistrarNotificationController::class, 'store'])      ->name('notifications.store');
+Route::patch('/notifications/{notification}/read', [RegistrarNotificationController::class, 'markRead'])   ->name('notifications.read');
+Route::patch('/notifications/read-all',   [RegistrarNotificationController::class, 'markAllRead'])->name('notifications.read-all');
+
 });
 
 // ===================================

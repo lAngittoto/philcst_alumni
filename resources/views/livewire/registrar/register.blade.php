@@ -1,5 +1,3 @@
-{{-- resources/views/livewire/registrar/register-alumni.blade.php --}}
-
 <?php
 
 use Livewire\Volt\Component;
@@ -99,7 +97,6 @@ new class extends Component {
         elseif (!$this->validateName($lastName))
             $errors[] = 'Last name may only contain letters, spaces, hyphens, or apostrophes.';
 
-        // ── Middle name is now REQUIRED ──────────────────────────
         $mid = trim($this->regMiddleInitial);
         if ($mid === '') {
             $errors[] = 'Middle name is required.';
@@ -202,6 +199,16 @@ new class extends Component {
             $this->successId    = $paddedId;
             $this->successPass  = $tmpPass;
             $this->successEmail = $email;
+
+            // ── Dispatch browser CustomEvent → caught by window.addEventListener
+            //    in layout.blade.php → pushes to Alpine.store('notifs')
+            //
+            //    NOTE: $this->dispatch() in Livewire v3 fires BOTH a Livewire
+            //    event AND a browser CustomEvent on `window`. The layout only
+            //    uses window.addEventListener (guarded against duplicates), so
+            //    exactly ONE notification is added per registration.
+            $this->dispatch('alumni-registered', name: $fullName, id: $paddedId);
+
             $this->resetForm();
 
         } catch (\Exception $e) {
@@ -424,9 +431,6 @@ new class extends Component {
             $this->importStatus = 'Importing…';
             $now = now()->toDateTimeString();
 
-            // ── Pre-hash all passwords in one pass using cost=4 for speed ──
-            // BCrypt default cost=10 is ~100ms each — cost=4 is ~3ms each.
-            // Temp passwords are short-lived and changed on first login.
             $hashedPasswords = [];
             foreach ($jobs as $job) {
                 $plain = $this->generateTempPassword($job['sid'], $job['lastName']);
@@ -504,6 +508,9 @@ new class extends Component {
             $this->importFile     = null;
             Log::info("Alumni import: {$this->importSuccessCount} inserted, {$this->importFailCount} errors, {$this->importDuplicateCount} duplicates.");
 
+            // ── Dispatch browser CustomEvent → caught by guarded listener in layout
+            $this->dispatch('alumni-imported', count: $this->importSuccessCount);
+
         } catch (\Exception $e) {
             Log::error('Import error: ' . $e->getMessage());
             $this->importStatus  = 'Error: ' . $e->getMessage();
@@ -523,7 +530,7 @@ new class extends Component {
     <div class="flex items-center justify-between gap-3 mb-5">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-user-plus text-white text-base"></i>
             </div>
             <div>
@@ -537,8 +544,7 @@ new class extends Component {
                 class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition hover:opacity-90 active:scale-95 shrink-0"
                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             <i class="fas fa-file-import text-sm"></i>
-            <span class="hidden sm:inline">Import</span>
-            <span class="sm:hidden">Import</span>
+            <span>Import</span>
         </button>
     </div>
 
@@ -548,68 +554,65 @@ new class extends Component {
                     {{ ($successMsg || count($formErrors) > 0) ? 'max-w-5xl' : 'max-w-2xl' }}
                     transition-all duration-300">
 
-            {{-- Form Column --}}
+            {{-- ── Form Column ──────────────────────────────────────── --}}
             <div class="{{ ($successMsg || count($formErrors) > 0) ? 'flex-1 min-w-0' : 'w-full' }}">
                 <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden">
-                    <div class="px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5]">
 
-                    </div>
                     <form wire:submit="registerAlumni" class="p-5 sm:p-6 space-y-5">
 
                         {{-- Full Name --}}
-                        <div class="space-y-2">
-                            <label class="block text-sm font-semibold text-[#333333] uppercase tracking-wide">
+                        <div class="space-y-3">
+                            <label class="block text-base font-bold text-[#333333] uppercase tracking-wide">
                                 Full Name <span class="text-red-500">*</span>
                             </label>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <input wire:model.defer="regFirstName" type="text" placeholder="First Name"
-                                           class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                                           class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] placeholder-[#AAAAAA] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                            maxlength="100" autocomplete="given-name">
-                                    <p class="text-xs text-[#666666] mt-1 font-normal">First Name <span class="text-red-500">*</span></p>
+                                    <p class="text-sm text-[#666666] mt-1.5 font-medium">First Name <span class="text-red-500">*</span></p>
                                 </div>
                                 <div>
                                     <input wire:model.defer="regLastName" type="text" placeholder="Last Name"
-                                           class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                                           class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] placeholder-[#AAAAAA] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                            maxlength="100" autocomplete="family-name">
-                                    <p class="text-xs text-[#666666] mt-1 font-normal">Last Name <span class="text-red-500">*</span></p>
+                                    <p class="text-sm text-[#666666] mt-1.5 font-medium">Last Name <span class="text-red-500">*</span></p>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
                                     <input wire:model.defer="regMiddleInitial" type="text" placeholder="e.g. Santos"
-                                           class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                                           class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] placeholder-[#AAAAAA] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                            maxlength="50">
-                                    {{-- ── Middle name now REQUIRED ── --}}
-                                    <p class="text-xs text-[#666666] mt-1 font-normal">Middle Name <span class="text-red-500">*</span></p>
+                                    <p class="text-sm text-[#666666] mt-1.5 font-medium">Middle Name <span class="text-red-500">*</span></p>
                                 </div>
                                 <div>
                                     <input wire:model.defer="regSuffix" type="text" placeholder="e.g. Jr."
-                                           class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                                           class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] placeholder-[#AAAAAA] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                            maxlength="10">
-                                    <p class="text-xs text-[#666666] mt-1 font-normal">Suffix</p>
+                                    <p class="text-sm text-[#666666] mt-1.5 font-medium">Suffix <span class="text-[#AAAAAA] font-normal">(optional)</span></p>
                                 </div>
                             </div>
                         </div>
 
                         {{-- Student ID --}}
                         <div>
-                            <label class="block text-sm font-semibold text-[#333333] uppercase tracking-wide mb-2">
+                            <label class="block text-base font-bold text-[#333333] uppercase tracking-wide mb-2">
                                 Student ID <span class="text-red-500">*</span>
                             </label>
                             <input wire:model.defer="regStudentId" type="text" placeholder="e.g. 12345"
-                                   class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] font-mono placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
+                                   class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] font-mono placeholder-[#AAAAAA] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                    maxlength="8" inputmode="numeric" autocomplete="off">
                         </div>
 
                         {{-- Course + Batch --}}
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-sm font-semibold text-[#333333] uppercase tracking-wide mb-2">
+                                <label class="block text-base font-bold text-[#333333] uppercase tracking-wide mb-2">
                                     Course <span class="text-red-500">*</span>
                                 </label>
                                 <select wire:model.defer="regCourseCode"
-                                        class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 cursor-pointer font-normal">
+                                        class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 cursor-pointer">
                                     <option value="">Select Course…</option>
                                     @foreach($this->courses as $c)
                                         <option value="{{ $c->code }}">{{ $c->code }} — {{ $c->name }}</option>
@@ -617,43 +620,42 @@ new class extends Component {
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-sm font-semibold text-[#333333] uppercase tracking-wide mb-2">
+                                <label class="block text-base font-bold text-[#333333] uppercase tracking-wide mb-2">
                                     Batch Year <span class="text-red-500">*</span>
                                 </label>
                                 <input wire:model.defer="regYear" type="number" placeholder="{{ date('Y') }}"
-                                       class="w-full px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                                       class="w-full px-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                        min="1900" max="9999">
                             </div>
                         </div>
 
                         {{-- Email --}}
                         <div>
-                            <label class="block text-sm font-semibold text-[#333333] uppercase tracking-wide mb-2">
+                            <label class="block text-base font-bold text-[#333333] uppercase tracking-wide mb-2">
                                 Email Address <span class="text-red-500">*</span>
                             </label>
                             <div class="relative">
                                 <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                    <i class="fas fa-envelope text-[#999999] text-sm"></i>
+                                    <i class="fas fa-envelope text-[#AAAAAA]"></i>
                                 </span>
                                 <input wire:model.defer="regEmail" type="email"
-                                       class="w-full pl-9 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333] placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                                       class="w-full pl-9 pr-3 py-2.5 border border-[#E8E0F0] rounded-lg text-base bg-white text-[#333333] placeholder-[#AAAAAA] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition"
                                        maxlength="255" autocomplete="email">
                             </div>
                         </div>
 
                         {{-- Buttons --}}
-                        <div class="flex gap-3 pt-2">
-                            {{-- FIX: Cancel replaced with Reset — clears the form in place --}}
+                        <div class="flex gap-3 pt-1">
                             <button type="button"
                                     wire:click="resetForm"
                                     wire:loading.attr="disabled" wire:target="registerAlumni"
-                                    class="flex-1 px-5 py-2.5 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99]">
-                               <i class="fa-solid fa-arrow-rotate-left"></i> Reset
+                                    class="flex-1 px-5 py-2.5 rounded-lg text-base font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99]">
+                               <i class="fa-solid fa-arrow-rotate-left mr-1"></i> Reset
                             </button>
                             <button type="submit"
                                     wire:loading.attr="disabled" wire:target="registerAlumni"
-                                    class="flex-1 px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
-                                    style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
+                                    class="flex-1 px-5 py-2.5 rounded-lg text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
+                                    style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                                 <span wire:loading wire:target="registerAlumni">
                                     <i class="fas fa-spinner animate-spin"></i> Registering…
                                 </span>
@@ -667,28 +669,28 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Side Error Panel --}}
+            {{-- ── Side Error Panel ─────────────────────────────────── --}}
             @if(count($formErrors) > 0)
             <div class="w-80 shrink-0">
                 <div class="bg-red-50 border border-red-200 rounded-2xl overflow-hidden shadow-sm">
                     <div class="px-4 py-3 flex items-center justify-between"
-                         style="background:linear-gradient(135deg,#DC2626,#DC2626);">
+                         style="background:linear-gradient(135deg,#DC2626,#b91c1c);">
                         <div class="flex items-center gap-2">
                             <i class="fas fa-circle-xmark text-white text-base"></i>
-                            <span class="text-sm font-semibold text-white">Validation Errors</span>
+                            <span class="text-base font-semibold text-white">Validation Errors</span>
                         </div>
                         <button wire:click="resetForm" type="button" class="text-white/70 hover:text-white transition">
                             <i class="fas fa-xmark text-sm"></i>
                         </button>
                     </div>
                     <div class="p-4">
-                        <p class="text-xs font-semibold text-red-800 mb-3">Please fix the following errors:</p>
+                        <p class="text-sm font-semibold text-red-800 mb-3">Please fix the following errors:</p>
                         <ul class="space-y-2">
                             @foreach($formErrors as $msgs)
                                 @foreach($msgs as $msg)
-                                    <li class="flex items-start gap-2 text-sm">
+                                    <li class="flex items-start gap-2">
                                         <span class="shrink-0 mt-0.5 text-red-500 font-bold">•</span>
-                                        <span class="text-red-700 leading-relaxed">{{ $msg }}</span>
+                                        <span class="text-sm text-red-700 leading-relaxed">{{ $msg }}</span>
                                     </li>
                                 @endforeach
                             @endforeach
@@ -698,15 +700,15 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Side Success Panel --}}
+            {{-- ── Side Success Panel ───────────────────────────────── --}}
             @if($successMsg)
             <div class="w-80 shrink-0">
                 <div class="bg-emerald-50 border border-emerald-200 rounded-2xl overflow-hidden shadow-sm">
                     <div class="px-4 py-3 flex items-center justify-between"
-                         style="background:linear-gradient(135deg,#059669,#059669);">
+                         style="background:linear-gradient(135deg,#059669,#047857);">
                         <div class="flex items-center gap-2">
                             <i class="fas fa-circle-check text-white text-base"></i>
-                            <span class="text-sm font-semibold text-white">Registration Successful</span>
+                            <span class="text-base font-semibold text-white">Registration Successful</span>
                         </div>
                         <button wire:click="clearSuccess" class="text-white/70 hover:text-white transition">
                             <i class="fas fa-xmark text-sm"></i>
@@ -715,34 +717,34 @@ new class extends Component {
                     <div class="p-4 space-y-4">
                         <div class="text-center py-3 px-2 bg-white rounded-xl border border-emerald-100">
                             <div class="w-12 h-12 rounded-full mx-auto mb-2 flex items-center justify-center"
-                                 style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
+                                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                                 <i class="fas fa-user-graduate text-white"></i>
                             </div>
-                            <p class="text-xs text-[#666666] mb-0.5 font-normal">Registered Alumni</p>
-                            <p class="text-sm font-semibold text-[#333333] leading-tight">{{ $successName }}</p>
+                            <p class="text-sm text-[#666666] mb-0.5">Registered Alumni</p>
+                            <p class="text-base font-semibold text-[#333333] leading-tight">{{ $successName }}</p>
                         </div>
                         <div class="space-y-2">
-                            <p class="text-[10px] font-semibold text-[#666666] uppercase tracking-wide">Login Credentials</p>
+                            <p class="text-xs font-bold text-[#666666] uppercase tracking-wide">Login Credentials</p>
                             <div class="bg-white rounded-xl border border-emerald-100 divide-y divide-emerald-50">
                                 <div class="px-3 py-2.5">
-                                    <p class="text-[10px] text-[#666666] font-semibold mb-0.5">Student ID</p>
-                                    <p class="text-sm font-mono font-semibold text-[#333333]">{{ $successId }}</p>
+                                    <p class="text-xs text-[#666666] font-semibold mb-0.5">Student ID</p>
+                                    <p class="text-base font-mono font-semibold text-[#333333]">{{ $successId }}</p>
                                 </div>
                                 <div class="px-3 py-2.5">
-                                    <p class="text-[10px] text-[#666666] font-semibold mb-0.5">Temporary Password</p>
-                                    <p class="text-sm font-mono font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg inline-block mt-0.5">{{ $successPass }}</p>
+                                    <p class="text-xs text-[#666666] font-semibold mb-0.5">Temporary Password</p>
+                                    <p class="text-base font-mono font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg inline-block mt-0.5">{{ $successPass }}</p>
                                 </div>
                                 <div class="px-3 py-2.5">
-                                    <p class="text-[10px] text-[#666666] font-semibold mb-0.5">Email Address</p>
-                                    <p class="text-sm font-normal text-[#333333] break-all">{{ $successEmail }}</p>
+                                    <p class="text-xs text-[#666666] font-semibold mb-0.5">Email Address</p>
+                                    <p class="text-sm text-[#333333] break-all">{{ $successEmail }}</p>
                                 </div>
                                 <div class="px-3 py-2.5">
-                                    <p class="text-[10px] text-[#666666] font-semibold mb-0.5">Status</p>
+                                    <p class="text-xs text-[#666666] font-semibold mb-0.5">Status</p>
                                     <span class="text-xs font-semibold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">VERIFIED</span>
                                 </div>
                             </div>
                         </div>
-                        <p class="text-[10px] text-emerald-700 leading-relaxed bg-emerald-100/60 rounded-lg p-2.5 font-normal">
+                        <p class="text-xs text-emerald-700 leading-relaxed bg-emerald-100/60 rounded-lg p-2.5">
                             <i class="fas fa-circle-info mr-1"></i>Share the temporary password with the alumni. They can change it after logging in.
                         </p>
                     </div>
@@ -757,11 +759,11 @@ new class extends Component {
 {{-- ══ IMPORT MODAL ════════════════════════════════════════════════ --}}
 @if($showImportModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center px-4"
-     style="background:rgba(27,6,46,0.60); backdrop-filter:blur(4px);"
+     style="background:rgba(27,6,46,0.60);backdrop-filter:blur(4px);"
      @keydown.escape.window="@if($importStep !== 'processing') $wire.closeImportModal() @endif">
 
     <div class="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-         style="max-height:90vh; animation:panelIn .22s cubic-bezier(.4,0,.2,1) both;">
+         style="max-height:90vh;animation:panelIn .22s cubic-bezier(.4,0,.2,1) both;">
         <style>
             @keyframes panelIn {
                 from { opacity:0; transform:translateY(14px) scale(.98); }
@@ -811,10 +813,9 @@ new class extends Component {
                 @endforeach
             </div>
 
-            {{-- ── UPLOAD STEP ────────────────────────────────── --}}
+            {{-- ── UPLOAD STEP ─────────────────────────────────── --}}
             @if($importStep === 'upload')
 
-            {{-- Required columns info box --}}
             <div class="p-4 rounded-xl bg-blue-50 border border-blue-200">
                 <p class="font-bold text-base text-blue-900 mb-2.5 flex items-center gap-1.5">
                     <i class="fas fa-circle-info text-blue-500"></i>Required Columns
@@ -865,7 +866,7 @@ new class extends Component {
                 </button>
             </div>
 
-            {{-- ── PROCESSING STEP ────────────────────────────── --}}
+            {{-- ── PROCESSING STEP ─────────────────────────────── --}}
             @elseif($importStep === 'processing')
 
             <div class="py-12 text-center">
@@ -880,12 +881,12 @@ new class extends Component {
                 <div class="w-full bg-[#F0F0F0] rounded-full h-3 overflow-hidden">
                     @php $pct = $importTotal > 0 ? round(($importProgress / $importTotal) * 100) : 0; @endphp
                     <div class="h-full rounded-full transition-all duration-500"
-                         style="width:{{ $pct }}%; background:linear-gradient(90deg,#7A3F91,#9b59b6);"></div>
+                         style="width:{{ $pct }}%;background:linear-gradient(90deg,#7A3F91,#9b59b6);"></div>
                 </div>
                 <p class="text-sm text-[#888888] mt-2.5 font-semibold">{{ $pct }}% complete</p>
             </div>
 
-            {{-- ── BLOCKED STEP ────────────────────────────────── --}}
+            {{-- ── BLOCKED STEP ─────────────────────────────────── --}}
             @elseif($importStep === 'blocked')
 
             <div class="flex items-start gap-4 p-4 rounded-xl bg-red-50 border border-red-200">
@@ -902,7 +903,7 @@ new class extends Component {
                 <i class="fas fa-rotate-left mr-2"></i>Try Again
             </button>
 
-            {{-- ── DONE STEP ────────────────────────────────────── --}}
+            {{-- ── DONE STEP ─────────────────────────────────────── --}}
             @elseif($importStep === 'done')
 
             @php
@@ -999,18 +1000,12 @@ new class extends Component {
 
         {{-- Modal Footer --}}
         <div class="shrink-0 px-5 py-3 border-t border-[#E8E0F0] bg-[#FAFAFA] flex items-center justify-between">
-            <p class="text-sm text-[#888888] font-normal">
-                @if($importStep === 'upload')
-                @elseif($importStep === 'processing') Do not close this window while importing.
+            <p class="text-sm text-[#888888]">
+                @if($importStep === 'processing') Do not close this window while importing.
                 @elseif($importStep === 'done')   Import complete — you may close this window.
-                @else                             Fix the error and try again.
+                @elseif($importStep === 'blocked') Fix the error and try again.
                 @endif
             </p>
-            @if($importStep !== 'processing')
-            <button wire:click="closeImportModal"
-                    class="text-sm text-[#555555] hover:text-[#333333] font-semibold flex items-center gap-1 transition">
-            </button>
-            @endif
         </div>
     </div>
 </div>

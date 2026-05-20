@@ -89,7 +89,6 @@ new class extends Component {
 
         $group = $this->getCourseGroup($this->alumniCourse);
 
-        // ── Strong match keywords → "yes" ─────────────────────────────────────
         $yesKw = [
             'technology'     => [
                 'developer','programmer','software','web dev','mobile app','network engineer',
@@ -168,7 +167,6 @@ new class extends Component {
             'general'        => [],
         ];
 
-        // ── Partial match keywords → "partially" ──────────────────────────────
         $partialKw = [
             'technology'     => [
                 'it ','tech ','digital','computer','online','system','app ','platform','encoder',
@@ -230,14 +228,9 @@ new class extends Component {
             ],
         ];
 
-        // ── Global cross-cutting overrides ────────────────────────────────────
-        // TESDA instructor/trainer: relevant if education, partial for all others
         if (str_contains($t, 'tesda')) {
             return $group === 'education' ? 'yes' : 'partially';
         }
-
-        // Overseas/OFW with a known role prefix — preserve group match
-        // (no special override needed; falls through to group keywords)
 
         $yesKeys     = $yesKw[$group]     ?? [];
         $partialKeys = $partialKw[$group] ?? [];
@@ -528,10 +521,6 @@ new class extends Component {
         }
     }
 
-    /**
-     * Auto-detect relevance as user types the custom job title.
-     * No manual selection needed — system figures it out.
-     */
     public function updatedCustomJobTitle(): void
     {
         if ($this->job_title === 'Other') {
@@ -549,7 +538,6 @@ new class extends Component {
         $isOther = ($this->job_title === 'Other');
         if ($isOther) {
             $this->custom_job_title = trim($this->custom_job_title);
-            // Ensure relevance is auto-detected at save time too
             if ($this->custom_job_title && !$this->course_relevance) {
                 $this->course_relevance = $this->detectJobRelevance($this->custom_job_title);
             }
@@ -587,7 +575,6 @@ new class extends Component {
             if ($isOther) {
                 $rules['custom_job_title'] = 'required|string|max:255';
                 $msgs['custom_job_title.required'] = 'Please specify your job title.';
-                // Relevance is auto-detected — no manual validation needed
             }
         }
 
@@ -623,6 +610,9 @@ new class extends Component {
                 'updated_at'          => $now,
             ];
 
+            // ── Flag BEFORE the transaction overwrites $this->trackingId ──────
+            $isNewRecord = ($this->trackingId === 0);
+
             DB::transaction(function () use ($data, $now) {
                 if ($this->trackingId) {
                     DB::table('employment_trackings')
@@ -635,7 +625,27 @@ new class extends Component {
             $this->hasRecord      = true;
             $this->editing        = false;
             $this->successMessage = 'Employment information updated successfully!';
-            $this->dispatch('employment-updated', alumniId: $this->alumniId);
+
+            // ── NOTIFICATION DISPATCH ─────────────────────────────────────────
+            // Fetch alumni name for the notification message.
+            $alumni = \App\Models\Alumni::find($this->alumniId);
+            $name   = trim(($alumni->first_name ?? '') . ' ' . ($alumni->last_name ?? ''));
+
+            if ($isNewRecord) {
+                // First-ever submission → "New Employment Record" notification
+                $this->dispatch('employment-recorded', [
+                    'name'   => $name,
+                    'status' => $this->employment_status,
+                ]);
+            } else {
+                // Updating an existing record → "Employment Status Updated" notification
+                $this->dispatch('employment-updated', [
+                    'name'       => $name,
+                    'status'     => $this->employment_status,
+                    'old_status' => $this->snapshot['employment_status'] ?? null,
+                ]);
+            }
+            // ─────────────────────────────────────────────────────────────────
 
             Log::info("Employment saved | alumni_id:{$this->alumniId} | status:{$this->employment_status}");
 
@@ -1139,7 +1149,6 @@ new class extends Component {
                             @if($job_title === 'Other')
                             <div class="specify-wrap mt-3 p-3 rounded-xl border border-dashed border-violet-200 bg-violet-50/40 space-y-3">
 
-                                {{-- Specify job title --}}
                                 <div>
                                     <label class="block s-label mb-1">
                                         Please Specify <span class="text-red-500">*</span>
@@ -1161,7 +1170,6 @@ new class extends Component {
                                     </p>
                                 </div>
 
-                                {{-- ── Smart auto-detected relevance ── --}}
                                 @if($custom_job_title)
                                 <div class="pt-2 border-t border-violet-200/60">
                                     <div class="flex items-center gap-2 flex-wrap">

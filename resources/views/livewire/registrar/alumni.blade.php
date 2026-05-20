@@ -20,7 +20,6 @@ new class extends Component {
     public string $alumniSearch = '';
     public string $alumniBatch  = '';
     public string $alumniCourse = '';
-    public string $alumniSort   = 'recent';
 
     // ── View profile ──────────────────────────────────────────────
     public ?int   $viewingProfileId  = null;
@@ -48,7 +47,6 @@ new class extends Component {
     public function updatingAlumniSearch() { $this->resetPage('alumniPage'); }
     public function updatingAlumniBatch()  { $this->resetPage('alumniPage'); }
     public function updatingAlumniCourse() { $this->resetPage('alumniPage'); }
-    public function updatingAlumniSort()   { $this->resetPage('alumniPage'); }
 
     // ─────────────────────────────────────────────────────────────
     #[Computed]
@@ -76,11 +74,7 @@ new class extends Component {
         if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
         if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
 
-        $q->when(
-            $this->alumniSort === 'oldest',
-            fn($q) => $q->orderBy('created_at'),
-            fn($q) => $q->orderByDesc('created_at')
-        );
+        $q->orderByDesc('created_at');
 
         return $q->paginate(200, ['*'], 'alumniPage');
     }
@@ -114,7 +108,6 @@ new class extends Component {
         $this->alumniSearch = '';
         $this->alumniBatch  = '';
         $this->alumniCourse = '';
-        $this->alumniSort   = 'recent';
         $this->resetPage('alumniPage');
     }
 
@@ -198,34 +191,44 @@ new class extends Component {
 <div>
 
 <style>
-    /* ── Cursor-follow tooltip ─────────────────────────────────── */
-    #ar-global-tooltip {
+    /* ── Dashboard-style hover tooltip (follows cursor) ─────────── */
+    .ar-hover-tip {
         position: fixed;
-        background: rgba(122, 63, 145, 0.92);
+        background: #1a1a1a;
         color: #fff;
         font-size: 10px;
-        font-weight: 600;
-        letter-spacing: .06em;
-        text-transform: uppercase;
-        padding: 5px 10px;
-        border-radius: 8px;
+        font-weight: 700;
+        letter-spacing: .05em;
+        padding: 5px 11px;
+        border-radius: 7px;
+        white-space: nowrap;
         pointer-events: none;
         opacity: 0;
         transition: opacity .15s ease;
-        white-space: nowrap;
         z-index: 99999;
+        box-shadow: 0 4px 14px rgba(0,0,0,.30);
         transform: translate(14px, 14px);
     }
-    #ar-global-tooltip.visible { opacity: 1; }
+    .ar-hover-tip.visible { opacity: 1; }
+    .ar-hover-tip::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 14px;
+        border: 5px solid transparent;
+        border-top-color: #1a1a1a;
+    }
 
-    /* ── Row: pointer + NO text selection ─────────────────────── */
+    /* ── Row: pointer + NO text selection + gray hover ────────── */
     .ar-row {
         cursor: pointer;
         user-select: none;
         -webkit-user-select: none;
+        transition: background .12s ease;
     }
+    .ar-row:hover { background: #F0ECF5 !important; }
 
-    /* ── Numbered pagination buttons ──────────────────────────── */
+    /* ── Numbered pagination buttons ── */
     .ar-pg-btn {
         display: inline-flex;
         align-items: center;
@@ -239,40 +242,144 @@ new class extends Component {
         transition: all .15s;
         border: 1.5px solid transparent;
     }
-    .ar-pg-active { background: #7A3F91; color: #fff; border-color: #7A3F91; }
-    .ar-pg-nav    { background: #fff; color: #7A3F91; border-color: #d9c9e8; }
-    .ar-pg-nav:hover:not(:disabled) { background: #f9f7fc; border-color: #7A3F91; }
-    .ar-pg-nav:disabled { opacity: .4; cursor: not-allowed; }
+    .ar-pg-active {
+        background: rgba(255, 255, 255, 1);
+        color: #7A3F91;
+        border-color: rgba(255, 255, 255, 1);
+    }
+    .ar-pg-nav {
+        background: rgba(255, 255, 255, .15);
+        color: #fff;
+        border-color: rgba(255, 255, 255, .25);
+    }
+    .ar-pg-nav:hover:not(:disabled) {
+        background: rgba(255, 255, 255, .28);
+        border-color: rgba(255, 255, 255, .5);
+    }
+    .ar-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-    /* ── Close-button tooltip ──────────────────────────────────── */
-    .ar-close-btn { position: relative; }
+    /* ── Close button — matches dashboard style ──────────────────── */
+    .ar-close-btn {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: rgba(255,255,255,.12);
+        border: 1px solid rgba(255,255,255,.2);
+        color: #fff;
+        cursor: pointer;
+        transition: background .15s;
+        overflow: visible;
+    }
+    .ar-close-btn:hover { background: rgba(255,255,255,.22); }
     .ar-close-tip {
         position: absolute;
-        right: calc(100% + 8px);
-        top: 50%;
-        transform: translateY(-50%);
-        background: rgba(27, 6, 46, 0.82);
+        top: calc(100% + 8px);
+        right: 0;
+        background: rgba(27, 6, 46, 0.88);
         color: #fff;
         font-size: 10px;
-        font-weight: 600;
-        letter-spacing: .06em;
+        font-weight: 700;
+        letter-spacing: .08em;
         text-transform: uppercase;
-        padding: 4px 9px;
+        padding: 4px 10px;
         border-radius: 7px;
         white-space: nowrap;
         pointer-events: none;
         opacity: 0;
         transition: opacity .15s ease;
+        z-index: 200;
+        box-shadow: 0 4px 12px rgba(0,0,0,.28);
+    }
+    .ar-close-tip::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        right: 10px;
+        border: 5px solid transparent;
+        border-bottom-color: rgba(27, 6, 46, 0.88);
     }
     .ar-close-btn:hover .ar-close-tip { opacity: 1; }
 
     /* ── Filters label ─────────────────────────────────────────── */
     .ar-filter-label { pointer-events: none; }
+
+    /* ── Custom dropdown ───────────────────────────────────────── */
+    .ar-dropdown { position: relative; }
+    .ar-dropdown-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        min-width: 100%;
+        max-height: 220px;
+        overflow-y: auto;
+        background: #fff;
+        border: 1.5px solid #E8E0F0;
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(122,63,145,.13);
+        z-index: 500;
+        padding: 4px;
+        scrollbar-width: thin;
+        scrollbar-color: #d4b8e8 transparent;
+    }
+    .ar-dropdown-menu::-webkit-scrollbar { width: 5px; }
+    .ar-dropdown-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+    .ar-dropdown-menu::-webkit-scrollbar-track { background: transparent; }
+
+    .ar-dropdown-item {
+        display: block;
+        width: 100%;
+        padding: 7px 10px;
+        border-radius: 7px;
+        font-size: .8rem;
+        font-weight: 600;
+        text-align: left;
+        color: #333;
+        transition: background .1s;
+        cursor: pointer;
+        white-space: nowrap;
+        border: none;
+        background: transparent;
+    }
+    .ar-dropdown-item:hover { background: #F5F0FA; color: #7A3F91; }
+    .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
+
+    .ar-dropdown-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 11px;
+        border: 1.5px solid #E8E0F0;
+        border-radius: 8px;
+        font-size: .8rem;
+        font-weight: 600;
+        background: #fff;
+        color: #333;
+        cursor: pointer;
+        transition: border-color .15s, background .15s, color .15s;
+        white-space: nowrap;
+        user-select: none;
+    }
+    .ar-dropdown-trigger:hover { border-color: #c49ed8; }
+    .ar-dropdown-trigger.has-value {
+        border-color: #7A3F91;
+        background: #F9F7FC;
+        color: #7A3F91;
+    }
+    .ar-dropdown-trigger .ar-chevron {
+        transition: transform .18s;
+        font-size: .65rem;
+        opacity: .6;
+    }
+    .ar-dropdown-trigger.open .ar-chevron { transform: rotate(180deg); }
 </style>
 
-{{-- Global cursor-follow tooltip --}}
-<div id="ar-global-tooltip">
-    <i class="fas fa-eye mr-1" style="font-size:.6rem;"></i>View Profile
+{{-- Dashboard-style hover tooltip (follows cursor, black bg) --}}
+<div id="ar-hover-tip" class="ar-hover-tip">
+    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Details
 </div>
 
 {{-- ══ FLASH TOAST ══════════════════════════════════════════════════ --}}
@@ -317,7 +424,7 @@ new class extends Component {
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7A3F91,#7A3F91);">
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white text-base"></i>
             </div>
             <div>
@@ -331,13 +438,12 @@ new class extends Component {
     <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
 
         {{-- ── Filters ── --}}
-        {{-- FIX 1: Removed the purple icon. "FILTERS" label now appears only on hover of this bar. --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0">
 
-            {{-- Hover-only FILTERS label --}}
             <span class="ar-filter-label text-xs font-bold tracking-widest uppercase shrink-0 select-none"
                   style="color:#7A3F91;">FILTERS</span>
 
+            {{-- Search --}}
             <div class="relative flex-1 min-w-[150px] max-w-xs"
                  wire:ignore
                  x-data="{
@@ -358,34 +464,113 @@ new class extends Component {
                        autocomplete="off" spellcheck="false">
             </div>
 
-            <select wire:model.live="alumniBatch"
-                    class="px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                           min-w-[90px] focus:outline-none focus:border-[#7A3F91] cursor-pointer font-normal
-                           transition-colors duration-150"
-                    :class="'{{ $alumniBatch ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : '' }}'">
-                <option value="">All Years</option>
-                @foreach($this->batches as $b)
-                    <option value="{{ $b }}">{{ $b }}</option>
-                @endforeach
-            </select>
+            {{-- ── Batch Year custom dropdown ── --}}
+            <div class="ar-dropdown"
+                 x-data="{
+                     open: false,
+                     toggle() { this.open = !this.open; },
+                     close() { this.open = false; },
+                     select(val) { $wire.set('alumniBatch', val); this.close(); }
+                 }"
+                 @click.outside="close()"
+                 wire:key="batch-dropdown">
 
-            <select wire:model.live="alumniCourse"
-                    class="px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                           min-w-[100px] focus:outline-none focus:border-[#7A3F91] cursor-pointer font-normal
-                           transition-colors duration-150">
-                <option value="">All Courses</option>
-                @foreach($this->courses as $c)
-                    <option value="{{ $c->code }}">{{ $c->code }}</option>
-                @endforeach
-            </select>
+                <button type="button"
+                        @click="toggle()"
+                        :class="{ 'has-value': $wire.alumniBatch !== '', 'open': open }"
+                        class="ar-dropdown-trigger">
+                    <i class="fas fa-calendar-alt" style="font-size:.7rem;opacity:.65;"></i>
+                    <span>
+                        @if($alumniBatch)
+                            {{ $alumniBatch }}
+                        @else
+                            All Batch Years
+                        @endif
+                    </span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
 
-            <select wire:model.live="alumniSort"
-                    class="px-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                           min-w-[110px] focus:outline-none focus:border-[#7A3F91] cursor-pointer font-normal">
-                <option value="recent">Newest First</option>
-                <option value="oldest">Oldest First</option>
-            </select>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75"
+                     x-transition:leave-start="opacity-100 scale-100"
+                     x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu"
+                     style="display:none;">
 
+                    <button type="button"
+                            @click="select('')"
+                            :class="{ 'active': $wire.alumniBatch === '' }"
+                            class="ar-dropdown-item">
+                        All Batch Years
+                    </button>
+                    @foreach($this->batches as $b)
+                    <button type="button"
+                            @click="select('{{ $b }}')"
+                            :class="{ 'active': $wire.alumniBatch === '{{ $b }}' }"
+                            class="ar-dropdown-item">
+                        {{ $b }}
+                    </button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- ── Course custom dropdown ── --}}
+            <div class="ar-dropdown"
+                 x-data="{
+                     open: false,
+                     toggle() { this.open = !this.open; },
+                     close() { this.open = false; },
+                     select(val) { $wire.set('alumniCourse', val); this.close(); }
+                 }"
+                 @click.outside="close()"
+                 wire:key="course-dropdown">
+
+                <button type="button"
+                        @click="toggle()"
+                        :class="{ 'has-value': $wire.alumniCourse !== '', 'open': open }"
+                        class="ar-dropdown-trigger">
+                    <i class="fas fa-book" style="font-size:.7rem;opacity:.65;"></i>
+                    <span>
+                        @if($alumniCourse)
+                            {{ $alumniCourse }}
+                        @else
+                            All Courses
+                        @endif
+                    </span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75"
+                     x-transition:leave-start="opacity-100 scale-100"
+                     x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu"
+                     style="display:none;">
+
+                    <button type="button"
+                            @click="select('')"
+                            :class="{ 'active': $wire.alumniCourse === '' }"
+                            class="ar-dropdown-item">
+                        All Courses
+                    </button>
+                    @foreach($this->courses as $c)
+                    <button type="button"
+                            @click="select('{{ $c->code }}')"
+                            :class="{ 'active': $wire.alumniCourse === '{{ $c->code }}' }"
+                            class="ar-dropdown-item">
+                        {{ $c->code }}
+                    </button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Reset --}}
             <button wire:click="resetAlumniFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
@@ -409,20 +594,6 @@ new class extends Component {
 
         {{-- ── Table wrapper ── --}}
         <div class="relative flex-1 min-h-0" x-data="{ showTop: false }">
-
-            {{-- Loading Overlay --}}
-            <div wire:loading
-                 wire:target="alumniSearch,alumniBatch,alumniCourse,alumniSort,resetAlumniFilters,previousPage,nextPage"
-                 class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none"
-                 style="background:rgba(255,255,255,.65);">
-                <div class="flex items-center gap-2.5 px-5 py-3 bg-white rounded-xl shadow-lg border border-[#E8E0F0]">
-                    <svg class="animate-spin w-4 h-4 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                    <span class="text-xs font-semibold text-[#7A3F91]">Loading records…</span>
-                </div>
-            </div>
 
             {{-- Scrollable table --}}
             <div id="alumni-scroll"
@@ -448,9 +619,7 @@ new class extends Component {
                     </thead>
                     <tbody class="divide-y divide-[#F0ECF5]">
                         @forelse($this->alumniRecords as $item)
-                        <tr class="ar-row bg-white transition-colors duration-100"
-                            onmouseenter="this.style.background='#EBEBEB'"
-                            onmouseleave="this.style.background=''"
+                        <tr class="ar-row bg-white"
                             wire:click="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
@@ -520,8 +689,8 @@ new class extends Component {
             $pgStart  = max(1, $cp - 2);
             $pgEnd    = min($lastPage, $cp + 2);
         @endphp
-        <div class="px-4 py-2.5 border-t border-[#E8E0F0] shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-             style="background:#7A3F91;">
+        <div class="px-4 py-2.5 border-t border-[#7A3F91]/30 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
 
             <p class="text-white/70 text-sm font-normal">
                 Showing <strong class="text-white font-semibold">{{ $from }}–{{ $to }}</strong>
@@ -654,15 +823,23 @@ new class extends Component {
 
         {{-- ── Sticky Header ── --}}
         <div class="flex items-center justify-between px-5 sm:px-7 py-4 shrink-0"
-             style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-            <h2 class="text-white font-semibold text-xl sm:text-2xl">Alumni Profile</h2>
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                    <i class="fas fa-user text-white text-sm"></i>
+                </div>
+                <div>
+                    <h2 class="text-white font-semibold text-base leading-tight">Alumni Profile</h2>
+                    <p class="text-white/60 text-xs font-normal">
+                        {{ $this->formatDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
+                    </p>
+                </div>
+            </div>
 
-            {{-- FIX 2: Icon-only close button. "CLOSE" tooltip shows on hover via .ar-close-tip. --}}
-            <button wire:click="closeModal"
-                    class="ar-close-btn flex items-center justify-center w-9 h-9 rounded-xl bg-white/10
-                           hover:bg-white/20 active:scale-95 text-white transition-all duration-150">
+            {{-- Close button — exact dashboard style --}}
+            <button wire:click="closeModal" class="ar-close-btn">
                 <span class="ar-close-tip">Close</span>
-                <i class="fas fa-xmark text-base"></i>
+                <i class="fas fa-xmark text-sm"></i>
             </button>
         </div>
 
@@ -743,7 +920,6 @@ new class extends Component {
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
                 {{-- Student Record --}}
-                {{-- FIX 3: All card cell backgrounds changed from gray (#F9F9F9/#F5F5F5) to white. Borders kept. --}}
                 <div class="rounded-xl border border-[#E0E0E0] overflow-hidden bg-white">
                     <div class="px-4 py-2.5 flex items-center justify-between border-b border-[#E0E0E0] bg-white">
                         <p class="font-semibold text-[#333333] text-sm uppercase tracking-wide">Student Record</p>
@@ -890,7 +1066,6 @@ new class extends Component {
                 @else
                     <div class="p-3 space-y-3">
 
-                        {{-- Status badges --}}
                         <div class="flex flex-wrap gap-2">
                             @if($empStatus && isset($empStatusMap[$empStatus]))
                                 <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold bg-white text-[#333333] border border-[#DEDEDE]">
@@ -914,7 +1089,6 @@ new class extends Component {
                             @endif
                         </div>
 
-                        {{-- Company / Job title --}}
                         @if($isWorking && (!empty($emp['company_name']) || !empty($emp['job_title'])))
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 @if(!empty($emp['company_name']))
@@ -934,7 +1108,6 @@ new class extends Component {
                             </div>
                         @endif
 
-                        {{-- Date hired / course relevance --}}
                         @if($isWorking)
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 @if($dateHired)
@@ -952,7 +1125,6 @@ new class extends Component {
                             </div>
                         @endif
 
-                        {{-- Career path --}}
                         @if($isWorking && count($careerPath))
                             <div>
                                 <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-1.5">Career Path</p>
@@ -966,7 +1138,6 @@ new class extends Component {
                             </div>
                         @endif
 
-                        {{-- Further education --}}
                         @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none')
                             @php
                                 $eduMap = [
@@ -998,22 +1169,26 @@ new class extends Component {
 
 <script>
 (function () {
-    var tip = document.getElementById('ar-global-tooltip');
-    if (!tip) return;
+    // ── Dashboard-style cursor-follow tooltip ──────────────────────
+    var tip = document.getElementById('ar-hover-tip');
 
     function bindRows() {
         document.querySelectorAll('.ar-row').forEach(function (row) {
             if (row._arTipBound) return;
             row._arTipBound = true;
+
             row.addEventListener('mousemove', function (e) {
+                if (!tip) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
                 tip.classList.add('visible');
             });
             row.addEventListener('mouseleave', function () {
+                if (!tip) return;
                 tip.classList.remove('visible');
             });
             row.addEventListener('click', function () {
+                if (!tip) return;
                 tip.classList.remove('visible');
             });
         });
@@ -1021,5 +1196,17 @@ new class extends Component {
 
     bindRows();
     document.addEventListener('livewire:updated', bindRows);
+
+    // ── Clean ?alumniPage=N from URL after every Livewire update ──
+    function cleanAlumniPageParam() {
+        var url = new URL(window.location.href);
+        if (url.searchParams.has('alumniPage')) {
+            url.searchParams.delete('alumniPage');
+            history.replaceState(null, '', url.pathname + (url.search || ''));
+        }
+    }
+
+    cleanAlumniPageParam();
+    document.addEventListener('livewire:updated', cleanAlumniPageParam);
 })();
 </script>
