@@ -528,6 +528,61 @@ new class extends Component {
         }
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Notification Helpers
+    //
+    //  ROOT CAUSE OF OLD BUG — explained:
+    //
+    //  The previous code used $this->js() to fire a browser CustomEvent:
+    //    $this->js("window.dispatchEvent(new CustomEvent('employment-updated', ...))");
+    //
+    //  $this->js() executes JavaScript on the CLIENT that made the Livewire
+    //  request — that client is the ALUMNI's browser.
+    //
+    //  But window.addEventListener('employment-updated', ...) in the registrar
+    //  layout lives in the REGISTRAR's browser — a completely separate JS
+    //  runtime, separate tab, separate session. The alumni browser's CustomEvent
+    //  NEVER reaches the registrar's browser, so _saveNotif() was never called,
+    //  and no notification row was ever written to the database.
+    //
+    //  FIX: Write the notification row directly to the DB from PHP here.
+    //  The registrar's existing 5-second polling loop picks it up automatically
+    //  on the next tick. Zero changes needed to the registrar layout.
+    //
+    //  ⚠️  Change 'registrar_notifications' below to match your actual table
+    //      name if it differs (check your notifications migration file).
+    // ═════════════════════════════════════════════════════════════════════════
+
+    protected function statusLabel(string $status): string
+    {
+        return match ($status) {
+            'employed'      => 'Employed',
+            'self_employed' => 'Self-Employed',
+            'unemployed'    => 'Unemployed',
+            default         => ucfirst(str_replace('_', ' ', $status)),
+        };
+    }
+
+    protected function saveRegistrarNotification(array $payload): void
+    {
+        try {
+            DB::table('registrar_notifications')->insert([
+                'icon'       => $payload['icon'],
+                'title'      => $payload['title'],
+                'message'    => $payload['message'],
+                'link_route' => $payload['link_route'],
+                'link_label' => $payload['link_label'],
+                'dedup_key'  => $payload['dedup_key'],
+                'read'       => false,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Non-fatal — log but never break the alumni's own save flow
+            Log::warning('Registrar notification insert failed: ' . $e->getMessage());
+        }
+    }
+
     // ── Save ─────────────────────────────────────────────────────────────────
 
     public function saveEmployment(): void
@@ -610,8 +665,9 @@ new class extends Component {
                 'updated_at'          => $now,
             ];
 
-            // ── Flag BEFORE the transaction overwrites $this->trackingId ──────
+            // Capture flags BEFORE transaction overwrites state
             $isNewRecord = ($this->trackingId === 0);
+            $oldStatus   = $this->snapshot['employment_status'] ?? null;
 
             DB::transaction(function () use ($data, $now) {
                 if ($this->trackingId) {
@@ -626,26 +682,36 @@ new class extends Component {
             $this->editing        = false;
             $this->successMessage = 'Employment information updated successfully!';
 
-            // ── NOTIFICATION DISPATCH ─────────────────────────────────────────
-            // Fetch alumni name for the notification message.
+            // ── FETCH ALUMNI NAME ─────────────────────────────────────────────
             $alumni = \App\Models\Alumni::find($this->alumniId);
             $name   = trim(($alumni->first_name ?? '') . ' ' . ($alumni->last_name ?? ''));
 
+            // ── SAVE NOTIFICATION DIRECTLY TO DB ─────────────────────────────
+            // (See saveRegistrarNotification() docblock above for full explanation)
+            // ─────────────────────────────────────────────────────────────────
             if ($isNewRecord) {
-                // First-ever submission → "New Employment Record" notification
-                $this->dispatch('employment-recorded', [
-                    'name'   => $name,
-                    'status' => $this->employment_status,
+                $this->saveRegistrarNotification([
+                    'icon'       => 'briefcase',
+                    'title'      => 'New Employment Record',
+                    'message'    => $name . ' submitted a new employment record as '
+                                 . $this->statusLabel($this->employment_status) . '.',
+                    'link_route' => 'registrar.employment.tracking',
+                    'link_label' => 'View Tracking',
+                    'dedup_key'  => 'recorded::' . $this->employment_status,
                 ]);
             } else {
-                // Updating an existing record → "Employment Status Updated" notification
-                $this->dispatch('employment-updated', [
-                    'name'       => $name,
-                    'status'     => $this->employment_status,
-                    'old_status' => $this->snapshot['employment_status'] ?? null,
+                $from = $oldStatus ? ' from ' . $this->statusLabel($oldStatus) : '';
+                $this->saveRegistrarNotification([
+                    'icon'       => 'arrow-rotate-right',
+                    'title'      => 'Employment Status Updated',
+                    'message'    => $name . ' updated their employment status'
+                                 . $from . ' to '
+                                 . $this->statusLabel($this->employment_status) . '.',
+                    'link_route' => 'registrar.employment.tracking',
+                    'link_label' => 'View Tracking',
+                    'dedup_key'  => 'updated::' . $this->employment_status,
                 ]);
             }
-            // ─────────────────────────────────────────────────────────────────
 
             Log::info("Employment saved | alumni_id:{$this->alumniId} | status:{$this->employment_status}");
 
@@ -910,8 +976,6 @@ new class extends Component {
 
         {{-- ── ACTION BAR ───────────────────────────────────────────────────── --}}
         <div class="content-block-filter flex flex-wrap gap-2 items-center justify-between">
-
-            {{-- Left: mode badge --}}
             <div class="flex items-center gap-2">
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 text-white font-semibold text-sm"
                      style="background: linear-gradient(135deg, #7A3F91, #9b59b6);">
@@ -922,8 +986,6 @@ new class extends Component {
                     {{ $editing ? 'Editing Mode' : 'View Mode' }}
                 </span>
             </div>
-
-            {{-- Right: History + Edit buttons --}}
             <div class="flex items-center gap-2">
                 @if($hasRecord)
                 <button wire:click="openHistory"
@@ -945,7 +1007,6 @@ new class extends Component {
                     </span>
                 </button>
                 @endif
-
                 @if(!$editing)
                 <button wire:click="startEditing"
                         class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
@@ -962,7 +1023,7 @@ new class extends Component {
         {{-- ── SCROLLABLE BODY ───────────────────────────────────────────────── --}}
         <div class="content-block-body">
 
-            {{-- ── ROW 1: Employment Status + Education Status ─────────────── --}}
+            {{-- ROW 1: Employment Status + Education Status --}}
             <div class="emp-grid">
 
                 {{-- Employment Status --}}
@@ -1085,11 +1146,10 @@ new class extends Component {
 
             </div>{{-- end row 1 --}}
 
-            {{-- ── ROW 2: Employment Details + Career Path ─────────────────── --}}
+            {{-- ROW 2: Employment Details + Career Path --}}
             @if($editing && in_array($employment_status, ['employed','self_employed']))
             <div class="emp-grid">
 
-                {{-- Employment Details (left) --}}
                 <div class="s-card">
                     <div class="s-head" style="background: #dbeafe;">
                         <div class="s-icon" style="background: #2563eb;"><i class="fa-solid fa-building text-white text-xs"></i></div>
@@ -1100,7 +1160,6 @@ new class extends Component {
                     </div>
                     <div class="s-body space-y-3">
 
-                        {{-- Company Name --}}
                         <div>
                             <label class="block s-label mb-1">
                                 {{ $employment_status === 'self_employed' ? 'Business Name' : 'Company Name' }}
@@ -1116,7 +1175,6 @@ new class extends Component {
                             @enderror
                         </div>
 
-                        {{-- Job Title --}}
                         <div>
                             <label class="block s-label mb-1">
                                 {{ $employment_status === 'self_employed' ? 'Occupation Type' : 'Job Title' }}
@@ -1133,7 +1191,6 @@ new class extends Component {
                                 <p class="e-msg mt-1"><i class="fa-solid fa-circle-exclamation text-xs"></i> {{ $message }}</p>
                             @enderror
 
-                            {{-- Auto-related badge for known titles --}}
                             @if($job_title && $job_title !== 'Other')
                                 <div class="mt-1.5 flex items-center gap-1.5">
                                     <span class="text-[10px]" style="color: #555555;">
@@ -1145,10 +1202,8 @@ new class extends Component {
                                 </div>
                             @endif
 
-                            {{-- ── "Other" expanded section ── --}}
                             @if($job_title === 'Other')
                             <div class="specify-wrap mt-3 p-3 rounded-xl border border-dashed border-violet-200 bg-violet-50/40 space-y-3">
-
                                 <div>
                                     <label class="block s-label mb-1">
                                         Please Specify <span class="text-red-500">*</span>
@@ -1179,36 +1234,19 @@ new class extends Component {
                                         </span>
                                         @php
                                             $relData = [
-                                                'yes'       => [
-                                                    'Related to Course',
-                                                    'text-emerald-700 bg-emerald-50 border-emerald-200',
-                                                    'fa-check-circle',
-                                                    'Your job title is recognized as related to your course.',
-                                                ],
-                                                'partially' => [
-                                                    'Partially Related',
-                                                    'text-amber-700 bg-amber-50 border-amber-200',
-                                                    'fa-circle-half-stroke',
-                                                    'Your job title appears partially related to your course.',
-                                                ],
-                                                'no'        => [
-                                                    'Not Related',
-                                                    'text-red-700 bg-red-50 border-red-200',
-                                                    'fa-circle-xmark',
-                                                    'Your job title does not appear related to your course.',
-                                                ],
+                                                'yes'       => ['Related to Course','text-emerald-700 bg-emerald-50 border-emerald-200','fa-check-circle','Your job title is recognized as related to your course.'],
+                                                'partially' => ['Partially Related','text-amber-700 bg-amber-50 border-amber-200','fa-circle-half-stroke','Your job title appears partially related to your course.'],
+                                                'no'        => ['Not Related','text-red-700 bg-red-50 border-red-200','fa-circle-xmark','Your job title does not appear related to your course.'],
                                             ];
                                             $rd = $relData[$course_relevance] ?? null;
                                         @endphp
                                         @if($rd)
                                             <span class="b-pill {{ $rd[1] }} auto-rel-badge">
-                                                <i class="fa-solid {{ $rd[2] }} text-xs"></i>
-                                                {{ $rd[0] }}
+                                                <i class="fa-solid {{ $rd[2] }} text-xs"></i> {{ $rd[0] }}
                                             </span>
                                         @else
                                             <span class="text-[10px] italic" style="color:#999;">
-                                                <i class="fa-solid fa-ellipsis fa-beat text-violet-300 text-xs mr-1"></i>
-                                                Detecting…
+                                                <i class="fa-solid fa-ellipsis fa-beat text-violet-300 text-xs mr-1"></i>Detecting…
                                             </span>
                                         @endif
                                     </div>
@@ -1228,12 +1266,10 @@ new class extends Component {
                                     </p>
                                 </div>
                                 @endif
-
                             </div>
                             @endif
                         </div>
 
-                        {{-- Employment Type --}}
                         <div>
                             <label class="block s-label mb-1.5">Employment Type <span class="text-red-500">*</span></label>
                             <div class="flex flex-wrap gap-1.5">
@@ -1256,7 +1292,6 @@ new class extends Component {
                             @enderror
                         </div>
 
-                        {{-- Work Location --}}
                         <div>
                             <label class="block s-label mb-1.5">Work Location <span class="text-red-500">*</span></label>
                             <div class="flex gap-1.5 flex-wrap">
@@ -1279,7 +1314,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Career Path (right) --}}
                 <div class="s-card">
                     <div class="s-head" style="background: #cffafe;">
                         <div class="s-icon" style="background: #0891b2;"><i class="fa-solid fa-road text-white text-xs"></i></div>
@@ -1311,10 +1345,10 @@ new class extends Component {
                     </div>
                 </div>
 
-            </div>{{-- end row 2 --}}
+            </div>
             @endif
 
-            {{-- ── Unemployment Status ──────────────────────────────────────── --}}
+            {{-- Unemployment Status --}}
             @if($editing && $employment_status === 'unemployed')
             <div class="s-card">
                 <div class="s-head" style="background: #fed7aa;">
@@ -1345,7 +1379,7 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- ── VIEW SUMMARY — Employed / Self-Employed ─────────────────── --}}
+            {{-- View Summary: Employed / Self-Employed --}}
             @if(!$editing && $hasRecord && in_array($employment_status, ['employed','self_employed']))
             <div class="s-card">
                 <div class="s-head" style="background: #dbeafe;">
@@ -1368,8 +1402,7 @@ new class extends Component {
                             <p class="s-label mb-1">{{ $employment_status === 'self_employed' ? 'Occupation Type' : 'Job Title' }}</p>
                             @php
                                 $displayJobTitle = ($job_title === 'Other' && $custom_job_title)
-                                    ? $custom_job_title
-                                    : ($job_title ?: '—');
+                                    ? $custom_job_title : ($job_title ?: '—');
                             @endphp
                             <div class="px-3 py-2 rounded-lg f-view text-xs font-semibold">{{ $displayJobTitle }}</div>
                         </div>
@@ -1383,24 +1416,20 @@ new class extends Component {
                         <div>
                             <p class="s-label mb-1">Work Location</p>
                             <div class="px-3 py-2 rounded-lg f-view text-xs font-semibold flex items-center gap-1.5">
-                                @if($work_location === 'local')
-                                    <i class="fa-solid fa-location-dot text-emerald-500 text-[10px]"></i> Local
-                                @elseif($work_location === 'abroad')
-                                    <i class="fa-solid fa-earth-asia text-sky-500 text-[10px]"></i> Abroad
-                                @else
-                                    —
+                                @if($work_location === 'local') <i class="fa-solid fa-location-dot text-emerald-500 text-[10px]"></i> Local
+                                @elseif($work_location === 'abroad') <i class="fa-solid fa-earth-asia text-sky-500 text-[10px]"></i> Abroad
+                                @else —
                                 @endif
                             </div>
                         </div>
                     </div>
-
                     <div class="flex flex-wrap gap-1.5 pt-1">
                         @if($course_relevance)
                             @php
                                 $rM = [
                                     'yes'       => ['Related to Course','text-emerald-700','bg-emerald-50 border-emerald-200','fa-check-circle'],
-                                    'no'        => ['Not Related',      'text-red-700',   'bg-red-50 border-red-200',        'fa-times-circle'],
-                                    'partially' => ['Partially Related','text-amber-700', 'bg-amber-50 border-amber-200',    'fa-circle-half-stroke'],
+                                    'no'        => ['Not Related','text-red-700','bg-red-50 border-red-200','fa-times-circle'],
+                                    'partially' => ['Partially Related','text-amber-700','bg-amber-50 border-amber-200','fa-circle-half-stroke'],
                                 ];
                                 $r = $rM[$course_relevance] ?? null;
                             @endphp
@@ -1410,7 +1439,6 @@ new class extends Component {
                                 </span>
                             @endif
                         @endif
-
                         @php $cpL=['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional']; @endphp
                         @foreach($career_path as $cp)
                             <span class="b-pill text-cyan-700 bg-cyan-50 border-cyan-200">
@@ -1421,7 +1449,7 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- VIEW SUMMARY — Unemployed --}}
+            {{-- View Summary: Unemployed --}}
             @elseif(!$editing && $hasRecord && $employment_status === 'unemployed')
             <div class="s-card">
                 <div class="s-head" style="background: #fed7aa;">
@@ -1437,7 +1465,7 @@ new class extends Component {
                     @php
                         $uM = [
                             'seeking_employment' => ['Actively Seeking Employment','text-violet-700','bg-violet-50 border-violet-200'],
-                            'not_looking'        => ['Not Currently Looking',      'text-gray-700',  'bg-gray-100 border-gray-300'],
+                            'not_looking'        => ['Not Currently Looking','text-gray-700','bg-gray-100 border-gray-300'],
                         ];
                         $u = $uM[$unemployment_status] ?? null;
                     @endphp
@@ -1467,7 +1495,7 @@ new class extends Component {
 
         </div>{{-- /content-block-body --}}
 
-        {{-- ── SAVE / CANCEL FOOTER ─────────────────────────────────────────── --}}
+        {{-- Save / Cancel Footer --}}
         @if($editing)
         <div class="save-footer">
             @if($hasRecord)
@@ -1617,9 +1645,7 @@ new class extends Component {
                                 @endif
                                 @if($isWork && $entry['work_location'])
                                     @php
-                                        $lc = $entry['work_location'] === 'Abroad'
-                                            ? 'text-sky-700 bg-sky-50 border-sky-200'
-                                            : 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                                        $lc = $entry['work_location'] === 'Abroad' ? 'text-sky-700 bg-sky-50 border-sky-200' : 'text-emerald-700 bg-emerald-50 border-emerald-200';
                                         $li = $entry['work_location'] === 'Abroad' ? 'fa-earth-asia' : 'fa-location-dot';
                                     @endphp
                                     <span class="b-pill {{ $lc }}">

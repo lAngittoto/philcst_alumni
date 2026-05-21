@@ -656,18 +656,24 @@
     {{-- Scrollable notification list --}}
     <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
-        {{-- Empty state --}}
-        <div x-show="!$store.notifs || $store.notifs.items.length === 0"
-             class="flex flex-col items-center justify-center py-16 px-6 text-center">
-            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-                 style="background:#F5F5F5;">
-                <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
+        {{-- ── FIX (Bug 1): Use x-if instead of x-show for the empty state.
+             x-show keeps the element in the DOM and relies on CSS display toggling,
+             which can cause it to remain visible alongside x-for items due to
+             Alpine's async reactive evaluation order after an async _fetch().
+             x-if physically removes / inserts the element, guaranteeing it is
+             gone from the DOM the moment items.length > 0. ── --}}
+        <template x-if="$store.notifs && $store.notifs.items.length === 0">
+            <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+                <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+                     style="background:#F5F5F5;">
+                    <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
+                </div>
+                <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
+                <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
+                    Alumni registrations, imports, and<br>employment updates will appear here.
+                </p>
             </div>
-            <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
-            <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
-                Alumni registrations, imports, and<br>employment updates will appear here.
-            </p>
-        </div>
+        </template>
 
         {{-- Notification items --}}
         <template x-if="$store.notifs">
