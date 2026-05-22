@@ -9,7 +9,6 @@ use App\Models\Alumni;
 
 new class extends Component {
 
-    // ── Student Record (read-only from school) ────────────────────────────────
     public string $last_name      = '';
     public string $first_name     = '';
     public string $middle_initial = '';
@@ -21,21 +20,17 @@ new class extends Component {
     public string $year_level     = '';
     public string $email          = '';
 
-    // ── Student Data (editable) ───────────────────────────────────────────────
     public string $gender        = '';
     public string $date_of_birth = '';
 
-    // ── Father's Name (editable) ──────────────────────────────────────────────
     public string $father_last_name   = '';
     public string $father_given_name  = '';
     public string $father_middle_name = '';
 
-    // ── Mother's Maiden Name (editable) ───────────────────────────────────────
     public string $mother_last_name   = '';
     public string $mother_given_name  = '';
     public string $mother_middle_name = '';
 
-    // ── DSWD / Address / Disability / Contact ────────────────────────────────
     public string $dswd_household_no    = '';
     public string $address_street       = '';
     public string $address_barangay     = '';
@@ -44,9 +39,8 @@ new class extends Component {
     public string $disability           = '';
     public string $contact_number       = '';
 
-    // ── UI State ──────────────────────────────────────────────────────────────
-    public string $errorMessage   = '';
-    public string $successMessage = '';
+    public string $errorMessage    = '';
+    public string $successMessage  = '';
     public bool   $profileComplete = false;
     public bool   $editing         = false;
     public int    $alumniId        = 0;
@@ -65,14 +59,12 @@ new class extends Component {
             ->select([
                 'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
                 'student_id', 'course_code', 'course_name', 'batch', 'year_level',
-                'email',
-                'gender', 'date_of_birth',
+                'email', 'gender', 'date_of_birth',
                 'father_last_name', 'father_given_name', 'father_middle_name',
                 'mother_last_name',  'mother_given_name',  'mother_middle_name',
                 'dswd_household_no',
                 'address_street', 'address_barangay', 'address_municipality', 'address_province',
-                'disability', 'contact_number',
-                'profile_completed',
+                'disability', 'contact_number', 'profile_completed',
             ])->first();
 
         if (!$alumni) {
@@ -116,8 +108,6 @@ new class extends Component {
         $this->editing         = !$this->profileComplete;
     }
 
-    // ── Edit / Cancel ─────────────────────────────────────────────────────────
-
     public function startEditing(): void
     {
         $this->errorMessage = $this->successMessage = '';
@@ -143,13 +133,10 @@ new class extends Component {
         $this->editing = false;
     }
 
-    // ── Save ──────────────────────────────────────────────────────────────────
-
     public function saveProfile(): void
     {
         $this->errorMessage = $this->successMessage = '';
 
-        // Force uppercase before validation
         $upperFields = [
             'father_last_name', 'father_given_name', 'father_middle_name',
             'mother_last_name',  'mother_given_name',  'mother_middle_name',
@@ -166,10 +153,10 @@ new class extends Component {
             'date_of_birth'        => 'required|date|before:today',
             'father_last_name'     => 'required|string|max:100',
             'father_given_name'    => 'required|string|max:100',
-            'father_middle_name'   => 'required|string|max:100',   // ← now required
+            'father_middle_name'   => 'required|string|max:100',
             'mother_last_name'     => 'required|string|max:100',
             'mother_given_name'    => 'required|string|max:100',
-            'mother_middle_name'   => 'required|string|max:100',   // ← now required
+            'mother_middle_name'   => 'required|string|max:100',
             'dswd_household_no'    => 'nullable|string|max:50',
             'address_street'       => 'required|string|max:255',
             'address_barangay'     => 'required|string|max:255',
@@ -226,10 +213,10 @@ new class extends Component {
             ]);
 
             $this->profileComplete = $profileComplete;
-            $this->editing = false;
-            $this->successMessage = $profileComplete
-                ? 'Profile saved successfully!'
-                : 'Progress saved. Fill in all required fields to complete your profile.';
+            $this->editing         = false;
+            $this->successMessage  = $profileComplete
+                ? 'Profile saved successfully.'
+                : 'Progress saved. Complete all required fields to finish your profile.';
 
             $this->dispatch('profile-updated', completed: $profileComplete);
 
@@ -242,279 +229,140 @@ new class extends Component {
     }
 }; ?>
 
-<div class="space-y-5">
+{{-- ══ ROOT ══════════════════════════════════════════════════════════════ --}}
+<div class="space-y-6">
 
-<style>
-/* ── Base tokens ─────────────────────────────────────────────────── */
-:root {
-    --brand:       #7a3f91;
-    --brand-light: #f9f7fc;
-    --brand-mid:   #ede9fe;
-}
-
-/* ── ALL TEXT INPUTS → UPPERCASE ─────────────────────────────────── */
-input[type="text"],
-input[type="tel"],
-input[type="search"] {
-    text-transform: uppercase;
-    letter-spacing: .03em;
-}
-
-/* ── Field states ────────────────────────────────────────────────── */
-.f-edit {
-    border: 1.5px solid #e8e0f0;
-    background: #ffffff;
-    color: #333333;
-    transition: border-color .15s, box-shadow .15s;
-}
-.f-edit:hover  { border-color: var(--brand); }
-.f-edit:focus  { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
-.f-edit.err    { border-color: #ef4444; }
-
-.f-view {
-    border: 1.5px solid #e8e0f0;
-    background: #f9fafb;
-    color: #333333;
-    cursor: default;
-    pointer-events: none;
-}
-
-/* Locked = from school records, truly immutable */
-.f-locked {
-    border: 1.5px solid #e8e0f0;
-    background: #f9fafb;
-    color: #333333;
-    cursor: not-allowed;
-    pointer-events: none;
-}
-
-/* ── Radio pill ──────────────────────────────────────────────────── */
-.r-pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 16px; border: 1.5px solid #e8e0f0;
-    border-radius: .75rem; cursor: pointer;
-    transition: border-color .15s, background .15s; font-size: .875rem;
-}
-.r-pill:hover      { border-color: var(--brand); background: var(--brand-light); }
-.r-pill input:checked ~ * { color: var(--brand); }
-
-/* ── Section card ────────────────────────────────────────────────── */
-.s-card {
-    background: #ffffff;
-    border: 1px solid #e8e0f0;
-    border-radius: 1rem;
-    overflow: hidden;
-    box-shadow: 0 1px 2px rgba(0,0,0,.03);
-}
-.s-head {
-    display: flex; align-items: center; gap: 10px;
-    padding: 14px 18px; border-bottom: 1px solid #e8e0f0;
-    background: linear-gradient(135deg,#f9f7fc,#ffffff);
-}
-.s-icon {
-    width: 32px; height: 32px; border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--brand); flex-shrink: 0;
-}
-.s-label {
-    font-size: .7rem; font-weight: 600; letter-spacing: .06em;
-    text-transform: uppercase; color: #999999;
-}
-
-/* ── Required star ───────────────────────────────────────────────── */
-.req { color: #ef4444; font-weight: 700; margin-left: 2px; font-size: .8rem; }
-
-/* ── Optional tag ────────────────────────────────────────────────── */
-.opt {
-    font-size: .68rem; font-weight: 500; color: #bbbbbb;
-    text-transform: none; letter-spacing: 0;
-    background: #f3f4f6; border: 1px solid #e5e7eb;
-    padding: 1px 6px; border-radius: 99px; margin-left: 4px;
-    vertical-align: middle;
-}
-
-/* ── Error text ──────────────────────────────────────────────────── */
-.e-msg {
-    font-size: .75rem; color: #ef4444;
-    display: flex; align-items: center; gap: 4px; margin-top: 3px;
-}
-
-/* ── Divider label ───────────────────────────────────────────────── */
-.div-lbl {
-    display: flex; align-items: center; gap: 8px;
-    font-size: .7rem; font-weight: 600; letter-spacing: .07em;
-    text-transform: uppercase; color: #999999;
-    margin-bottom: 10px; margin-top: 2px;
-}
-.div-lbl::after { content: ''; flex: 1; height: 1px; background: #e8e0f0; }
-</style>
-
-{{-- ══ PAGE HEADER ══════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-    <div>
-        <h1 class="text-3xl font-semibold text-[#333333] tracking-tight">My Profile Information</h1>
-        <p class="text-base leading-relaxed mt-2 text-[#666666] font-normal">
-            Complete your personal details to update your alumni profile.
-            Fields marked with <span class="req">*</span> are required.
-        </p>
+{{-- ── Page header ──────────────────────────────────────────────────────── --}}
+<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+    <div class="flex items-center gap-3">
+        <div class="w-[42px] h-[42px] rounded-xl bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid fa-address-card text-white text-base"></i>
+        </div>
+        <div>
+            <h1 class="text-2xl font-semibold text-gray-900 tracking-tight">My Profile Information</h1>
+            <p class="text-sm text-gray-500 mt-0.5">
+                Complete your personal details to update your alumni profile.
+                Fields marked <span class="text-red-500 font-semibold">*</span> are required.
+            </p>
+        </div>
     </div>
-
-    <div class="flex items-center gap-2 flex-wrap">
-        @if ($profileComplete)
-            <span class="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200
-                         text-emerald-700 px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest">
-                <i class="fa-solid fa-circle-check text-emerald-600"></i> Profile Complete
-            </span>
-        @else
-            <span class="inline-flex items-center gap-2 bg-amber-50 border border-amber-200
-                         text-amber-700 px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-widest">
-                <i class="fa-solid fa-triangle-exclamation text-amber-500"></i> Profile Incomplete
-            </span>
-        @endif
-
-        @if(!$editing)
+    @if(!$editing)
+        <div class="flex items-center gap-2 flex-wrap">
             <button wire:click="startEditing"
-                    class="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-semibold
-                           text-white shadow-md transition hover:opacity-90 active:scale-95 uppercase tracking-widest"
-                    style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                <i class="fa-solid fa-pen"></i> Edit Profile
+                    class="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-lg
+                           bg-[#7a3f91] text-white text-sm font-semibold cursor-pointer
+                           hover:opacity-90 active:scale-[.98] transition">
+                Edit Profile
             </button>
-        @endif
+        </div>
+    @endif
+</div>
+
+{{-- ── Alerts ────────────────────────────────────────────────────────────── --}}
+@if($errorMessage)
+    <div class="rounded-xl px-4 py-3 text-sm border bg-red-50 text-red-600 border-red-200">
+        {{ $errorMessage }}
+    </div>
+@endif
+@if($successMessage)
+    <div class="rounded-xl px-4 py-3 text-sm border bg-green-50 text-green-700 border-green-200">
+        {{ $successMessage }}
+    </div>
+@endif
+
+{{-- ══ STUDENT ID CARD ══════════════════════════════════════════════════ --}}
+<div class="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center gap-3">
+    <div>
+        <p class="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-1">Student ID</p>
+        <p class="text-base font-semibold text-gray-900">{{ $student_id ?: '—' }}</p>
     </div>
 </div>
 
-{{-- ── Alerts ── --}}
-@if ($errorMessage)
-    <div class="p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 flex items-start gap-2">
-        <i class="fa-solid fa-circle-exclamation mt-0.5 text-red-600 text-sm flex-shrink-0"></i>
-        <p class="text-sm font-semibold">{{ $errorMessage }}</p>
+{{-- ══ SECTION 1 — STUDENT'S NAME ══════════════════════════════════════ --}}
+<div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between gap-2">
+        <span class="text-base font-semibold text-gray-900">Student's Name</span>
     </div>
-@endif
-@if ($successMessage)
-    <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 flex items-start gap-2">
-        <i class="fa-solid fa-circle-check mt-0.5 text-emerald-600 text-sm flex-shrink-0"></i>
-        <p class="text-sm font-semibold">{{ $successMessage }}</p>
-    </div>
-@endif
-
-{{-- ══════════════════════════════════════════════════════════════════════════
-     SECTION 1 — STUDENT'S NAME
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="s-card">
-    <div class="s-head">
-        <div class="s-icon"><i class="fa-solid fa-id-card text-white text-xs"></i></div>
-        <div class="flex-1">
-            <p class="text-base font-semibold text-[#333333]">Student's Name</p>
-            <p class="text-xs text-[#666666] font-normal">From your school records — read only</p>
-        </div>
-        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
-            <i class="fa-solid fa-lock text-xs"></i> Locked
-        </span>
-    </div>
-
-    <div class="p-4">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div class="p-5">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-                <p class="s-label mb-1">Last Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
-                    {{ $last_name ?: '—' }}
-                </div>
+                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Last Name</span>
+                <p class="text-base font-semibold text-gray-900">{{ $last_name ?: '—' }}</p>
             </div>
             <div>
-                <p class="s-label mb-1">Given Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
-                    {{ $first_name ?: '—' }}
-                </div>
+                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Given Name</span>
+                <p class="text-base font-semibold text-gray-900">{{ $first_name ?: '—' }}</p>
             </div>
             <div>
-                <p class="s-label mb-1">Middle Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
-                    {{ $middle_initial ?: '—' }}
-                </div>
+                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Middle Name</span>
+                <p class="text-base font-semibold text-gray-900">{{ $middle_initial ?: '—' }}</p>
             </div>
             <div>
-                <p class="s-label mb-1">Ext. Name</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold uppercase">
-                    {{ $suffix ?: '—' }}
-                </div>
+                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Extension Name</span>
+                <p class="text-base font-semibold text-gray-900">{{ $suffix ?: '—' }}</p>
             </div>
         </div>
     </div>
 </div>
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     SECTION 2 — STUDENT'S DATA
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="s-card">
-    <div class="s-head">
-        <div class="s-icon"><i class="fa-solid fa-user-graduate text-white text-xs"></i></div>
-        <div class="flex-1">
-            <p class="text-base font-semibold text-[#333333]">Student's Data</p>
-            <p class="text-xs text-[#666666] font-normal">Sex, birth date, and course</p>
-        </div>
-        @if(!$editing)
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
-                <i class="fa-solid fa-eye text-xs"></i> View Only
-            </span>
-        @endif
+{{-- ══ SECTION 2 — STUDENT'S DATA ══════════════════════════════════════ --}}
+<div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-gray-100">
+        <span class="text-base font-semibold text-gray-900">Student's Data</span>
     </div>
+    <div class="p-5">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
-    <div class="p-4 space-y-4">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
-
-            {{-- Sex / Gender --}}
+            {{-- Sex --}}
             <div>
-                <label class="block s-label mb-2">
-                    Sex <span class="req">*</span>
+                <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                    Sex <span class="text-red-500">*</span>
                 </label>
                 @if($editing)
-                    <div class="flex gap-2 flex-wrap">
-                        <label class="r-pill">
-                            <input wire:model="gender" type="radio" value="Male" class="w-4 h-4 accent-blue-600">
-                            <i class="fa-solid fa-mars text-blue-500 text-xs"></i>
-                            <span class="font-semibold text-[#333333] text-sm">Male</span>
+                    <div class="flex gap-5 flex-wrap pt-0.5">
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                            <input wire:model="gender" type="radio" value="Male"
+                                   class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
+                            <span class="text-base font-semibold text-gray-900 cursor-pointer">Male</span>
                         </label>
-                        <label class="r-pill">
-                            <input wire:model="gender" type="radio" value="Female" class="w-4 h-4 accent-pink-500">
-                            <i class="fa-solid fa-venus text-pink-500 text-xs"></i>
-                            <span class="font-semibold text-[#333333] text-sm">Female</span>
+                        <label class="flex items-center gap-1.5 cursor-pointer">
+                            <input wire:model="gender" type="radio" value="Female"
+                                   class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
+                            <span class="text-base font-semibold text-gray-900 cursor-pointer">Female</span>
                         </label>
                     </div>
-                    @error('gender')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @error('gender') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
                 @else
-                    <div class="px-3 py-2 rounded-xl f-view text-base font-semibold">
-                        @if($gender === 'Male') <i class="fa-solid fa-mars text-blue-400 mr-1.5"></i>
-                        @elseif($gender === 'Female') <i class="fa-solid fa-venus text-pink-400 mr-1.5"></i>
-                        @endif
-                        {{ $gender ?: '—' }}
-                    </div>
+                    <p class="text-base font-semibold text-gray-900">{{ $gender ?: '—' }}</p>
                 @endif
             </div>
 
             {{-- Birth Date --}}
             <div>
-                <label class="block s-label mb-2">
-                    Birth Date <span class="req">*</span>
+                <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                    Date of Birth <span class="text-red-500">*</span>
                 </label>
-                <input wire:model="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
-                       {{ !$editing ? 'disabled' : '' }}
-                       class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('date_of_birth') ? ' err' : '') : 'f-view' }}">
-                @error('date_of_birth')
-                    <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                @enderror
+                @if($editing)
+                    <input wire:model="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
+                           class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                  border border-gray-200 rounded-lg px-3 py-2 transition
+                                  hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                  focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                  {{ $errors->has('date_of_birth') ? 'border-red-500' : '' }}">
+                    @error('date_of_birth') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                @else
+                    <p class="text-base font-semibold text-gray-900">
+                        {{ $date_of_birth ? \Carbon\Carbon::parse($date_of_birth)->format('F d, Y') : '—' }}
+                    </p>
+                @endif
             </div>
 
             {{-- Course --}}
             <div>
-                <p class="s-label mb-2">Course</p>
-                <div class="px-3 py-2 rounded-xl f-locked text-base font-semibold tracking-wide uppercase" title="{{ $course_name }}">
-                    <i class="fa-solid fa-graduation-cap mr-1.5 text-xs" style="color:#7A3F91;"></i>
-                    {{ $course_code ?: '—' }}
-                </div>
+                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Course</span>
+                <p class="text-base font-semibold text-gray-900">{{ $course_code ?: '—' }}</p>
                 @if($course_name)
-                    <p class="text-xs text-[#999999] mt-1 pl-1 truncate uppercase" title="{{ $course_name }}">{{ $course_name }}</p>
+                    <p class="text-sm font-normal text-gray-900 mt-0.5">{{ $course_name }}</p>
                 @endif
             </div>
 
@@ -522,120 +370,128 @@ input[type="search"] {
     </div>
 </div>
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     SECTIONS 3 & 4 — PARENT NAMES
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+{{-- ══ SECTIONS 3 & 4 — PARENT NAMES ══════════════════════════════════ --}}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-    {{-- FATHER'S NAME --}}
-    <div class="s-card">
-        <div class="s-head">
-            <div class="s-icon" style="background:#2563eb;"><i class="fa-solid fa-person text-white text-xs"></i></div>
-            <div class="flex-1">
-                <p class="text-base font-semibold text-[#333333]">Father's Name</p>
-                <p class="text-xs text-[#666666] font-normal">Father's full name</p>
-            </div>
-            @if(!$editing)
-                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
-                    <i class="fa-solid fa-eye text-xs"></i> View Only
-                </span>
-            @endif
+    {{-- Father's Name --}}
+    <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div class="px-5 py-3.5 border-b border-gray-100">
+            <span class="text-base font-semibold text-gray-900">Father's Name</span>
         </div>
-        <div class="p-4">
-            <div class="grid grid-cols-3 gap-3">
+        <div class="p-5">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                    <label class="block s-label mb-1">
-                        Last Name <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Last Name <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="father_last_name" type="text" placeholder="DELA CRUZ"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_last_name') ? ' err' : '') : 'f-view' }}">
-                    @error('father_last_name')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="father_last_name" type="text" placeholder="DELA CRUZ"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('father_last_name') ? 'border-red-500' : '' }}">
+                        @error('father_last_name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $father_last_name ?: '—' }}</p>
+                    @endif
                 </div>
                 <div>
-                    <label class="block s-label mb-1">
-                        Given Name <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Given Name <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="father_given_name" type="text" placeholder="JUAN"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_given_name') ? ' err' : '') : 'f-view' }}">
-                    @error('father_given_name')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="father_given_name" type="text" placeholder="JUAN"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('father_given_name') ? 'border-red-500' : '' }}">
+                        @error('father_given_name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $father_given_name ?: '—' }}</p>
+                    @endif
                 </div>
                 <div>
-                    {{-- CHANGED: optional → required (*) --}}
-                    <label class="block s-label mb-1">
-                        Middle Name <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Middle Name <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="father_middle_name" type="text" placeholder="SANTOS"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('father_middle_name') ? ' err' : '') : 'f-view' }}">
-                    @error('father_middle_name')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="father_middle_name" type="text" placeholder="SANTOS"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('father_middle_name') ? 'border-red-500' : '' }}">
+                        @error('father_middle_name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $father_middle_name ?: '—' }}</p>
+                    @endif
                 </div>
             </div>
         </div>
     </div>
 
-    {{-- MOTHER'S MAIDEN NAME --}}
-    <div class="s-card">
-        <div class="s-head">
-            <div class="s-icon" style="background:#db2777;"><i class="fa-solid fa-person-dress text-white text-xs"></i></div>
-            <div class="flex-1">
-                <p class="text-base font-semibold text-[#333333]">Mother's Maiden Name</p>
-                <p class="text-xs text-[#666666] font-normal">Mother's maiden name before marriage</p>
-            </div>
-            @if(!$editing)
-                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
-                    <i class="fa-solid fa-eye text-xs"></i> View Only
-                </span>
-            @endif
+    {{-- Mother's Maiden Name --}}
+    <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div class="px-5 py-3.5 border-b border-gray-100">
+            <span class="text-base font-semibold text-gray-900">Mother's Maiden Name</span>
         </div>
-        <div class="p-4">
-            <div class="grid grid-cols-3 gap-3">
+        <div class="p-5">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                    <label class="block s-label mb-1">
-                        Last Name <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Last Name <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="mother_last_name" type="text" placeholder="REYES"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_last_name') ? ' err' : '') : 'f-view' }}">
-                    @error('mother_last_name')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="mother_last_name" type="text" placeholder="REYES"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('mother_last_name') ? 'border-red-500' : '' }}">
+                        @error('mother_last_name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $mother_last_name ?: '—' }}</p>
+                    @endif
                 </div>
                 <div>
-                    <label class="block s-label mb-1">
-                        Given Name <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Given Name <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="mother_given_name" type="text" placeholder="MARIA"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_given_name') ? ' err' : '') : 'f-view' }}">
-                    @error('mother_given_name')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="mother_given_name" type="text" placeholder="MARIA"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('mother_given_name') ? 'border-red-500' : '' }}">
+                        @error('mother_given_name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $mother_given_name ?: '—' }}</p>
+                    @endif
                 </div>
                 <div>
-                    {{-- CHANGED: optional → required (*) --}}
-                    <label class="block s-label mb-1">
-                        Middle Name <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Middle Name <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="mother_middle_name" type="text" placeholder="CRUZ"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('mother_middle_name') ? ' err' : '') : 'f-view' }}">
-                    @error('mother_middle_name')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="mother_middle_name" type="text" placeholder="CRUZ"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('mother_middle_name') ? 'border-red-500' : '' }}">
+                        @error('mother_middle_name') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $mother_middle_name ?: '—' }}</p>
+                    @endif
                 </div>
             </div>
         </div>
@@ -643,190 +499,203 @@ input[type="search"] {
 
 </div>
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     SECTION 5 — DSWD + ADDRESS + DISABILITY + CONTACT + EMAIL
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="s-card">
-    <div class="s-head">
-        <div class="s-icon" style="background:#059669;"><i class="fa-solid fa-map-location-dot text-white text-xs"></i></div>
-        <div class="flex-1">
-            <p class="text-base font-semibold text-[#333333]">Other Information</p>
-            <p class="text-xs text-[#666666] font-normal">DSWD, address, disability, contact &amp; email</p>
-        </div>
-        @if(!$editing)
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#F5F5F5] text-[#999999] uppercase tracking-widest">
-                <i class="fa-solid fa-eye text-xs"></i> View Only
-            </span>
-        @endif
+{{-- ══ SECTION 5 — OTHER INFORMATION ══════════════════════════════════ --}}
+<div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div class="px-5 py-3.5 border-b border-gray-100">
+        <span class="text-base font-semibold text-gray-900">Other Information</span>
     </div>
+    <div class="p-5 space-y-6">
 
-    <div class="p-4 space-y-4">
-
-        {{-- DSWD --}}
+        {{-- DSWD Household --}}
         <div>
-            <div class="div-lbl"><span>DSWD Household</span></div>
-            <label class="block s-label mb-1">
-                DSWD Household No. <span class="opt">optional</span>
-            </label>
-            <input wire:model="dswd_household_no" type="text" placeholder="E.G. 004-0012345"
-                   oninput="this.value=this.value.toUpperCase()"
-                   {{ !$editing ? 'disabled' : '' }}
-                   class="w-full sm:w-1/2 px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
-            @if($editing)
-                <p class="text-xs text-[#999999] mt-1 font-normal">
-                    <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
-                    Leave blank if not a DSWD beneficiary.
-                </p>
-            @endif
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-gray-400 pb-1.5 border-b border-gray-100 mb-4">
+                DSWD Household
+            </p>
+            <div class="max-w-sm">
+                <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                    DSWD Household No.
+                    <span class="normal-case font-normal text-gray-400 text-[11px] tracking-normal ml-1">(optional)</span>
+                </label>
+                @if($editing)
+                    <input wire:model="dswd_household_no" type="text" placeholder="E.G. 004-0012345"
+                           oninput="this.value=this.value.toUpperCase()"
+                           class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                  border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                  transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                  focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white">
+                    <p class="text-xs text-gray-400 mt-1">Leave blank if not a DSWD beneficiary.</p>
+                @else
+                    <p class="text-base font-semibold text-gray-900">{{ $dswd_household_no ?: '—' }}</p>
+                @endif
+            </div>
         </div>
 
         {{-- Permanent Address --}}
         <div>
-            <div class="div-lbl"><span>Permanent Address</span></div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-gray-400 pb-1.5 border-b border-gray-100 mb-4">
+                Permanent Address
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label class="block s-label mb-1">
-                        Street <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Street <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="address_street" type="text" placeholder="E.G. 123 RIZAL ST."
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_street') ? ' err' : '') : 'f-view' }}">
-                    @error('address_street')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="address_street" type="text" placeholder="E.G. 123 RIZAL ST."
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('address_street') ? 'border-red-500' : '' }}">
+                        @error('address_street') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $address_street ?: '—' }}</p>
+                    @endif
                 </div>
-
                 <div>
-                    <label class="block s-label mb-1">
-                        Barangay <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Barangay <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="address_barangay" type="text" placeholder="E.G. BAGONG SILANG"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_barangay') ? ' err' : '') : 'f-view' }}">
-                    @error('address_barangay')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="address_barangay" type="text" placeholder="E.G. BAGONG SILANG"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('address_barangay') ? 'border-red-500' : '' }}">
+                        @error('address_barangay') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $address_barangay ?: '—' }}</p>
+                    @endif
                 </div>
-
                 <div>
-                    <label class="block s-label mb-1">
-                        Town / City / Municipality <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Town / City / Municipality <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="address_municipality" type="text" placeholder="E.G. LIPA CITY"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_municipality') ? ' err' : '') : 'f-view' }}">
-                    @error('address_municipality')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="address_municipality" type="text" placeholder="E.G. LIPA CITY"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('address_municipality') ? 'border-red-500' : '' }}">
+                        @error('address_municipality') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $address_municipality ?: '—' }}</p>
+                    @endif
                 </div>
-
                 <div>
-                    <label class="block s-label mb-1">
-                        Province <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Province <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="address_province" type="text" placeholder="E.G. BATANGAS"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('address_province') ? ' err' : '') : 'f-view' }}">
-                    @error('address_province')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="address_province" type="text" placeholder="E.G. BATANGAS"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('address_province') ? 'border-red-500' : '' }}">
+                        @error('address_province') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $address_province ?: '—' }}</p>
+                    @endif
                 </div>
-
             </div>
         </div>
 
         {{-- Disability --}}
         <div>
-            <div class="div-lbl"><span>Disability</span></div>
-            <label class="block s-label mb-1">
-                Disability <span class="opt">optional</span>
-            </label>
-            <input wire:model="disability" type="text" placeholder="E.G. NONE / VISUAL IMPAIRMENT / HEARING LOSS"
-                   oninput="this.value=this.value.toUpperCase()"
-                   {{ !$editing ? 'disabled' : '' }}
-                   class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit' : 'f-view' }}">
-            @if($editing)
-                <p class="text-xs text-[#999999] mt-1 font-normal">
-                    <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
-                    Type <strong>NONE</strong> if you have no disability.
-                </p>
-            @endif
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-gray-400 pb-1.5 border-b border-gray-100 mb-4">
+                Disability
+            </p>
+            <div class="max-w-lg">
+                <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                    Disability
+                    <span class="normal-case font-normal text-gray-400 text-[11px] tracking-normal ml-1">(optional)</span>
+                </label>
+                @if($editing)
+                    <input wire:model="disability" type="text"
+                           placeholder="E.G. NONE / VISUAL IMPAIRMENT / HEARING LOSS"
+                           oninput="this.value=this.value.toUpperCase()"
+                           class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                  border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                  transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                  focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white">
+                    <p class="text-xs text-gray-400 mt-1">Type NONE if not applicable.</p>
+                @else
+                    <p class="text-base font-semibold text-gray-900">{{ $disability ?: '—' }}</p>
+                @endif
+            </div>
         </div>
 
-        {{-- Contact + Email --}}
+        {{-- Contact & Email --}}
         <div>
-            <div class="div-lbl"><span>Contact &amp; Email</span></div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-gray-400 pb-1.5 border-b border-gray-100 mb-4">
+                Contact &amp; Email
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label class="block s-label mb-1">
-                        Contact Number <span class="req">*</span>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Contact Number <span class="text-red-500">*</span>
                     </label>
-                    <input wire:model="contact_number" type="tel" placeholder="09XX-XXX-XXXX"
-                           oninput="this.value=this.value.toUpperCase()"
-                           {{ !$editing ? 'disabled' : '' }}
-                           class="w-full px-3 py-2 text-base rounded-xl transition-all {{ $editing ? 'f-edit'.($errors->has('contact_number') ? ' err' : '') : 'f-view' }}">
-                    @error('contact_number')
-                        <p class="e-msg"><i class="fa-solid fa-circle-exclamation"></i> {{ $message }}</p>
-                    @enderror
+                    @if($editing)
+                        <input wire:model="contact_number" type="tel" placeholder="09XX-XXX-XXXX"
+                               oninput="this.value=this.value.toUpperCase()"
+                               class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
+                                      border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
+                                      transition hover:border-gray-300 focus:outline-none focus:border-[#7a3f91]
+                                      focus:ring-2 focus:ring-[#7a3f91]/10 focus:bg-white
+                                      {{ $errors->has('contact_number') ? 'border-red-500' : '' }}">
+                        @error('contact_number') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
+                    @else
+                        <p class="text-base font-semibold text-gray-900">{{ $contact_number ?: '—' }}</p>
+                    @endif
                 </div>
-
                 <div>
-                    <label class="block s-label mb-1">Email Address</label>
-                    <div class="flex items-center gap-2 px-3 py-2 f-locked rounded-xl text-base">
-                        <i class="fa-solid fa-envelope text-[#999999] text-xs flex-shrink-0"></i>
-                        <span class="truncate text-[#333333] font-semibold">{{ $email ?: '—' }}</span>
-                        <span class="ml-auto inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5
-                                     rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0 uppercase tracking-widest">
-                            <i class="fa-solid fa-check text-[10px]"></i> Verified
-                        </span>
-                    </div>
+                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                        Email Address
+                    </span>
+                    <p class="text-base font-semibold text-gray-500">{{ $email ?: '—' }}</p>
+                    <p class="text-xs text-gray-400 mt-1">Verified — cannot be changed here.</p>
                 </div>
-
             </div>
         </div>
 
     </div>
 </div>
 
-{{-- ══ ACTION BUTTONS ════════════════════════════════════════════════════════ --}}
+{{-- ══ ACTION BUTTONS ══════════════════════════════════════════════════ --}}
 @if($editing)
-    <div class="flex flex-col sm:flex-row gap-3">
+    <div class="flex gap-3 flex-wrap">
         <button wire:click="saveProfile"
                 wire:loading.attr="disabled"
                 wire:target="saveProfile"
-                class="flex-1 text-white py-3 rounded-xl font-semibold text-sm shadow-md hover:opacity-90
-                       disabled:opacity-70 active:scale-[0.98] transition-all flex items-center justify-center gap-2 uppercase tracking-widest"
-                style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-            <span wire:loading.remove wire:target="saveProfile">
-                <i class="fa-solid fa-floppy-disk mr-1.5"></i> Save Profile
-            </span>
-            <span wire:loading wire:target="saveProfile">
-                <i class="fa-solid fa-circle-notch fa-spin mr-1.5"></i> Saving…
-            </span>
+                class="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-lg
+                       bg-[#7a3f91] text-white text-sm font-semibold cursor-pointer
+                       hover:opacity-90 active:scale-[.98] transition
+                       disabled:opacity-55 disabled:cursor-not-allowed">
+            <span wire:loading.remove wire:target="saveProfile">Save Profile</span>
+            <span wire:loading wire:target="saveProfile">Saving…</span>
         </button>
-
         @if($profileComplete)
             <button wire:click="cancelEditing"
-                    class="flex-1 py-3 rounded-xl font-semibold text-sm border-2 border-[#E8E0F0] bg-white
-                           text-[#333333] hover:bg-[#F5F5F5] active:scale-[0.98] transition-all
-                           flex items-center justify-center gap-2 uppercase tracking-widest">
-                <i class="fa-solid fa-xmark mr-1.5"></i> Cancel
+                    class="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-lg
+                           bg-transparent text-gray-900 text-sm font-semibold cursor-pointer
+                           border border-gray-200 hover:bg-gray-50 active:scale-[.98] transition">
+                Cancel
             </button>
         @endif
     </div>
 @endif
 
 @if(!$profileComplete && !$editing)
-    <p class="text-xs text-center text-[#999999] pb-2 font-normal">
-        <i class="fa-solid fa-circle-info mr-1 text-blue-400"></i>
-        Click <strong>Edit Profile</strong> to fill in your information.
-    </p>
+    <div class="rounded-xl px-4 py-3 text-sm border bg-amber-50 text-amber-700 border-amber-200">
+        Your profile is incomplete. Click <strong>Edit Profile</strong> to fill in all required fields.
+    </div>
 @endif
 
 </div>
