@@ -5,6 +5,7 @@
 use Livewire\Volt\Component;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use App\Models\Alumni;
 
 new class extends Component {
@@ -18,13 +19,23 @@ new class extends Component {
     public int    $trackingId     = 0;
 
     // ── Records ───────────────────────────────────────────────────────────────
-    public ?array $currentRecord = null;
+    public ?array $currentRecord  = null;
     public ?array $previousRecord = null;
 
-    // ── Alumni Course Context ─────────────────────────────────────────────────
-    public string $alumniCourse     = '';
-    public string $alumniCourseName = '';
-    public array  $jobOptions       = [];
+    // ── Alumni Info ───────────────────────────────────────────────────────────
+    public string $alumniCourse       = '';
+    public string $alumniCourseName   = '';
+    public string $alumniFullName     = '';
+    public string $alumniFirstName    = '';
+    public string $alumniLastName     = '';
+    public string $alumniEmail        = '';
+    public string $alumniContact      = '';
+    public string $alumniBatch        = '';
+    public string $alumniAddress      = '';
+    public string $alumniPhoto        = '';   // raw stored path (same as dashboard)
+    public string $alumniGender       = '';
+    public string $alumniDob          = '';
+    public array  $jobOptions         = [];
 
     // ── Core Status ───────────────────────────────────────────────────────────
     public string $employment_status = '';
@@ -44,46 +55,70 @@ new class extends Component {
     // ── Common ────────────────────────────────────────────────────────────────
     public string $education_status = '';
 
+    // ── Internal snapshot for cancel ──────────────────────────────────────────
     protected array $snapshot = [];
 
+    // ── Snapshot keys (single source of truth) ────────────────────────────────
+    private const SNAP_KEYS = [
+        'employment_status', 'company_name', 'job_title', 'custom_job_title',
+        'employment_type', 'work_location', 'career_path', 'education_status',
+        'course_relevance', 'unemployment_status',
+    ];
+
     // ═════════════════════════════════════════════════════════════════════════
-    //  Course Group Detection
+    //  Profile Photo (mirrors dashboard pattern exactly)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    public function getProfilePhotoUrl(): string
+    {
+        $path = $this->alumniPhoto;
+        if (!$path || str_contains($path, 'default.png')) {
+            return asset('storage/alumni-photos/default.png');
+        }
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/')) {
+            return Storage::disk('public')->exists($path)
+                ? asset('storage/' . $path)
+                : asset('storage/alumni-photos/default.png');
+        }
+        return asset('storage/alumni-photos/default.png');
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Course Group + Job Detection
     // ═════════════════════════════════════════════════════════════════════════
 
     protected function getCourseGroup(string $code): string
     {
         $c = strtoupper(trim($code));
-        if (preg_match('/\b(BSIT|BSCS|BSIS|BSCPE|BSICT|IT|CS|CPE|ICT)\b/', $c)) return 'technology';
-        if (preg_match('/\b(BSN|BSMT)\b/', $c) || str_contains($c, 'NURS'))         return 'nursing';
+        if (preg_match('/\b(BSIT|BSCS|BSIS|BSCPE|BSICT|IT|CS|CPE|ICT)\b/', $c))                    return 'technology';
+        if (preg_match('/\b(BSN|BSMT)\b/', $c) || str_contains($c, 'NURS'))                          return 'nursing';
         if (preg_match('/\b(BSED|BEED|BELTE|BTTE|MAED)\b/', $c)
-            || str_contains($c, 'EDUC') || str_contains($c, 'TEACH'))               return 'education';
-        if (preg_match('/\b(BSACCT|BSAC|BSMA|BSA)\b/', $c)
-            || str_contains($c, 'ACCOUNT'))                                          return 'accounting';
+            || str_contains($c, 'EDUC') || str_contains($c, 'TEACH'))                                return 'education';
+        if (preg_match('/\b(BSACCT|BSAC|BSMA|BSA)\b/', $c) || str_contains($c, 'ACCOUNT'))          return 'accounting';
         if (preg_match('/\b(BSBA|BSBM|BSENT|BSMGT|BSIB|BSHRM)\b/', $c)
-            || str_contains($c, 'BUSINESS') || str_contains($c, 'MARKET'))          return 'business';
+            || str_contains($c, 'BUSINESS') || str_contains($c, 'MARKET'))                           return 'business';
         if (preg_match('/\b(BSCE|BSME|BSEE|BSECE|BSIE|BSCHE|BSEM|BSCPE)\b/', $c)
-            || str_contains($c, 'ENGINEER'))                                         return 'engineering';
+            || str_contains($c, 'ENGINEER'))                                                          return 'engineering';
         if (preg_match('/\b(BSPT|BSOT|BSRT|BSMLS|BSPHARM|BSRAD|BSMED)\b/', $c)
-            || str_contains($c, 'PHARM') || str_contains($c, 'THERAP'))             return 'healthcare';
-        if (str_contains($c, 'CRIM'))                                                return 'criminology';
+            || str_contains($c, 'PHARM') || str_contains($c, 'THERAP'))                              return 'healthcare';
+        if (str_contains($c, 'CRIM'))                                                                 return 'criminology';
         if (preg_match('/\b(BSHTM|BSHM|BSTM|BSTHM)\b/', $c)
-            || str_contains($c, 'HOSP') || str_contains($c, 'TOURISM')
-            || str_contains($c, 'HOTEL'))                                            return 'hospitality';
-        if (str_contains($c, 'PSYCH'))                                               return 'psychology';
+            || str_contains($c, 'HOSP') || str_contains($c, 'TOURISM') || str_contains($c, 'HOTEL')) return 'hospitality';
+        if (str_contains($c, 'PSYCH'))                                                                return 'psychology';
         if (str_contains($c, 'COMM') || str_contains($c, 'JOURN')
-            || str_contains($c, 'MEDIA') || str_contains($c, 'BROADCAST'))          return 'communications';
-        if (str_contains($c, 'ARCH'))                                                return 'architecture';
-        if (str_contains($c, 'LAW') || str_contains($c, 'LLB') || $c === 'JD')     return 'law';
+            || str_contains($c, 'MEDIA') || str_contains($c, 'BROADCAST'))                           return 'communications';
+        if (str_contains($c, 'ARCH'))                                                                 return 'architecture';
+        if (str_contains($c, 'LAW') || str_contains($c, 'LLB') || $c === 'JD')                      return 'law';
         return 'general';
     }
 
     protected function detectJobRelevance(string $title): string
     {
-        $t = strtolower(trim($title));
+        $t     = strtolower(trim($title));
         if (empty($t)) return '';
         $group = $this->getCourseGroup($this->alumniCourse);
 
-        $yesKw = [
+        $yes = [
             'technology'     => ['developer','programmer','software','web dev','mobile app','network engineer','database admin','sysadmin','devops','cloud engineer','cybersecurity','data scientist','data analyst','ui/ux','it support','qa engineer','ml engineer','ai engineer','tech lead','systems analyst','ict','computer engineer','full stack','backend','frontend','it officer','helpdesk','network admin','it manager','it specialist','information technology','computer science','system developer','software engineer'],
             'nursing'        => ['nurse','nursing','rn ','registered nurse','icu','er nurse','surgical nurse','ward nurse','dialysis nurse','pediatric nurse','public health nurse','head nurse','charge nurse','clinical nurse','operating room nurse','or nurse'],
             'education'      => ['teacher','instructor','professor','tutor','faculty','educator','academic coordinator','school principal','curriculum developer','lecturer','teaching','special education','classroom teacher','school admin','school head','subject teacher','grade school','high school teacher','college instructor','tesda trainer','tesda teacher','vocational trainer','skills trainer'],
@@ -99,7 +134,7 @@ new class extends Component {
             'law'            => ['lawyer','attorney','legal officer','paralegal','court interpreter','judge','prosecutor','public attorney','legal counsel','law practitioner','notary public','legal consultant','solicitor'],
             'general'        => [],
         ];
-        $partialKw = [
+        $partial = [
             'technology'     => ['it ','tech ','digital','computer','online','system','app ','platform','encoder','data entry','web','virtual','it-related','tech support','technical','network','technical writer','technical support','it coordinator','it staff'],
             'nursing'        => ['health','clinic','hospital','patient','caregiver','medical','lab','healthcare','home care','nursing aide','orderly','health worker'],
             'education'      => ['trainer','training','coach','mentor','facilitator','tesda','reviewer','subject matter','tutorial','educational','school','learning','academic','instruction','development officer'],
@@ -117,14 +152,13 @@ new class extends Component {
         ];
 
         if (str_contains($t, 'tesda')) return $group === 'education' ? 'yes' : 'partially';
-        foreach ($yesKw[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'yes'; }
-        foreach ($partialKw[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'partially'; }
+        foreach ($yes[$group] ?? []     as $kw) { if (str_contains($t, strtolower($kw))) return 'yes'; }
+        foreach ($partial[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'partially'; }
         return 'no';
     }
 
     protected function buildJobOptions(): array
     {
-        $group = $this->getCourseGroup($this->alumniCourse);
         $map = [
             'technology'     => ['Software Developer','Web Developer','Mobile App Developer','Systems Analyst','Database Administrator','Network Engineer','IT Support Specialist','Cybersecurity Analyst','Data Analyst / Data Scientist','UI / UX Designer','QA / Test Engineer','DevOps / Cloud Engineer','AI / ML Engineer','Technical Project Manager'],
             'nursing'        => ['Registered Nurse (RN)','ICU / Critical Care Nurse','ER / Emergency Nurse','Head Nurse / Supervisor','OR / Surgical Nurse','Pediatric Nurse','Public Health Nurse','Dialysis Nurse','OFW / International Nurse'],
@@ -141,56 +175,123 @@ new class extends Component {
             'law'            => ['Lawyer / Attorney','Legal Officer','Court Interpreter','Paralegal','Legal Researcher'],
             'general'        => ['Administrative Officer','Office Staff','Customer Service Representative','Sales Representative'],
         ];
-        $titles   = $map[$group] ?? $map['general'];
+        $titles   = $map[$this->getCourseGroup($this->alumniCourse)] ?? $map['general'];
         $titles[] = 'Other';
         return $titles;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Mount
+    // ═════════════════════════════════════════════════════════════════════════
 
     public function mount(): void
     {
         $user = auth()->user();
         if (!$user || $user->role !== 'alumni') { $this->redirect(route('login')); return; }
 
-        $alumni = Alumni::where('user_id', $user->id)
-            ->select(['id', 'course_code', 'course_name'])->first();
+        $alumni = Alumni::where('user_id', $user->id)->first();
         if (!$alumni) { $this->redirect(route('login')); return; }
 
         $this->alumniId         = $alumni->id;
-        $this->alumniCourse     = $alumni->course_code ?? '';
-        $this->alumniCourseName = $alumni->course_name ?? '';
-        $this->jobOptions       = $this->buildJobOptions();
+        $this->alumniCourse     = $alumni->course_code  ?? '';
+        $this->alumniCourseName = $alumni->course_name  ?? '';
+        $this->alumniFirstName  = $alumni->first_name   ?? '';
+        $this->alumniLastName   = $alumni->last_name    ?? '';
+        $this->alumniFullName   = trim(
+            ($alumni->first_name ?? '') . ' ' .
+            ($alumni->middle_initial ? $alumni->middle_initial . '. ' : '') .
+            ($alumni->last_name ?? '') .
+            ($alumni->suffix ? ' ' . $alumni->suffix : '')
+        );
+        $this->alumniEmail      = $alumni->email          ?? '';
+        $this->alumniContact    = $alumni->contact_number ?? '';
+        $this->alumniBatch      = (string)($alumni->batch ?? '');
+        $this->alumniGender     = $alumni->gender         ?? '';
+        $this->alumniDob        = $alumni->date_of_birth
+            ? \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y')
+            : '';
 
-        $this->loadRecord();
-        $this->loadTwoRecords();
+        $this->alumniAddress = implode(', ', array_filter([
+            $alumni->address_street       ?? '',
+            $alumni->address_barangay     ?? '',
+            $alumni->address_municipality ?? '',
+            $alumni->address_province     ?? '',
+        ]));
+
+        // Store raw path — resolved via getProfilePhotoUrl() like the dashboard
+        $this->alumniPhoto = $alumni->profile_photo ?? '';
+
+        $this->jobOptions = $this->buildJobOptions();
+
+        $this->loadRecords();
     }
 
-    protected function loadRecord(): void
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Data Loading (merged loadRecord + loadTwoRecords into one query trip)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    protected function loadRecords(): void
     {
-        $record = DB::table('employment_trackings')
+        // Label maps — defined once, used for both current & previous
+        $typeLabels   = ['full_time' => 'Full-Time', 'part_time' => 'Part-Time', 'contractual' => 'Contractual', 'project_based' => 'Project-Based', 'internship' => 'Internship'];
+        $careerLabels = ['ofw' => 'OFW', 'freelancer' => 'Freelancer', 'entrepreneur' => 'Entrepreneur', 'career_shifter' => 'Career Shifter', 'industry_professional' => 'Industry Professional'];
+        $eduLabels    = ['none' => 'None', 'pursuing_masteral' => 'Pursuing Masteral', 'pursuing_doctorate' => 'Pursuing Doctorate'];
+        $relLabels    = ['yes' => 'Related to Course', 'no' => 'Not Related', 'partially' => 'Partially Related'];
+        $unLabels     = ['seeking_employment' => 'Actively Seeking Employment', 'not_looking' => 'Not Currently Looking'];
+        $statusLabels = ['employed' => 'Employed', 'self_employed' => 'Self-Employed', 'unemployed' => 'Unemployed'];
+
+        $mapRecord = function ($r) use ($typeLabels, $careerLabels, $eduLabels, $relLabels, $unLabels, $statusLabels) {
+            $cp = $r->career_path ? json_decode($r->career_path, true) : [];
+            return [
+                'id'                  => $r->id,
+                'employment_status'   => $statusLabels[$r->employment_status ?? ''] ?? ucfirst($r->employment_status ?? ''),
+                'is_working'          => in_array($r->employment_status ?? '', ['employed', 'self_employed']),
+                'company_name'        => $r->company_name ?? '',
+                'job_title'           => $r->job_title ?? '',
+                'employment_type'     => $typeLabels[$r->employment_type ?? ''] ?? '',
+                'work_location'       => ucfirst($r->work_location ?? ''),
+                'career_path_labels'  => array_values(array_filter(array_map(fn($v) => $careerLabels[$v] ?? null, $cp))),
+                'course_relevance'    => $relLabels[$r->course_relevance ?? ''] ?? '',
+                'unemployment_status' => $unLabels[$r->unemployment_status ?? ''] ?? '',
+                'education_status'    => $eduLabels[$r->education_status ?? ''] ?? '',
+                'submitted_at'        => $r->created_at ? \Carbon\Carbon::parse($r->created_at)->format('F j, Y') : '',
+            ];
+        };
+
+        // Current (not soft-deleted)
+        $current = DB::table('employment_trackings')
             ->where('alumni_id', $this->alumniId)
             ->whereNull('deleted_at')
             ->latest('created_at')
             ->first();
 
-        if ($record) {
-            $this->trackingId          = $record->id;
-            $this->employment_status   = $record->employment_status   ?? '';
-            $this->company_name        = $record->company_name        ?? '';
-            $this->employment_type     = $record->employment_type     ?? '';
-            $this->work_location       = $record->work_location       ?? '';
-            $this->career_path         = $record->career_path ? json_decode($record->career_path, true) : [];
-            $this->education_status    = $record->education_status    ?? '';
-            $this->course_relevance    = $record->course_relevance    ?? '';
-            $this->unemployment_status = $record->unemployment_status ?? '';
+        // Previous (soft-deleted = old record)
+        $previous = DB::table('employment_trackings')
+            ->where('alumni_id', $this->alumniId)
+            ->whereNotNull('deleted_at')
+            ->latest('created_at')
+            ->first();
 
-            $loadedJobTitle = $record->job_title ?? '';
-            if ($loadedJobTitle && !in_array($loadedJobTitle, $this->jobOptions, true)) {
+        $this->currentRecord  = $current  ? $mapRecord($current)  : null;
+        $this->previousRecord = $previous ? $mapRecord($previous) : null;
+
+        if ($current) {
+            $this->trackingId          = $current->id;
+            $this->employment_status   = $current->employment_status   ?? '';
+            $this->company_name        = $current->company_name        ?? '';
+            $this->employment_type     = $current->employment_type     ?? '';
+            $this->work_location       = $current->work_location       ?? '';
+            $this->career_path         = $current->career_path ? json_decode($current->career_path, true) : [];
+            $this->education_status    = $current->education_status    ?? '';
+            $this->course_relevance    = $current->course_relevance    ?? '';
+            $this->unemployment_status = $current->unemployment_status ?? '';
+
+            $loaded = $current->job_title ?? '';
+            if ($loaded && !in_array($loaded, $this->jobOptions, true)) {
                 $this->job_title        = 'Other';
-                $this->custom_job_title = $loadedJobTitle;
+                $this->custom_job_title = $loaded;
             } else {
-                $this->job_title        = $loadedJobTitle;
+                $this->job_title        = $loaded;
                 $this->custom_job_title = '';
             }
 
@@ -205,59 +306,15 @@ new class extends Component {
         }
     }
 
-    protected function loadTwoRecords(): void
-    {
-        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based','internship'=>'Internship'];
-        $careerLabels = ['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional'];
-        $eduLabels    = ['none'=>'None','pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate'];
-        $relLabels    = ['yes'=>'Related to Course','no'=>'Not Related','partially'=>'Partially Related'];
-        $unLabels     = ['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'];
-        $statusLabels = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'];
-
-        $mapRecord = function ($r) use ($typeLabels, $careerLabels, $eduLabels, $relLabels, $unLabels, $statusLabels) {
-            $cp = $r->career_path ? json_decode($r->career_path, true) : [];
-            return [
-                'id'                  => $r->id,
-                'employment_status'   => $statusLabels[$r->employment_status ?? ''] ?? ucfirst($r->employment_status ?? ''),
-                'is_working'          => in_array($r->employment_status ?? '', ['employed','self_employed']),
-                'company_name'        => $r->company_name ?? '',
-                'job_title'           => $r->job_title ?? '',
-                'employment_type'     => $typeLabels[$r->employment_type ?? ''] ?? '',
-                'work_location'       => ucfirst($r->work_location ?? ''),
-                'career_path_labels'  => array_values(array_filter(array_map(fn($v) => $careerLabels[$v] ?? null, $cp))),
-                'course_relevance'    => $relLabels[$r->course_relevance ?? ''] ?? '',
-                'unemployment_status' => $unLabels[$r->unemployment_status ?? ''] ?? '',
-                'education_status'    => $eduLabels[$r->education_status ?? ''] ?? '',
-                'submitted_at'        => $r->created_at ? \Carbon\Carbon::parse($r->created_at)->format('F j, Y') : '',
-            ];
-        };
-
-        // Current = not soft-deleted
-        $current = DB::table('employment_trackings')
-            ->where('alumni_id', $this->alumniId)
-            ->whereNull('deleted_at')
-            ->latest('created_at')
-            ->first();
-        $this->currentRecord = $current ? $mapRecord($current) : null;
-
-        // Previous = most recent soft-deleted record
-        $previous = DB::table('employment_trackings')
-            ->where('alumni_id', $this->alumniId)
-            ->whereNotNull('deleted_at')
-            ->latest('created_at')
-            ->first();
-        $this->previousRecord = $previous ? $mapRecord($previous) : null;
-    }
-
-    // ── Edit / Cancel ─────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Edit / Cancel
+    // ═════════════════════════════════════════════════════════════════════════
 
     public function startEditing(): void
     {
         $this->errorMessage = $this->successMessage = '';
         $this->snapshot = [];
-        foreach (['employment_status','company_name','job_title','custom_job_title',
-                  'employment_type','work_location','career_path','education_status',
-                  'course_relevance','unemployment_status'] as $k) {
+        foreach (self::SNAP_KEYS as $k) {
             $this->snapshot[$k] = $this->$k;
         }
         $this->editing = true;
@@ -267,11 +324,15 @@ new class extends Component {
     {
         $this->errorMessage = $this->successMessage = '';
         $this->resetValidation();
-        foreach ($this->snapshot as $k => $v) { $this->$k = $v; }
+        foreach ($this->snapshot as $k => $v) {
+            $this->$k = $v;
+        }
         $this->editing = false;
     }
 
-    // ── Reactive Hooks ────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Reactive Hooks
+    // ═════════════════════════════════════════════════════════════════════════
 
     public function updatedEmploymentStatus(): void
     {
@@ -288,14 +349,12 @@ new class extends Component {
     public function updatedJobTitle(): void
     {
         if ($this->job_title === 'Other') {
-            $this->course_relevance = '';
-            $this->custom_job_title = '';
+            $this->course_relevance = $this->custom_job_title = '';
         } elseif ($this->job_title !== '') {
             $this->course_relevance = 'yes';
             $this->custom_job_title = '';
         } else {
-            $this->course_relevance = '';
-            $this->custom_job_title = '';
+            $this->course_relevance = $this->custom_job_title = '';
         }
     }
 
@@ -306,7 +365,9 @@ new class extends Component {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Helpers
+    // ═════════════════════════════════════════════════════════════════════════
 
     protected function statusLabel(string $status): string
     {
@@ -337,7 +398,9 @@ new class extends Component {
         }
     }
 
-    // ── Save ─────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Save
+    // ═════════════════════════════════════════════════════════════════════════
 
     public function saveEmployment(): void
     {
@@ -357,6 +420,7 @@ new class extends Component {
             $this->course_relevance = 'yes';
         }
 
+        // Build validation rules
         $rules = [
             'employment_status' => 'required|in:employed,self_employed,unemployed',
             'education_status'  => 'required|in:none,pursuing_masteral,pursuing_doctorate',
@@ -396,25 +460,29 @@ new class extends Component {
         $finalRelevance = $working ? ($this->course_relevance ?: 'no') : null;
 
         try {
-            $now  = now();
+            $now       = now();
+            $isNew     = ($this->trackingId === 0);
+            $oldStatus = $this->snapshot['employment_status'] ?? null;
+
             $data = [
                 'alumni_id'           => $this->alumniId,
                 'employment_status'   => $this->employment_status,
-                'education_status'    => $this->education_status   ?: null,
+                'education_status'    => $this->education_status ?: null,
                 'company_name'        => $working ? ($this->company_name    ?: null) : null,
                 'job_title'           => $working ? ($finalJobTitle         ?: null) : null,
                 'employment_type'     => $working ? ($this->employment_type ?: null) : null,
                 'work_location'       => $working ? ($this->work_location   ?: null) : null,
                 'date_hired'          => null,
-                'career_path'         => $working && count($this->career_path) ? json_encode(array_values($this->career_path)) : null,
+                'career_path'         => $working && count($this->career_path)
+                                            ? json_encode(array_values($this->career_path))
+                                            : null,
                 'course_relevance'    => $finalRelevance,
-                'unemployment_status' => $this->employment_status === 'unemployed' ? ($this->unemployment_status ?: null) : null,
+                'unemployment_status' => $this->employment_status === 'unemployed'
+                                            ? ($this->unemployment_status ?: null)
+                                            : null,
                 'created_at'          => $now,
                 'updated_at'          => $now,
             ];
-
-            $isNewRecord = ($this->trackingId === 0);
-            $oldStatus   = $this->snapshot['employment_status'] ?? null;
 
             DB::transaction(function () use ($data, $now) {
                 if ($this->trackingId) {
@@ -432,7 +500,7 @@ new class extends Component {
             $alumni = \App\Models\Alumni::find($this->alumniId);
             $name   = trim(($alumni->first_name ?? '') . ' ' . ($alumni->last_name ?? ''));
 
-            if ($isNewRecord) {
+            if ($isNew) {
                 $this->saveRegistrarNotification([
                     'icon'       => 'briefcase',
                     'title'      => 'New Employment Record',
@@ -453,9 +521,7 @@ new class extends Component {
                 ]);
             }
 
-            $this->loadRecord();
-            $this->loadTwoRecords();
-
+            $this->loadRecords();
             Log::info("Employment saved | alumni_id:{$this->alumniId} | status:{$this->employment_status}");
 
         } catch (\Throwable $e) {
@@ -465,13 +531,13 @@ new class extends Component {
     }
 }; ?>
 
-{{-- ══ ROOT ══════════════════════════════════════════════════════════════════ --}}
+{{-- ══ ROOT ════════════════════════════════════════════════════════════════════ --}}
 <div
-    x-data="{ showHistoryModal: false, showCvModal: false }"
+    x-data="{ showCvModal: false }"
     class="space-y-6"
 >
 
-{{-- ── Page header ──────────────────────────────────────────────────────────── --}}
+{{-- ── Page Header ─────────────────────────────────────────────────────────── --}}
 <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
     <div class="flex items-center gap-3">
         <div class="w-[42px] h-[42px] rounded-xl bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
@@ -488,16 +554,16 @@ new class extends Component {
             </p>
         </div>
     </div>
+    @if(!$editing)
     <div class="flex items-center gap-2 flex-wrap">
-        @if(!$editing)
         <button wire:click="startEditing"
                 class="inline-flex items-center justify-center gap-1.5 px-6 py-2.5 rounded-lg
                        bg-[#7a3f91] text-white text-sm font-semibold cursor-pointer
                        hover:opacity-90 active:scale-[.98] transition">
             Update Employment
         </button>
-        @endif
     </div>
+    @endif
 </div>
 
 {{-- ── Alerts ──────────────────────────────────────────────────────────────── --}}
@@ -513,7 +579,7 @@ new class extends Component {
 ════════════════════════════════════════════════════════════════════════════ --}}
 @if($editing)
 
-{{-- SECTION 1 — Employment Status --}}
+{{-- Section 1 — Employment Status --}}
 <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
     <div class="px-5 py-3.5 border-b border-gray-100">
         <span class="text-base font-semibold text-gray-900">Employment Status</span>
@@ -523,21 +589,13 @@ new class extends Component {
             Current Status <span class="text-red-500">*</span>
         </label>
         <div class="flex flex-wrap gap-3">
+            @foreach(['employed' => 'Employed', 'self_employed' => 'Self-Employed', 'unemployed' => 'Unemployed'] as $val => $lbl)
             <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model.live="employment_status" type="radio" value="employed"
+                <input wire:model.live="employment_status" type="radio" value="{{ $val }}"
                        class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Employed</span>
+                <span class="text-sm font-semibold text-gray-900">{{ $lbl }}</span>
             </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model.live="employment_status" type="radio" value="self_employed"
-                       class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Self-Employed</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model.live="employment_status" type="radio" value="unemployed"
-                       class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Unemployed</span>
-            </label>
+            @endforeach
         </div>
         @error('employment_status')
             <p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>
@@ -545,8 +603,9 @@ new class extends Component {
     </div>
 </div>
 
-{{-- SECTION 2 — Employment Details (Employed / Self-Employed) --}}
-@if(in_array($employment_status, ['employed','self_employed']))
+{{-- Section 2 — Employment Details (Employed / Self-Employed) --}}
+@if(in_array($employment_status, ['employed', 'self_employed']))
+@php $isSelf = $employment_status === 'self_employed'; @endphp
 <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
     <div class="px-5 py-3.5 border-b border-gray-100">
         <span class="text-base font-semibold text-gray-900">Employment Details</span>
@@ -556,11 +615,10 @@ new class extends Component {
         {{-- Company / Business Name --}}
         <div class="max-w-lg">
             <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
-                {{ $employment_status === 'self_employed' ? 'Business Name' : 'Company Name' }}
-                <span class="text-red-500">*</span>
+                {{ $isSelf ? 'Business Name' : 'Company Name' }} <span class="text-red-500">*</span>
             </label>
             <input wire:model="company_name" type="text"
-                   placeholder="{{ $employment_status === 'self_employed' ? 'E.G. ABC TRADING' : 'E.G. JOLLIBEE FOODS CORP.' }}"
+                   placeholder="{{ $isSelf ? 'E.G. ABC TRADING' : 'E.G. JOLLIBEE FOODS CORP.' }}"
                    oninput="this.value=this.value.toUpperCase()"
                    class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
                           border border-gray-200 rounded-lg px-3 py-2 uppercase tracking-wide
@@ -573,8 +631,7 @@ new class extends Component {
         {{-- Job Title --}}
         <div class="max-w-lg">
             <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
-                {{ $employment_status === 'self_employed' ? 'Occupation / Role' : 'Job Title' }}
-                <span class="text-red-500">*</span>
+                {{ $isSelf ? 'Occupation / Role' : 'Job Title' }} <span class="text-red-500">*</span>
             </label>
             <select wire:model.live="job_title"
                     class="w-full box-border text-base font-normal text-gray-900 bg-gray-50
@@ -590,9 +647,7 @@ new class extends Component {
             @error('job_title') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
 
             @if($job_title && $job_title !== 'Other')
-                <p class="text-xs text-emerald-600 mt-1.5 font-medium">
-                    Auto-detected: Related to your course.
-                </p>
+                <p class="text-xs text-emerald-600 mt-1.5 font-medium">Auto-detected: Related to your course.</p>
             @endif
 
             @if($job_title === 'Other')
@@ -611,22 +666,16 @@ new class extends Component {
                     @error('custom_job_title') <p class="text-xs text-red-500 mt-1">{{ $message }}</p> @enderror
                 </div>
                 @if($custom_job_title)
+                @php
+                    [$relText, $relColor] = match($course_relevance) {
+                        'yes'       => ['Related to Course',    'text-emerald-700'],
+                        'partially' => ['Partially Related',    'text-amber-700'],
+                        'no'        => ['Not Related',          'text-red-700'],
+                        default     => ['Detecting…',           'text-gray-400'],
+                    };
+                @endphp
                 <div>
                     <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Auto-Detected Relevance: </span>
-                    @php
-                        $relText = match($course_relevance) {
-                            'yes'       => 'Related to Course',
-                            'partially' => 'Partially Related',
-                            'no'        => 'Not Related',
-                            default     => 'Detecting…',
-                        };
-                        $relColor = match($course_relevance) {
-                            'yes'       => 'text-emerald-700',
-                            'partially' => 'text-amber-700',
-                            'no'        => 'text-red-700',
-                            default     => 'text-gray-400',
-                        };
-                    @endphp
                     <span class="text-xs font-semibold {{ $relColor }}">{{ $relText }}</span>
                 </div>
                 @endif
@@ -640,7 +689,7 @@ new class extends Component {
                 Employment Type <span class="text-red-500">*</span>
             </label>
             <div class="flex flex-wrap gap-4">
-                @foreach(['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based','internship'=>'Internship'] as $val=>$lbl)
+                @foreach(['full_time' => 'Full-Time', 'part_time' => 'Part-Time', 'contractual' => 'Contractual', 'project_based' => 'Project-Based', 'internship' => 'Internship'] as $val => $lbl)
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input wire:model="employment_type" type="radio" value="{{ $val }}"
                            class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
@@ -657,16 +706,13 @@ new class extends Component {
                 Work Location <span class="text-red-500">*</span>
             </label>
             <div class="flex flex-wrap gap-4">
+                @foreach(['local' => 'Local', 'abroad' => 'Abroad'] as $val => $lbl)
                 <label class="flex items-center gap-2 cursor-pointer">
-                    <input wire:model="work_location" type="radio" value="local"
+                    <input wire:model="work_location" type="radio" value="{{ $val }}"
                            class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                    <span class="text-sm font-semibold text-gray-900">Local</span>
+                    <span class="text-sm font-semibold text-gray-900">{{ $lbl }}</span>
                 </label>
-                <label class="flex items-center gap-2 cursor-pointer">
-                    <input wire:model="work_location" type="radio" value="abroad"
-                           class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                    <span class="text-sm font-semibold text-gray-900">Abroad</span>
-                </label>
+                @endforeach
             </div>
             @error('work_location') <p class="text-xs text-red-500 mt-1.5">{{ $message }}</p> @enderror
         </div>
@@ -678,7 +724,7 @@ new class extends Component {
                 <span class="normal-case font-normal text-gray-400 text-[11px] tracking-normal ml-1">(optional, select all that apply)</span>
             </label>
             <div class="flex flex-wrap gap-4">
-                @foreach(['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional'] as $val=>$lbl)
+                @foreach(['ofw' => 'OFW', 'freelancer' => 'Freelancer', 'entrepreneur' => 'Entrepreneur', 'career_shifter' => 'Career Shifter', 'industry_professional' => 'Industry Professional'] as $val => $lbl)
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input wire:model="career_path" type="checkbox" value="{{ $val }}"
                            class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
@@ -692,7 +738,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- SECTION 3 — Unemployment Status --}}
+{{-- Section 3 — Unemployment Status --}}
 @if($employment_status === 'unemployed')
 <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
     <div class="px-5 py-3.5 border-b border-gray-100">
@@ -703,23 +749,20 @@ new class extends Component {
             Job Search Status <span class="text-red-500">*</span>
         </label>
         <div class="flex flex-wrap gap-4">
+            @foreach(['seeking_employment' => 'Actively Seeking Employment', 'not_looking' => 'Not Currently Looking'] as $val => $lbl)
             <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model="unemployment_status" type="radio" value="seeking_employment"
+                <input wire:model="unemployment_status" type="radio" value="{{ $val }}"
                        class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Actively Seeking Employment</span>
+                <span class="text-sm font-semibold text-gray-900">{{ $lbl }}</span>
             </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model="unemployment_status" type="radio" value="not_looking"
-                       class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Not Currently Looking</span>
-            </label>
+            @endforeach
         </div>
         @error('unemployment_status') <p class="text-xs text-red-500 mt-1.5">{{ $message }}</p> @enderror
     </div>
 </div>
 @endif
 
-{{-- SECTION 4 — Further Education --}}
+{{-- Section 4 — Further Education --}}
 <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
     <div class="px-5 py-3.5 border-b border-gray-100">
         <span class="text-base font-semibold text-gray-900">Further Education</span>
@@ -729,27 +772,19 @@ new class extends Component {
             Education Status <span class="text-red-500">*</span>
         </label>
         <div class="flex flex-wrap gap-4">
+            @foreach(['none' => 'None', 'pursuing_masteral' => 'Pursuing Masteral', 'pursuing_doctorate' => 'Pursuing Doctorate'] as $val => $lbl)
             <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model="education_status" type="radio" value="none"
+                <input wire:model="education_status" type="radio" value="{{ $val }}"
                        class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">None</span>
+                <span class="text-sm font-semibold text-gray-900">{{ $lbl }}</span>
             </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model="education_status" type="radio" value="pursuing_masteral"
-                       class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Pursuing Masteral</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-                <input wire:model="education_status" type="radio" value="pursuing_doctorate"
-                       class="w-4 h-4 accent-[#7a3f91] cursor-pointer">
-                <span class="text-sm font-semibold text-gray-900">Pursuing Doctorate</span>
-            </label>
+            @endforeach
         </div>
         @error('education_status') <p class="text-xs text-red-500 mt-1.5">{{ $message }}</p> @enderror
     </div>
 </div>
 
-{{-- Action buttons --}}
+{{-- Action Buttons --}}
 <div class="flex gap-3 flex-wrap">
     <button wire:click="saveEmployment"
             wire:loading.attr="disabled"
@@ -774,12 +809,11 @@ new class extends Component {
 @endif {{-- end $editing --}}
 
 {{-- ════════════════════════════════════════════════════════════════════════════
-     RECORD VIEW  (shown only when not editing)
+     RECORD VIEW
 ════════════════════════════════════════════════════════════════════════════ --}}
 @if(!$editing)
 
     @if(!$currentRecord && !$previousRecord)
-    {{-- Empty state --}}
     <div class="bg-white border border-gray-200 rounded-xl p-12 flex flex-col items-center justify-center text-center">
         <p class="font-semibold text-base text-gray-900">No Employment Record Yet</p>
         <p class="text-sm text-gray-500 mt-1">
@@ -788,11 +822,11 @@ new class extends Component {
     </div>
     @else
 
-    {{-- ── CURRENT RECORD ──────────────────────────────────────────────────── --}}
     @if($currentRecord)
     <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div class="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between gap-2">
             <span class="text-base font-semibold text-gray-900">Current Employment Status</span>
+            <span class="text-xs text-gray-400">Submitted: {{ $currentRecord['submitted_at'] }}</span>
         </div>
         <div class="p-5 space-y-5">
 
@@ -808,17 +842,18 @@ new class extends Component {
             </div>
 
             @if($currentRecord['is_working'])
+            @php $isSelfView = str_contains(strtolower($currentRecord['employment_status']), 'self'); @endphp
             <div class="pt-4 border-t border-gray-100 space-y-4">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                            {{ str_contains(strtolower($currentRecord['employment_status']), 'self') ? 'Business Name' : 'Company Name' }}
+                            {{ $isSelfView ? 'Business Name' : 'Company Name' }}
                         </span>
                         <p class="text-base font-semibold text-gray-900 uppercase">{{ $currentRecord['company_name'] ?: '—' }}</p>
                     </div>
                     <div>
                         <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                            {{ str_contains(strtolower($currentRecord['employment_status']), 'self') ? 'Occupation / Role' : 'Job Title' }}
+                            {{ $isSelfView ? 'Occupation / Role' : 'Job Title' }}
                         </span>
                         <p class="text-base font-semibold text-gray-900">{{ $currentRecord['job_title'] ?: '—' }}</p>
                     </div>
@@ -857,161 +892,22 @@ new class extends Component {
     </div>
     @endif
 
-    {{-- ── ACTION BUTTONS ROW ──────────────────────────────────────────────── --}}
+    {{-- View CV Button --}}
+    @if($currentRecord)
     <div class="flex flex-wrap gap-3">
-
-        {{-- View Previous Record button --}}
-        @if($previousRecord)
-        <button
-            @click="showHistoryModal = true"
-            class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg
-                   bg-white text-gray-700 text-sm font-semibold cursor-pointer
-                   border border-gray-200 hover:bg-gray-50 active:scale-[.98] transition">
-            <i class="fa-solid fa-clock-rotate-left text-gray-500 text-xs"></i>
-            Previous Record
-        </button>
-        @endif
-
-        {{-- View CV button --}}
-        @if($currentRecord)
-        <button
-            @click="showCvModal = true"
-            class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg
-                   bg-[#7a3f91] text-white text-sm font-semibold cursor-pointer
-                   hover:opacity-90 active:scale-[.98] transition">
+        <button @click="showCvModal = true"
+                class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg
+                       bg-[#7a3f91] text-white text-sm font-semibold cursor-pointer
+                       hover:opacity-90 active:scale-[.98] transition">
             <i class="fa-solid fa-file-user text-white text-xs"></i>
             View CV
         </button>
-        @endif
-
     </div>
+    @endif
 
     @endif {{-- end empty check --}}
 
 @endif {{-- end !$editing --}}
-
-
-{{-- ════════════════════════════════════════════════════════════════════════════
-     PREVIOUS RECORD MODAL
-════════════════════════════════════════════════════════════════════════════ --}}
-<div
-    x-show="showHistoryModal"
-    x-transition:enter="transition ease-out duration-200"
-    x-transition:enter-start="opacity-0"
-    x-transition:enter-end="opacity-100"
-    x-transition:leave="transition ease-in duration-150"
-    x-transition:leave-start="opacity-100"
-    x-transition:leave-end="opacity-0"
-    class="fixed inset-0 z-50 flex items-center justify-center p-4"
-    style="display: none;"
->
-    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showHistoryModal = false"></div>
-
-    <div
-        x-show="showHistoryModal"
-        x-transition:enter="transition ease-out duration-200"
-        x-transition:enter-start="opacity-0 scale-95 translate-y-2"
-        x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-        x-transition:leave="transition ease-in duration-150"
-        x-transition:leave-start="opacity-100 scale-100 translate-y-0"
-        x-transition:leave-end="opacity-0 scale-95 translate-y-2"
-        class="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col overflow-hidden"
-    >
-        {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
-            <div class="flex items-center gap-2.5">
-                <div class="w-8 h-8 rounded-lg bg-[#7a3f91]/10 flex items-center justify-center">
-                    <i class="fa-solid fa-clock-rotate-left text-[#7a3f91] text-sm"></i>
-                </div>
-                <h2 class="text-base font-semibold text-gray-900">Previous Record</h2>
-            </div>
-            <button @click="showHistoryModal = false"
-                    class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition cursor-pointer">
-                <i class="fa-solid fa-xmark text-base"></i>
-            </button>
-        </div>
-
-        {{-- Body --}}
-        <div class="overflow-y-auto flex-1 p-6">
-            @if($previousRecord)
-            <div class="space-y-4">
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Employment Status</span>
-                        <p class="text-base font-semibold text-gray-900">{{ $previousRecord['employment_status'] }}</p>
-                    </div>
-                    <div>
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Further Education</span>
-                        <p class="text-base font-semibold text-gray-900">{{ $previousRecord['education_status'] ?: '—' }}</p>
-                    </div>
-                </div>
-
-                @if($previousRecord['is_working'])
-                <div class="pt-4 border-t border-gray-100 space-y-4">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                                {{ str_contains(strtolower($previousRecord['employment_status']), 'self') ? 'Business Name' : 'Company Name' }}
-                            </span>
-                            <p class="text-base font-semibold text-gray-900 uppercase">{{ $previousRecord['company_name'] ?: '—' }}</p>
-                        </div>
-                        <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                                {{ str_contains(strtolower($previousRecord['employment_status']), 'self') ? 'Occupation / Role' : 'Job Title' }}
-                            </span>
-                            <p class="text-base font-semibold text-gray-900">{{ $previousRecord['job_title'] ?: '—' }}</p>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Employment Type</span>
-                            <p class="text-base font-semibold text-gray-900">{{ $previousRecord['employment_type'] ?: '—' }}</p>
-                        </div>
-                        <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Work Location</span>
-                            <p class="text-base font-semibold text-gray-900">{{ $previousRecord['work_location'] ?: '—' }}</p>
-                        </div>
-                        <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Course Relevance</span>
-                            <p class="text-base font-semibold text-gray-900">{{ $previousRecord['course_relevance'] ?: '—' }}</p>
-                        </div>
-                    </div>
-                    @if(!empty($previousRecord['career_path_labels']))
-                    <div>
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Career Path</span>
-                        <p class="text-base font-semibold text-gray-900">{{ implode(', ', $previousRecord['career_path_labels']) }}</p>
-                    </div>
-                    @endif
-                </div>
-                @endif
-
-                @if(!$previousRecord['is_working'] && $previousRecord['unemployment_status'])
-                <div class="pt-4 border-t border-gray-100">
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Job Search Status</span>
-                    <p class="text-base font-semibold text-gray-900">{{ $previousRecord['unemployment_status'] }}</p>
-                </div>
-                @endif
-
-                <div class="pt-3 border-t border-gray-100">
-                    <span class="text-xs text-gray-400">Submitted: {{ $previousRecord['submitted_at'] }}</span>
-                </div>
-
-            </div>
-            @endif
-        </div>
-
-        {{-- Footer --}}
-        <div class="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
-            <button @click="showHistoryModal = false"
-                    class="inline-flex items-center justify-center px-5 py-2 rounded-lg
-                           bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer
-                           hover:bg-gray-200 active:scale-[.98] transition">
-                Close
-            </button>
-        </div>
-    </div>
-</div>
 
 
 {{-- ════════════════════════════════════════════════════════════════════════════
@@ -1026,7 +922,7 @@ new class extends Component {
     x-transition:leave-start="opacity-100"
     x-transition:leave-end="opacity-0"
     class="fixed inset-0 z-50 flex items-center justify-center p-4"
-    style="display: none;"
+    style="display:none;"
 >
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showCvModal = false"></div>
 
@@ -1038,174 +934,196 @@ new class extends Component {
         x-transition:leave="transition ease-in duration-150"
         x-transition:leave-start="opacity-100 scale-100 translate-y-0"
         x-transition:leave-end="opacity-0 scale-95 translate-y-2"
-        class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden"
+        class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden"
     >
-        {{-- Header --}}
+        {{-- Modal Header --}}
         <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
             <div class="flex items-center gap-2.5">
                 <div class="w-8 h-8 rounded-lg bg-[#7a3f91]/10 flex items-center justify-center">
                     <i class="fa-solid fa-file-user text-[#7a3f91] text-sm"></i>
                 </div>
                 <div>
-                    <h2 class="text-base font-semibold text-gray-900">Employment CV</h2>
-                    <p class="text-xs text-gray-500">Your employment record summary</p>
+                    <h2 class="text-base font-semibold text-gray-900">Alumni Employment CV</h2>
+                    <p class="text-xs text-gray-500">Complete employment record summary</p>
                 </div>
             </div>
             <button @click="showCvModal = false"
-                    class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition cursor-pointer">
+                    class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400
+                           hover:bg-gray-100 hover:text-gray-600 transition cursor-pointer">
                 <i class="fa-solid fa-xmark text-base"></i>
             </button>
         </div>
 
-        {{-- CV Body --}}
-        <div class="overflow-y-auto flex-1 p-6 space-y-6" id="cv-print-area">
+        {{-- CV Printable Body --}}
+        <div class="overflow-y-auto flex-1" id="cv-print-area">
+        <div class="p-6" style="font-family:'Segoe UI',system-ui,sans-serif;">
 
-            {{-- CV Header --}}
-            <div class="flex items-start gap-4 pb-5 border-b-2 border-[#7a3f91]">
-                <div class="w-16 h-16 rounded-full bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
-                    <i class="fa-solid fa-user text-white text-2xl"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <h3 class="text-xl font-bold text-gray-900 truncate">
-                        {{ auth()->user()->name ?? 'Alumni' }}
-                    </h3>
-                    @if($currentRecord && $currentRecord['is_working'])
-                        <p class="text-sm font-semibold text-[#7a3f91] mt-0.5">{{ $currentRecord['job_title'] ?: '' }}</p>
-                        <p class="text-sm text-gray-500">{{ $currentRecord['company_name'] ?: '' }}</p>
-                    @elseif($currentRecord)
-                        <p class="text-sm text-gray-500 mt-0.5">{{ $currentRecord['employment_status'] }}</p>
-                    @endif
-                    @if($alumniCourseName)
-                        <p class="text-xs text-gray-400 mt-1">{{ $alumniCourseName }}
-                            @if($alumniCourse) · <span class="font-semibold">{{ $alumniCourse }}</span> @endif
-                        </p>
-                    @endif
-                </div>
-            </div>
-
-            {{-- Current Position --}}
-            @if($currentRecord)
-            <div>
-                <h4 class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-3">Current Status</h4>
-
-                @if($currentRecord['is_working'])
-                <div class="bg-gray-50 rounded-xl p-4 space-y-3">
-                    <div class="flex items-start justify-between gap-2">
-                        <div>
-                            <p class="text-sm font-bold text-gray-900">{{ $currentRecord['job_title'] ?: '—' }}</p>
-                            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-0.5">{{ $currentRecord['company_name'] ?: '—' }}</p>
-                        </div>
-                        <span class="flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            {{ $currentRecord['employment_status'] }}
-                        </span>
-                    </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-200">
-                        @if($currentRecord['employment_type'])
-                        <div>
-                            <span class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">Type</span>
-                            <p class="text-xs font-semibold text-gray-700">{{ $currentRecord['employment_type'] }}</p>
-                        </div>
-                        @endif
-                        @if($currentRecord['work_location'])
-                        <div>
-                            <span class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">Location</span>
-                            <p class="text-xs font-semibold text-gray-700">{{ $currentRecord['work_location'] }}</p>
-                        </div>
-                        @endif
-                        @if($currentRecord['course_relevance'])
-                        <div>
-                            <span class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">Relevance</span>
-                            <p class="text-xs font-semibold text-gray-700">{{ $currentRecord['course_relevance'] }}</p>
-                        </div>
-                        @endif
-                    </div>
-                    @if(!empty($currentRecord['career_path_labels']))
-                    <div class="pt-2 border-t border-gray-200">
-                        <span class="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">Career Path</span>
-                        <div class="flex flex-wrap gap-1.5">
-                            @foreach($currentRecord['career_path_labels'] as $cp)
-                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">{{ $cp }}</span>
-                            @endforeach
-                        </div>
-                    </div>
-                    @endif
-                </div>
-                @else
-                <div class="bg-gray-50 rounded-xl p-4 flex items-center justify-between">
-                    <p class="text-sm font-semibold text-gray-700">{{ $currentRecord['employment_status'] }}</p>
-                    @if($currentRecord['unemployment_status'])
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                        {{ $currentRecord['unemployment_status'] }}
+            {{-- Header Band --}}
+            @php $cvPhoto = $this->getProfilePhotoUrl(); @endphp
+            <div style="background:#1a1a2e;border-radius:10px;padding:24px 28px;color:#fff;display:flex;align-items:center;gap:20px;margin-bottom:20px;">
+                {{-- Avatar — uses same resolved URL as dashboard --}}
+                <div style="width:68px;height:68px;border-radius:50%;border:2px solid rgba(255,255,255,0.25);flex-shrink:0;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:600;color:#1a1a2e;">
+                    <img src="{{ $cvPhoto }}"
+                         style="width:100%;height:100%;object-fit:cover;"
+                         alt="{{ $alumniFirstName }}"
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+                    <span style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:1.4rem;font-weight:600;color:#1a1a2e;">
+                        {{ strtoupper(substr($alumniFirstName, 0, 1)) }}{{ strtoupper(substr($alumniLastName, 0, 1)) }}
                     </span>
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <p style="font-size:1.15rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin:0 0 4px;line-height:1.2;">
+                        {{ $alumniFullName ?: (auth()->user()->name ?? 'Alumni') }}
+                    </p>
+                    @if($currentRecord && $currentRecord['is_working'] && $currentRecord['job_title'])
+                    <p style="font-size:.82rem;opacity:.78;margin:0 0 8px;">
+                        {{ $currentRecord['job_title'] }}@if($currentRecord['company_name']) &nbsp;&middot;&nbsp; {{ $currentRecord['company_name'] }}@endif
+                    </p>
+                    @elseif($currentRecord)
+                    <p style="font-size:.82rem;opacity:.78;margin:0 0 8px;">{{ $currentRecord['employment_status'] }}</p>
                     @endif
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        @if($alumniCourse)
+                        <span style="font-size:.7rem;background:rgba(255,255,255,.12);border:0.5px solid rgba(255,255,255,.25);border-radius:20px;padding:3px 10px;">
+                            {{ strtoupper($alumniCourse) }}{{ $alumniBatch ? ' &middot; Batch ' . $alumniBatch : '' }}
+                        </span>
+                        @endif
+                        @if($alumniGender)
+                        <span style="font-size:.7rem;background:rgba(255,255,255,.12);border:0.5px solid rgba(255,255,255,.25);border-radius:20px;padding:3px 10px;">
+                            {{ $alumniGender }}
+                        </span>
+                        @endif
+                    </div>
                 </div>
-                @endif
-
-                @if($currentRecord['education_status'] && $currentRecord['education_status'] !== 'None')
-                <div class="mt-3 flex items-center gap-2">
-                    <i class="fa-solid fa-graduation-cap text-[#7a3f91] text-sm"></i>
-                    <span class="text-sm font-semibold text-gray-700">{{ $currentRecord['education_status'] }}</span>
-                </div>
-                @endif
             </div>
-            @endif
 
-            {{-- Previous Position in CV --}}
-            @if($previousRecord)
-            <div>
-                <h4 class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-3">Previous Status</h4>
-                <div class="pl-6 relative">
-                    <div class="absolute left-0 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-gray-300 bg-white"></div>
-                    <div class="absolute left-[6px] top-4 bottom-0 w-px bg-gray-200"></div>
-                    <div class="bg-gray-50 rounded-xl p-3.5">
-                        <div class="flex items-start justify-between gap-2 mb-1.5">
+            {{-- Body: Left + Right --}}
+            <div style="display:flex;gap:24px;align-items:flex-start;">
+
+                {{-- Left Column --}}
+                <div style="width:38%;flex-shrink:0;">
+
+                    <p style="font-size:.6rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#888;border-bottom:1.5px solid #e5e5e5;padding-bottom:5px;margin:0 0 10px;">Contact</p>
+
+                    @foreach([
+                        ['Email',         $alumniEmail,   'word-break:break-all;'],
+                        ['Mobile',        $alumniContact, ''],
+                        ['Address',       $alumniAddress, ''],
+                        ['Date of Birth', $alumniDob,     ''],
+                    ] as [$label, $value, $style])
+                    @if($value)
+                    <div style="margin-bottom:9px;">
+                        <span style="font-size:.66rem;color:#888;display:block;margin-bottom:1px;">{{ $label }}</span>
+                        <span style="font-size:.8rem;font-weight:500;color:#111;{{ $style }}">{{ $value }}</span>
+                    </div>
+                    @endif
+                    @endforeach
+
+                    <p style="font-size:.6rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#888;border-bottom:1.5px solid #e5e5e5;padding-bottom:5px;margin:18px 0 10px;">Education</p>
+
+                    @foreach(array_filter([
+                        $alumniCourseName ? ['Degree',                   $alumniCourseName]           : null,
+                        $alumniCourse     ? ['Program Code',             strtoupper($alumniCourse)]   : null,
+                        $alumniBatch      ? ['Batch / Graduation Year',  $alumniBatch]                : null,
+                        $currentRecord    ? ['Further Studies', $currentRecord['education_status'] ?: 'None'] : null,
+                    ]) as [$label, $value])
+                    <div style="margin-bottom:9px;">
+                        <span style="font-size:.66rem;color:#888;display:block;margin-bottom:1px;">{{ $label }}</span>
+                        <span style="font-size:.8rem;font-weight:500;color:#111;">{{ $value }}</span>
+                    </div>
+                    @endforeach
+
+                </div>
+
+                {{-- Column Divider --}}
+                <div style="width:0.5px;background:#e5e5e5;align-self:stretch;flex-shrink:0;"></div>
+
+                {{-- Right Column --}}
+                <div style="flex:1;min-width:0;">
+
+                    @if($currentRecord)
+                    <p style="font-size:.6rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#888;border-bottom:1.5px solid #e5e5e5;padding-bottom:5px;margin:0 0 12px;">Current Employment</p>
+
+                    @if($currentRecord['is_working'])
+                    <div style="border:0.5px solid #e0e0e0;border-radius:8px;padding:14px 16px;background:#f9f9f9;margin-bottom:16px;">
+                        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;">
                             <div>
-                                @if($previousRecord['is_working'] && $previousRecord['job_title'])
-                                    <p class="text-sm font-bold text-gray-900">{{ $previousRecord['job_title'] }}</p>
-                                    @if($previousRecord['company_name'])
-                                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{{ $previousRecord['company_name'] }}</p>
-                                    @endif
-                                @else
-                                    <p class="text-sm font-bold text-gray-900">{{ $previousRecord['employment_status'] }}</p>
+                                <p style="font-size:.95rem;font-weight:600;color:#111;margin:0 0 2px;">{{ $currentRecord['job_title'] ?: '—' }}</p>
+                                @if($currentRecord['company_name'])
+                                <p style="font-size:.8rem;color:#555;text-transform:uppercase;letter-spacing:.04em;margin:0;">{{ $currentRecord['company_name'] }}</p>
                                 @endif
                             </div>
-                            <span class="flex-shrink-0 text-xs text-gray-400 whitespace-nowrap">{{ $previousRecord['submitted_at'] }}</span>
+                            <span style="font-size:.68rem;font-weight:600;padding:3px 10px;border-radius:20px;background:#edf7f2;color:#2d6a4f;border:0.5px solid #b7dfc9;white-space:nowrap;flex-shrink:0;">
+                                {{ $currentRecord['employment_status'] }}
+                            </span>
                         </div>
-                        @if($previousRecord['is_working'])
-                        <div class="flex flex-wrap gap-2 mt-1.5">
-                            @if($previousRecord['employment_type'])
-                            <span class="text-[11px] font-semibold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded">{{ $previousRecord['employment_type'] }}</span>
-                            @endif
-                            @if($previousRecord['work_location'])
-                            <span class="text-[11px] font-semibold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded">{{ $previousRecord['work_location'] }}</span>
-                            @endif
-                            @if($previousRecord['course_relevance'])
-                            <span class="text-[11px] font-semibold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded">{{ $previousRecord['course_relevance'] }}</span>
+                        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                            @foreach(array_filter([$currentRecord['employment_type'], $currentRecord['work_location']]) as $tag)
+                            <span style="font-size:.68rem;border:0.5px solid #ddd;border-radius:20px;padding:2px 9px;color:#555;background:#fff;">{{ $tag }}</span>
+                            @endforeach
+                            @if($currentRecord['course_relevance'])
+                            <span style="font-size:.68rem;border:0.5px solid #2d6a4f;border-radius:20px;padding:2px 9px;color:#2d6a4f;background:#edf7f2;">{{ $currentRecord['course_relevance'] }}</span>
                             @endif
                         </div>
-                        @endif
-                        @if(!$previousRecord['is_working'] && $previousRecord['unemployment_status'])
-                        <p class="text-xs text-gray-500 mt-1">{{ $previousRecord['unemployment_status'] }}</p>
+                        @if(!empty($currentRecord['career_path_labels']))
+                        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">
+                            @foreach($currentRecord['career_path_labels'] as $cp)
+                            <span style="font-size:.68rem;border:0.5px solid #ddd;border-radius:20px;padding:2px 9px;color:#555;background:#fff;">{{ $cp }}</span>
+                            @endforeach
+                        </div>
                         @endif
                     </div>
+                    @else
+                    <div style="border:0.5px solid #e0e0e0;border-radius:8px;padding:14px 16px;background:#f9f9f9;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div>
+                            <p style="font-size:.9rem;font-weight:600;color:#111;margin:0 0 3px;">{{ $currentRecord['employment_status'] }}</p>
+                            @if($currentRecord['unemployment_status'])
+                            <p style="font-size:.8rem;color:#555;margin:0;">{{ $currentRecord['unemployment_status'] }}</p>
+                            @endif
+                        </div>
+                        <span style="font-size:.68rem;font-weight:600;padding:3px 10px;border-radius:20px;background:#fff3cd;color:#92400e;border:0.5px solid #fcd096;white-space:nowrap;flex-shrink:0;">Not Working</span>
+                    </div>
+                    @endif
+
+                    {{-- Professional Summary --}}
+                    <p style="font-size:.6rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#888;border-bottom:1.5px solid #e5e5e5;padding-bottom:5px;margin:0 0 10px;">Professional Summary</p>
+                    <p style="font-size:.8rem;color:#444;line-height:1.7;margin:0;">
+                        @if($alumniBatch)Batch {{ $alumniBatch }} graduate of @endif
+                        {{ $alumniCourseName ?: strtoupper($alumniCourse) }}
+                        @if($currentRecord['is_working'])
+                            currently working as {{ $currentRecord['job_title'] }}@if($currentRecord['company_name']) at {{ $currentRecord['company_name'] }}@endif.
+                            @if($currentRecord['employment_type']) Engaged on a {{ strtolower($currentRecord['employment_type']) }}@if($currentRecord['work_location']), {{ strtolower($currentRecord['work_location']) }}@endif arrangement.@endif
+                            @if($currentRecord['course_relevance']) Role is {{ strtolower($currentRecord['course_relevance']) }}.@endif
+                        @else
+                            currently seeking employment opportunities.
+                        @endif
+                    </p>
+                    @endif {{-- end $currentRecord --}}
+
                 </div>
-            </div>
-            @endif
+
+            </div>{{-- end body columns --}}
+
+            {{-- Footer --}}
+            <p style="font-size:.62rem;color:#bbb;text-align:center;margin-top:20px;padding-top:12px;border-top:0.5px solid #ebebeb;">
+                Generated {{ now()->format('F j, Y') }} &nbsp;&middot;&nbsp; Alumni Employment Tracking System
+            </p>
 
         </div>
+        </div>{{-- end cv-print-area --}}
 
-        {{-- CV Footer --}}
+        {{-- Modal Footer --}}
         <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
             <p class="text-xs text-gray-400">Generated {{ now()->format('F j, Y') }}</p>
             <div class="flex gap-2">
                 <button
                     onclick="
                         const area = document.getElementById('cv-print-area');
-                        const win = window.open('', '_blank');
-                        win.document.write('<html><head><title>Employment CV</title><style>body{font-family:sans-serif;padding:32px;max-width:700px;margin:auto}h4{color:#7a3f91;font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}p,span{font-size:13px}@media print{body{padding:0}}</style></head><body>' + area.innerHTML + '</body></html>');
+                        const win  = window.open('', '_blank');
+                        win.document.write('<!DOCTYPE html><html><head><title>Employment CV - ' + {{ json_encode($alumniFullName) }} + '</title><link rel=\'stylesheet\' href=\'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css\'><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:\'Segoe UI\',system-ui,sans-serif;background:#fff;padding:28px;max-width:740px;margin:auto;}@media print{body{padding:0;}@page{margin:14mm;}}</style></head><body>' + area.innerHTML + '</body></html>');
                         win.document.close();
                         win.focus();
-                        win.print();
+                        setTimeout(function(){ win.print(); }, 600);
                     "
                     class="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg
                            bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer

@@ -375,21 +375,14 @@ new class extends Component {
 };
 ?>
 
-{{-- ═══════════════════════════════════════════════════════════
-     SINGLE ROOT ELEMENT — required by Livewire
-═══════════════════════════════════════════════════════════ --}}
 <div
     @dash-open-alumni.window="$wire.openAlumniModal($event.detail.filter ?? 'all', $event.detail.batch ?? null)"
     @dash-open-emp.window="$wire.openEmpModal($event.detail.filter ?? '')">
 
-    {{-- Batch data bridge for JS chart --}}
     <div id="__dash_batch_data" class="hidden"
          data-batches="{{ $this->allBatches->toJson() }}">
     </div>
 
-    {{-- ═══════════════════════════════════════════════════════════
-         PAGE CONTENT
-    ═══════════════════════════════════════════════════════════ --}}
     <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-4 max-w-screen-2xl mx-auto">
 
         {{-- PAGE HEADER --}}
@@ -399,8 +392,8 @@ new class extends Component {
                 <i class="fas fa-gauge-high text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Registrar Dashboard</h1>
-                <p class="text-sm text-[#666666] font-normal">{{ now()->format('l, F j, Y') }}</p>
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Registrar Dashboard</h1>
+                <p class="text-sm text-[#333333] font-normal">{{ now()->format('l, F j, Y') }}</p>
             </div>
         </div>
 
@@ -411,11 +404,10 @@ new class extends Component {
             <div wire:click="openAlumniModal('all')"
                  class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                         hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985]">
-                {{-- hover tooltip --}}
                 <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                             opacity-0 group-hover:opacity-100 z-50 shadow-lg
+                             opacity-0 z-50 shadow-lg
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
                              [.relative:hover_&]:opacity-100">
@@ -428,8 +420,8 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">Total</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalAlumni) }}</p>
-                <p class="text-sm text-[#666666] mt-1 font-normal">Alumni Records</p>
+                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalAlumni) }}</p>
+                <p class="text-sm text-[#333333] mt-1 font-normal">Alumni Records</p>
                 @if($this->newThisMonth > 0)
                     <p class="text-xs text-emerald-600 font-semibold mt-2 flex items-center gap-1">
                         <i class="fas fa-arrow-trend-up text-sm"></i> +{{ $this->newThisMonth }} this month
@@ -456,13 +448,13 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase">Complete</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->profileComplete) }}</p>
-                <p class="text-sm text-[#666666] mt-1 font-normal">Profiles Filled</p>
+                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileComplete) }}</p>
+                <p class="text-sm text-[#333333] mt-1 font-normal">Profiles Filled</p>
                 <div class="mt-2 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
                     <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
                          style="width:{{ $this->completionRate }}%;"></div>
                 </div>
-                <p class="text-xs text-[#999999] mt-1 font-normal">{{ $this->completionRate }}% completion rate</p>
+                <p class="text-xs text-[#333333] mt-1 font-normal">{{ $this->completionRate }}% completion rate</p>
             </div>
 
             {{-- Profile Pending --}}
@@ -484,8 +476,8 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Pending</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->profileIncomplete) }}</p>
-                <p class="text-sm text-[#666666] mt-1 font-normal">Pending Profiles</p>
+                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileIncomplete) }}</p>
+                <p class="text-sm text-[#333333] mt-1 font-normal">Pending Profiles</p>
                 @if($this->totalAlumni > 0)
                     <p class="text-xs text-amber-600 font-semibold mt-2">
                         {{ round(($this->profileIncomplete / $this->totalAlumni) * 100) }}% still need info
@@ -512,8 +504,8 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">Courses</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalCourses) }}</p>
-                <p class="text-sm text-[#666666] mt-1 font-normal">Active Courses</p>
+                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
+                <p class="text-sm text-[#333333] mt-1 font-normal">Active Courses</p>
                 @if($this->latestBatch)
                     <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
                         <i class="fas fa-calendar-check text-sm"></i> Latest batch: {{ $this->latestBatch }}
@@ -536,7 +528,7 @@ new class extends Component {
                     ['label'=>'Employed',      'count'=>$ec['employed'],   'icon'=>'fa-user-tie',        'color'=>'#7A3F91','light'=>'#F9F7FC','border'=>'#E8E0F0','filter'=>'employed',      'tip'=>'View Employed Alumni'],
                     ['label'=>'Self-Employed', 'count'=>$ec['self'],       'icon'=>'fa-store',           'color'=>'#2563eb','light'=>'#EFF6FF','border'=>'#BFDBFE','filter'=>'self_employed', 'tip'=>'View Self-Employed Alumni'],
                     ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'icon'=>'fa-magnifying-glass','color'=>'#d97706','light'=>'#FFFBEB','border'=>'#FCD34D','filter'=>'unemployed',    'tip'=>'View Unemployed Alumni'],
-                    ['label'=>'No Record',     'count'=>$ec['noRecord'],   'icon'=>'fa-circle-minus',    'color'=>'#6B7280','light'=>'#F9FAFB','border'=>'#E5E7EB','filter'=>'no_record',     'tip'=>'View No Employment Record'],
+                    ['label'=>'No Record',     'count'=>$ec['noRecord'],   'icon'=>'fa-circle-minus',    'color'=>'#374151','light'=>'#F9FAFB','border'=>'#E5E7EB','filter'=>'no_record',     'tip'=>'View No Employment Record'],
                 ];
             @endphp
 
@@ -546,22 +538,22 @@ new class extends Component {
                         <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                             <i class="fas fa-briefcase text-white" style="font-size:11px;"></i>
                         </div>
-                        <p class="text-sm font-semibold text-[#333333] uppercase tracking-wide">Employment Overview</p>
+                        <p class="text-sm font-semibold text-[#111111] uppercase tracking-wide">Employment Overview</p>
                     </div>
                 </div>
                 <div class="p-4 flex flex-col gap-3 flex-1">
                     <div class="bg-[#F9F7FC] border border-[#E8E0F0] rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
-                            <p class="text-xs font-semibold text-[#666666] uppercase tracking-wide">Submitted Employment Info</p>
+                            <p class="text-xs font-semibold text-[#111111] uppercase tracking-wide">Submitted Employment Info</p>
                             <span class="text-xs font-semibold text-[#7A3F91]">{{ $submittedPct }}%</span>
                         </div>
                         <div class="h-2 rounded-full overflow-hidden bg-white border border-[#E8E0F0]">
                             <div class="h-full rounded-full transition-all duration-500"
                                  style="width:{{ $submittedPct }}%; background:linear-gradient(90deg,#7A3F91,#9b59b6);"></div>
                         </div>
-                        <p class="text-xs text-[#999999] mt-1.5 font-normal">
-                            <strong class="text-[#333333] font-semibold">{{ number_format($submitted) }}</strong> of
-                            <strong class="text-[#333333] font-semibold">{{ number_format($total) }}</strong> alumni submitted
+                        <p class="text-xs text-[#333333] mt-1.5 font-normal">
+                            <strong class="text-[#111111] font-semibold">{{ number_format($submitted) }}</strong> of
+                            <strong class="text-[#111111] font-semibold">{{ number_format($total) }}</strong> alumni submitted
                         </p>
                     </div>
                     <div class="space-y-2">
@@ -585,11 +577,11 @@ new class extends Component {
                                          style="background:{{ $row['color'] }}20; color:{{ $row['color'] }};">
                                         <i class="fas {{ $row['icon'] }} text-xs"></i>
                                     </div>
-                                    <span class="text-sm font-semibold text-[#333333]">{{ $row['label'] }}</span>
+                                    <span class="text-sm font-semibold text-[#111111]">{{ $row['label'] }}</span>
                                 </div>
                                 <div class="flex items-center gap-1.5">
                                     <span class="text-2xl font-semibold" style="color:{{ $row['color'] }};">{{ number_format($row['count']) }}</span>
-                                    <i class="fas fa-chevron-right text-xs text-[#CCCCCC]"></i>
+                                    <i class="fas fa-chevron-right text-xs text-[#AAAAAA]"></i>
                                 </div>
                             </div>
                         </div>
@@ -598,15 +590,15 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── Alumni by Batch Year — Chart.js ── --}}
+            {{-- ── Alumni by Batch Year — Chart.js with multicolor bars ── --}}
             @if($this->allBatches->count() > 0)
             <div class="lg:col-span-2 bg-white border border-[#E8E0F0] rounded-[14px] shadow-sm overflow-hidden flex flex-col
                         cursor-pointer transition-all duration-200 hover:shadow-[0_5px_16px_rgba(122,63,145,.11)] hover:border-[rgba(122,63,145,.28)]">
                 <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
                     <div class="flex items-center gap-[7px]">
                         <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
-                        <span class="text-[.78rem] font-bold text-[#333333] uppercase tracking-[.06em]">Alumni by Batch Year</span>
-                        <span class="text-[.68rem] text-[#bbbbbb] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
+                        <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Alumni by Batch Year</span>
+                        <span class="text-[.68rem] text-[#555555] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
                             <i class="fas fa-hand-pointer"></i> Click bar
                         </span>
                     </div>
@@ -618,7 +610,7 @@ new class extends Component {
                                        disabled:opacity-35 disabled:cursor-not-allowed">
                             <i class="fa-solid fa-chevron-left" style="font-size:.60rem;"></i>
                         </button>
-                        <span id="dashBatchPageInfo" class="text-[.74rem] font-semibold text-[#666666] whitespace-nowrap"></span>
+                        <span id="dashBatchPageInfo" class="text-[.74rem] font-semibold text-[#333333] whitespace-nowrap"></span>
                         <button id="dashBatchNext"
                                 class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91] text-[.75rem]
                                        cursor-pointer flex items-center justify-center
@@ -676,7 +668,7 @@ new class extends Component {
     <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 animate-[dashPageIn_.22s_cubic-bezier(.4,0,.2,1)_both]"
          @keydown.escape.window="$wire.closeModal()">
 
-        {{-- ─── Header ──────────────────────────────────────────── --}}
+        {{-- Header --}}
         <div class="flex items-center justify-between px-6 lg:px-10 py-3.5 shrink-0 shadow"
              style="background:#7A3F91;">
             <div class="flex items-center gap-3">
@@ -690,7 +682,6 @@ new class extends Component {
                     </p>
                 </div>
             </div>
-            {{-- Close button --}}
             <div class="relative">
                 <button wire:click="closeModal"
                         class="relative flex items-center justify-center w-9 h-9 rounded-[10px]
@@ -709,7 +700,7 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ─── Toolbar ─────────────────────────────────────────── --}}
+        {{-- Toolbar --}}
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
 
             <div class="flex flex-wrap gap-3 items-center mb-3">
@@ -719,7 +710,6 @@ new class extends Component {
                     <i class="fas fa-filter text-[10px] mr-1"></i>Filters
                 </span>
 
-                {{-- Search --}}
                 <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.alumniModalSearch ?? ''; $wire.$watch('alumniModalSearch', v => { if(v!==this.q) this.q=v; }); } }">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
@@ -731,7 +721,6 @@ new class extends Component {
                            autocomplete="off">
                 </div>
 
-                {{-- Profile filter tabs --}}
                 @if($alumniModalFilter !== 'courses')
                 <div class="flex flex-wrap gap-1.5 items-center">
                     @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
@@ -740,13 +729,13 @@ new class extends Component {
                         class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5
                                {{ $alumniModalFilter === $val
                                     ? 'text-white border-transparent bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
+                                    : 'bg-white text-[#111111] border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
                                {{ !$alumniTabsClickable ? 'cursor-default' : 'active:scale-95' }}">
                         <i class="fas {{ $icon }} text-[10px]"></i>{{ $lbl }}
                     </button>
                     @endforeach
                     @if(!$alumniTabsClickable && !$isAllNoFilter)
-                    <span class="flex items-center gap-1 text-xs text-gray-400 font-normal ml-1">
+                    <span class="flex items-center gap-1 text-xs text-[#333333] font-normal ml-1">
                         <i class="fas fa-lock text-gray-300 text-xs"></i> Filtered view
                     </span>
                     @endif
@@ -765,7 +754,7 @@ new class extends Component {
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.alumniModalBatch !== null }"
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#555555] cursor-pointer whitespace-nowrap select-none
+                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
                         <i class="fas fa-calendar-alt opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($alumniModalBatch) Batch {{ $alumniModalBatch }} @else All Batch Years @endif</span>
@@ -778,14 +767,14 @@ new class extends Component {
                                     [scrollbar-width:thin] [scrollbar-color:#d4b8e8_transparent]" style="display:none;">
                         <button type="button" @click="select('')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.alumniModalBatch === null}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             All Batch Years
                         </button>
                         @foreach($this->availableModalBatches as $bYear)
                         <button type="button" @click="select('{{ $bYear }}')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.alumniModalBatch === {{ $bYear }}}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             Batch {{ $bYear }}
                         </button>
@@ -806,7 +795,7 @@ new class extends Component {
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.alumniModalCourseFilter !== '' }"
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#555555] cursor-pointer whitespace-nowrap select-none
+                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
                         <i class="fas fa-book-open opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($alumniModalCourseFilter) {{ $alumniModalCourseFilter }} @else All Courses @endif</span>
@@ -819,14 +808,14 @@ new class extends Component {
                                     [scrollbar-width:thin] [scrollbar-color:#d4b8e8_transparent]" style="display:none;">
                         <button type="button" @click="select('')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.alumniModalCourseFilter === ''}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             All Courses
                         </button>
                         @foreach($this->availableModalCourses as $code)
                         <button type="button" @click="select('{{ $code }}')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.alumniModalCourseFilter === '{{ $code }}'}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             {{ $code }}
                         </button>
@@ -836,7 +825,7 @@ new class extends Component {
 
                 @if($alumniModalBatch || $alumniModalCourseFilter)
                 <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-xs text-gray-400 font-normal">Filtering by:</span>
+                    <span class="text-xs text-[#333333] font-normal">Filtering by:</span>
                     @if($alumniModalBatch && !$alumniModalBatchLocked)
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
                             <i class="fas fa-calendar text-[10px]"></i> Batch {{ $alumniModalBatch }}
@@ -861,17 +850,17 @@ new class extends Component {
 
         </div>
 
-        {{-- ─── Table ── --}}
+        {{-- Table --}}
         <div class="flex-1 overflow-y-auto min-h-0" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
 
             @if($alumniModalFilter === 'courses')
             <table class="w-full border-collapse" style="min-width:500px;">
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
-                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-14">#</th>
-                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Course</th>
-                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Course Name</th>
-                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">College</th>
+                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
+                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
+                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course Name</th>
+                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">College</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
@@ -879,17 +868,16 @@ new class extends Component {
                     @php $rowNum = ($this->alumniModalRecords->currentPage() - 1) * $this->alumniModalRecords->perPage() + $idx + 1; @endphp
                     <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
                         <td class="pl-6 lg:pl-10 pr-3 py-3">
-                            <span class="text-xs font-semibold text-gray-400">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
+                            <span class="text-xs font-semibold text-[#333333]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
                         <td class="px-5 py-3">
-                            <span class="inline-block px-2.5 py-1 rounded-lg text-xs font-mono font-bold border
-                                         bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">{{ $course->code }}</span>
+                            <span class="text-sm font-mono font-bold text-[#111111]">{{ $course->code }}</span>
                         </td>
                         <td class="px-5 py-3">
-                            <p class="text-sm font-semibold text-gray-800">{{ $course->name }}</p>
+                            <p class="text-sm font-semibold text-[#111111]">{{ $course->name }}</p>
                         </td>
                         <td class="px-5 py-3">
-                            <span class="text-sm text-gray-500">{{ $course->college ?? '—' }}</span>
+                            <span class="text-sm text-[#333333]">{{ $course->college ?? '—' }}</span>
                         </td>
                     </tr>
                     @empty
@@ -898,7 +886,7 @@ new class extends Component {
                             <div class="w-12 h-12 bg-[#f0e6f8] rounded-2xl flex items-center justify-center">
                                 <i class="fas fa-book text-xl" style="color:#c89de0;"></i>
                             </div>
-                            <p class="text-sm font-semibold text-gray-400">No courses found</p>
+                            <p class="text-sm font-semibold text-[#333333]">No courses found</p>
                         </div>
                     </td></tr>
                     @endforelse
@@ -910,12 +898,12 @@ new class extends Component {
             <table class="w-full border-collapse" style="min-width:760px;">
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
-                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-14">#</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Student ID</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Course</th>
-                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Batch</th>
-                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
+                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
+                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Status</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
@@ -923,38 +911,37 @@ new class extends Component {
                     @php $rowNum = ($this->alumniModalRecords->currentPage() - 1) * $this->alumniModalRecords->perPage() + $idx + 1; @endphp
                     <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
                         <td class="pl-6 lg:pl-10 pr-3 py-3">
-                            <span class="text-xs font-semibold" style="color:#c0a0d8;">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
+                            <span class="text-xs font-semibold text-[#333333]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-3">
                                 <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
                                      alt="{{ $alumni->first_name }}"
                                      class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                                <p class="text-sm font-semibold text-gray-900 truncate uppercase">
+                                <p class="text-sm font-semibold text-[#111111] truncate uppercase">
                                     {{ $this->formatDisplayName($alumni->first_name??'',$alumni->middle_initial??'',$alumni->last_name??'',$alumni->suffix??'') }}
                                 </p>
                             </div>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="inline-block px-2.5 py-1 rounded-lg text-xs font-mono font-bold border
-                                         bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
+                            <span class="text-sm font-mono font-semibold text-[#111111]">
                                 {{ $alumni->student_id }}
                             </span>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="font-mono text-sm text-gray-700">{{ $alumni->course_code }}</span>
+                            <span class="font-mono text-sm font-semibold text-[#111111]">{{ $alumni->course_code }}</span>
                         </td>
                         <td class="px-4 py-3 text-center">
-                            <span class="text-sm font-semibold text-gray-800">{{ $alumni->batch }}</span>
+                            <span class="text-sm font-semibold text-[#111111]">{{ $alumni->batch }}</span>
                         </td>
                         <td class="px-4 py-3 text-center">
                             @if($alumni->profile_completed)
-                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
-                                    <i class="fas fa-circle-check text-[10px]"></i> Complete
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                                    Complete
                                 </span>
                             @else
-                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border bg-amber-50 text-amber-700 border-amber-200">
-                                    <i class="fas fa-clock text-[10px]"></i> Pending
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-amber-50 text-amber-700 border-amber-200">
+                                    Pending
                                 </span>
                             @endif
                         </td>
@@ -965,8 +952,8 @@ new class extends Component {
                             <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
                                 <i class="fas fa-users text-xl" style="color:#c89de0;"></i>
                             </div>
-                            <p class="text-sm font-semibold text-gray-400">No alumni records found</p>
-                            <p class="text-xs text-gray-300 font-normal">Try adjusting your search or filters</p>
+                            <p class="text-sm font-semibold text-[#333333]">No alumni records found</p>
+                            <p class="text-xs text-[#555555] font-normal">Try adjusting your search or filters</p>
                         </div>
                     </td></tr>
                     @endforelse
@@ -976,7 +963,7 @@ new class extends Component {
 
         </div>
 
-        {{-- ─── Footer Pagination (always visible) ── --}}
+        {{-- Footer Pagination --}}
         <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
              style="background:#7A3F91;">
             <p class="text-white/70 text-sm">
@@ -992,7 +979,6 @@ new class extends Component {
                                disabled:opacity-35 disabled:cursor-not-allowed transition-all duration-150">
                     <i class="fas fa-chevron-left text-xs"></i>
                 </button>
-
                 @if($aPgStart > 1)
                     <button wire:click="$set('alumniModalPage', 1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-[10px] rounded-lg text-xs font-bold
@@ -1000,7 +986,6 @@ new class extends Component {
                                    hover:bg-white/[.28] hover:border-white/50 transition-all duration-150">1</button>
                     @if($aPgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                 @endif
-
                 @for($p = $aPgStart; $p <= $aPgEnd; $p++)
                     @if($p === $aCp)
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-[10px] rounded-lg text-xs font-bold
@@ -1012,7 +997,6 @@ new class extends Component {
                                        hover:bg-white/[.28] hover:border-white/50 transition-all duration-150">{{ $p }}</button>
                     @endif
                 @endfor
-
                 @if($aPgEnd < $aLastPage)
                     @if($aPgEnd < $aLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                     <button wire:click="$set('alumniModalPage', {{ $aLastPage }})"
@@ -1020,7 +1004,6 @@ new class extends Component {
                                    bg-white/[.15] text-white border-[1.5px] border-white/25
                                    hover:bg-white/[.28] hover:border-white/50 transition-all duration-150">{{ $aLastPage }}</button>
                 @endif
-
                 <button @if($aCp >= $aLastPage) disabled @endif
                         wire:click="$set('alumniModalPage', {{ min($aLastPage,$aCp+1) }})"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-[10px] rounded-lg text-xs font-bold
@@ -1029,7 +1012,6 @@ new class extends Component {
                                disabled:opacity-35 disabled:cursor-not-allowed transition-all duration-150">
                     <i class="fas fa-chevron-right text-xs"></i>
                 </button>
-
                 <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $aCp }}/{{ $aLastPage }}</span>
             </div>
         </div>
@@ -1091,7 +1073,7 @@ new class extends Component {
     <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 animate-[dashPageIn_.22s_cubic-bezier(.4,0,.2,1)_both]"
          @keydown.escape.window="$wire.closeModal()">
 
-        {{-- ─── Header ──────────────────────────────────────────── --}}
+        {{-- Header --}}
         <div class="flex items-center justify-between px-6 lg:px-10 py-3.5 shrink-0 shadow"
              style="background:#7A3F91;">
             <div class="flex items-center gap-3">
@@ -1123,7 +1105,7 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ─── Toolbar ─────────────────────────────────────────── --}}
+        {{-- Toolbar --}}
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
 
             <div class="flex flex-wrap gap-3 items-center mb-3">
@@ -1133,7 +1115,6 @@ new class extends Component {
                     <i class="fas fa-filter text-[10px] mr-1"></i>Filters
                 </span>
 
-                {{-- Search --}}
                 <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.empSearch ?? ''; $wire.$watch('empSearch', v => { if(v!==this.q) this.q=v; }); } }">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
@@ -1152,13 +1133,13 @@ new class extends Component {
                         class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5
                                {{ $this->empFilter === $val
                                     ? 'text-white border-transparent bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
+                                    : 'bg-white text-[#111111] border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
                                {{ $empTabsLocked ? 'cursor-default' : 'active:scale-95' }}">
                         <i class="fas {{ $icon }} text-[10px]"></i>{{ $lbl }}
                     </button>
                     @endforeach
                     @if($empTabsLocked)
-                    <span class="flex items-center gap-1 text-xs text-gray-400 font-normal ml-1">
+                    <span class="flex items-center gap-1 text-xs text-[#333333] font-normal ml-1">
                         <i class="fas fa-lock text-gray-300 text-[10px]"></i> Filtered view
                     </span>
                     @endif
@@ -1174,7 +1155,7 @@ new class extends Component {
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.empBatchFilter !== '' }"
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#555555] cursor-pointer whitespace-nowrap select-none
+                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
                         <i class="fas fa-calendar-alt opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($empBatchFilter) Batch {{ $empBatchFilter }} @else All Batch Years @endif</span>
@@ -1186,14 +1167,14 @@ new class extends Component {
                                     shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1" style="display:none;">
                         <button type="button" @click="select('')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.empBatchFilter === ''}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             All Batch Years
                         </button>
                         @foreach($this->availableModalBatches as $bYear)
                         <button type="button" @click="select('{{ $bYear }}')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.empBatchFilter === '{{ $bYear }}'}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             Batch {{ $bYear }}
                         </button>
@@ -1207,7 +1188,7 @@ new class extends Component {
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.empCourseFilter !== '' }"
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#555555] cursor-pointer whitespace-nowrap select-none
+                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
                         <i class="fas fa-book-open opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($empCourseFilter) {{ $empCourseFilter }} @else All Courses @endif</span>
@@ -1219,14 +1200,14 @@ new class extends Component {
                                     shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1" style="display:none;">
                         <button type="button" @click="select('')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.empCourseFilter === ''}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             All Courses
                         </button>
                         @foreach($this->availableModalCourses as $code)
                         <button type="button" @click="select('{{ $code }}')"
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.empCourseFilter === '{{ $code }}'}"
-                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#333333]
+                                class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
                             {{ $code }}
                         </button>
@@ -1236,7 +1217,7 @@ new class extends Component {
 
                 @if($empHasSecondaryFilter)
                 <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-xs text-gray-400 font-normal">Filtering by:</span>
+                    <span class="text-xs text-[#333333] font-normal">Filtering by:</span>
                     @if($empBatchFilter)
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
                             <i class="fas fa-calendar text-[10px]"></i> Batch {{ $empBatchFilter }}
@@ -1263,25 +1244,25 @@ new class extends Component {
 
         </div>
 
-        {{-- ─── Table ── --}}
+        {{-- Table --}}
         <div class="flex-1 overflow-y-auto min-h-0" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
             <table class="w-full border-collapse" style="min-width:900px;">
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
-                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-14">#</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Alumni</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Student ID</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Course</th>
-                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">{{ $dynColLabel }}</th>
-                        <th class="pl-4 pr-6 lg:pr-10 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Email</th>
+                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Alumni</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
+                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Status</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider hidden md:table-cell">{{ $dynColLabel }}</th>
+                        <th class="pl-4 pr-6 lg:pr-10 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider hidden sm:table-cell">Email</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     @forelse($records as $idx => $row)
                     @php
                         $rowNum  = ($records->currentPage() - 1) * $records->perPage() + $idx + 1;
-                        $badge   = $isNoRecord ? null : ($statusBadge[$row->employment_status] ?? ['Unknown','text-gray-600 bg-gray-50 border-gray-200','fa-circle']);
+                        $badge   = $isNoRecord ? null : ($statusBadge[$row->employment_status] ?? ['Unknown','text-[#333333] bg-gray-50 border-gray-200','fa-circle']);
                         $photo   = $this->getPhotoUrl($row->profile_photo ?? null);
                         $dName   = $this->formatDisplayName(
                             $row->first_name ?? '', $row->middle_initial ?? '',
@@ -1291,46 +1272,45 @@ new class extends Component {
                         $rowStatus = $isNoRecord ? 'no_record' : ($row->employment_status ?? '');
                         if ($rowStatus === 'employed') {
                             $dynCellValue = $row->job_title ?? null;
-                            $dynCellClass = 'text-sm font-semibold text-[#333333] truncate uppercase';
+                            $dynCellClass = 'text-sm font-semibold text-[#111111] truncate uppercase';
                         } elseif ($rowStatus === 'self_employed') {
                             $dynCellValue = $row->company_name ?? null;
-                            $dynCellClass = 'text-sm font-semibold text-[#333333] truncate uppercase';
+                            $dynCellClass = 'text-sm font-semibold text-[#111111] truncate uppercase';
                         } elseif ($rowStatus === 'unemployed' || $rowStatus === 'no_record') {
                             $dynCellValue = $row->contact_number ?? null;
-                            $dynCellClass = 'text-sm text-[#555555] font-medium';
+                            $dynCellClass = 'text-sm text-[#333333] font-medium';
                         } else {
                             $dynCellValue = $row->company_name ?? null;
-                            $dynCellClass = 'text-sm font-semibold text-[#333333] truncate uppercase';
+                            $dynCellClass = 'text-sm font-semibold text-[#111111] truncate uppercase';
                         }
                     @endphp
                     <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
                         <td class="pl-6 lg:pl-10 pr-3 py-3">
-                            <span class="text-xs font-semibold" style="color:#c0a0d8;">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
+                            <span class="text-xs font-semibold text-[#333333]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-2.5">
                                 <img src="{{ $photo }}" alt="{{ $row->first_name ?? '' }}"
                                      class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                                <p class="text-sm font-semibold text-[#333333] truncate uppercase">{{ $dName }}</p>
+                                <p class="text-sm font-semibold text-[#111111] truncate uppercase">{{ $dName }}</p>
                             </div>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="inline-block px-2.5 py-1 rounded-lg text-xs font-mono font-bold border
-                                         bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
+                            <span class="text-sm font-mono font-semibold text-[#111111]">
                                 {{ $row->student_id ?? '—' }}
                             </span>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="text-sm font-semibold text-[#333333]">{{ $row->course_code ?? '—' }}</span>
+                            <span class="text-sm font-semibold text-[#111111]">{{ $row->course_code ?? '—' }}</span>
                         </td>
                         <td class="px-4 py-3 text-center">
                             @if($isNoRecord)
-                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-gray-500 bg-gray-50 border-gray-200">
-                                    <i class="fas fa-circle-minus text-[10px]"></i> No Record
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border text-[#333333] bg-gray-50 border-gray-200">
+                                    No Record
                                 </span>
                             @else
-                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $badge[1] }}">
-                                    <i class="fas {{ $badge[2] }} text-[10px]"></i> {{ $badge[0] }}
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {{ $badge[1] }}">
+                                    {{ $badge[0] }}
                                 </span>
                             @endif
                         </td>
@@ -1338,11 +1318,11 @@ new class extends Component {
                             @if($dynCellValue)
                                 <p class="{{ $dynCellClass }}">{{ $dynCellValue }}</p>
                             @else
-                                <span class="text-xs text-[#CCCCCC]">—</span>
+                                <span class="text-xs text-[#AAAAAA]">—</span>
                             @endif
                         </td>
                         <td class="pl-4 pr-6 lg:pr-10 py-3 hidden sm:table-cell">
-                            <span class="text-sm text-[#555555] truncate block max-w-[200px]">
+                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">
                                 {{ strtolower($row->email ?? '—') }}
                             </span>
                         </td>
@@ -1353,8 +1333,8 @@ new class extends Component {
                             <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
                                 <i class="fas fa-briefcase text-xl" style="color:#c89de0;"></i>
                             </div>
-                            <p class="text-sm font-semibold text-gray-400">No records found</p>
-                            <p class="text-xs text-gray-300 font-normal">Try adjusting your search or filters</p>
+                            <p class="text-sm font-semibold text-[#333333]">No records found</p>
+                            <p class="text-xs text-[#555555] font-normal">Try adjusting your search or filters</p>
                         </div>
                     </td></tr>
                     @endforelse
@@ -1362,7 +1342,7 @@ new class extends Component {
             </table>
         </div>
 
-        {{-- ─── Footer Pagination (always visible) ── --}}
+        {{-- Footer Pagination --}}
         <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
              style="background:#7A3F91;">
             <p class="text-white/70 text-sm">
@@ -1378,7 +1358,6 @@ new class extends Component {
                                disabled:opacity-35 disabled:cursor-not-allowed transition-all duration-150">
                     <i class="fas fa-chevron-left text-xs"></i>
                 </button>
-
                 @if($ePgStart > 1)
                     <button wire:click="$set('empModalPage', 1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-[10px] rounded-lg text-xs font-bold
@@ -1386,7 +1365,6 @@ new class extends Component {
                                    hover:bg-white/[.28] hover:border-white/50 transition-all duration-150">1</button>
                     @if($ePgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                 @endif
-
                 @for($p = $ePgStart; $p <= $ePgEnd; $p++)
                     @if($p === $eCp)
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-[10px] rounded-lg text-xs font-bold
@@ -1398,7 +1376,6 @@ new class extends Component {
                                        hover:bg-white/[.28] hover:border-white/50 transition-all duration-150">{{ $p }}</button>
                     @endif
                 @endfor
-
                 @if($ePgEnd < $eLastPage)
                     @if($ePgEnd < $eLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                     <button wire:click="$set('empModalPage', {{ $eLastPage }})"
@@ -1406,7 +1383,6 @@ new class extends Component {
                                    bg-white/[.15] text-white border-[1.5px] border-white/25
                                    hover:bg-white/[.28] hover:border-white/50 transition-all duration-150">{{ $eLastPage }}</button>
                 @endif
-
                 <button @if($eCp >= $eLastPage) disabled @endif
                         wire:click="$set('empModalPage', {{ min($eLastPage,$eCp+1) }})"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-[10px] rounded-lg text-xs font-bold
@@ -1415,7 +1391,6 @@ new class extends Component {
                                disabled:opacity-35 disabled:cursor-not-allowed transition-all duration-150">
                     <i class="fas fa-chevron-right text-xs"></i>
                 </button>
-
                 <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $eCp }}/{{ $eLastPage }}</span>
             </div>
         </div>
@@ -1423,7 +1398,6 @@ new class extends Component {
     </div>
     @endif
 
-{{-- ══ BATCH CHART SCRIPT + ANIMATION KEYFRAME ══ --}}
 <style>
 @keyframes dashPageIn {
     from { opacity: 0; transform: translateY(10px); }
@@ -1434,6 +1408,18 @@ new class extends Component {
 <script>
 (function () {
     'use strict';
+
+    // ── Multi-color palette for batch bars ──────────────────────────
+    var BAR_COLORS = [
+        { bg: 'rgba(122,63,145,0.82)',  border: '#7A3F91' },
+        { bg: 'rgba(37,99,235,0.80)',   border: '#2563eb' },
+        { bg: 'rgba(16,185,129,0.80)',  border: '#10b981' },
+        { bg: 'rgba(245,158,11,0.82)',  border: '#f59e0b' },
+        { bg: 'rgba(239,68,68,0.80)',   border: '#ef4444' },
+        { bg: 'rgba(59,130,246,0.80)',  border: '#3b82f6' },
+        { bg: 'rgba(168,85,247,0.80)',  border: '#a855f7' },
+        { bg: 'rgba(20,184,166,0.80)',  border: '#14b8a6' },
+    ];
 
     var BATCH_PAGE_SIZE = 8;
     var dashBatchIndex  = 0;
@@ -1465,6 +1451,10 @@ new class extends Component {
             if (existing) existing.destroy();
         }
 
+        // Assign colors cycling through the palette per bar
+        var bgColors     = slice.labels.map(function(_, i){ return BAR_COLORS[i % BAR_COLORS.length].bg; });
+        var borderColors = slice.labels.map(function(_, i){ return BAR_COLORS[i % BAR_COLORS.length].border; });
+
         new Chart(canvas, {
             type: 'bar',
             data: {
@@ -1472,10 +1462,10 @@ new class extends Component {
                 datasets: [{
                     label: 'Total Alumni',
                     data:  slice.totals,
-                    backgroundColor: '#9b59b6cc',
-                    borderColor:     '#7A3F91',
-                    borderWidth: 1,
-                    borderRadius: 4,
+                    backgroundColor: bgColors,
+                    borderColor:     borderColors,
+                    borderWidth: 1.5,
+                    borderRadius: 5,
                 }],
             },
             options: {
@@ -1494,11 +1484,11 @@ new class extends Component {
                 scales: {
                     x: {
                         grid: { display: false },
-                        ticks: { font: { size: 11, weight: '600' }, color: '#666666' },
+                        ticks: { font: { size: 11, weight: '600' }, color: '#111111' },
                     },
                     y: {
                         grid: { color: '#f3f4f6' },
-                        ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 },
+                        ticks: { font: { size: 10, weight: '500' }, color: '#333333', precision: 0 },
                         beginAtZero: true,
                     },
                 },
@@ -1619,4 +1609,4 @@ new class extends Component {
 })();
 </script>
 
-</div>{{-- END single root element --}}
+</div>

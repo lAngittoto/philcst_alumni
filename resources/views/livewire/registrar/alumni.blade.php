@@ -16,25 +16,20 @@ new class extends Component {
 
     protected function queryString(): array { return []; }
 
-    // ── Filters ───────────────────────────────────────────────────
     public string $alumniSearch = '';
     public string $alumniBatch  = '';
     public string $alumniCourse = '';
 
-    // ── View profile ──────────────────────────────────────────────
     public ?int   $viewingProfileId  = null;
     public        $viewingProfile    = null;
     public        $viewingEmployment = null;
 
-    // ── Photo upload ──────────────────────────────────────────────
     public $newAlumniPhoto = null;
 
-    // ── Modal ─────────────────────────────────────────────────────
     public string $activeModal = '';
 
     protected string $paginationTheme = 'tailwind';
 
-    // ─────────────────────────────────────────────────────────────
     public function mount(): void
     {
         if (session()->has('success'))
@@ -43,12 +38,10 @@ new class extends Component {
             $this->dispatch('flash-message', type: 'error', message: session()->pull('error'));
     }
 
-    // ─────────────────────────────────────────────────────────────
     public function updatingAlumniSearch() { $this->resetPage('alumniPage'); }
     public function updatingAlumniBatch()  { $this->resetPage('alumniPage'); }
     public function updatingAlumniCourse() { $this->resetPage('alumniPage'); }
 
-    // ─────────────────────────────────────────────────────────────
     #[Computed]
     public function alumniRecords()
     {
@@ -82,7 +75,6 @@ new class extends Component {
     #[Computed] public function courses() { return Course::orderBy('code')->get(); }
     #[Computed] public function batches() { return Alumni::distinct()->orderByDesc('batch')->pluck('batch'); }
 
-    // ─────────────────────────────────────────────────────────────
     public function getPhotoUrl(?string $path): string
     {
         if (!$path || str_contains($path, 'default.png'))
@@ -191,13 +183,13 @@ new class extends Component {
 <div>
 
 <style>
-    /* ── Dashboard-style hover tooltip (follows cursor) ─────────── */
+    /* ── Hover tooltip ───────────────────────────────────────────── */
     .ar-hover-tip {
         position: fixed;
         background: #1a1a1a;
         color: #fff;
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 600;
         letter-spacing: .05em;
         padding: 5px 11px;
         border-radius: 7px;
@@ -207,7 +199,7 @@ new class extends Component {
         transition: opacity .15s ease;
         z-index: 99999;
         box-shadow: 0 4px 14px rgba(0,0,0,.30);
-        transform: translate(14px, 14px);
+        transform: translate(12px, -110%);
     }
     .ar-hover-tip.visible { opacity: 1; }
     .ar-hover-tip::after {
@@ -219,7 +211,7 @@ new class extends Component {
         border-top-color: #1a1a1a;
     }
 
-    /* ── Row: pointer + NO text selection + gray hover ────────── */
+    /* ── Table rows ──────────────────────────────────────────────── */
     .ar-row {
         cursor: pointer;
         user-select: none;
@@ -228,7 +220,7 @@ new class extends Component {
     }
     .ar-row:hover { background: #F0ECF5 !important; }
 
-    /* ── Numbered pagination buttons ── */
+    /* ── Pagination ──────────────────────────────────────────────── */
     .ar-pg-btn {
         display: inline-flex;
         align-items: center;
@@ -238,146 +230,149 @@ new class extends Component {
         padding: 0 10px;
         border-radius: 8px;
         font-size: .75rem;
-        font-weight: 700;
+        font-weight: 600;
         transition: all .15s;
         border: 1.5px solid transparent;
     }
-    .ar-pg-active {
-        background: rgba(255, 255, 255, 1);
-        color: #7A3F91;
-        border-color: rgba(255, 255, 255, 1);
-    }
-    .ar-pg-nav {
-        background: rgba(255, 255, 255, .15);
-        color: #fff;
-        border-color: rgba(255, 255, 255, .25);
-    }
-    .ar-pg-nav:hover:not(:disabled) {
-        background: rgba(255, 255, 255, .28);
-        border-color: rgba(255, 255, 255, .5);
-    }
+    .ar-pg-active { background: #fff; color: #7A3F91; border-color: #fff; }
+    .ar-pg-nav { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.25); }
+    .ar-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
     .ar-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-    /* ── Close button — matches dashboard style ──────────────────── */
+    /* ── Close button ────────────────────────────────────────────── */
     .ar-close-btn {
         position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 36px;
-        height: 36px;
+        display: flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px;
         border-radius: 10px;
         background: rgba(255,255,255,.12);
         border: 1px solid rgba(255,255,255,.2);
-        color: #fff;
-        cursor: pointer;
+        color: #fff; cursor: pointer;
         transition: background .15s;
         overflow: visible;
     }
     .ar-close-btn:hover { background: rgba(255,255,255,.22); }
     .ar-close-tip {
         position: absolute;
-        top: calc(100% + 8px);
-        right: 0;
-        background: rgba(27, 6, 46, 0.88);
-        color: #fff;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: .08em;
-        text-transform: uppercase;
-        padding: 4px 10px;
-        border-radius: 7px;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 200;
-        box-shadow: 0 4px 12px rgba(0,0,0,.28);
+        top: calc(100% + 8px); right: 0;
+        background: rgba(27,6,46,.88);
+        color: #fff; font-size: 10px; font-weight: 600;
+        letter-spacing: .08em; text-transform: uppercase;
+        padding: 4px 10px; border-radius: 7px;
+        white-space: nowrap; pointer-events: none;
+        opacity: 0; transition: opacity .15s ease;
+        z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,.28);
     }
     .ar-close-tip::before {
         content: '';
-        position: absolute;
-        bottom: 100%;
-        right: 10px;
+        position: absolute; bottom: 100%; right: 10px;
         border: 5px solid transparent;
-        border-bottom-color: rgba(27, 6, 46, 0.88);
+        border-bottom-color: rgba(27,6,46,.88);
     }
     .ar-close-btn:hover .ar-close-tip { opacity: 1; }
 
-    /* ── Filters label ─────────────────────────────────────────── */
+    /* ── Filter bar ──────────────────────────────────────────────── */
     .ar-filter-label { pointer-events: none; }
-
-    /* ── Custom dropdown ───────────────────────────────────────── */
     .ar-dropdown { position: relative; }
     .ar-dropdown-menu {
-        position: absolute;
-        top: calc(100% + 4px);
-        left: 0;
-        min-width: 100%;
-        max-height: 220px;
-        overflow-y: auto;
-        background: #fff;
-        border: 1.5px solid #E8E0F0;
-        border-radius: 10px;
-        box-shadow: 0 8px 24px rgba(122,63,145,.13);
-        z-index: 500;
-        padding: 4px;
-        scrollbar-width: thin;
-        scrollbar-color: #d4b8e8 transparent;
+        position: absolute; top: calc(100% + 4px); left: 0;
+        min-width: 100%; max-height: 220px; overflow-y: auto;
+        background: #fff; border: 1.5px solid #E8E0F0;
+        border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
+        z-index: 500; padding: 4px;
+        scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
     }
     .ar-dropdown-menu::-webkit-scrollbar { width: 5px; }
     .ar-dropdown-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
-    .ar-dropdown-menu::-webkit-scrollbar-track { background: transparent; }
-
     .ar-dropdown-item {
-        display: block;
-        width: 100%;
-        padding: 7px 10px;
-        border-radius: 7px;
-        font-size: .8rem;
-        font-weight: 600;
-        text-align: left;
-        color: #333;
-        transition: background .1s;
-        cursor: pointer;
-        white-space: nowrap;
-        border: none;
-        background: transparent;
+        display: block; width: 100%; padding: 7px 10px; border-radius: 7px;
+        font-size: .8rem; font-weight: 600; text-align: left; color: #333;
+        transition: background .1s; cursor: pointer; white-space: nowrap;
+        border: none; background: transparent;
     }
     .ar-dropdown-item:hover { background: #F5F0FA; color: #7A3F91; }
     .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
-
     .ar-dropdown-trigger {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 11px;
-        border: 1.5px solid #E8E0F0;
-        border-radius: 8px;
-        font-size: .8rem;
-        font-weight: 600;
-        background: #fff;
-        color: #333;
-        cursor: pointer;
-        transition: border-color .15s, background .15s, color .15s;
-        white-space: nowrap;
-        user-select: none;
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 8px;
+        font-size: .8rem; font-weight: 600; background: #fff; color: #333;
+        cursor: pointer; transition: border-color .15s, background .15s, color .15s;
+        white-space: nowrap; user-select: none;
     }
     .ar-dropdown-trigger:hover { border-color: #c49ed8; }
-    .ar-dropdown-trigger.has-value {
-        border-color: #7A3F91;
-        background: #F9F7FC;
-        color: #7A3F91;
-    }
-    .ar-dropdown-trigger .ar-chevron {
-        transition: transform .18s;
-        font-size: .65rem;
-        opacity: .6;
-    }
+    .ar-dropdown-trigger.has-value { border-color: #7A3F91; background: #F9F7FC; color: #7A3F91; }
+    .ar-dropdown-trigger .ar-chevron { transition: transform .18s; font-size: .65rem; opacity: .6; }
     .ar-dropdown-trigger.open .ar-chevron { transform: rotate(180deg); }
+
+    /* ── Profile field labels — semi-bold, not too heavy ─────────── */
+    .ar-field-label {
+        font-size: .625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: #555555;
+        margin-bottom: 1px;
+    }
+    .ar-field-value {
+        font-size: .8rem;
+        font-weight: 600;
+        color: #1a1a1a;
+        word-break: break-word;
+    }
+
+    /* ── Profile info table cards ────────────────────────────────── */
+    .ar-card {
+        background: #fff;
+        border: 1.5px solid #E4E4E4;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .ar-card-header {
+        padding: 6px 12px;
+        border-bottom: 1px solid #EEEEEE;
+        background: #F8F8F8;
+    }
+    .ar-card-header p {
+        font-size: .7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: #444444;
+        margin: 0;
+    }
+    .ar-cell {
+        padding: 6px 10px;
+        border: 1px solid #F0F0F0;
+        background: #fff;
+        border-radius: 7px;
+    }
+
+    /* ── Panel animation ─────────────────────────────────────────── */
+    @keyframes arPanelIn {
+        from { opacity:0; transform:translateY(10px) scale(.99); }
+        to   { opacity:1; transform:none; }
+    }
+    .ar-panel { animation: arPanelIn .18s cubic-bezier(.4,0,.2,1) both; }
+
+    /* ── Profile fullscreen layout — no scroll ───────────────────── */
+    .ar-profile-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-rows: auto auto auto auto auto;
+        gap: 6px;
+        padding: 10px 14px;
+        height: 100%;
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+
+    /* Avatar strip spans full width */
+    .ar-avatar-strip { grid-column: 1 / -1; }
+
+    /* Employment spans full width at bottom */
+    .ar-emp-block { grid-column: 1 / -1; }
 </style>
 
-{{-- Dashboard-style hover tooltip (follows cursor, black bg) --}}
 <div id="ar-hover-tip" class="ar-hover-tip">
     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Details
 </div>
@@ -396,18 +391,10 @@ new class extends Component {
      x-transition:leave-start="opacity-100"
      x-transition:leave-end="opacity-0 scale-95"
      class="fixed top-4 right-4 z-[200] flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl max-w-sm border-l-4 bg-white"
-     :class="{
-         'border-emerald-500': type==='success',
-         'border-red-500':     type==='error',
-         'border-blue-500':    type==='info',
-     }"
+     :class="{ 'border-emerald-500':type==='success','border-red-500':type==='error','border-blue-500':type==='info' }"
      style="display:none">
     <i class="fas mt-0.5 text-base shrink-0"
-       :class="{
-           'fa-circle-check text-emerald-500': type==='success',
-           'fa-circle-exclamation text-red-500': type==='error',
-           'fa-circle-info text-blue-500': type==='info',
-       }"></i>
+       :class="{ 'fa-circle-check text-emerald-500':type==='success','fa-circle-exclamation text-red-500':type==='error','fa-circle-info text-blue-500':type==='info' }"></i>
     <div class="flex-1 min-w-0">
         <p class="font-semibold text-sm text-[#333333]" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
         <p class="text-sm mt-0.5 text-[#666666] leading-snug break-words font-normal" x-text="msg"></p>
@@ -418,7 +405,7 @@ new class extends Component {
 </div>
 
 {{-- ══ PAGE ══════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-4 max-w-screen-2xl mx-auto" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-4 max-w-screen-2xl mx-auto" style="height:90vh;overflow:hidden;">
 
     {{-- Header --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
@@ -437,150 +424,65 @@ new class extends Component {
     {{-- Table Card --}}
     <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
 
-        {{-- ── Filters ── --}}
+        {{-- Filters --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0">
-
-            <span class="ar-filter-label text-xs font-bold tracking-widest uppercase shrink-0 select-none"
-                  style="color:#7A3F91;">FILTERS</span>
+            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
             {{-- Search --}}
-            <div class="relative flex-1 min-w-[150px] max-w-xs"
-                 wire:ignore
-                 x-data="{
-                     q: '',
-                     init() {
-                         this.q = $wire.alumniSearch ?? '';
-                         $wire.$watch('alumniSearch', v => { if (v !== this.q) this.q = v; });
-                     }
-                 }">
+            <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
+                 x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
-                <input type="text"
-                       x-model="q"
-                       @input.debounce.300ms="$wire.set('alumniSearch', q)"
+                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('alumniSearch',q)"
                        placeholder="Search name, ID, course…"
                        class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                              placeholder-[#999999] focus:outline-none focus:border-[#7A3F91]
-                              focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                              placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
                        autocomplete="off" spellcheck="false">
             </div>
 
-            {{-- ── Batch Year custom dropdown ── --}}
+            {{-- Batch Year --}}
             <div class="ar-dropdown"
-                 x-data="{
-                     open: false,
-                     toggle() { this.open = !this.open; },
-                     close() { this.open = false; },
-                     select(val) { $wire.set('alumniBatch', val); this.close(); }
-                 }"
-                 @click.outside="close()"
-                 wire:key="batch-dropdown">
-
-                <button type="button"
-                        @click="toggle()"
-                        :class="{ 'has-value': $wire.alumniBatch !== '', 'open': open }"
-                        class="ar-dropdown-trigger">
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniBatch',val); this.close(); } }"
+                 @click.outside="close()" wire:key="batch-dropdown">
+                <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniBatch!=='','open':open }" class="ar-dropdown-trigger">
                     <i class="fas fa-calendar-alt" style="font-size:.7rem;opacity:.65;"></i>
-                    <span>
-                        @if($alumniBatch)
-                            {{ $alumniBatch }}
-                        @else
-                            All Batch Years
-                        @endif
-                    </span>
+                    <span>@if($alumniBatch){{ $alumniBatch }}@else All Batch Years @endif</span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
-
                 <div x-show="open"
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
-                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu"
-                     style="display:none;">
-
-                    <button type="button"
-                            @click="select('')"
-                            :class="{ 'active': $wire.alumniBatch === '' }"
-                            class="ar-dropdown-item">
-                        All Batch Years
-                    </button>
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75"  x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;">
+                    <button type="button" @click="select('')" :class="{'active':$wire.alumniBatch===''}" class="ar-dropdown-item">All Batch Years</button>
                     @foreach($this->batches as $b)
-                    <button type="button"
-                            @click="select('{{ $b }}')"
-                            :class="{ 'active': $wire.alumniBatch === '{{ $b }}' }"
-                            class="ar-dropdown-item">
-                        {{ $b }}
-                    </button>
+                    <button type="button" @click="select('{{ $b }}')" :class="{'active':$wire.alumniBatch==='{{ $b }}'}" class="ar-dropdown-item">{{ $b }}</button>
                     @endforeach
                 </div>
             </div>
 
-            {{-- ── Course custom dropdown ── --}}
+            {{-- Course --}}
             <div class="ar-dropdown"
-                 x-data="{
-                     open: false,
-                     toggle() { this.open = !this.open; },
-                     close() { this.open = false; },
-                     select(val) { $wire.set('alumniCourse', val); this.close(); }
-                 }"
-                 @click.outside="close()"
-                 wire:key="course-dropdown">
-
-                <button type="button"
-                        @click="toggle()"
-                        :class="{ 'has-value': $wire.alumniCourse !== '', 'open': open }"
-                        class="ar-dropdown-trigger">
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniCourse',val); this.close(); } }"
+                 @click.outside="close()" wire:key="course-dropdown">
+                <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniCourse!=='','open':open }" class="ar-dropdown-trigger">
                     <i class="fas fa-book" style="font-size:.7rem;opacity:.65;"></i>
-                    <span>
-                        @if($alumniCourse)
-                            {{ $alumniCourse }}
-                        @else
-                            All Courses
-                        @endif
-                    </span>
+                    <span>@if($alumniCourse){{ $alumniCourse }}@else All Courses @endif</span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
-
                 <div x-show="open"
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
-                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu"
-                     style="display:none;">
-
-                    <button type="button"
-                            @click="select('')"
-                            :class="{ 'active': $wire.alumniCourse === '' }"
-                            class="ar-dropdown-item">
-                        All Courses
-                    </button>
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75"  x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;">
+                    <button type="button" @click="select('')" :class="{'active':$wire.alumniCourse===''}" class="ar-dropdown-item">All Courses</button>
                     @foreach($this->courses as $c)
-                    <button type="button"
-                            @click="select('{{ $c->code }}')"
-                            :class="{ 'active': $wire.alumniCourse === '{{ $c->code }}' }"
-                            class="ar-dropdown-item">
-                        {{ $c->code }}
-                    </button>
+                    <button type="button" @click="select('{{ $c->code }}')" :class="{'active':$wire.alumniCourse==='{{ $c->code }}'}" class="ar-dropdown-item">{{ $c->code }}</button>
                     @endforeach
                 </div>
             </div>
 
             {{-- Reset --}}
-            <button wire:click="resetAlumniFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetAlumniFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5]
-                           transition active:scale-95 disabled:pointer-events-none">
-                <span wire:loading.remove wire:target="resetAlumniFilters">
-                    <i class="fas fa-rotate-left text-sm"></i>
-                </span>
+            <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none">
+                <span wire:loading.remove wire:target="resetAlumniFilters"><i class="fas fa-rotate-left text-sm"></i></span>
                 <span wire:loading wire:target="resetAlumniFilters">
                     <svg class="animate-spin w-4 h-4 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -589,24 +491,14 @@ new class extends Component {
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
-
         </div>
 
-        {{-- ── Table wrapper ── --}}
-        <div class="relative flex-1 min-h-0" x-data="{ showTop: false }">
-
-            {{-- Scrollable table --}}
-            <div id="alumni-scroll"
-                 @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="h-full overflow-y-auto overflow-x-auto">
-
+        {{-- Table wrapper --}}
+        <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
+            <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200" class="h-full overflow-y-auto overflow-x-auto">
                 <table class="w-full border-collapse table-fixed" style="min-width:620px;">
                     <colgroup>
-                        <col style="width:28%;">
-                        <col style="width:18%;">
-                        <col style="width:14%;">
-                        <col style="width:12%;">
-                        <col style="width:28%;">
+                        <col style="width:28%;"><col style="width:18%;"><col style="width:14%;"><col style="width:12%;"><col style="width:28%;">
                     </colgroup>
                     <thead>
                         <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
@@ -619,16 +511,13 @@ new class extends Component {
                     </thead>
                     <tbody class="divide-y divide-[#F0ECF5]">
                         @forelse($this->alumniRecords as $item)
-                        <tr class="ar-row bg-white"
-                            wire:click="viewProfile({{ $item->id }})">
+                        <tr class="ar-row bg-white" wire:click="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
-                                    <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
-                                         alt="{{ $item->first_name }}"
-                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]"
-                                         draggable="false">
+                                    <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
+                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false">
                                     <span class="font-semibold text-[#333333] text-sm uppercase truncate">
-                                        {{ $this->formatDisplayName($item->first_name??'', $item->middle_initial??'', $item->last_name??'', $item->suffix??'') }}
+                                        {{ $this->formatDisplayName($item->first_name??'',$item->middle_initial??'',$item->last_name??'',$item->suffix??'') }}
                                     </span>
                                 </div>
                             </td>
@@ -645,9 +534,7 @@ new class extends Component {
                                 <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
                             <td class="px-4 py-3 hidden md:table-cell overflow-hidden">
-                                <span class="text-[#333333] text-sm font-normal uppercase truncate block">
-                                    {{ strtoupper($item->email ?? '—') }}
-                                </span>
+                                <span class="text-[#333333] text-sm font-normal uppercase truncate block">{{ strtoupper($item->email ?? '—') }}</span>
                             </td>
                         </tr>
                         @empty
@@ -667,18 +554,14 @@ new class extends Component {
                 </table>
             </div>
 
-            {{-- Scroll to top --}}
-            <button x-show="showTop"
-                    @click="document.getElementById('alumni-scroll').scrollTo({top:0,behavior:'smooth'})"
-                    class="absolute bottom-4 right-4 z-20 w-8 h-8 rounded-full flex items-center justify-center
-                           shadow-lg text-white transition hover:opacity-90"
-                    style="background:#7A3F91; display:none;">
+            <button x-show="showTop" @click="document.getElementById('alumni-scroll').scrollTo({top:0,behavior:'smooth'})"
+                    class="absolute bottom-4 right-4 z-20 w-8 h-8 rounded-full flex items-center justify-center shadow-lg text-white transition hover:opacity-90"
+                    style="background:#7A3F91;display:none;">
                 <i class="fas fa-arrow-up text-sm"></i>
             </button>
-
         </div>
 
-        {{-- ── Pagination footer ── --}}
+        {{-- Pagination footer --}}
         @php
             $total    = $this->alumniRecords->total();
             $pp       = $this->alumniRecords->perPage();
@@ -691,76 +574,47 @@ new class extends Component {
         @endphp
         <div class="px-4 py-2.5 border-t border-[#7A3F91]/30 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-
             <p class="text-white/70 text-sm font-normal">
                 Showing <strong class="text-white font-semibold">{{ $from }}–{{ $to }}</strong>
                 of <strong class="text-white font-semibold">{{ $total }}</strong> alumni
             </p>
-
             @if($lastPage > 1)
             <div class="flex items-center gap-1.5 flex-wrap">
-
-                {{-- Prev arrow --}}
                 @if($this->alumniRecords->onFirstPage())
-                    <button disabled class="ar-pg-btn ar-pg-nav">
-                        <i class="fas fa-chevron-left text-xs"></i>
-                    </button>
+                    <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                 @else
-                    <button wire:click="previousPage('alumniPage')" class="ar-pg-btn ar-pg-nav">
-                        <i class="fas fa-chevron-left text-xs"></i>
-                    </button>
+                    <button wire:click="previousPage('alumniPage')" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                 @endif
-
-                {{-- Leading ellipsis --}}
                 @if($pgStart > 1)
-                    <button wire:click="gotoPage(1, 'alumniPage')" class="ar-pg-btn ar-pg-nav">1</button>
-                    @if($pgStart > 2)
-                        <span class="text-white/50 text-sm font-bold px-1">…</span>
-                    @endif
+                    <button wire:click="gotoPage(1,'alumniPage')" class="ar-pg-btn ar-pg-nav">1</button>
+                    @if($pgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                 @endif
-
-                {{-- Numbered pages --}}
                 @for($p = $pgStart; $p <= $pgEnd; $p++)
                     @if($p === $cp)
                         <span class="ar-pg-btn ar-pg-active">{{ $p }}</span>
                     @else
-                        <button wire:click="gotoPage({{ $p }}, 'alumniPage')" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
+                        <button wire:click="gotoPage({{ $p }},'alumniPage')" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
                     @endif
                 @endfor
-
-                {{-- Trailing ellipsis --}}
                 @if($pgEnd < $lastPage)
-                    @if($pgEnd < $lastPage - 1)
-                        <span class="text-white/50 text-sm font-bold px-1">…</span>
-                    @endif
-                    <button wire:click="gotoPage({{ $lastPage }}, 'alumniPage')" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
+                    @if($pgEnd < $lastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
+                    <button wire:click="gotoPage({{ $lastPage }},'alumniPage')" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
                 @endif
-
-                {{-- Next arrow --}}
                 @if($this->alumniRecords->hasMorePages())
-                    <button wire:click="nextPage('alumniPage')" class="ar-pg-btn ar-pg-nav">
-                        <i class="fas fa-chevron-right text-xs"></i>
-                    </button>
+                    <button wire:click="nextPage('alumniPage')" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
                 @else
-                    <button disabled class="ar-pg-btn ar-pg-nav">
-                        <i class="fas fa-chevron-right text-xs"></i>
-                    </button>
+                    <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
                 @endif
-
-                <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">
-                    Page {{ $cp }}/{{ $lastPage }}
-                </span>
-
+                <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $cp }}/{{ $lastPage }}</span>
             </div>
             @endif
-
         </div>
 
     </div>{{-- end table card --}}
 </div>{{-- end page --}}
 
 
-{{-- ══ VIEW PROFILE — FULLSCREEN PANEL ════════════════════════════ --}}
+{{-- ══ VIEW PROFILE — FULLSCREEN NO-SCROLL PANEL ══════════════════ --}}
 @if($activeModal === 'viewProfile' && $viewingProfile)
 @php
     $up = fn(?string $v): string => strtoupper(trim($v ?? ''));
@@ -793,11 +647,9 @@ new class extends Component {
     $isWorking   = in_array($empStatus, ['employed', 'self_employed']);
     $empTypeLbl  = $empTypeMap[$emp['employment_type'] ?? ''] ?? null;
     $dateHired   = !empty($emp['date_hired'])
-        ? \Carbon\Carbon::parse($emp['date_hired'])->format('F j, Y')
-        : null;
+        ? \Carbon\Carbon::parse($emp['date_hired'])->format('F j, Y') : null;
     $submittedAt = !empty($emp['created_at'])
-        ? \Carbon\Carbon::parse($emp['created_at'])->format('M j, Y')
-        : null;
+        ? \Carbon\Carbon::parse($emp['created_at'])->format('M j, Y') : null;
     $careerPath  = !empty($emp['career_path']) ? json_decode($emp['career_path'], true) : [];
     $cpLabels    = [
         'ofw'                   => 'OFW',
@@ -806,361 +658,331 @@ new class extends Component {
         'career_shifter'        => 'Career Shifter',
         'industry_professional' => 'Industry Professional',
     ];
+    $dob = !empty($viewingProfile['date_of_birth'])
+        ? strtoupper(\Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y'))
+        : '—';
 @endphp
 
-<div class="fixed inset-0 z-50 flex flex-col"
-     style="background:rgba(27,6,46,0.60); backdrop-filter:blur(4px);"
+{{-- Fullscreen overlay — fixed, covers entire viewport --}}
+<div class="fixed inset-0 z-50"
+     style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="w-full h-full bg-white flex flex-col overflow-hidden"
-         style="animation:panelIn .22s cubic-bezier(.4,0,.2,1) both;">
-        <style>
-            @keyframes panelIn {
-                from { opacity:0; transform:translateY(14px) scale(.98); }
-                to   { opacity:1; transform:none; }
-            }
-        </style>
+    {{-- Panel — fills entire screen, no overflow --}}
+    <div class="w-full h-full flex flex-col bg-[#F0F0F0] ar-panel overflow-hidden">
 
         {{-- ── Sticky Header ── --}}
-        <div class="flex items-center justify-between px-5 sm:px-7 py-4 shrink-0"
+        <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                    <i class="fas fa-user text-white text-sm"></i>
+                <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                    <i class="fas fa-user text-white text-xs"></i>
                 </div>
                 <div>
-                    <h2 class="text-white font-semibold text-base leading-tight">Alumni Profile</h2>
+                    <h2 class="text-white font-semibold text-sm leading-tight">Alumni Profile</h2>
                     <p class="text-white/60 text-xs font-normal">
-                        {{ $this->formatDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
+                        {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
                     </p>
                 </div>
             </div>
-
-            {{-- Close button — exact dashboard style --}}
             <button wire:click="closeModal" class="ar-close-btn">
                 <span class="ar-close-tip">Close</span>
                 <i class="fas fa-xmark text-sm"></i>
             </button>
         </div>
 
-        {{-- ── Scrollable Content ── --}}
-        <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4 bg-[#F7F7F7]">
+        {{-- ── Body — CSS grid, no scroll ── --}}
+        <div class="flex-1 min-h-0 overflow-hidden" style="padding:8px 12px;">
+            <div style="
+                display:grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                grid-template-rows: auto auto auto auto auto auto;
+                gap:6px;
+                height:100%;
+                box-sizing:border-box;
+            ">
 
-            {{-- ── Avatar + Quick Info ── --}}
-            <div class="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-[#E0E0E0] bg-white">
-
-                <div class="relative shrink-0 group self-start sm:self-auto" style="width:88px; height:88px;">
-                    @if($newAlumniPhoto)
-                        <img src="{{ $newAlumniPhoto->temporaryUrl() }}" alt="Preview"
-                             class="w-full h-full rounded-xl object-cover shadow-md ring-2 ring-[#BBBBBB]">
-                    @else
-                        <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
-                             alt="{{ $viewingProfile['first_name'] ?? '' }}"
-                             class="w-full h-full rounded-xl object-cover shadow-md ring-2 ring-[#DDDDDD]">
-                    @endif
-                    <label class="absolute inset-0 rounded-xl flex flex-col items-center justify-center gap-0.5
-                                  bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                        <i class="fas fa-camera text-white text-lg"></i>
-                        <span class="text-white font-semibold" style="font-size:10px;">CHANGE</span>
-                        <input type="file" wire:model="newAlumniPhoto" class="hidden"
-                               accept="image/jpeg,image/png,image/webp">
-                    </label>
-                    @if($newAlumniPhoto)
-                        <span class="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#7A3F91] border-2 border-white"></span>
-                    @endif
-                </div>
-
-                <div class="flex-1 min-w-0">
-                    <p class="text-xl sm:text-2xl font-semibold text-[#333333] leading-tight uppercase">
-                        {{ $this->formatDisplayName($viewingProfile['first_name']??'', $viewingProfile['middle_initial']??'', $viewingProfile['last_name']??'', $viewingProfile['suffix']??'') }}
-                    </p>
-                    <p class="text-sm text-[#777777] font-mono mt-0.5 uppercase">{{ $viewingProfile['student_id'] ?? '—' }}</p>
-
-                    <div class="flex flex-wrap gap-1.5 mt-2">
-                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">
-                            {{ $viewingProfile['course_code'] ?? '—' }}
-                        </span>
-                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">
-                            BATCH {{ $viewingProfile['batch'] ?? '—' }}
-                        </span>
-                        <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">
-                            {{ !empty($viewingProfile['profile_completed']) ? 'COMPLETE' : 'INCOMPLETE' }}
-                        </span>
+                {{-- ── Row 1: Avatar strip (full width) ── --}}
+                <div style="grid-column:1/-1;" class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[#DEDEDE] bg-white">
+                    <div class="shrink-0 flex flex-col items-center gap-0.5">
+                        <div class="relative group" style="width:56px;height:56px;">
+                            @if($newAlumniPhoto)
+                                <img src="{{ $newAlumniPhoto->temporaryUrl() }}" alt="Preview"
+                                     class="w-full h-full rounded-lg object-cover shadow ring-2 ring-[#BBBBBB]">
+                            @else
+                                <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
+                                     alt="{{ $viewingProfile['first_name'] ?? '' }}"
+                                     class="w-full h-full rounded-lg object-cover shadow ring-2 ring-[#DDDDDD]">
+                            @endif
+                            <label class="absolute inset-0 rounded-lg flex flex-col items-center justify-center gap-0.5 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                                <i class="fas fa-camera text-white text-sm"></i>
+                                <input type="file" wire:model="newAlumniPhoto" class="hidden" accept="image/jpeg,image/png,image/webp">
+                            </label>
+                            @if($newAlumniPhoto)
+                                <span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#7A3F91] border-2 border-white"></span>
+                            @endif
+                        </div>
+                        @if(!$newAlumniPhoto)
+                            <p class="text-center leading-tight" style="font-size:12px;color:#333333;white-space:nowrap;">Hover to<br>change</p>
+                        @endif
                     </div>
-
+                    <div class="flex-1 min-w-0">
+                        <p class="text-base font-bold text-[#1a1a1a] uppercase leading-tight truncate">
+                            {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
+                        </p>
+                        <p class="text-xs text-[#777777] font-mono">{{ $viewingProfile['student_id'] ?? '—' }}</p>
+                        <div class="flex flex-wrap gap-1 mt-1">
+                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">{{ $viewingProfile['course_code'] ?? '—' }}</span>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">BATCH {{ $viewingProfile['batch'] ?? '—' }}</span>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">{{ !empty($viewingProfile['profile_completed']) ? 'COMPLETE' : 'INCOMPLETE' }}</span>
+                        </div>
+                    </div>
                     @if($newAlumniPhoto)
-                        <div class="flex items-center gap-2 mt-3">
-                            <button wire:click="uploadAlumniPhoto"
-                                    wire:loading.attr="disabled" wire:target="uploadAlumniPhoto"
-                                    class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold
-                                           text-white transition active:scale-95 disabled:opacity-60"
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button wire:click="uploadAlumniPhoto" wire:loading.attr="disabled" wire:target="uploadAlumniPhoto"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition active:scale-95 disabled:opacity-60"
                                     style="background:#7A3F91;">
-                                <span wire:loading.remove wire:target="uploadAlumniPhoto">
-                                    <i class="fas fa-upload text-xs mr-1"></i>Save Photo
-                                </span>
-                                <span wire:loading wire:target="uploadAlumniPhoto">
-                                    <i class="fas fa-spinner fa-spin text-xs mr-1"></i>Uploading…
-                                </span>
+                                <span wire:loading.remove wire:target="uploadAlumniPhoto"><i class="fas fa-upload text-xs mr-1"></i>Save</span>
+                                <span wire:loading wire:target="uploadAlumniPhoto"><i class="fas fa-spinner fa-spin text-xs mr-1"></i>…</span>
                             </button>
-                            <button wire:click="$set('newAlumniPhoto', null)"
-                                    wire:loading.attr="disabled" wire:target="uploadAlumniPhoto"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
-                                           bg-white border border-[#DDDDDD] text-[#666666] hover:bg-[#F5F5F5] transition">
-                                <i class="fas fa-xmark text-xs"></i> Cancel
+                            <button wire:click="$set('newAlumniPhoto',null)"
+                                    class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-[#DDDDDD] text-[#666666] hover:bg-[#F5F5F5] transition">
+                                <i class="fas fa-xmark text-xs"></i>
                             </button>
-                            <span class="text-xs text-[#999999]">JPG / PNG / WebP · max 2 MB</span>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- ── Row 2: Student ID | Student Name (4 cells) ── --}}
+                {{-- Student ID --}}
+                <div class="ar-card" style="grid-column:1/2;">
+                    <div class="ar-card-header"><p>Student ID</p></div>
+                    <div class="p-2">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Student ID</p>
+                            <p class="ar-field-value font-mono text-xs">{{ $up($viewingProfile['student_id'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Student Name --}}
+                <div class="ar-card" style="grid-column:2/-1;">
+                    <div class="ar-card-header"><p>Student's Name</p></div>
+                    <div class="p-2 grid grid-cols-4 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Last Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['last_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Given Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['first_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Middle Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['middle_initial'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Ext.</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['suffix'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- ── Row 3: Student Data | Father | Mother ── --}}
+                <div class="ar-card">
+                    <div class="ar-card-header"><p>Student's Data</p></div>
+                    <div class="p-2 grid grid-cols-2 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Sex</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['gender'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Birthdate</p>
+                            <p class="ar-field-value text-xs">{{ $dob }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Course</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['course_code'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Year Level</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['year_level'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ar-card">
+                    <div class="ar-card-header"><p>Father's Name</p></div>
+                    <div class="p-2 grid grid-cols-1 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Last Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['father_last_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Given Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['father_given_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Middle Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['father_middle_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ar-card">
+                    <div class="ar-card-header"><p>Mother's Maiden Name</p></div>
+                    <div class="p-2 grid grid-cols-1 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Last Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['mother_last_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Given Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['mother_given_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Middle Name</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['mother_middle_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- ── Row 4: Address (full width) ── --}}
+                <div class="ar-card" style="grid-column:1/-1;">
+                    <div class="ar-card-header"><p>Permanent Address</p></div>
+                    <div class="p-2 grid grid-cols-4 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Street</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_street'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Barangay</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_barangay'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Municipality / City</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_municipality'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Province</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_province'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- ── Row 5: DSWD | Disability | Contact | Email (full width) ── --}}
+                <div class="ar-card" style="grid-column:1/-1;">
+                    <div class="p-2 grid grid-cols-4 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">DSWD Household No.</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['dswd_household_no'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Disability</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['disability'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Contact Number</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['contact_number'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Email Address</p>
+                            <p class="ar-field-value text-xs" style="font-size:.7rem;">{{ $up($viewingProfile['email'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- ── Row 6: Employment Status (full width, flex remaining space) ── --}}
+                <div class="ar-card" style="grid-column:1/-1; min-height:0;">
+                    <div class="ar-card-header flex items-center justify-between">
+                        <p>Employment Status</p>
+                        @if($emp && $submittedAt)
+                            <span class="text-xs text-[#888888] font-semibold normal-case tracking-normal">Updated {{ $submittedAt }}</span>
+                        @endif
+                    </div>
+
+                    @if(!$emp)
+                        <div class="p-3 text-center">
+                            <p class="text-xs font-semibold text-[#555555]">No employment record submitted yet.</p>
+                            <p class="text-xs text-[#777777] mt-0.5 font-normal">The alumni has not filled in their employment information.</p>
                         </div>
                     @else
-                        <p class="text-xs text-[#AAAAAA] mt-2">Hover photo to change</p>
-                    @endif
-                </div>
-            </div>
-
-            {{-- ── Two-column grid ── --}}
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-                {{-- Student Record --}}
-                <div class="rounded-xl border border-[#E0E0E0] overflow-hidden bg-white">
-                    <div class="px-4 py-2.5 flex items-center justify-between border-b border-[#E0E0E0] bg-white">
-                        <p class="font-semibold text-[#333333] text-sm uppercase tracking-wide">Student Record</p>
-                        <span class="text-xs text-[#AAAAAA] font-semibold">From School</span>
-                    </div>
-                    <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        @foreach([
-                            ['Last Name',   $up($viewingProfile['last_name'] ?? '') . (!empty($viewingProfile['suffix']) ? ', '.$up($viewingProfile['suffix']) : '')],
-                            ['Given Name',  $up($viewingProfile['first_name']     ?? '')],
-                            ['Middle Name', $up($viewingProfile['middle_initial'] ?? '')],
-                            ['Student ID',  $up($viewingProfile['student_id']     ?? '')],
-                            ['Course',      $up($viewingProfile['course_code']    ?? '')],
-                            ['Batch Year',  $up($viewingProfile['batch']          ?? '')],
-                        ] as [$lbl, $val])
-                        <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                            <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
-                        </div>
-                        @endforeach
-                    </div>
-                    <div class="px-3 pb-3">
-                        <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                            <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">Course Name</p>
-                            <p class="text-sm font-semibold text-[#333333] break-words">{{ $up($viewingProfile['course_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Personal Details --}}
-                @php
-                    $dob = !empty($viewingProfile['date_of_birth'])
-                        ? strtoupper(\Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y'))
-                        : '—';
-                @endphp
-                <div class="rounded-xl border border-[#E0E0E0] overflow-hidden bg-white">
-                    <div class="px-4 py-2.5 border-b border-[#E0E0E0] bg-white">
-                        <p class="font-semibold text-[#333333] text-sm uppercase tracking-wide">Personal Details</p>
-                    </div>
-                    <div class="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        @foreach([
-                            ['Gender',        $up($viewingProfile['gender']            ?? '')],
-                            ['Date of Birth', $dob],
-                            ['Contact No.',   $up($viewingProfile['contact_number']    ?? '')],
-                            ['Disability',    $up($viewingProfile['disability']        ?? '')],
-                            ['DSWD No.',      $up($viewingProfile['dswd_household_no'] ?? '')],
-                            ['Email Address', $up($viewingProfile['email']             ?? '')],
-                        ] as [$lbl, $val])
-                        <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                            <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                            <p class="text-sm font-semibold text-[#333333] break-words">{{ $val ?: '—' }}</p>
-                        </div>
-                        @endforeach
-                    </div>
-                </div>
-
-                {{-- Family Background --}}
-                <div class="rounded-xl border border-[#E0E0E0] overflow-hidden bg-white">
-                    <div class="px-4 py-2.5 border-b border-[#E0E0E0] bg-white">
-                        <p class="font-semibold text-[#333333] text-sm uppercase tracking-wide">Family Background</p>
-                    </div>
-                    <div class="px-3 pt-3">
-                        <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-widest mb-1.5">Father's Name</p>
-                        <div class="grid grid-cols-3 gap-2 mb-3">
-                            @foreach([
-                                ['Last Name',   $up($viewingProfile['father_last_name']   ?? '')],
-                                ['Given Name',  $up($viewingProfile['father_given_name']  ?? '')],
-                                ['Middle Name', $up($viewingProfile['father_middle_name'] ?? '')],
-                            ] as [$lbl, $val])
-                            <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                                <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
-                            </div>
-                            @endforeach
-                        </div>
-                    </div>
-                    <div class="px-3 pb-3">
-                        <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-widest mb-1.5">Mother's Maiden Name</p>
-                        <div class="grid grid-cols-3 gap-2">
-                            @foreach([
-                                ['Last Name',   $up($viewingProfile['mother_last_name']   ?? '')],
-                                ['Given Name',  $up($viewingProfile['mother_given_name']  ?? '')],
-                                ['Middle Name', $up($viewingProfile['mother_middle_name'] ?? '')],
-                            ] as [$lbl, $val])
-                            <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                                <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
-                            </div>
-                            @endforeach
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Permanent Address --}}
-                <div class="rounded-xl border border-[#E0E0E0] overflow-hidden bg-white">
-                    <div class="px-4 py-2.5 border-b border-[#E0E0E0] bg-white">
-                        <p class="font-semibold text-[#333333] text-sm uppercase tracking-wide">Permanent Address</p>
-                    </div>
-                    <div class="p-3 space-y-2">
-                        @php
-                            $addrParts = array_filter([
-                                $up($viewingProfile['address_street']       ?? ''),
-                                $up($viewingProfile['address_barangay']     ?? ''),
-                                $up($viewingProfile['address_municipality'] ?? ''),
-                                $up($viewingProfile['address_province']     ?? ''),
-                            ]);
-                            $fullAddress = implode(', ', $addrParts) ?: '—';
-                        @endphp
-                        <div class="bg-white border border-[#E0E0E0] rounded-lg p-2.5">
-                            <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">Full Address</p>
-                            <p class="text-sm font-semibold text-[#333333] leading-snug">{{ $fullAddress }}</p>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            @foreach([
-                                ['Street',            $up($viewingProfile['address_street']       ?? '')],
-                                ['Barangay',          $up($viewingProfile['address_barangay']     ?? '')],
-                                ['City/Municipality', $up($viewingProfile['address_municipality'] ?? '')],
-                                ['Province',          $up($viewingProfile['address_province']     ?? '')],
-                            ] as [$lbl, $val])
-                            <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">{{ $lbl }}</p>
-                                <p class="text-sm font-semibold text-[#333333]">{{ $val ?: '—' }}</p>
-                            </div>
-                            @endforeach
-                        </div>
-                    </div>
-                </div>
-
-            </div>{{-- end two-column grid --}}
-
-            {{-- ── Employment Status ── --}}
-            <div class="rounded-xl border border-[#E0E0E0] overflow-hidden bg-white">
-                <div class="px-4 py-2.5 flex items-center justify-between border-b border-[#E0E0E0] bg-white">
-                    <p class="font-semibold text-[#333333] text-sm uppercase tracking-wide">Employment Status</p>
-                    @if($emp && $submittedAt)
-                        <span class="text-xs text-[#AAAAAA] font-semibold">Updated {{ $submittedAt }}</span>
-                    @endif
-                </div>
-
-                @if(!$emp)
-                    <div class="p-6 text-center">
-                        <p class="text-sm font-semibold text-[#666666]">No employment record submitted yet.</p>
-                        <p class="text-xs text-[#AAAAAA] mt-1">The alumni has not filled in their employment information.</p>
-                    </div>
-                @else
-                    <div class="p-3 space-y-3">
-
-                        <div class="flex flex-wrap gap-2">
-                            @if($empStatus && isset($empStatusMap[$empStatus]))
-                                <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold bg-white text-[#333333] border border-[#DEDEDE]">
-                                    {{ $empStatusMap[$empStatus] }}
-                                </span>
-                            @endif
-                            @if($isWorking && $empTypeLbl)
-                                <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold bg-white text-[#555555] border border-[#E0E0E0]">
-                                    {{ $empTypeLbl }}
-                                </span>
-                            @endif
-                            @if($isWorking && !empty($emp['work_location']))
-                                <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold bg-white text-[#555555] border border-[#E0E0E0]">
-                                    {{ ucfirst($emp['work_location']) }}
-                                </span>
-                            @endif
-                            @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']) && isset($unempMap[$emp['unemployment_status']]))
-                                <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold bg-white text-[#555555] border border-[#E0E0E0]">
-                                    {{ $unempMap[$emp['unemployment_status']] }}
-                                </span>
-                            @endif
-                        </div>
-
-                        @if($isWorking && (!empty($emp['company_name']) || !empty($emp['job_title'])))
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                @if(!empty($emp['company_name']))
-                                    <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                        <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">
-                                            {{ $empStatus === 'self_employed' ? 'Business Name' : 'Company Name' }}
-                                        </p>
-                                        <p class="text-sm font-bold text-[#333333] uppercase">{{ strtoupper($emp['company_name']) }}</p>
-                                    </div>
+                        <div class="p-2 flex flex-wrap gap-x-4 gap-y-2 items-start">
+                            {{-- Status badges --}}
+                            <div class="flex flex-wrap gap-1.5 items-center">
+                                @if($empStatus && isset($empStatusMap[$empStatus]))
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#1a1a1a] border border-[#DEDEDE]">
+                                        {{ $empStatusMap[$empStatus] }}
+                                    </span>
                                 @endif
-                                @if(!empty($emp['job_title']))
-                                    <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                        <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">Job Title / Position</p>
-                                        <p class="text-sm font-bold text-[#333333] uppercase">{{ strtoupper($emp['job_title']) }}</p>
-                                    </div>
+                                @if($isWorking && $empTypeLbl)
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#444444] border border-[#E0E0E0]">{{ $empTypeLbl }}</span>
+                                @endif
+                                @if($isWorking && !empty($emp['work_location']))
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#444444] border border-[#E0E0E0]">{{ ucfirst($emp['work_location']) }}</span>
+                                @endif
+                                @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']) && isset($unempMap[$emp['unemployment_status']]))
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#444444] border border-[#E0E0E0]">{{ $unempMap[$emp['unemployment_status']] }}</span>
                                 @endif
                             </div>
-                        @endif
 
-                        @if($isWorking)
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                @if($dateHired)
-                                    <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                        <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">Date Hired</p>
-                                        <p class="text-sm font-semibold text-[#333333]">{{ $dateHired }}</p>
-                                    </div>
-                                @endif
-                                @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
-                                    <div class="bg-white border border-[#EBEBEB] rounded-lg p-2.5">
-                                        <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-0.5">Course Relevance</p>
-                                        <p class="text-sm font-semibold text-[#333333]">{{ $relevanceMap[$emp['course_relevance']] }}</p>
-                                    </div>
-                                @endif
-                            </div>
-                        @endif
+                            {{-- Company / Job --}}
+                            @if($isWorking && (!empty($emp['company_name']) || !empty($emp['job_title'])))
+                                <div class="flex gap-1.5 flex-wrap">
+                                    @if(!empty($emp['company_name']))
+                                        <div class="ar-cell">
+                                            <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company Name' }}</p>
+                                            <p class="ar-field-value text-xs uppercase">{{ strtoupper($emp['company_name']) }}</p>
+                                        </div>
+                                    @endif
+                                    @if(!empty($emp['job_title']))
+                                        <div class="ar-cell">
+                                            <p class="ar-field-label">Job Title</p>
+                                            <p class="ar-field-value text-xs uppercase">{{ strtoupper($emp['job_title']) }}</p>
+                                        </div>
+                                    @endif
+                                    @if($dateHired)
+                                        <div class="ar-cell">
+                                            <p class="ar-field-label">Date Hired</p>
+                                            <p class="ar-field-value text-xs">{{ $dateHired }}</p>
+                                        </div>
+                                    @endif
+                                    @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
+                                        <div class="ar-cell">
+                                            <p class="ar-field-label">Course Relevance</p>
+                                            <p class="ar-field-value text-xs">{{ $relevanceMap[$emp['course_relevance']] }}</p>
+                                        </div>
+                                    @endif
+                                </div>
+                            @endif
 
-                        @if($isWorking && count($careerPath))
-                            <div>
-                                <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-1.5">Career Path</p>
-                                <div class="flex flex-wrap gap-1.5">
+                            {{-- Career Path --}}
+                            @if($isWorking && count($careerPath))
+                                <div class="flex flex-wrap gap-1 items-center">
+                                    <span class="ar-field-label mr-1">Career Path:</span>
                                     @foreach($careerPath as $cpKey)
-                                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#333333] border border-[#DEDEDE]">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-white text-[#333333] border border-[#DEDEDE]">
                                             {{ $cpLabels[$cpKey] ?? $cpKey }}
                                         </span>
                                     @endforeach
                                 </div>
-                            </div>
-                        @endif
+                            @endif
 
-                        @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none')
-                            @php
-                                $eduMap = [
-                                    'pursuing_masteral'  => 'Pursuing Masteral',
-                                    'pursuing_doctorate' => 'Pursuing Doctorate',
-                                ];
-                            @endphp
-                            @if(isset($eduMap[$emp['education_status']]))
-                                <div class="pt-1 border-t border-[#EEEEEE]">
-                                    <p class="text-xs font-semibold text-[#AAAAAA] uppercase tracking-wide mb-1.5">Further Education</p>
-                                    <span class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold bg-white text-[#333333] border border-[#DEDEDE]">
+                            {{-- Further Education --}}
+                            @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none')
+                                @php $eduMap = ['pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate']; @endphp
+                                @if(isset($eduMap[$emp['education_status']]))
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#333333] border border-[#DEDEDE]">
                                         {{ $eduMap[$emp['education_status']] }}
                                     </span>
-                                </div>
+                                @endif
                             @endif
-                        @endif
+                        </div>
+                    @endif
+                </div>
 
-                    </div>
-                @endif
-            </div>
-
-        </div>{{-- end scrollable content --}}
-
+            </div>{{-- end grid --}}
+        </div>{{-- end body --}}
     </div>{{-- end panel --}}
 </div>{{-- end overlay --}}
 @endif
@@ -1169,35 +991,26 @@ new class extends Component {
 
 <script>
 (function () {
-    // ── Dashboard-style cursor-follow tooltip ──────────────────────
     var tip = document.getElementById('ar-hover-tip');
 
     function bindRows() {
         document.querySelectorAll('.ar-row').forEach(function (row) {
             if (row._arTipBound) return;
             row._arTipBound = true;
-
             row.addEventListener('mousemove', function (e) {
                 if (!tip) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
                 tip.classList.add('visible');
             });
-            row.addEventListener('mouseleave', function () {
-                if (!tip) return;
-                tip.classList.remove('visible');
-            });
-            row.addEventListener('click', function () {
-                if (!tip) return;
-                tip.classList.remove('visible');
-            });
+            row.addEventListener('mouseleave', function () { if (tip) tip.classList.remove('visible'); });
+            row.addEventListener('click',      function () { if (tip) tip.classList.remove('visible'); });
         });
     }
 
     bindRows();
     document.addEventListener('livewire:updated', bindRows);
 
-    // ── Clean ?alumniPage=N from URL after every Livewire update ──
     function cleanAlumniPageParam() {
         var url = new URL(window.location.href);
         if (url.searchParams.has('alumniPage')) {
@@ -1205,7 +1018,6 @@ new class extends Component {
             history.replaceState(null, '', url.pathname + (url.search || ''));
         }
     }
-
     cleanAlumniPageParam();
     document.addEventListener('livewire:updated', cleanAlumniPageParam);
 })();
