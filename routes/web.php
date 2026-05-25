@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\AlumniInformationController;
+use App\Http\Controllers\AlumniNotificationController;
 use App\Http\Controllers\AlumniPasswordChangeController;
 use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\CourseController;
@@ -84,6 +85,11 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
 
     Route::post('/messenger/ping',           [MessengerController::class, 'ping'])        ->name('messenger.ping');
     Route::get('/messenger/{roomId}/online', [MessengerController::class, 'onlineCount']) ->name('messenger.online');
+
+    Route::get('/alumni/notifications',                    [AlumniNotificationController::class, 'index']);
+Route::post('/alumni/notifications',                   [AlumniNotificationController::class, 'store']);
+Route::patch('/alumni/notifications/{n}/read',         [AlumniNotificationController::class, 'markRead']);
+Route::patch('/alumni/notifications/read-all',         [AlumniNotificationController::class, 'markAllRead']);
 });
 
 // ===================================
