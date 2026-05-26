@@ -187,10 +187,155 @@ new class extends Component {
 ?>
 <div>{{-- single Livewire root --}}
 
+{{-- ══ Cursor-following floating tooltip ══ --}}
+<div id="org-float-tip"></div>
+
+<style>
+/* ── Cursor-following tooltip ─────────────────────────────── */
+#org-float-tip {
+    position: fixed;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    padding: 5px 11px;
+    border-radius: 7px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 99999;
+    box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    transform: translate(-50%, calc(-100% - 10px));
+}
+
+/* ── Stat cards ───────────────────────────────────────────── */
+.org-stat-card {
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .18s ease, border-color .18s ease, transform .12s ease;
+    cursor: pointer;
+}
+.org-stat-card:active { transform: scale(.985); }
+
+/* ── "View Details" slide-up overlay ─────────────────────── */
+.org-view-overlay {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transform: translateY(100%);
+    transition: transform .2s ease-out;
+    border-radius: 0 0 1rem 1rem;
+    z-index: 10;
+    pointer-events: none;
+}
+.org-stat-card:hover .org-view-overlay { transform: translateY(0); }
+
+/* ── Employment mini-card overlay ────────────────────────── */
+.org-emp-card {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .15s ease;
+}
+.org-emp-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.10); }
+.org-emp-card:active { transform: scale(.97); }
+.org-emp-overlay {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transform: translateY(100%);
+    transition: transform .2s ease-out;
+    border-radius: 0 0 .75rem .75rem;
+    z-index: 10;
+    pointer-events: none;
+}
+.org-emp-card:hover .org-emp-overlay { transform: translateY(0); }
+
+/* ── List-row hover badges ───────────────────────────────── */
+.org-list-row { transition: background .12s ease; }
+.org-list-row:hover { background: #faf7ff !important; }
+.org-list-row .view-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 6px;
+    background: #ede0f5;
+    color: #7A3F91;
+    border: 1px solid #d4aaeb;
+    opacity: 0;
+    transition: opacity .15s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+    align-self: center;
+}
+.org-list-row:hover .view-badge { opacity: 1; }
+
+/* ── Table row ───────────────────────────────────────────── */
+.org-table-row { transition: background .10s; }
+.org-table-row:hover { background: #F5F0FA !important; }
+
+/* ── Modal close button ──────────────────────────────────── */
+.org-close-btn {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    gap: 6px;
+    padding: 6px 16px;
+    border-radius: 10px;
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.2);
+    color: #fff;
+    font-size: .875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+}
+.org-close-btn:hover { background: rgba(255,255,255,.22); }
+
+/* ── Pagination ──────────────────────────────────────────── */
+.org-pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 32px; height: 32px; padding: 0 10px;
+    border-radius: 8px; font-size: .75rem; font-weight: 700;
+    transition: all .15s; border: 1.5px solid transparent;
+}
+.org-pg-active { background: #fff; color: #7A3F91; border-color: #fff; }
+.org-pg-nav    { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.25); }
+.org-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
+.org-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ── Scrollbar ───────────────────────────────────────────── */
+.org-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
+.org-scroll::-webkit-scrollbar { width: 4px; }
+.org-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+
+/* ── Modal animation ─────────────────────────────────────── */
+@keyframes orgModalIn {
+    from { opacity:0; transform: translateY(8px); }
+    to   { opacity:1; transform: translateY(0); }
+}
+.org-modal-enter { animation: orgModalIn .2s cubic-bezier(.4,0,.2,1) both; }
+</style>
+
 {{-- ═══════════════════════════════════════════════════════════════
      MAIN PAGE
 ════════════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 max-w-screen-2xl mx-auto w-full h-[90vh] overflow-hidden">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 max-w-screen-2xl mx-auto w-full"
+     style="height:90vh;">
 
     {{-- PAGE HEADER --}}
     <div class="flex items-center gap-3 mb-3 shrink-0">
@@ -215,20 +360,20 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- STAT CARDS --}}
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3 shrink-0">
+    {{-- ── STAT CARDS ───────────────────────────────────────────── --}}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0 mb-2.5">
 
         {{-- Total Alumni --}}
         <div wire:click="openTotalAlumniModal"
-             class="group relative bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 overflow-visible cursor-pointer
-                    hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-150 active:scale-[0.985]">
-            <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
-                         bg-[#1a1a1a] text-white text-[10px] font-bold tracking-[0.04em]
-                         px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                         opacity-0 group-hover:opacity-100 z-50
-                         shadow-[0_10px_24px_rgba(0,0,0,.22)] transition-opacity duration-[180ms]">
-                <i class="fas fa-eye mr-1 text-[9px]"></i>View All Alumni
-            </span>
+             data-ctip="View All Alumni"
+             class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3
+                    hover:shadow-md hover:border-[#7A3F91]/40">
+
+            <div class="org-view-overlay bg-gradient-to-t from-[#7A3F91] to-[#9b59b6]">
+                <i class="fas fa-eye text-white text-[10px]"></i>
+                <span class="text-white text-[11px] font-bold tracking-wide">View Details</span>
+            </div>
+
             <div class="flex items-start justify-between mb-2">
                 <div class="w-9 h-9 rounded-xl flex items-center justify-center shadow bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]">
                     <i class="fas fa-graduation-cap text-white text-sm"></i>
@@ -238,27 +383,29 @@ new class extends Component {
             <p class="text-2xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalAlumniInCollege) }}</p>
             <p class="text-xs text-[#666666] mt-1 font-normal">Total Alumni</p>
             @if(!empty($this->alumniByDepartment))
-                <div class="flex flex-wrap gap-1 mt-1.5">
+                <div class="flex flex-wrap gap-1 mt-1.5 pb-7">
                     @foreach($this->alumniByDepartment as $code => $info)
                         <span class="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-[#7A3F91]/10 text-[#7A3F91] border border-[#7A3F91]/20">
                             {{ $code }} · {{ $info['count'] }}
                         </span>
                     @endforeach
                 </div>
+            @else
+                <div class="pb-7"></div>
             @endif
         </div>
 
         {{-- Total Events --}}
         <div wire:click="openTotalEventsModal"
-             class="group relative bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 overflow-visible cursor-pointer
-                    hover:shadow-md hover:border-emerald-500/40 transition-all duration-150 active:scale-[0.985]">
-            <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
-                         bg-[#1a1a1a] text-white text-[10px] font-bold tracking-[0.04em]
-                         px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                         opacity-0 group-hover:opacity-100 z-50
-                         shadow-[0_10px_24px_rgba(0,0,0,.22)] transition-opacity duration-[180ms]">
-                <i class="fas fa-eye mr-1 text-[9px]"></i>View All Events
-            </span>
+             data-ctip="View All Events"
+             class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3
+                    hover:shadow-md hover:border-emerald-500/40">
+
+            <div class="org-view-overlay bg-gradient-to-t from-[#7A3F91] to-[#9b59b6]">
+                <i class="fas fa-eye text-white text-[10px]"></i>
+                <span class="text-white text-[11px] font-bold tracking-wide">View Details</span>
+            </div>
+
             <div class="flex items-start justify-between mb-2">
                 <div class="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center shadow">
                     <i class="fas fa-calendar-days text-sm text-[#7A3F91]"></i>
@@ -267,7 +414,7 @@ new class extends Component {
             </div>
             <p class="text-2xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalEvents) }}</p>
             <p class="text-xs text-[#666666] mt-1 font-normal">Total Events</p>
-            <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pb-7">
                 <span wire:click.stop="openApprovedEventsModal"
                       class="text-xs font-semibold text-emerald-600 flex items-center gap-1 cursor-pointer hover:underline">
                     <i class="fas fa-circle-check text-xs"></i> {{ $this->approvedEvents }} Approved
@@ -277,15 +424,15 @@ new class extends Component {
 
         {{-- Pending Events --}}
         <div wire:click="openPendingEventsModal"
-             class="group relative bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 overflow-visible cursor-pointer
-                    hover:shadow-md hover:border-amber-500/40 transition-all duration-150 active:scale-[0.985]">
-            <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
-                         bg-[#1a1a1a] text-white text-[10px] font-bold tracking-[0.04em]
-                         px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                         opacity-0 group-hover:opacity-100 z-50
-                         shadow-[0_10px_24px_rgba(0,0,0,.22)] transition-opacity duration-[180ms]">
-                <i class="fas fa-eye mr-1 text-[9px]"></i>View Pending Events
-            </span>
+             data-ctip="View Pending Events"
+             class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3
+                    hover:shadow-md hover:border-amber-500/40">
+
+            <div class="org-view-overlay bg-gradient-to-t from-amber-500 to-amber-400">
+                <i class="fas fa-eye text-white text-[10px]"></i>
+                <span class="text-white text-[11px] font-bold tracking-wide">View Details</span>
+            </div>
+
             <div class="flex items-start justify-between mb-2">
                 <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shadow">
                     <i class="fas fa-hourglass-end text-amber-500 text-sm"></i>
@@ -294,27 +441,29 @@ new class extends Component {
             </div>
             <p class="text-2xl font-semibold text-amber-600 leading-none">{{ number_format($this->pendingEvents) }}</p>
             <p class="text-xs text-[#666666] mt-1 font-normal">Pending Review</p>
-            @if($this->rejectedEvents > 0)
-                <p wire:click.stop="openRejectedEventsModal"
-                   class="text-xs text-red-500 font-semibold mt-1.5 flex items-center gap-1 cursor-pointer hover:underline">
-                    <i class="fas fa-circle-xmark text-xs"></i> {{ $this->rejectedEvents }} Rejected
-                </p>
-            @else
-                <p class="text-xs text-[#999999] mt-1.5 font-normal">Awaiting admin approval</p>
-            @endif
+            <div class="pb-7">
+                @if($this->rejectedEvents > 0)
+                    <p wire:click.stop="openRejectedEventsModal"
+                       class="text-xs text-red-500 font-semibold mt-1.5 flex items-center gap-1 cursor-pointer hover:underline">
+                        <i class="fas fa-circle-xmark text-xs"></i> {{ $this->rejectedEvents }} Rejected
+                    </p>
+                @else
+                    <p class="text-xs text-[#999999] mt-1.5 font-normal">Awaiting admin approval</p>
+                @endif
+            </div>
         </div>
 
         {{-- Job Postings --}}
         <div wire:click="openJobsModal"
-             class="group relative bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 overflow-visible cursor-pointer
-                    hover:shadow-md hover:border-blue-500/40 transition-all duration-150 active:scale-[0.985]">
-            <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
-                         bg-[#1a1a1a] text-white text-[10px] font-bold tracking-[0.04em]
-                         px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                         opacity-0 group-hover:opacity-100 z-50
-                         shadow-[0_10px_24px_rgba(0,0,0,.22)] transition-opacity duration-[180ms]">
-                <i class="fas fa-eye mr-1 text-[9px]"></i>View All Job Postings
-            </span>
+             data-ctip="View All Job Postings"
+             class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3
+                    hover:shadow-md hover:border-blue-500/40">
+
+            <div class="org-view-overlay bg-gradient-to-t from-blue-600 to-blue-500">
+                <i class="fas fa-eye text-white text-[10px]"></i>
+                <span class="text-white text-[11px] font-bold tracking-wide">View Details</span>
+            </div>
+
             <div class="flex items-start justify-between mb-2">
                 <div class="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center shadow">
                     <i class="fas fa-briefcase text-blue-500 text-sm"></i>
@@ -323,7 +472,7 @@ new class extends Component {
             </div>
             <p class="text-2xl font-semibold text-[#333333] leading-none">{{ number_format($this->totalJobs) }}</p>
             <p class="text-xs text-[#666666] mt-1 font-normal">Job Postings</p>
-            <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 pb-7">
                 <span wire:click.stop="openActiveJobsModal"
                       class="text-xs font-semibold text-emerald-600 flex items-center gap-1 cursor-pointer hover:underline">
                     <i class="fas fa-circle text-[8px]"></i> {{ $this->activeJobs }} Active
@@ -333,24 +482,26 @@ new class extends Component {
                 </span>
             </div>
         </div>
-    </div>
 
-    {{-- CONTENT GRID --}}
+    </div>{{-- end stat cards --}}
+
+    {{-- ── CONTENT GRID ─────────────────────────────────────────── --}}
     @php
         $ec  = $this->empCounts;
         $crb = $this->empCourseRelevanceBreakdown;
         $empRows = [
-            ['label'=>'Employed',     'count'=>$ec['employed'],   'icon'=>'fa-user-tie',        'cardCls'=>'bg-[#F9F7FC] border-[#E8E0F0]',  'iconCls'=>'bg-[#7A3F91]/10 text-[#7A3F91]', 'cntCls'=>'text-[#7A3F91]',  'filter'=>'employed'],
-            ['label'=>'Self-Employed','count'=>$ec['self'],       'icon'=>'fa-store',            'cardCls'=>'bg-blue-50 border-blue-200',      'iconCls'=>'bg-blue-100 text-blue-600',       'cntCls'=>'text-blue-600',   'filter'=>'self_employed'],
-            ['label'=>'Unemployed',   'count'=>$ec['unemployed'], 'icon'=>'fa-magnifying-glass', 'cardCls'=>'bg-amber-50 border-amber-200',    'iconCls'=>'bg-amber-100 text-amber-600',     'cntCls'=>'text-amber-600',  'filter'=>'unemployed'],
-            ['label'=>'No Record',    'count'=>$ec['noRecord'],   'icon'=>'fa-circle-minus',     'cardCls'=>'bg-gray-50 border-gray-200',      'iconCls'=>'bg-gray-200 text-gray-500',       'cntCls'=>'text-gray-500',   'filter'=>'no_record'],
+            ['label'=>'Employed',      'count'=>$ec['employed'],   'icon'=>'fa-user-tie',        'cardCls'=>'bg-[#F9F7FC] border-[#E8E0F0]',  'iconCls'=>'bg-[#7A3F91]/10 text-[#7A3F91]', 'cntCls'=>'text-[#7A3F91]',  'overlayCls'=>'from-[#7A3F91] to-[#9b59b6]', 'filter'=>'employed',      'ctip'=>'View Employed Alumni'],
+            ['label'=>'Self-Employed', 'count'=>$ec['self'],       'icon'=>'fa-store',            'cardCls'=>'bg-blue-50 border-blue-200',      'iconCls'=>'bg-blue-100 text-blue-600',       'cntCls'=>'text-blue-600',   'overlayCls'=>'from-blue-600 to-blue-500',    'filter'=>'self_employed', 'ctip'=>'View Self-Employed Alumni'],
+            ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'icon'=>'fa-magnifying-glass', 'cardCls'=>'bg-amber-50 border-amber-200',    'iconCls'=>'bg-amber-100 text-amber-600',     'cntCls'=>'text-amber-600',  'overlayCls'=>'from-amber-500 to-amber-400',  'filter'=>'unemployed',    'ctip'=>'View Unemployed Alumni'],
+            ['label'=>'No Record',     'count'=>$ec['noRecord'],   'icon'=>'fa-circle-minus',     'cardCls'=>'bg-gray-50 border-gray-200',      'iconCls'=>'bg-gray-200 text-gray-500',       'cntCls'=>'text-gray-500',   'overlayCls'=>'from-gray-500 to-gray-400',    'filter'=>'no_record',     'ctip'=>'View Alumni With No Record'],
         ];
     @endphp
 
-    <div class="flex-1 min-h-0 grid gap-2.5 grid-cols-[1fr_1fr_280px] grid-rows-[3fr_2fr]">
+    <div class="flex-1 min-h-0 grid gap-2.5"
+         style="grid-template-columns:1fr 1fr 280px; grid-template-rows:1fr 1fr;">
 
         {{-- Employment Overview: col 1-2, row 1 --}}
-        <div class="col-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+        <div class="col-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col min-h-0">
             <div class="px-4 py-2.5 border-b border-[#E8E0F0] shrink-0 flex items-center justify-between bg-gradient-to-br from-[#F9F7FC] to-white">
                 <div class="flex items-center gap-2">
                     <div class="w-5 h-5 rounded-lg flex items-center justify-center bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]">
@@ -364,24 +515,28 @@ new class extends Component {
                     View All <i class="fas fa-arrow-right text-xs"></i>
                 </a>
             </div>
-            <div class="flex-1 overflow-y-auto p-3">
+            <div class="flex-1 overflow-y-auto org-scroll p-3 min-h-0">
+
+                {{-- Employment status mini-cards --}}
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                     @foreach($empRows as $row)
                     <div wire:click="openEmploymentModal('{{ $row['filter'] }}')"
-                         class="rounded-xl border p-2.5 cursor-pointer transition-all duration-150
-                                hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.97]
-                                {{ $row['cardCls'] }}">
+                         data-ctip="{{ $row['ctip'] }}"
+                         class="org-emp-card rounded-xl border p-2.5 {{ $row['cardCls'] }}">
+
+                        <div class="org-emp-overlay bg-gradient-to-t {{ $row['overlayCls'] }}">
+                            <i class="fas fa-eye text-white text-[9px]"></i>
+                            <span class="text-white text-[10px] font-bold tracking-wide">View Details</span>
+                        </div>
+
                         <div class="flex items-center gap-1.5 mb-1.5">
                             <div class="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 {{ $row['iconCls'] }}">
                                 <i class="fas {{ $row['icon'] }} text-xs"></i>
                             </div>
                             <span class="text-xs font-semibold text-[#555555]">{{ $row['label'] }}</span>
                         </div>
-                        <p class="text-2xl font-semibold leading-none {{ $row['cntCls'] }}">
+                        <p class="text-2xl font-semibold leading-none pb-6 {{ $row['cntCls'] }}">
                             {{ number_format($row['count']) }}
-                        </p>
-                        <p class="text-[10px] text-[#999999] mt-1 font-normal flex items-center gap-1">
-                            <i class="fas fa-arrow-up-right-from-square text-[8px]"></i> View details
                         </p>
                     </div>
                     @endforeach
@@ -452,23 +607,24 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Account Info: col 3, spans rows 1 & 2 --}}
-        <div class="col-start-3 row-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+        {{-- Account Info: col 3, rows 1-2 --}}
+        <div class="col-start-3 row-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col min-h-0">
             <div class="px-4 py-2.5 border-b border-[#E8E0F0] shrink-0 flex items-center gap-2 bg-gradient-to-br from-[#F9F7FC] to-white">
                 <div class="w-5 h-5 rounded-lg flex items-center justify-center bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]">
                     <i class="fas fa-user-circle text-white text-[10px]"></i>
                 </div>
                 <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Account Info</p>
             </div>
-            <div class="flex-1 overflow-y-auto divide-y divide-[#F5F5F5] px-4">
+            <div class="flex-1 overflow-y-auto org-scroll divide-y divide-[#F5F5F5] px-4 min-h-0">
                 {{-- Name --}}
                 <div class="flex items-center justify-between py-2.5">
                     <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">Name</span>
-                    <div class="group relative ml-2">
+                    <div class="group/tip relative ml-2">
                         <span class="text-xs font-semibold text-[#333333] text-right truncate max-w-[145px] block cursor-default">{{ $this->organizerName }}</span>
-                        <div class="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute bottom-[125%] left-1/2 -translate-x-1/2
-                                    bg-[#1f1a2e] text-white text-center rounded-xl px-3 py-2 z-[1000] whitespace-nowrap
-                                    text-xs font-semibold transition-all duration-300 shadow-2xl pointer-events-none">
+                        <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100
+                                    absolute bottom-[125%] left-1/2 -translate-x-1/2
+                                    bg-[#1a1a1a] text-white text-center rounded-xl px-3 py-2 z-[9990] whitespace-nowrap
+                                    text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
                             {{ $this->organizerName }}
                         </div>
                     </div>
@@ -476,11 +632,12 @@ new class extends Component {
                 {{-- Teacher ID --}}
                 <div class="flex items-center justify-between py-2.5">
                     <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">Teacher ID</span>
-                    <div class="group relative ml-2">
+                    <div class="group/tip relative ml-2">
                         <span class="text-xs font-semibold font-mono text-[#7A3F91] cursor-default">{{ $this->organizerTeacherId }}</span>
-                        <div class="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute bottom-[125%] left-1/2 -translate-x-1/2
-                                    bg-[#1f1a2e] text-white text-center rounded-xl px-3 py-2 z-[1000] whitespace-nowrap
-                                    text-xs font-semibold transition-all duration-300 shadow-2xl pointer-events-none">
+                        <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100
+                                    absolute bottom-[125%] left-1/2 -translate-x-1/2
+                                    bg-[#1a1a1a] text-white text-center rounded-xl px-3 py-2 z-[9990] whitespace-nowrap
+                                    text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
                             {{ $this->organizerTeacherId }}
                         </div>
                     </div>
@@ -488,11 +645,12 @@ new class extends Component {
                 {{-- Email --}}
                 <div class="flex items-start justify-between py-2.5">
                     <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0 mt-0.5">Email</span>
-                    <div class="group relative ml-2">
+                    <div class="group/tip relative ml-2">
                         <span class="text-xs text-[#666666] font-normal text-right break-all max-w-[145px] block cursor-default">{{ $this->organizerEmail }}</span>
-                        <div class="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute bottom-[125%] left-1/2 -translate-x-1/2
-                                    bg-[#1f1a2e] text-white text-center rounded-xl px-3 py-2 z-[1000] whitespace-nowrap
-                                    text-xs font-semibold transition-all duration-300 shadow-2xl pointer-events-none">
+                        <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100
+                                    absolute bottom-[125%] left-1/2 -translate-x-1/2
+                                    bg-[#1a1a1a] text-white text-center rounded-xl px-3 py-2 z-[9990] whitespace-nowrap
+                                    text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
                             {{ $this->organizerEmail }}
                         </div>
                     </div>
@@ -500,11 +658,12 @@ new class extends Component {
                 {{-- College --}}
                 <div class="flex items-center justify-between py-2.5">
                     <span class="text-xs font-semibold text-[#999999] uppercase tracking-wide shrink-0">College</span>
-                    <div class="group relative ml-2">
+                    <div class="group/tip relative ml-2">
                         <span class="text-xs font-semibold text-[#333333] text-right truncate max-w-[145px] block cursor-default">{{ $this->organizerDepartment }}</span>
-                        <div class="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute bottom-[125%] left-1/2 -translate-x-1/2
-                                    bg-[#1f1a2e] text-white text-center rounded-xl px-3 py-2 z-[1000] whitespace-nowrap
-                                    text-xs font-semibold transition-all duration-300 shadow-2xl pointer-events-none">
+                        <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100
+                                    absolute bottom-[125%] left-1/2 -translate-x-1/2
+                                    bg-[#1a1a1a] text-white text-center rounded-xl px-3 py-2 z-[9990] whitespace-nowrap
+                                    text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
                             {{ $this->organizerDepartment }}
                         </div>
                     </div>
@@ -551,7 +710,7 @@ new class extends Component {
         </div>
 
         {{-- Recent Events: col 1, row 2 --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col min-h-0">
             <div class="px-4 py-2.5 border-b border-[#E8E0F0] shrink-0 flex items-center bg-gradient-to-br from-[#F9F7FC] to-white">
                 <button type="button" wire:click="openTotalEventsModal"
                         class="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer">
@@ -563,18 +722,18 @@ new class extends Component {
                 </button>
                 <span class="ml-auto text-[10px] text-[#c0a0d8] hidden sm:inline font-normal">click row to filter</span>
             </div>
-            <div class="flex-1 overflow-y-auto divide-y divide-[#F5F5F5]">
+            <div class="flex-1 overflow-y-auto org-scroll divide-y divide-[#F5F5F5] min-h-0">
                 @forelse($this->recentEvents as $index => $event)
                 @php
                     $sc = match($event->status) {
-                        'PENDING'   => ['text-amber-700 bg-amber-50 border-amber-200',       'fa-hourglass-end', 'bg-amber-100 text-amber-600'],
-                        'APPROVED'  => ['text-emerald-700 bg-emerald-50 border-emerald-200', 'fa-circle-check',  'bg-emerald-100 text-emerald-600'],
-                        'REJECTED'  => ['text-red-600 bg-red-50 border-red-200',             'fa-circle-xmark',  'bg-red-100 text-red-500'],
-                        'COMPLETED' => ['text-blue-700 bg-blue-50 border-blue-200',          'fa-check-double',  'bg-blue-100 text-blue-600'],
-                        default     => ['text-[#666666] bg-[#F9F7FC] border-[#E8E0F0]',      'fa-circle',        'bg-purple-100 text-purple-500'],
+                        'PENDING'   => ['text-amber-700 bg-amber-50 border-amber-200',       'fa-hourglass-end',  'bg-amber-100 text-amber-600'],
+                        'APPROVED'  => ['text-emerald-700 bg-emerald-50 border-emerald-200', 'fa-circle-check',   'bg-emerald-100 text-emerald-600'],
+                        'REJECTED'  => ['text-red-600 bg-red-50 border-red-200',             'fa-circle-xmark',   'bg-red-100 text-red-500'],
+                        'COMPLETED' => ['text-blue-700 bg-blue-50 border-blue-200',          'fa-check-double',   'bg-blue-100 text-blue-600'],
+                        default     => ['text-[#666666] bg-[#F9F7FC] border-[#E8E0F0]',      'fa-circle',         'bg-purple-100 text-purple-500'],
                     };
                 @endphp
-                <div class="px-3 py-2.5 flex items-center gap-2 cursor-pointer transition-colors duration-100 hover:bg-[#faf7ff]"
+                <div class="org-list-row px-3 py-2.5 flex items-center gap-2 cursor-pointer"
                      wire:click="openEventModalByStatus('{{ $event->status }}')">
                     <span class="w-4 text-center text-xs font-semibold shrink-0 text-[#c0a0d8]">
                         {{ str_pad($index + 1, 2, '0', STR_PAD_LEFT) }}
@@ -588,6 +747,7 @@ new class extends Component {
                             {{ $event->event_date->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}
                         </p>
                     </div>
+                    <span class="view-badge"><i class="fas fa-eye" style="font-size:8px;"></i> View</span>
                     <div class="shrink-0 text-right">
                         <span class="text-xs font-semibold px-1.5 py-0.5 rounded-full border {{ $sc[0] }}">
                             {{ $event->status }}
@@ -611,7 +771,7 @@ new class extends Component {
         </div>
 
         {{-- Recent Jobs: col 2, row 2 --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col min-h-0">
             <div class="px-4 py-2.5 border-b border-[#E8E0F0] shrink-0 flex items-center bg-gradient-to-br from-[#F9F7FC] to-white">
                 <button type="button" wire:click="openJobsModal"
                         class="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer">
@@ -623,13 +783,13 @@ new class extends Component {
                 </button>
                 <span class="ml-auto text-[10px] text-[#c0a0d8] hidden sm:inline font-normal">click row to filter</span>
             </div>
-            <div class="flex-1 overflow-y-auto divide-y divide-[#F5F5F5]">
+            <div class="flex-1 overflow-y-auto org-scroll divide-y divide-[#F5F5F5] min-h-0">
                 @forelse($this->recentJobs as $index => $job)
                 @php
                     $dl       = Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
                     $isActive = $job->status === 'ACTIVE';
                 @endphp
-                <div class="px-3 py-2.5 flex items-center gap-2 cursor-pointer transition-colors duration-100 hover:bg-[#faf7ff]"
+                <div class="org-list-row px-3 py-2.5 flex items-center gap-2 cursor-pointer"
                      wire:click="openJobModalByStatus('{{ $job->status }}')">
                     <span class="w-4 text-center text-xs font-semibold shrink-0 text-[#c0a0d8]">
                         {{ str_pad($index + 1, 2, '0', STR_PAD_LEFT) }}
@@ -646,6 +806,7 @@ new class extends Component {
                             <span class="font-semibold text-blue-500">{{ $job->employment_type }}</span>
                         </p>
                     </div>
+                    <span class="view-badge"><i class="fas fa-eye" style="font-size:8px;"></i> View</span>
                     <div class="shrink-0 text-right">
                         @if($isActive)
                             <span class="text-xs font-semibold px-1.5 py-0.5 rounded-full border text-emerald-700 bg-emerald-50 border-emerald-200">Active</span>
@@ -672,6 +833,7 @@ new class extends Component {
 
     </div>{{-- end content grid --}}
 </div>{{-- end 90vh wrapper --}}
+
 
 {{-- ═══════════════════════════════════════════════════════════════
      MODAL: TOTAL ALUMNI
@@ -704,9 +866,8 @@ new class extends Component {
     $displayAlumni  = $filteredAlumni->slice(($alumniSafePage - 1) * $alumniModalSize, $alumniModalSize)->values()->toArray();
     $hasFilter      = $alumniSearch || $alumniFilterCourse || $alumniFilterBatch;
 @endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50"
+<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 org-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
-    {{-- Header --}}
     <div class="flex items-center justify-between px-6 lg:px-10 py-4 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
             <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
@@ -720,12 +881,10 @@ new class extends Component {
                 </p>
             </div>
         </div>
-        <button wire:click="closeModal"
-                class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-sm font-semibold transition-all duration-150">
+        <button wire:click="closeModal" class="org-close-btn">
             <i class="fas fa-xmark"></i><span class="hidden sm:inline">Close</span>
         </button>
     </div>
-    {{-- Filters --}}
     <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
         <div class="flex flex-wrap items-center gap-2">
             <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
@@ -772,8 +931,7 @@ new class extends Component {
             </span>
         </div>
     </div>
-    {{-- Table --}}
-    <div class="flex-1 overflow-y-auto min-h-0">
+    <div class="flex-1 overflow-y-auto org-scroll min-h-0">
         <table class="w-full border-collapse min-w-[500px]">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
@@ -787,7 +945,7 @@ new class extends Component {
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($displayAlumni as $idx => $a)
-                <tr class="bg-white hover:bg-gray-50 transition-colors duration-100">
+                <tr class="org-table-row bg-white">
                     <td class="pl-6 lg:pl-10 pr-3 py-3">
                         <span class="text-xs font-semibold text-[#c0a0d8]">{{ str_pad($alumniFrom + $idx, 2, '0', STR_PAD_LEFT) }}</span>
                     </td>
@@ -821,7 +979,6 @@ new class extends Component {
             </tbody>
         </table>
     </div>
-    {{-- Pagination --}}
     <div class="px-5 py-3 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#7A3F91]">
         <p class="text-white text-sm font-normal">
             Showing <strong class="font-bold text-base">{{ $alumniFrom }}–{{ $alumniTo }}</strong>
@@ -830,22 +987,19 @@ new class extends Component {
         </p>
         @if($alumniLastPage > 1)
         <div class="flex items-center gap-1.5">
-            <button wire:click="alumniPrevPage"
-                    {{ $alumniSafePage <= 1 ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="alumniPrevPage" {{ $alumniSafePage <= 1 ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-left text-xs"></i>
             </button>
             @for($p = max(1, $alumniSafePage - 2); $p <= min($alumniLastPage, $alumniSafePage + 2); $p++)
                 @if($p === $alumniSafePage)
-                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold border-[1.5px] bg-white text-[#7A3F91] border-white">{{ $p }}</span>
+                    <span class="org-pg-btn org-pg-active">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('alumniModalPage', {{ $p }})"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91]">{{ $p }}</button>
+                    <button wire:click="$set('alumniModalPage', {{ $p }})" class="org-pg-btn org-pg-nav">{{ $p }}</button>
                 @endif
             @endfor
-            <button wire:click="alumniNextPage({{ $alumniLastPage }})"
-                    {{ $alumniSafePage >= $alumniLastPage ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="alumniNextPage({{ $alumniLastPage }})" {{ $alumniSafePage >= $alumniLastPage ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-right text-xs"></i>
             </button>
             <span class="text-xs font-semibold text-white/80 ml-1">Page {{ $alumniSafePage }}/{{ $alumniLastPage }}</span>
@@ -855,18 +1009,13 @@ new class extends Component {
 </div>
 @endif
 
+
 {{-- ═══════════════════════════════════════════════════════════════
      MODAL: EMPLOYMENT
 ════════════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'employment')
 @php
-    $empFilterLabels = [
-        'employed'      => 'Employed',
-        'self_employed' => 'Self-Employed',
-        'unemployed'    => 'Unemployed',
-        'no_record'     => 'No Record',
-        ''              => 'All Alumni',
-    ];
+    $empFilterLabels = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed','no_record'=>'No Record',''=>'All Alumni'];
     $currentFilterLabel = $empFilterLabels[$empModalFilter] ?? 'All Alumni';
     $statusLabels2 = [
         'employed'      => ['Employed',     'text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0]'],
@@ -890,7 +1039,7 @@ new class extends Component {
     $empTo       = min($empSafePage * $empModalSize, $empTotal);
     $displayEmp  = $empFiltered->slice(($empSafePage - 1) * $empModalSize, $empModalSize)->values()->toArray();
 @endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50"
+<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 org-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
     <div class="flex items-center justify-between px-6 lg:px-10 py-4 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
@@ -902,8 +1051,7 @@ new class extends Component {
                 <p class="text-white/60 text-xs font-normal">{{ $empFrom }}–{{ $empTo }} of {{ $empTotal }} alumni</p>
             </div>
         </div>
-        <button wire:click="closeModal"
-                class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-sm font-semibold transition-all duration-150">
+        <button wire:click="closeModal" class="org-close-btn">
             <i class="fas fa-xmark"></i><span class="hidden sm:inline">Close</span>
         </button>
     </div>
@@ -923,7 +1071,7 @@ new class extends Component {
             </span>
         </div>
     </div>
-    <div class="flex-1 overflow-y-auto min-h-0">
+    <div class="flex-1 overflow-y-auto org-scroll min-h-0">
         <table class="w-full border-collapse min-w-[600px]">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
@@ -941,7 +1089,7 @@ new class extends Component {
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($displayEmp as $idx => $a)
-                <tr class="bg-white hover:bg-gray-50 transition-colors duration-100">
+                <tr class="org-table-row bg-white">
                     <td class="pl-6 lg:pl-10 pr-3 py-3">
                         <span class="text-xs font-semibold text-[#c0a0d8]">{{ str_pad($empFrom + $idx, 2, '0', STR_PAD_LEFT) }}</span>
                     </td>
@@ -970,13 +1118,7 @@ new class extends Component {
                     </td>
                     @if(in_array($empModalFilter, ['employed','self_employed']))
                     <td class="px-4 py-3 text-center hidden lg:table-cell">
-                        @php
-                            $relMap = [
-                                'yes'       => ['Related',     'text-emerald-700 bg-emerald-50 border-emerald-200'],
-                                'no'        => ['Not Related', 'text-red-600 bg-red-50 border-red-200'],
-                                'partially' => ['Partial',     'text-amber-700 bg-amber-50 border-amber-200'],
-                            ];
-                        @endphp
+                        @php $relMap=['yes'=>['Related','text-emerald-700 bg-emerald-50 border-emerald-200'],'no'=>['Not Related','text-red-600 bg-red-50 border-red-200'],'partially'=>['Partial','text-amber-700 bg-amber-50 border-amber-200']]; @endphp
                         @if($a['course_relevance'] && isset($relMap[$a['course_relevance']]))
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border {{ $relMap[$a['course_relevance']][1] }}">
                                 {{ $relMap[$a['course_relevance']][0] }}
@@ -1008,22 +1150,19 @@ new class extends Component {
         </p>
         @if($empLastPage > 1)
         <div class="flex items-center gap-1.5">
-            <button wire:click="empPrevPage"
-                    {{ $empSafePage <= 1 ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="empPrevPage" {{ $empSafePage <= 1 ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-left text-xs"></i>
             </button>
             @for($p = max(1, $empSafePage - 2); $p <= min($empLastPage, $empSafePage + 2); $p++)
                 @if($p === $empSafePage)
-                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold border-[1.5px] bg-white text-[#7A3F91] border-white">{{ $p }}</span>
+                    <span class="org-pg-btn org-pg-active">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('empModalPage', {{ $p }})"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91]">{{ $p }}</button>
+                    <button wire:click="$set('empModalPage', {{ $p }})" class="org-pg-btn org-pg-nav">{{ $p }}</button>
                 @endif
             @endfor
-            <button wire:click="empNextPage({{ $empLastPage }})"
-                    {{ $empSafePage >= $empLastPage ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="empNextPage({{ $empLastPage }})" {{ $empSafePage >= $empLastPage ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-right text-xs"></i>
             </button>
             <span class="text-xs font-semibold text-white/80 ml-1">Page {{ $empSafePage }}/{{ $empLastPage }}</span>
@@ -1032,6 +1171,7 @@ new class extends Component {
     </div>
 </div>
 @endif
+
 
 {{-- ═══════════════════════════════════════════════════════════════
      MODAL: EVENTS
@@ -1051,7 +1191,7 @@ new class extends Component {
     $evtTo         = min($evtSafePage * $eventModalSize, $evtTotal);
     $displayEvents = $filteredEvents->slice(($evtSafePage - 1) * $eventModalSize, $eventModalSize)->values()->toArray();
 @endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50"
+<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 org-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
     <div class="flex items-center justify-between px-6 lg:px-10 py-4 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
@@ -1063,8 +1203,7 @@ new class extends Component {
                 <p class="text-white/60 text-xs font-normal">{{ $evtFrom }}–{{ $evtTo }} of {{ $evtTotal }} event(s)</p>
             </div>
         </div>
-        <button wire:click="closeModal"
-                class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-sm font-semibold transition-all duration-150">
+        <button wire:click="closeModal" class="org-close-btn">
             <i class="fas fa-xmark"></i><span class="hidden sm:inline">Close</span>
         </button>
     </div>
@@ -1084,7 +1223,7 @@ new class extends Component {
             </span>
         </div>
     </div>
-    <div class="flex-1 overflow-y-auto min-h-0">
+    <div class="flex-1 overflow-y-auto org-scroll min-h-0">
         <table class="w-full border-collapse min-w-[540px]">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
@@ -1107,7 +1246,7 @@ new class extends Component {
                         default     => ['text-gray-600 bg-gray-50 border-gray-200',          'fa-circle'],
                     };
                 @endphp
-                <tr class="bg-white hover:bg-gray-50 transition-colors duration-100">
+                <tr class="org-table-row bg-white">
                     <td class="pl-6 lg:pl-10 pr-3 py-3.5">
                         <span class="text-xs font-semibold text-[#c0a0d8]">{{ str_pad($evtFrom + $idx, 2, '0', STR_PAD_LEFT) }}</span>
                     </td>
@@ -1155,22 +1294,19 @@ new class extends Component {
         </p>
         @if($evtLastPage > 1)
         <div class="flex items-center gap-1.5">
-            <button wire:click="eventPrevPage"
-                    {{ $evtSafePage <= 1 ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="eventPrevPage" {{ $evtSafePage <= 1 ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-left text-xs"></i>
             </button>
             @for($p = max(1, $evtSafePage - 2); $p <= min($evtLastPage, $evtSafePage + 2); $p++)
                 @if($p === $evtSafePage)
-                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold border-[1.5px] bg-white text-[#7A3F91] border-white">{{ $p }}</span>
+                    <span class="org-pg-btn org-pg-active">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('eventModalPage', {{ $p }})"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91]">{{ $p }}</button>
+                    <button wire:click="$set('eventModalPage', {{ $p }})" class="org-pg-btn org-pg-nav">{{ $p }}</button>
                 @endif
             @endfor
-            <button wire:click="eventNextPage({{ $evtLastPage }})"
-                    {{ $evtSafePage >= $evtLastPage ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="eventNextPage({{ $evtLastPage }})" {{ $evtSafePage >= $evtLastPage ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-right text-xs"></i>
             </button>
             <span class="text-xs font-semibold text-white/80 ml-1">Page {{ $evtSafePage }}/{{ $evtLastPage }}</span>
@@ -1179,6 +1315,7 @@ new class extends Component {
     </div>
 </div>
 @endif
+
 
 {{-- ═══════════════════════════════════════════════════════════════
      MODAL: JOB POSTINGS
@@ -1205,7 +1342,7 @@ new class extends Component {
         default => 'My Job Postings',
     };
 @endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50"
+<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 org-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
     <div class="flex items-center justify-between px-6 lg:px-10 py-4 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
@@ -1217,8 +1354,7 @@ new class extends Component {
                 <p class="text-white/60 text-xs font-normal">{{ $jobFrom }}–{{ $jobTo }} of {{ $jobTotalCount }} job(s)</p>
             </div>
         </div>
-        <button wire:click="closeModal"
-                class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-sm font-semibold transition-all duration-150">
+        <button wire:click="closeModal" class="org-close-btn">
             <i class="fas fa-xmark"></i><span class="hidden sm:inline">Close</span>
         </button>
     </div>
@@ -1238,7 +1374,7 @@ new class extends Component {
             </span>
         </div>
     </div>
-    <div class="flex-1 overflow-y-auto min-h-0">
+    <div class="flex-1 overflow-y-auto org-scroll min-h-0">
         <table class="w-full border-collapse min-w-[620px]">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
@@ -1254,46 +1390,30 @@ new class extends Component {
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($displayJobs as $idx => $job)
-                @php
-                    $isUrgent = ($job['days_left'] ?? 99) <= 7;
-                    $isActive = $job['status'] === 'ACTIVE';
-                @endphp
-                <tr class="bg-white hover:bg-gray-50 transition-colors duration-100">
+                @php $isUrgent=($job['days_left']??99)<=7; $isActive=$job['status']==='ACTIVE'; @endphp
+                <tr class="org-table-row bg-white">
                     <td class="pl-6 lg:pl-10 pr-3 py-3.5">
                         <span class="text-xs font-semibold text-[#c0a0d8]">{{ str_pad($jobFrom + $idx, 2, '0', STR_PAD_LEFT) }}</span>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="text-sm font-semibold text-gray-900 truncate max-w-[180px]">{{ $job['title'] }}</p>
-                    </td>
-                    <td class="px-4 py-3.5">
-                        <p class="text-sm text-gray-600 truncate max-w-[140px]">{{ $job['company'] }}</p>
-                    </td>
+                    <td class="px-4 py-3.5"><p class="text-sm font-semibold text-gray-900 truncate max-w-[180px]">{{ $job['title'] }}</p></td>
+                    <td class="px-4 py-3.5"><p class="text-sm text-gray-600 truncate max-w-[140px]">{{ $job['company'] }}</p></td>
                     <td class="px-4 py-3.5 hidden sm:table-cell">
                         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">{{ $job['type'] }}</span>
                     </td>
                     <td class="px-4 py-3.5 hidden md:table-cell"><p class="text-sm text-gray-500">{{ $job['location'] ?: '—' }}</p></td>
-                    <td class="px-4 py-3.5 hidden md:table-cell">
-                        <p class="text-sm font-semibold text-[#7A3F91]">{{ $job['salary'] ?: '—' }}</p>
-                    </td>
+                    <td class="px-4 py-3.5 hidden md:table-cell"><p class="text-sm font-semibold text-[#7A3F91]">{{ $job['salary'] ?: '—' }}</p></td>
                     <td class="px-4 py-3.5 text-center">
                         @if($isActive)
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-emerald-700 bg-emerald-50 border-emerald-200">
-                                <i class="fas fa-circle text-[8px]"></i> Active
-                            </span>
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-emerald-700 bg-emerald-50 border-emerald-200"><i class="fas fa-circle text-[8px]"></i> Active</span>
                         @else
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-amber-700 bg-amber-50 border-amber-200">
-                                <i class="fas fa-circle text-[8px]"></i> Inactive
-                            </span>
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-amber-700 bg-amber-50 border-amber-200"><i class="fas fa-circle text-[8px]"></i> Inactive</span>
                         @endif
                     </td>
                     <td class="px-4 py-3.5 text-center">
                         <p class="text-xs font-semibold {{ $isUrgent ? 'text-red-600' : 'text-gray-500' }}">
-                            <i class="fas fa-{{ $isUrgent ? 'fire' : 'calendar' }} text-xs mr-0.5"></i>
-                            {{ $job['deadline'] }}
+                            <i class="fas fa-{{ $isUrgent ? 'fire' : 'calendar' }} text-xs mr-0.5"></i>{{ $job['deadline'] }}
                         </p>
-                        @if($isUrgent)
-                        <p class="text-xs text-red-400 font-normal mt-0.5">{{ $job['days_left'] }}d left</p>
-                        @endif
+                        @if($isUrgent)<p class="text-xs text-red-400 font-normal mt-0.5">{{ $job['days_left'] }}d left</p>@endif
                     </td>
                 </tr>
                 @empty
@@ -1317,22 +1437,19 @@ new class extends Component {
         </p>
         @if($jobLastPage > 1)
         <div class="flex items-center gap-1.5">
-            <button wire:click="jobPrevPage"
-                    {{ $jobSafePage <= 1 ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="jobPrevPage" {{ $jobSafePage <= 1 ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-left text-xs"></i>
             </button>
             @for($p = max(1, $jobSafePage - 2); $p <= min($jobLastPage, $jobSafePage + 2); $p++)
                 @if($p === $jobSafePage)
-                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold border-[1.5px] bg-white text-[#7A3F91] border-white">{{ $p }}</span>
+                    <span class="org-pg-btn org-pg-active">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('jobModalPage', {{ $p }})"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91]">{{ $p }}</button>
+                    <button wire:click="$set('jobModalPage', {{ $p }})" class="org-pg-btn org-pg-nav">{{ $p }}</button>
                 @endif
             @endfor
-            <button wire:click="jobNextPage({{ $jobLastPage }})"
-                    {{ $jobSafePage >= $jobLastPage ? 'disabled' : '' }}
-                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold transition-all border-[1.5px] border-[#d9c9e8] bg-white text-[#7A3F91] hover:bg-[#f9f7fc] hover:border-[#7A3F91] disabled:opacity-40 disabled:cursor-not-allowed">
+            <button wire:click="jobNextPage({{ $jobLastPage }})" {{ $jobSafePage >= $jobLastPage ? 'disabled' : '' }}
+                    class="org-pg-btn org-pg-nav">
                 <i class="fas fa-chevron-right text-xs"></i>
             </button>
             <span class="text-xs font-semibold text-white/80 ml-1">Page {{ $jobSafePage }}/{{ $jobLastPage }}</span>
@@ -1341,5 +1458,54 @@ new class extends Component {
     </div>
 </div>
 @endif
+
+
+{{-- ══ Cursor-following tooltip script ══ --}}
+<script>
+(function () {
+    'use strict';
+
+    if (window._orgCursorTipBound) return;
+    window._orgCursorTipBound = true;
+
+    function getTip() {
+        return document.getElementById('org-float-tip');
+    }
+
+    document.addEventListener('mousemove', function (e) {
+        var tip = getTip();
+        if (tip && tip._ctipVisible) {
+            tip.style.left = e.clientX + 'px';
+            tip.style.top  = e.clientY + 'px';
+        }
+    });
+
+    document.addEventListener('mouseover', function (e) {
+        var el = e.target.closest('[data-ctip]');
+        if (!el) return;
+        var tip = getTip();
+        if (!tip) return;
+        tip.textContent   = el.getAttribute('data-ctip');
+        tip._ctipVisible  = true;
+        tip.style.opacity = '1';
+    });
+
+    document.addEventListener('mouseout', function (e) {
+        var el = e.target.closest('[data-ctip]');
+        if (!el) return;
+        var related = e.relatedTarget;
+        if (related && el.contains(related)) return;
+        var tip = getTip();
+        if (!tip) return;
+        tip._ctipVisible  = false;
+        tip.style.opacity = '0';
+    });
+
+    document.addEventListener('livewire:navigating', function () {
+        var tip = getTip();
+        if (tip) { tip._ctipVisible = false; tip.style.opacity = '0'; }
+    });
+})();
+</script>
 
 </div>{{-- end single Livewire root --}}

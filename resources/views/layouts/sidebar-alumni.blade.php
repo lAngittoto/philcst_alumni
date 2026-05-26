@@ -52,7 +52,6 @@
         }
         .notif-item:hover .notif-hover-label { opacity: 1; }
 
-        /* ── Close button with overlay tooltip ── */
         .notif-close-btn {
             position: relative;
             width: 28px;
@@ -102,10 +101,6 @@
             right: 8px;
             border: 5px solid transparent;
             border-bottom-color: rgba(0,0,0,0.88);
-        }
-        .notif-close-btn:hover .close-tooltip {
-            opacity: 1;
-            transform: translateY(0);
         }
     </style>
 
@@ -293,18 +288,22 @@
         label.style.top  = (e.clientY + 14) + 'px';
     });
 
+    /* ─────────────────────────────────────────────────────────────────────────
+       NOTIFICATION EVENT LISTENERS
+    ───────────────────────────────────────────────────────────────────────── */
     if (!window.__philcstAlumniNotifListeners) {
         window.__philcstAlumniNotifListeners = true;
 
         function _alumniDetail(e) {
             var d = e.detail;
             if (!d) return {};
-            return Array.isArray(d) ? (d[0] || {}) : d;
+            if (!Array.isArray(d)) return d;
+            return d[0] || {};
         }
 
         async function _saveAlumniNotif(payload) {
             try {
-                await window.fetch('/alumni/notifications', {
+                var res = await window.fetch('/alumni/notifications', {
                     method: 'POST',
                     headers: {
                         'Content-Type':     'application/json',
@@ -323,6 +322,7 @@
             } catch (e) { /* ignore */ }
         }
 
+        /* ── Profile Updated ── */
         window.addEventListener('profile-updated', function (e) {
             _saveAlumniNotif({
                 icon:       'user-circle',
@@ -334,17 +334,11 @@
             });
         });
 
-        window.addEventListener('employment-submitted', function () {
-            _saveAlumniNotif({
-                icon:       'chart-line',
-                title:      'Employment Record Submitted',
-                message:    'Your employment record has been submitted and is pending review.',
-                link_route: 'alumni.employment',
-                link_label: 'View Employment',
-                dedup_key:  'employment-submitted',
-            });
-        });
+        /* ── Employment: intentionally omitted ──
+           Livewire's saveAlumniNotification() writes these server-side.
+           A JS listener here would double-write every time. */
 
+        /* ── Event Announced ── */
         window.addEventListener('event-announced', function (e) {
             var d = _alumniDetail(e);
             _saveAlumniNotif({
@@ -358,16 +352,52 @@
             });
         });
 
+        /* ── Message Received (FALLBACK only) ──────────────────────────────────
+           The messenger component now writes message notifications DIRECTLY to
+           the DB server-side via checkAndDispatchNewMessageNotifications().
+           This listener only fires when the DB write fails (the PHP catch block
+           dispatches 'message-received' as a fallback). In normal operation the
+           server-side write succeeds and only 'alumni-notif-refresh' is fired.
+        ────────────────────────────────────────────────────────────────────── */
         window.addEventListener('message-received', function (e) {
             var d = _alumniDetail(e);
+
+            var sender = d.sender || 'Someone';
+            var room   = d.room   || 'Group Chat';
+            var body   = d.body   || '';
+            var count  = Number(d.count) || 1;
+
+            var msgText = count > 1
+                ? sender + ' and others sent ' + count + ' new messages in ' + room + '.'
+                : sender + ' sent a message in ' + room +
+                  (body ? ': "' + body.substring(0, 50) + (body.length > 50 ? '…' : '') + '"' : '.');
+
             _saveAlumniNotif({
                 icon:       'comments',
-                title:      'New Message',
-                message:    (d.sender || 'Someone') + ' sent you a message.',
+                title:      count > 1 ? count + ' New Messages' : 'New Message',
+                message:    msgText,
                 link_route: 'alumni.messenger',
-                link_label: 'View Messages',
-                dedup_key:  'message-received::' + (d.sender || ''),
+                link_label: 'Open Messenger',
+                dedup_key:  'message-received::' + sender + '::' + room + '::' + Math.floor(Date.now() / 60000),
             });
+        });
+
+        /* ── alumni-notif-refresh ───────────────────────────────────────────────
+           Fired by the messenger component after it successfully writes a message
+           notification to the DB server-side. Just re-fetches the store so the
+           bell badge and panel update immediately — no double-write.
+        ────────────────────────────────────────────────────────────────────── */
+        window.addEventListener('alumni-notif-refresh', function () {
+            var s = window.__safeAlumniNotifsStore();
+            if (s) {
+                s._fetch();
+                /* Second fetch after a short delay handles race conditions where
+                   the DB write hasn't fully committed when the first fetch fires. */
+                setTimeout(function () {
+                    var s2 = window.__safeAlumniNotifsStore();
+                    if (s2) s2._fetch();
+                }, 800);
+            }
         });
     }
     </script>
@@ -619,7 +649,6 @@
             </span>
         </div>
         <div class="flex items-center gap-1">
-            {{-- Mark all read --}}
             <button type="button"
                     x-show="$store.alumniNotifs && $store.alumniNotifs.unread > 0"
                     x-cloak
@@ -630,7 +659,6 @@
                 Mark all read
             </button>
 
-            {{-- ── Close button with black overlay tooltip ── --}}
             <button
                 type="button"
                 @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
@@ -707,6 +735,7 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
+                                {{-- Job badge --}}
                                 <span
                                     x-show="notif.icon === 'briefcase' && !notif.read"
                                     x-cloak
@@ -716,6 +745,7 @@
                                     NEW JOB
                                 </span>
 
+                                {{-- Event badge --}}
                                 <span
                                     x-show="(notif.icon === 'calendar' || notif.icon === 'circle-check') && !notif.read"
                                     x-cloak
@@ -723,6 +753,26 @@
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#059669,#047857);">
                                     NEW EVENT
+                                </span>
+
+                                {{-- Employment badge --}}
+                                <span
+                                    x-show="notif.icon === 'chart-line' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    EMPLOYMENT
+                                </span>
+
+                                {{-- Message badge --}}
+                                <span
+                                    x-show="notif.icon === 'comments' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                    NEW MSG
                                 </span>
                             </div>
 

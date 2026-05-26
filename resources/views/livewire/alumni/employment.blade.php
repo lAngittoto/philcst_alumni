@@ -45,8 +45,8 @@ new class extends Component {
     public string $unemployment_status = '';
     public string $education_status    = '';
 
-    protected array $snapshot = [];
-
+    public array $snapshot = [];
+    
     private const SNAP_KEYS = [
         'employment_status', 'company_name', 'job_title', 'custom_job_title',
         'employment_type', 'work_location', 'career_path', 'education_status',
@@ -300,28 +300,128 @@ new class extends Component {
         };
     }
 
+    protected function hasChanged(): bool
+    {
+        if (empty($this->snapshot)) return true;
+        $isOther  = ($this->job_title === 'Other');
+        $finalJob = $isOther ? $this->custom_job_title : $this->job_title;
+        $snapJob  = $this->snapshot['job_title'] === 'Other'
+            ? ($this->snapshot['custom_job_title'] ?? '')
+            : ($this->snapshot['job_title'] ?? '');
+
+        $current = [
+            'employment_status'   => $this->employment_status,
+            'company_name'        => strtoupper(trim($this->company_name)),
+            'job_title'           => $finalJob,
+            'employment_type'     => $this->employment_type,
+            'work_location'       => $this->work_location,
+            'career_path'         => $this->career_path,
+            'education_status'    => $this->education_status,
+            'course_relevance'    => $this->course_relevance,
+            'unemployment_status' => $this->unemployment_status,
+        ];
+        $snap = [
+            'employment_status'   => $this->snapshot['employment_status']   ?? '',
+            'company_name'        => strtoupper(trim($this->snapshot['company_name'] ?? '')),
+            'job_title'           => $snapJob,
+            'employment_type'     => $this->snapshot['employment_type']     ?? '',
+            'work_location'       => $this->snapshot['work_location']       ?? '',
+            'career_path'         => $this->snapshot['career_path']         ?? [],
+            'education_status'    => $this->snapshot['education_status']    ?? '',
+            'course_relevance'    => $this->snapshot['course_relevance']    ?? '',
+            'unemployment_status' => $this->snapshot['unemployment_status'] ?? '',
+        ];
+        sort($current['career_path']);
+        sort($snap['career_path']);
+        return $current !== $snap;
+    }
+
+    // ── FIXED: upsert alumni notification — same dedup_key today → increment count ──
+    protected function saveAlumniNotification(array $payload): void
+    {
+        try {
+            $today    = now()->toDateString();
+            $existing = DB::table('alumni_notifications')
+                ->where('alumni_id', $this->alumniId)
+                ->where('dedup_key', $payload['dedup_key'])
+                ->whereDate('created_at', $today)
+                ->first();
+
+            if ($existing) {
+                DB::table('alumni_notifications')
+                    ->where('id', $existing->id)
+                    ->update([
+                        'count'      => DB::raw('count + 1'),
+                        'read'       => false,
+                        'message'    => $payload['message'],
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                DB::table('alumni_notifications')->insert([
+                    'alumni_id'  => $this->alumniId,
+                    'icon'       => $payload['icon'],
+                    'title'      => $payload['title'],
+                    'message'    => $payload['message'],
+                    'link_route' => $payload['link_route'],
+                    'link_label' => $payload['link_label'],
+                    'dedup_key'  => $payload['dedup_key'],
+                    'read'       => false,
+                    'count'      => 1,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Alumni notification upsert failed: ' . $e->getMessage());
+        }
+    }
+
+    // ── FIXED: same dedup per-day for registrar too ──
     protected function saveRegistrarNotification(array $payload): void
     {
         try {
-            DB::table('registrar_notifications')->insert([
-                'icon'       => $payload['icon'],
-                'title'      => $payload['title'],
-                'message'    => $payload['message'],
-                'link_route' => $payload['link_route'],
-                'link_label' => $payload['link_label'],
-                'dedup_key'  => $payload['dedup_key'],
-                'read'       => false,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $today    = now()->toDateString();
+            $existing = DB::table('registrar_notifications')
+                ->where('dedup_key', $payload['dedup_key'])
+                ->whereDate('created_at', $today)
+                ->first();
+
+            if ($existing) {
+                DB::table('registrar_notifications')
+                    ->where('id', $existing->id)
+                    ->update([
+                        'read'       => false,
+                        'message'    => $payload['message'],
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                DB::table('registrar_notifications')->insert([
+                    'icon'       => $payload['icon'],
+                    'title'      => $payload['title'],
+                    'message'    => $payload['message'],
+                    'link_route' => $payload['link_route'],
+                    'link_label' => $payload['link_label'],
+                    'dedup_key'  => $payload['dedup_key'],
+                    'read'       => false,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         } catch (\Throwable $e) {
-            Log::warning('Registrar notification insert failed: ' . $e->getMessage());
+            Log::warning('Registrar notification upsert failed: ' . $e->getMessage());
         }
     }
 
     public function saveEmployment(): void
     {
         $this->errorMessage = $this->successMessage = '';
+
+        // ── No-change guard (only for existing records) ──────────────────────
+        if ($this->trackingId !== 0 && !$this->hasChanged()) {
+            $this->dispatch('show-emp-toast', type: 'error', message: 'No changes were made. Please edit a field before saving.');
+            return;
+        }
+
         $this->company_name = strtoupper(trim($this->company_name));
         $isOther = ($this->job_title === 'Other');
         if ($isOther) {
@@ -397,15 +497,57 @@ new class extends Component {
 
             $alumni = \App\Models\Alumni::find($this->alumniId);
             $name = trim(($alumni->first_name ?? '') . ' ' . ($alumni->last_name ?? ''));
+
             if ($isNew) {
-                $this->saveRegistrarNotification(['icon'=>'briefcase','title'=>'New Employment Record','message'=>$name.' submitted a new employment record as '.$this->statusLabel($this->employment_status).'.','link_route'=>'registrar.employment.tracking','link_label'=>'View Tracking','dedup_key'=>'recorded::'.$this->employment_status]);
+                $this->saveRegistrarNotification([
+                    'icon'       => 'briefcase',
+                    'title'      => 'New Employment Record',
+                    'message'    => $name . ' submitted a new employment record as ' . $this->statusLabel($this->employment_status) . '.',
+                    'link_route' => 'registrar.employment.tracking',
+                    'link_label' => 'View Tracking',
+                    'dedup_key'  => 'recorded::' . $this->alumniId . '::' . $this->employment_status,
+                ]);
             } else {
                 $from = $oldStatus ? ' from ' . $this->statusLabel($oldStatus) : '';
-                $this->saveRegistrarNotification(['icon'=>'arrow-rotate-right','title'=>'Employment Status Updated','message'=>$name.' updated their employment status'.$from.' to '.$this->statusLabel($this->employment_status).'.','link_route'=>'registrar.employment.tracking','link_label'=>'View Tracking','dedup_key'=>'updated::'.$this->employment_status]);
+                $this->saveRegistrarNotification([
+                    'icon'       => 'arrow-rotate-right',
+                    'title'      => 'Employment Status Updated',
+                    'message'    => $name . ' updated their employment status' . $from . ' to ' . $this->statusLabel($this->employment_status) . '.',
+                    'link_route' => 'registrar.employment.tracking',
+                    'link_label' => 'View Tracking',
+                    'dedup_key'  => 'updated::' . $this->alumniId . '::' . $this->employment_status,
+                ]);
             }
 
             $this->dispatch('show-emp-toast', type: 'success', message: $this->successMessage);
 
+            $statusStr = $this->statusLabel($this->employment_status);
+            $fromStr   = $oldStatus ? $this->statusLabel($oldStatus) : '';
+
+            if ($isNew) {
+                $this->saveAlumniNotification([
+                    'icon'       => 'chart-line',
+                    'title'      => 'Employment Record Submitted',
+                    'message'    => 'Your employment record has been submitted successfully'
+                                   . ($statusStr ? ' as ' . $statusStr : '') . '. Pending admin review.',
+                    'link_route' => 'alumni.employment',
+                    'link_label' => 'View Employment',
+                    'dedup_key'  => 'employment-submitted',
+                ]);
+            } else {
+                $this->saveAlumniNotification([
+                    'icon'       => 'chart-line',
+                    'title'      => 'Employment Status Updated',
+                    'message'    => 'Your employment status has been updated'
+                                   . ($fromStr   ? ' from ' . $fromStr   : '')
+                                   . ($statusStr ? ' to '   . $statusStr : '') . '.',
+                    'link_route' => 'alumni.employment',
+                    'link_label' => 'View Employment',
+                    'dedup_key'  => 'employment-updated::' . $this->employment_status,
+                ]);
+            }
+
+            $this->dispatch('refresh-alumni-notifs');
             $this->loadRecords();
             Log::info("Employment saved | alumni_id:{$this->alumniId} | status:{$this->employment_status}");
         } catch (\Throwable $e) {
@@ -420,7 +562,6 @@ new class extends Component {
 
 {{-- ── TOAST ── --}}
 <style>
-/* ── Tooltip ── */
 .emp-tooltip {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -449,11 +590,9 @@ new class extends Component {
 }
 .emp-btn-group:hover .emp-tooltip { opacity: 1; }
 
-/* ── Spinner ── */
 @keyframes emp-spin { to { transform: rotate(360deg); } }
 .emp-spin { animation: emp-spin .7s linear infinite; }
 
-/* ── Toast ── */
 #emp-toast {
     position: fixed;
     top: 20px;
@@ -552,6 +691,11 @@ new class extends Component {
 document.addEventListener('livewire:initialized', () => {
     Livewire.on('show-emp-toast', ({ type, message }) => {
         window.showEmpToast(type, message);
+    });
+
+    Livewire.on('refresh-alumni-notifs', () => {
+        const s = window.__safeAlumniNotifsStore ? window.__safeAlumniNotifsStore() : null;
+        if (s) s._fetch();
     });
 });
 </script>
@@ -861,14 +1005,18 @@ document.addEventListener('livewire:initialized', () => {
 @if($currentRecord)
 @php
     $statusRaw = $currentRecord['employment_status_raw'] ?? '';
-    $statusBadge = match($statusRaw) {
-        'employed'      => ['bg' => 'bg-gray-100', 'border' => 'border-gray-300', 'text' => 'text-gray-800', 'dot' => 'bg-gray-700', 'icon' => 'fa-briefcase'],
-        'self_employed' => ['bg' => 'bg-gray-100', 'border' => 'border-gray-300', 'text' => 'text-gray-800', 'dot' => 'bg-gray-700', 'icon' => 'fa-store'],
-        'unemployed'    => ['bg' => 'bg-gray-100', 'border' => 'border-gray-300', 'text' => 'text-gray-800', 'dot' => 'bg-gray-400', 'icon' => 'fa-circle-xmark'],
-        default         => ['bg' => 'bg-gray-50',  'border' => 'border-gray-300', 'text' => 'text-gray-700', 'dot' => 'bg-gray-400', 'icon' => 'fa-circle-question'],
+    $statusDot = match($statusRaw) {
+        'employed'      => 'bg-gray-700',
+        'self_employed' => 'bg-gray-700',
+        'unemployed'    => 'bg-gray-400',
+        default         => 'bg-gray-400',
     };
-    $relRaw = $currentRecord['course_relevance_raw'] ?? '';
-    $relBadge = ['bg' => 'bg-gray-100', 'border' => 'border-gray-300', 'text' => 'text-gray-800'];
+    $statusIcon = match($statusRaw) {
+        'employed'      => 'fa-briefcase',
+        'self_employed' => 'fa-store',
+        'unemployed'    => 'fa-circle-xmark',
+        default         => 'fa-circle-question',
+    };
 @endphp
 <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
     <div class="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between gap-2">
@@ -879,11 +1027,7 @@ document.addEventListener('livewire:initialized', () => {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Employment Status</span>
-                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-bold border {{ $statusBadge['bg'] }} {{ $statusBadge['border'] }} {{ $statusBadge['text'] }}">
-                    <span class="w-2 h-2 rounded-full flex-shrink-0 {{ $statusBadge['dot'] }}"></span>
-                    <i class="fa-solid {{ $statusBadge['icon'] }} text-xs"></i>
-                    {{ $currentRecord['employment_status'] }}
-                </span>
+                <p class="text-base font-semibold text-gray-900">{{ $currentRecord['employment_status'] }}</p>
             </div>
             <div>
                 <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Further Education</span>
@@ -917,26 +1061,14 @@ document.addEventListener('livewire:initialized', () => {
                     <p class="text-base font-semibold text-gray-900">{{ $currentRecord['work_location'] ?: '—' }}</p>
                 </div>
                 <div>
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Course Relevance</span>
-                    @if($currentRecord['course_relevance'])
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $relBadge['bg'] }} {{ $relBadge['border'] }} {{ $relBadge['text'] }}">
-                        {{ $currentRecord['course_relevance'] }}
-                    </span>
-                    @else
-                    <p class="text-base font-semibold text-gray-900">—</p>
-                    @endif
+                    <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Course Relevance</span>
+                    <p class="text-base font-semibold text-gray-900">{{ $currentRecord['course_relevance'] ?: '—' }}</p>
                 </div>
             </div>
             @if(!empty($currentRecord['career_path_labels']))
             <div>
                 <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Career Path</span>
-                <div class="flex flex-wrap gap-1.5 mt-1">
-                    @foreach($currentRecord['career_path_labels'] as $cp)
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-gray-100 border border-gray-300 text-gray-800">
-                        {{ $cp }}
-                    </span>
-                    @endforeach
-                </div>
+                <p class="text-base font-semibold text-gray-900">{{ implode(', ', $currentRecord['career_path_labels']) }}</p>
             </div>
             @endif
         </div>
@@ -1002,15 +1134,16 @@ document.addEventListener('livewire:initialized', () => {
                 @if($currentRecord)
                 @php
                     $mStatusRaw = $currentRecord['employment_status_raw'] ?? '';
-                    $mBadge = ['bg'=>'bg-gray-100','border'=>'border-gray-300','text'=>'text-gray-800','dot'=>'bg-gray-700'];
-                    $mRelBadge = ['bg'=>'bg-gray-100','border'=>'border-gray-200','text'=>'text-gray-800'];
+                    $mDot = match($mStatusRaw) {
+                        'employed','self_employed' => 'bg-gray-700',
+                        default => 'bg-gray-400',
+                    };
                 @endphp
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div class="bg-gray-50 rounded-xl p-4">
                             <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Status</span>
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $mBadge['bg'] }} {{ $mBadge['border'] }} {{ $mBadge['text'] }}">
-                                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ $mBadge['dot'] }}"></span>
+                            <span class="text-sm font-bold text-gray-900">
                                 {{ $currentRecord['employment_status'] }}
                             </span>
                         </div>
@@ -1039,24 +1172,14 @@ document.addEventListener('livewire:initialized', () => {
                                 <p class="text-sm font-bold text-gray-900">{{ $currentRecord['work_location'] ?: '—' }}</p>
                             </div>
                             <div>
-                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Relevance</span>
-                                @if($currentRecord['course_relevance'])
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border {{ $mRelBadge['bg'] }} {{ $mRelBadge['border'] }} {{ $mRelBadge['text'] }}">
-                                    {{ $currentRecord['course_relevance'] }}
-                                </span>
-                                @else
-                                <p class="text-sm font-bold text-gray-900">—</p>
-                                @endif
+                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Relevance</span>
+                                <p class="text-sm font-bold text-gray-900">{{ $currentRecord['course_relevance'] ?: '—' }}</p>
                             </div>
                         </div>
                         @if(!empty($currentRecord['career_path_labels']))
                         <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Career Path</span>
-                            <div class="flex flex-wrap gap-1.5">
-                                @foreach($currentRecord['career_path_labels'] as $cp)
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 border border-gray-300 text-gray-800">{{ $cp }}</span>
-                                @endforeach
-                            </div>
+                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Career Path</span>
+                            <p class="text-sm font-bold text-gray-900">{{ implode(', ', $currentRecord['career_path_labels']) }}</p>
                         </div>
                         @endif
                     </div>
@@ -1075,15 +1198,17 @@ document.addEventListener('livewire:initialized', () => {
             <div x-show="cvTab === 'previous'">
                 @if($previousRecord)
                 @php
-                    $pBadge = ['bg'=>'bg-gray-100','border'=>'border-gray-300','text'=>'text-gray-800','dot'=>'bg-gray-700'];
-                    $pRelBadge = ['bg'=>'bg-gray-100','border'=>'border-gray-200','text'=>'text-gray-800'];
+                    $pStatusRaw = $previousRecord['employment_status_raw'] ?? '';
+                    $pDot = match($pStatusRaw) {
+                        'employed','self_employed' => 'bg-gray-700',
+                        default => 'bg-gray-400',
+                    };
                 @endphp
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div class="bg-gray-50 rounded-xl p-4">
                             <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Status</span>
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $pBadge['bg'] }} {{ $pBadge['border'] }} {{ $pBadge['text'] }}">
-                                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ $pBadge['dot'] }}"></span>
+                            <span class="text-sm font-bold text-gray-900">
                                 {{ $previousRecord['employment_status'] }}
                             </span>
                         </div>
@@ -1112,24 +1237,14 @@ document.addEventListener('livewire:initialized', () => {
                                 <p class="text-sm font-bold text-gray-900">{{ $previousRecord['work_location'] ?: '—' }}</p>
                             </div>
                             <div>
-                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Relevance</span>
-                                @if($previousRecord['course_relevance'])
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border {{ $pRelBadge['bg'] }} {{ $pRelBadge['border'] }} {{ $pRelBadge['text'] }}">
-                                    {{ $previousRecord['course_relevance'] }}
-                                </span>
-                                @else
-                                <p class="text-sm font-bold text-gray-900">—</p>
-                                @endif
+                                <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Relevance</span>
+                                <p class="text-sm font-bold text-gray-900">{{ $previousRecord['course_relevance'] ?: '—' }}</p>
                             </div>
                         </div>
                         @if(!empty($previousRecord['career_path_labels']))
                         <div>
-                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Career Path</span>
-                            <div class="flex flex-wrap gap-1.5">
-                                @foreach($previousRecord['career_path_labels'] as $cp)
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 border border-gray-300 text-gray-800">{{ $cp }}</span>
-                                @endforeach
-                            </div>
+                            <span class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Career Path</span>
+                            <p class="text-sm font-bold text-gray-900">{{ implode(', ', $previousRecord['career_path_labels']) }}</p>
                         </div>
                         @endif
                     </div>

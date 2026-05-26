@@ -51,8 +51,16 @@ new class extends Component {
     public string $alumniBatch     = '';
     public string $alumniCollege   = '';
 
-    // which message has its toolbar open (click-toggle)
     public ?int $openToolbarMsgId = null;
+
+    // ── Tracks last seen message IDs per room (for read/unread UI) ────────────
+    public array $lastSeenMessageIds = [];
+
+    // ── Tracks last NOTIFIED message IDs per room (for bell notifications) ───
+    // Completely separate from lastSeenMessageIds.
+    // Only advanced by: sendMessage() and checkAndDispatchNewMessageNotifications().
+    // NOT advanced by selectRoom() — so notifications fire even for the active room.
+    public array $lastNotifiedMessageIds = [];
 
     private function lastReadCacheKey(int $roomId): string
     {
@@ -139,10 +147,25 @@ new class extends Component {
         $this->ensureRoomsExist();
         $this->pingPresence();
         $this->loadRooms();
+        $this->seedLastSeenMessageIds();
 
         $batchRoom = collect($this->rooms)->firstWhere('type', 'batch');
         if ($batchRoom) $this->selectRoom($batchRoom['id']);
         elseif (! empty($this->rooms)) $this->selectRoom($this->rooms[0]['id']);
+    }
+
+    private function seedLastSeenMessageIds(): void
+    {
+        foreach ($this->rooms as $r) {
+            $maxId = DB::table('chat_messages')
+                ->where('room_id', $r['id'])
+                ->whereNull('deleted_at')
+                ->max('id') ?? 0;
+            $this->lastSeenMessageIds[$r['id']]     = (int) $maxId;
+            // Initialize lastNotifiedMessageIds to current max so we only
+            // notify about messages that arrive AFTER the page loads.
+            $this->lastNotifiedMessageIds[$r['id']] = (int) $maxId;
+        }
     }
 
     protected function ensureRoomsExist(): void
@@ -238,7 +261,6 @@ new class extends Component {
             }
             $total  = (clone $baseQ)->count();
             $online = (clone $baseQ)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
-            $unread = ($r->id !== $self->roomId) ? $self->getUnreadCount($r->id) : 0;
 
             return [
                 'id'            => $r->id,
@@ -252,7 +274,6 @@ new class extends Component {
                 'latest_time'   => $latestTime,
                 'total_count'   => $total,
                 'online_count'  => $online,
-                'unread_count'  => $unread,
                 'is_active'     => $r->id === $self->roomId,
             ];
         })
@@ -286,9 +307,18 @@ new class extends Component {
         $this->openToolbarMsgId    = null;
 
         foreach ($this->rooms as &$r) {
-            $r['is_active']  = $r['id'] === $id;
-            if ($r['id'] === $id) $r['unread_count'] = 0;
+            $r['is_active'] = $r['id'] === $id;
         }
+
+        $maxId = DB::table('chat_messages')
+            ->where('room_id', $id)
+            ->whereNull('deleted_at')
+            ->max('id') ?? 0;
+
+        // Only advance lastSeenMessageIds (for unread badge UI).
+        // Do NOT touch lastNotifiedMessageIds here — that would suppress
+        // bell notifications for messages arriving while in this room.
+        $this->lastSeenMessageIds[$id] = (int) $maxId;
 
         $this->markRoomAsRead($id);
         $this->refreshOnlineCount();
@@ -321,6 +351,93 @@ new class extends Component {
         $this->loadMessages();
         $this->loadTypingIndicators();
         if ($this->roomId) $this->markRoomAsRead($this->roomId);
+
+        $this->checkAndDispatchNewMessageNotifications();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BUG FIX: Check ALL rooms INCLUDING the currently active room for new
+    // messages from others, then dispatch bell notifications.
+    //
+    // Key changes vs original:
+    //   1. We do NOT skip the active room — coordinator messages in your
+    //      current chat should still trigger the bell.
+    //   2. lastNotifiedMessageIds is NEVER reset by selectRoom(), so the
+    //      pointer only moves forward here and in sendMessage().
+    //   3. lastSeenMessageIds for the active room is still advanced (no
+    //      unread badge), but that does not affect notifications.
+    // ─────────────────────────────────────────────────────────────────────────
+    private function checkAndDispatchNewMessageNotifications(): void
+    {
+        foreach ($this->rooms as $room) {
+            $roomId = (int) $room['id'];
+
+            // Ensure the notification pointer is initialized for this room.
+            if (! isset($this->lastNotifiedMessageIds[$roomId])) {
+                $this->lastNotifiedMessageIds[$roomId] = (int) (
+                    DB::table('chat_messages')
+                        ->where('room_id', $roomId)
+                        ->whereNull('deleted_at')
+                        ->max('id') ?? 0
+                );
+                // Nothing new to notify on first initialization.
+                continue;
+            }
+
+            $lastKnown = (int) $this->lastNotifiedMessageIds[$roomId];
+
+            // Fetch new messages from others that arrived after our last check.
+            // This runs for ALL rooms, including the currently open one.
+            $newMessages = DB::table('chat_messages as m')
+                ->where('m.room_id', $roomId)
+                ->whereNull('m.deleted_at')
+                ->where('m.id', '>', $lastKnown)
+                ->where(function ($q) {
+                    // Exclude messages sent by this alumni themselves.
+                    $q->where('m.sender_type', '!=', 'alumni')
+                      ->orWhere('m.sender_id', '!=', $this->alumniId);
+                })
+                ->orderBy('m.id')
+                ->get(['m.id', 'm.sender_type', 'm.sender_id', 'm.body'])
+                ->toArray();
+
+            if (empty($newMessages)) continue;
+
+            // Advance the notification pointer BEFORE dispatching so a second
+            // rapid poll doesn't re-fire the same notification.
+            $newMaxId = max(array_column($newMessages, 'id'));
+            $this->lastNotifiedMessageIds[$roomId] = (int) $newMaxId;
+
+            // Also advance lastSeenMessageIds for the CURRENT active room
+            // (user is looking at it, so mark as seen too).
+            if ($roomId === $this->roomId) {
+                $this->lastSeenMessageIds[$roomId] = (int) $newMaxId;
+            }
+
+            $latest     = end($newMessages);
+            $senderName = 'Someone';
+
+            if (in_array($latest->sender_type, ['organizer', 'coordinator'], true)) {
+                $firstName  = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
+                $senderName = ($firstName ?? 'Coordinator') . ' (Coordinator)';
+            } else {
+                $firstName  = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
+                $senderName = $firstName ?? 'Someone';
+            }
+
+            $roomName = $room['name'] ?? 'Group Chat';
+            $bodySnip = mb_substr($latest->body ?? '', 0, 60);
+            $count    = count($newMessages);
+
+            // Dispatch with named params → Livewire v3 puts them directly in
+            // e.detail (plain object), not wrapped in an array.
+            $this->dispatch('message-received',
+                sender: $senderName,
+                room:   $roomName,
+                body:   $bodySnip,
+                count:  $count,
+            );
+        }
     }
 
     public function refreshTyping(): void { $this->loadTypingIndicators(); }
@@ -519,6 +636,12 @@ new class extends Component {
         $this->openToolbarMsgId = null;
         $this->stopTyping();
         $this->markRoomAsRead($this->roomId);
+
+        // Advance BOTH pointers for the alumni's own sent message so we
+        // never generate a "New Message" notification for our own sends.
+        $this->lastSeenMessageIds[$this->roomId]     = (int) $msgId;
+        $this->lastNotifiedMessageIds[$this->roomId] = (int) $msgId;
+
         $this->loadMessages();
         $this->loadRooms();
         $this->dispatch('chat-scroll-bottom');
@@ -778,28 +901,24 @@ new class extends Component {
 
         <div class="flex-1 overflow-y-auto px-2 py-2 space-y-1 bg-white">
             @forelse($rooms as $r)
-            @php $hasUnread = ($r['unread_count'] ?? 0) > 0 && ! $r['is_active']; @endphp
             <button wire:click="selectRoom({{ $r['id'] }})"
                     class="w-full text-left rounded-xl px-3 py-3 transition-all border
-                           {{ $r['is_active'] ? 'border-[#d9c9e8] bg-[#f3eef8]' : ($hasUnread ? 'border-[#e2cff0] bg-[#fdf9ff] hover:bg-[#f9f0ff]' : 'border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]') }}">
+                           {{ $r['is_active']
+                               ? 'border-[#d9c9e8] bg-[#f3eef8]'
+                               : 'border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]' }}">
                 <div class="flex items-start gap-2.5">
-                    <div class="relative w-10 h-10 flex-shrink-0">
-                        <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm {{ $r['type']==='college' ? 'bg-[#7a3f91]' : ($r['is_active'] ? 'bg-[#7a3f91]' : 'bg-[#c4a8d4]') }}">
-                            <i class="fa-solid {{ $r['type']==='college' ? 'fa-school' : 'fa-users' }}"></i>
-                        </div>
-                        @if($hasUnread)
-                        <span class="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full bg-red-500 border-2 border-white flex items-center justify-center px-1">
-                            <span class="text-white text-[9px] font-black leading-none">{{ $r['unread_count'] > 9 ? '9+' : $r['unread_count'] }}</span>
-                        </span>
-                        @endif
+                    <div class="w-10 h-10 flex-shrink-0 rounded-xl flex items-center justify-center text-white text-sm
+                                {{ $r['type']==='college' ? 'bg-[#7a3f91]' : ($r['is_active'] ? 'bg-[#7a3f91]' : 'bg-[#c4a8d4]') }}">
+                        <i class="fa-solid {{ $r['type']==='college' ? 'fa-school' : 'fa-users' }}"></i>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-start justify-between gap-1">
-                            <p class="text-sm leading-tight truncate {{ $hasUnread ? 'font-extrabold text-[#111]' : ($r['is_active'] ? 'font-semibold text-[#7a3f91]' : 'font-semibold text-[#333333]') }}">
+                            <p class="text-sm leading-tight truncate
+                                      {{ $r['is_active'] ? 'font-semibold text-[#7a3f91]' : 'font-semibold text-[#333333]' }}">
                                 {{ $r['type']==='college' ? $r['department'] : $r['name'] }}
                             </p>
                             @if($r['latest_time'])
-                            <span class="text-xs flex-shrink-0 mt-0.5 {{ $hasUnread ? 'font-bold text-[#7a3f91]' : 'font-semibold text-[#999999]' }}">{{ $r['latest_time'] }}</span>
+                            <span class="text-xs flex-shrink-0 mt-0.5 font-semibold text-[#999999]">{{ $r['latest_time'] }}</span>
                             @endif
                         </div>
                         <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
@@ -812,7 +931,7 @@ new class extends Component {
                             @endif
                         </div>
                         @if($r['latest_body'])
-                        <p class="text-xs truncate leading-tight {{ $hasUnread ? 'font-semibold text-[#222]' : 'text-[#666666]' }}">
+                        <p class="text-xs truncate leading-tight text-[#666666]">
                             @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span> @endif
                             {{ Str::limit($r['latest_body'], 34) }}
                         </p>
@@ -959,7 +1078,6 @@ new class extends Component {
                                 <div class="relative">
 
                                     @if($editingId === $msg['id'])
-                                    {{-- Edit mode --}}
                                     <div class="flex flex-col gap-1.5 min-w-[220px]">
                                         <textarea wire:model="editBody" rows="2"
                                                   class="text-sm rounded-lg border border-[#7A3F91] px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/30 w-full bg-white shadow-sm"
@@ -972,7 +1090,6 @@ new class extends Component {
 
                                     @else
 
-                                    {{-- ── Message bubble ── --}}
                                     @php
                                         $safe = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
                                         $mentionClass = $msg['is_mine']
@@ -996,14 +1113,12 @@ new class extends Component {
                                         @endif
                                     </button>
 
-                                    {{-- ── TOOLBAR — shown when $toolbarOpen, floats ABOVE bubble ── --}}
                                     @if($toolbarOpen)
                                     <div class="absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} z-50
                                                 flex items-center gap-0.5 bg-white border border-[#D8CCE8] rounded-2xl
                                                 px-2 py-1.5 shadow-xl whitespace-nowrap"
                                          wire:click.stop>
 
-                                        {{-- ── Emoji reactions ── --}}
                                         @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'] as $rk => $re)
                                         <div class="relative group/tip" x-data>
                                             <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
@@ -1020,7 +1135,6 @@ new class extends Component {
 
                                         <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
-                                        {{-- Reply --}}
                                         <div class="relative group/tip" x-data>
                                             <button wire:click="setReply({{ $msg['id'] }})"
                                                     class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555]
@@ -1029,12 +1143,9 @@ new class extends Component {
                                             </button>
                                             <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
                                                          bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">
-                                                Reply
-                                            </span>
+                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">Reply</span>
                                         </div>
 
-                                        {{-- Pin / Unpin --}}
                                         <div class="relative group/tip" x-data>
                                             <button wire:click="togglePin({{ $msg['id'] }})"
                                                     class="w-8 h-8 flex items-center justify-center rounded-xl transition
@@ -1051,7 +1162,6 @@ new class extends Component {
                                         @if($msg['is_mine'])
                                         <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
-                                        {{-- Edit --}}
                                         <div class="relative group/tip" x-data>
                                             <button wire:click="startEdit({{ $msg['id'] }})"
                                                     class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555]
@@ -1060,12 +1170,9 @@ new class extends Component {
                                             </button>
                                             <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
                                                          bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">
-                                                Edit
-                                            </span>
+                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">Edit</span>
                                         </div>
 
-                                        {{-- Delete with confirm --}}
                                         <div x-data="{ confirmUnsend: false }" class="relative group/tip flex items-center">
                                             <button x-show="!confirmUnsend"
                                                     @click.stop="confirmUnsend = true"
@@ -1076,9 +1183,7 @@ new class extends Component {
                                             <span x-show="!confirmUnsend"
                                                   class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
                                                          bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">
-                                                Delete
-                                            </span>
+                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">Delete</span>
                                             <div x-show="confirmUnsend" class="flex items-center gap-1" @click.stop>
                                                 <span class="text-xs text-red-600 font-semibold px-1">Delete?</span>
                                                 <button wire:click="unsend({{ $msg['id'] }})"
@@ -1090,11 +1195,10 @@ new class extends Component {
                                         @endif
                                     </div>
                                     @endif
-                                    {{-- end toolbar --}}
 
-                                    @endif {{-- end editing check --}}
+                                    @endif
 
-                                    {{-- ── Reactions who-reacted popup (triggered by clicking reaction pills) ── --}}
+                                    {{-- Reactions popup --}}
                                     @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
                                     <div class="absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} z-50
                                                 bg-white border border-[#D0C0E0] rounded-2xl shadow-xl w-64 overflow-hidden"
@@ -1124,9 +1228,7 @@ new class extends Component {
                                                     <div class="flex-1 min-w-0">
                                                         <p class="text-xs font-semibold text-[#333333] truncate">
                                                             {{ $reactor['name'] }}
-                                                            @if($reactor['is_me'])
-                                                                <span class="text-[#7a3f91]"> (You)</span>
-                                                            @endif
+                                                            @if($reactor['is_me'])<span class="text-[#7a3f91]"> (You)</span>@endif
                                                         </p>
                                                         <p class="text-[10px] font-medium text-[#7a3f91]">{{ ucfirst($reactor['type']) }}</p>
                                                     </div>
@@ -1138,9 +1240,9 @@ new class extends Component {
                                     </div>
                                     @endif
 
-                                </div>{{-- end .relative wrapper --}}
+                                </div>
 
-                                {{-- Reaction pills below bubble — clicking opens who-reacted popup --}}
+                                {{-- Reaction pills --}}
                                 @if(! empty($msg['reactions']))
                                 <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk => $cnt)
@@ -1342,19 +1444,13 @@ new class extends Component {
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-[#333333] truncate">
                                         {{ $bm['name'] }}
-                                        @if($bm['is_me'])
-                                            <span class="text-xs font-medium text-[#7a3f91]"> (You)</span>
-                                        @endif
+                                        @if($bm['is_me'])<span class="text-xs font-medium text-[#7a3f91]"> (You)</span>@endif
                                     </p>
                                     <p class="text-xs font-medium text-emerald-600">
                                         Online
                                         @if($roomType === 'college')
-                                            @if($bm['course_code'])
-                                                <span class="text-[#7a3f91] ml-1">· {{ strtoupper($bm['course_code']) }}</span>
-                                            @endif
-                                            @if($bm['batch'])
-                                                <span class="text-[#999999] ml-1">Batch {{ $bm['batch'] }}</span>
-                                            @endif
+                                            @if($bm['course_code'])<span class="text-[#7a3f91] ml-1">· {{ strtoupper($bm['course_code']) }}</span>@endif
+                                            @if($bm['batch'])<span class="text-[#999999] ml-1">Batch {{ $bm['batch'] }}</span>@endif
                                         @endif
                                     </p>
                                 </div>
@@ -1378,19 +1474,13 @@ new class extends Component {
                                     <div class="flex-1 min-w-0">
                                         <p class="text-xs font-semibold text-[#666666] truncate">
                                             {{ $bm['name'] }}
-                                            @if($bm['is_me'])
-                                                <span class="text-xs font-medium text-[#7a3f91]"> (You)</span>
-                                            @endif
+                                            @if($bm['is_me'])<span class="text-xs font-medium text-[#7a3f91]"> (You)</span>@endif
                                         </p>
                                         <p class="text-xs font-medium text-[#999999]">
                                             {{ $bm['last_seen_fmt'] }}
                                             @if($roomType === 'college')
-                                                @if($bm['course_code'])
-                                                    <span class="ml-1">· {{ strtoupper($bm['course_code']) }}</span>
-                                                @endif
-                                                @if($bm['batch'])
-                                                    <span class="ml-1">Batch {{ $bm['batch'] }}</span>
-                                                @endif
+                                                @if($bm['course_code'])<span class="ml-1">· {{ strtoupper($bm['course_code']) }}</span>@endif
+                                                @if($bm['batch'])<span class="ml-1">Batch {{ $bm['batch'] }}</span>@endif
                                             @endif
                                         </p>
                                     </div>

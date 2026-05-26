@@ -1,4 +1,4 @@
-{{-- resources/views/livewire/coordinator/messenger.blade.php --}}
+{{-- resources/views/livewire/organizer/chat-alumni.blade.php --}}
 
 <?php
 
@@ -76,6 +76,9 @@ new class extends Component {
     public ?int  $reactionsPopupMsgId = null;
     public array $reactionsPopupData  = [];
 
+    // ── New-message watermark: [ roomId => lastSeenMaxId ] ────────────────
+    public array $lastSeenMessageIds = [];
+
     // ─────────────────────────────────────────────────────────────────────
     // Photo URL helper
     // ─────────────────────────────────────────────────────────────────────
@@ -129,8 +132,24 @@ new class extends Component {
         $this->pingPresence();
         $this->loadRooms();
 
+        $this->seedLastSeenMessageIds();
+
         if (! empty($this->rooms)) {
             $this->selectRoom($this->rooms[0]['id']);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Seed watermarks from current DB state
+    // ─────────────────────────────────────────────────────────────────────
+    private function seedLastSeenMessageIds(): void
+    {
+        foreach ($this->rooms as $r) {
+            $maxId = DB::table('chat_messages')
+                ->where('room_id', $r['id'])
+                ->whereNull('deleted_at')
+                ->max('id') ?? 0;
+            $this->lastSeenMessageIds[$r['id']] = (int) $maxId;
         }
     }
 
@@ -139,7 +158,6 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     protected function ensureRoomsExist(): void
     {
-        // Staff room
         try {
             if (! DB::table('chat_rooms')->where('course_code', '__director__')->exists()) {
                 DB::table('chat_rooms')->insert([
@@ -155,7 +173,6 @@ new class extends Component {
 
         if (empty($this->deptCourseCodes)) return;
 
-        // Batch rooms (batch > 0 only)
         try {
             $batches = DB::table('alumni')
                 ->whereIn('course_code', $this->deptCourseCodes)
@@ -184,7 +201,6 @@ new class extends Component {
             }
         } catch (\Throwable) {}
 
-        // Course GC rooms — batch = 0, one per course code
         try {
             foreach ($this->deptCourseCodes as $code) {
                 $exists = DB::table('chat_rooms')
@@ -193,7 +209,6 @@ new class extends Component {
                     ->exists();
 
                 if (! $exists) {
-                    $courseName = DB::table('courses')->where('code', $code)->value('name') ?? strtoupper($code);
                     DB::table('chat_rooms')->insert([
                         'name'        => strtoupper($code) . ' · All Batches',
                         'course_code' => $code,
@@ -225,9 +240,143 @@ new class extends Component {
         if ($this->showMembers && $this->isStaffRoom) {
             $this->loadStaffMembers();
         }
+
+        $this->checkAndDispatchNewMessageNotifications();
     }
 
     public function refreshTyping(): void { $this->loadTypingIndicators(); }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Detect new messages in background rooms → fire JS 'message-received'
+    // ─────────────────────────────────────────────────────────────────────
+    private function checkAndDispatchNewMessageNotifications(): void
+    {
+        foreach ($this->rooms as $room) {
+            $roomId = (int) $room['id'];
+
+            if ($roomId === $this->roomId) {
+                $maxId = DB::table('chat_messages')
+                    ->where('room_id', $roomId)
+                    ->whereNull('deleted_at')
+                    ->max('id') ?? 0;
+                $this->lastSeenMessageIds[$roomId] = (int) $maxId;
+                continue;
+            }
+
+            $lastKnown = (int) ($this->lastSeenMessageIds[$roomId] ?? 0);
+
+            $newMessages = DB::table('chat_messages as m')
+                ->where('m.room_id', $roomId)
+                ->whereNull('m.deleted_at')
+                ->where('m.id', '>', $lastKnown)
+                ->where(function ($q) {
+                    $q->where('m.sender_type', '!=', 'organizer')
+                      ->orWhere('m.sender_id', '!=', $this->coordinatorId);
+                })
+                ->orderBy('m.id')
+                ->get(['m.id', 'm.sender_type', 'm.sender_id', 'm.body'])
+                ->toArray();
+
+            if (empty($newMessages)) continue;
+
+            $newMaxId = max(array_column($newMessages, 'id'));
+            $this->lastSeenMessageIds[$roomId] = (int) $newMaxId;
+
+            $latest     = end($newMessages);
+            $senderName = 'Someone';
+
+            if ($latest->sender_type === 'alumni') {
+                $firstName  = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
+                $senderName = $firstName ?? 'Alumni';
+            } elseif ($latest->sender_type === 'director') {
+                $firstName  = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
+                $senderName = ($firstName ?? 'Director') . ' (Director)';
+            } else {
+                $firstName  = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
+                $senderName = ($firstName ?? 'Coordinator') . ' (Coordinator)';
+            }
+
+            $roomName = $room['name'] ?? 'Group Chat';
+            $bodySnip = mb_substr($latest->body ?? '', 0, 60);
+            $count    = count($newMessages);
+
+            $this->dispatch('message-received', [
+                'sender' => $senderName,
+                'room'   => $roomName,
+                'body'   => $bodySnip,
+                'count'  => $count,
+            ]);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ★ FIX: Write alumni notifications to DB server-side
+    //   Called after every message the organizer/coordinator sends.
+    //   Alumni poll GET /alumni/notifications every 10 s — they will see it.
+    // ─────────────────────────────────────────────────────────────────────
+    private function notifyAlumniInRoom(string $body): void
+    {
+        // Staff-only room — no alumni to notify
+        if ($this->isStaffRoom || ! $this->room) return;
+
+        try {
+            $senderName  = $this->coordinatorFirstName ?: $this->coordinatorName;
+            $courseCode  = $this->room['course_code'] ?? '';
+            $batch       = (int) ($this->room['batch'] ?? 0);
+
+            $roomLabel = $this->isCourseRoom
+                ? strtoupper($courseCode) . ' All Batches GC'
+                : ($this->room['name'] ?? 'Group Chat');
+
+            $bodySnip = mb_substr($body, 0, 80);
+            $preview  = $bodySnip . (mb_strlen($body) > 80 ? '…' : '');
+
+            $title   = $senderName . ' sent a message';
+            $message = $senderName . ' messaged in ' . $roomLabel
+                       . ($preview !== '' ? ': "' . $preview . '"' : '.');
+
+            // Deduplicate per coordinator × room × minute so rapid typing
+            // doesn't spam the notification table.
+            $dedupKey = 'coord-msg::' . $this->coordinatorId . '::' . $this->roomId
+                        . '::' . floor(time() / 60);
+
+            // Collect alumni IDs in this room
+            $alumniQuery = DB::table('alumni')
+                ->whereNull('deleted_at')
+                ->where('course_code', $courseCode);
+
+            if (! $this->isCourseRoom && $batch > 0) {
+                $alumniQuery->where('batch', $batch);
+            }
+
+            $alumniRows = $alumniQuery->get(['id']);
+
+            foreach ($alumniRows as $alumnus) {
+                // Skip if a notification with this dedup key already exists
+                $alreadyExists = DB::table('alumni_notifications')
+                    ->where('alumni_id', (int) $alumnus->id)
+                    ->where('dedup_key', $dedupKey)
+                    ->exists();
+
+                if ($alreadyExists) continue;
+
+                DB::table('alumni_notifications')->insert([
+                    'alumni_id'  => (int) $alumnus->id,
+                    'icon'       => 'comments',
+                    'title'      => $title,
+                    'message'    => $message,
+                    'link_route' => 'alumni.messenger',
+                    'link_label' => 'Open Messenger',
+                    'dedup_key'  => $dedupKey,
+                    'read'       => 0,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        } catch (\Throwable) {
+            // Silently fail — notifications are non-critical
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // Rooms list
@@ -351,7 +500,6 @@ new class extends Component {
             ];
         })->sortBy('course_code');
 
-        // Apply courseFilter to course GC rooms
         if ($this->courseFilter !== '') {
             $courseGcRooms = $courseGcRooms->filter(
                 fn ($r) => strtoupper($r['course_code']) === strtoupper($this->courseFilter)
@@ -490,6 +638,12 @@ new class extends Component {
         $this->coordinators          = [];
         $this->staffDirectors        = [];
         $this->staffCoords           = [];
+
+        $maxId = DB::table('chat_messages')
+            ->where('room_id', $id)
+            ->whereNull('deleted_at')
+            ->max('id') ?? 0;
+        $this->lastSeenMessageIds[$id] = (int) $maxId;
 
         $this->refreshOnlineCount();
         $this->loadMessages();
@@ -733,6 +887,12 @@ new class extends Component {
             }
         }
 
+        $this->lastSeenMessageIds[$this->roomId] = (int) $msgId;
+
+        // ★ FIX: Write alumni notification records directly to DB so
+        //   the alumni's notification panel picks them up on next poll.
+        $this->notifyAlumniInRoom($body);
+
         $this->body = ''; $this->replyTo = null; $this->showMentions = false;
         $this->stopTyping();
         $this->loadMessages();
@@ -874,7 +1034,6 @@ new class extends Component {
             ->where('course_code', $this->room['course_code'])
             ->whereNull('deleted_at');
 
-        // Course GC: all batches; Batch GC: specific batch
         if (! $this->isCourseRoom) {
             $query->where('batch', $this->room['batch']);
         }
@@ -958,7 +1117,7 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // @mention autocomplete (updated for course GC)
+    // @mention autocomplete
     // ─────────────────────────────────────────────────────────────────────
     public function updatedBody(string $value): void
     {
@@ -1000,9 +1159,6 @@ new class extends Component {
     }
 }; ?>
 
-{{-- ════════════════════════════════════════════════════════════════════════
-     COORDINATOR MESSENGER
-     ════════════════════════════════════════════════════════════════════════ --}}
 <div class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
      style="height: calc(100vh - 90px);"
      wire:poll.8000ms="refreshAll">
@@ -1039,7 +1195,6 @@ new class extends Component {
         {{-- Filter + Sort bar --}}
         <div class="px-3 pt-3 pb-2 border-b border-[#ddd3e8] flex-shrink-0 space-y-2.5 bg-[#fafafa]">
 
-            {{-- Room Type filter — 2×2 grid --}}
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
                     <i class="fa-solid fa-layer-group mr-1"></i>Chat Type
@@ -1062,7 +1217,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Course filter --}}
             @if($roomTypeFilter !== 'staff' && count($availableCourses) > 0)
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
@@ -1085,7 +1239,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Batch filter (not shown for Course GC only view) --}}
             @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'course' && count($availableBatches) > 0)
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
@@ -1104,7 +1257,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Sort (only for batch rooms) --}}
             @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'course')
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
@@ -1122,7 +1274,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Active filters --}}
             @if($courseFilter !== '' || $batchFilter !== '')
             <div class="flex items-center justify-between pt-0.5">
                 <div class="flex items-center gap-1.5 flex-wrap">
@@ -1145,7 +1296,6 @@ new class extends Component {
             @endif
         </div>
 
-        {{-- Chat list label --}}
         <div class="px-4 pt-3 pb-1.5 flex-shrink-0 bg-white">
             <div class="flex items-center justify-between">
                 <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">
@@ -1162,177 +1312,145 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Chat list --}}
         <div class="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5 bg-white">
-
             @php $prevType = null; @endphp
-
             @forelse($rooms as $r)
-            @php $thisType = $r['type']; @endphp
+                @php $thisType = $r['type']; @endphp
 
-            {{-- Section dividers when showing "All Chats" --}}
-            @if($roomTypeFilter === '' && $prevType !== null && $prevType !== $thisType)
-                @if($thisType === 'course')
-                <div class="flex items-center gap-2 px-1 py-2">
-                    <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                    <span class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1">
-                        <i class="fa-solid fa-layer-group text-[9px]"></i>Course GCs
-                    </span>
-                    <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                </div>
-                @elseif($thisType === 'batch')
-                <div class="flex items-center gap-2 px-1 py-2">
-                    <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                    <span class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1">
-                        <i class="fa-solid fa-users text-[9px]"></i>Batch Chats
-                    </span>
-                    <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                </div>
+                @if($roomTypeFilter === '' && $prevType !== null && $prevType !== $thisType)
+                    @if($thisType === 'course')
+                    <div class="flex items-center gap-2 px-1 py-2">
+                        <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                        <span class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1">
+                            <i class="fa-solid fa-layer-group text-[9px]"></i>Course GCs
+                        </span>
+                        <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                    </div>
+                    @elseif($thisType === 'batch')
+                    <div class="flex items-center gap-2 px-1 py-2">
+                        <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                        <span class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1">
+                            <i class="fa-solid fa-users text-[9px]"></i>Batch Chats
+                        </span>
+                        <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                    </div>
+                    @endif
                 @endif
-            @endif
-            @php $prevType = $thisType; @endphp
+                @php $prevType = $thisType; @endphp
 
-            {{-- ── STAFF CHAT ───────────────────────────────────────── --}}
-            @if($r['type'] === 'staff')
-            <button wire:click="selectRoom({{ $r['id'] }})"
-                    class="w-full text-left rounded-xl px-3 py-3 transition-all border
-                           {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
-                <div class="flex items-start gap-2.5">
-                    <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm"
-                         style="background:#6b2490;">
-                        <i class="fa-solid fa-shield-halved"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-1">
-                            <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">
-                                Staff Chat
+                @if($r['type'] === 'staff')
+                <button wire:click="selectRoom({{ $r['id'] }})"
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all border
+                               {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm" style="background:#6b2490;">
+                            <i class="fa-solid fa-shield-halved"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-1">
+                                <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">Staff Chat</p>
+                                @if($r['latest_time'])<span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>@endif
+                            </div>
+                            <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-700"><i class="fa-solid fa-lock text-[9px] mr-0.5"></i>Internal</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]">Directors + Coordinators</span>
+                            </div>
+                            @if($r['latest_body'])
+                            <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
+                                @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
+                                {{ Str::limit($r['latest_body'], 38) }}
                             </p>
-                            @if($r['latest_time'])
-                            <span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>
+                            @else
+                            <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
+                            @endif
+                            @if($r['online_count'] > 0)
+                            <div class="flex items-center gap-1 mt-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
+                            </div>
+                            @else
+                            <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} staff members</p>
                             @endif
                         </div>
-                        <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
-                            <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-700">
-                                <i class="fa-solid fa-lock text-[9px] mr-0.5"></i>Internal
-                            </span>
-                            <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]">
-                                Directors + Coordinators
-                            </span>
-                        </div>
-                        @if($r['latest_body'])
-                        <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
-                            @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
-                            {{ Str::limit($r['latest_body'], 38) }}
-                        </p>
-                        @else
-                        <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
-                        @endif
-                        @if($r['online_count'] > 0)
-                        <div class="flex items-center gap-1 mt-1">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                            <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
-                        </div>
-                        @else
-                        <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} staff members</p>
-                        @endif
                     </div>
-                </div>
-            </button>
+                </button>
 
-            {{-- ── COURSE GC ─────────────────────────────────────────── --}}
-            @elseif($r['type'] === 'course')
-            <button wire:click="selectRoom({{ $r['id'] }})"
-                    class="w-full text-left rounded-xl px-3 py-3 transition-all border
-                           {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
-                <div class="flex items-start gap-2.5">
-                    <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm"
-                         style="{{ $r['is_active'] ? 'background:#6b2490;' : 'background:#9b59b6;' }}">
-                        <i class="fa-solid fa-layer-group"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-1">
-                            <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">
-                                {{ strtoupper($r['course_code']) }}
+                @elseif($r['type'] === 'course')
+                <button wire:click="selectRoom({{ $r['id'] }})"
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all border
+                               {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm"
+                             style="{{ $r['is_active'] ? 'background:#6b2490;' : 'background:#9b59b6;' }}">
+                            <i class="fa-solid fa-layer-group"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-1">
+                                <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">{{ strtoupper($r['course_code']) }}</p>
+                                @if($r['latest_time'])<span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>@endif
+                            </div>
+                            <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Batches</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} alumni</span>
+                            </div>
+                            @if($r['latest_body'])
+                            <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
+                                @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
+                                {{ Str::limit($r['latest_body'], 38) }}
                             </p>
-                            @if($r['latest_time'])
-                            <span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>
+                            @else
+                            <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
+                            @endif
+                            @if($r['online_count'] > 0)
+                            <div class="flex items-center gap-1 mt-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
+                            </div>
+                            @else
+                            <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} total alumni</p>
                             @endif
                         </div>
-                        <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
-                            <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]">
-                                <i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Batches
-                            </span>
-                            <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">
-                                {{ $r['total_count'] }} alumni
-                            </span>
-                        </div>
-                        @if($r['latest_body'])
-                        <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
-                            @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
-                            {{ Str::limit($r['latest_body'], 38) }}
-                        </p>
-                        @else
-                        <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
-                        @endif
-                        @if($r['online_count'] > 0)
-                        <div class="flex items-center gap-1 mt-1">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                            <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
-                        </div>
-                        @else
-                        <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} total alumni</p>
-                        @endif
                     </div>
-                </div>
-            </button>
+                </button>
 
-            {{-- ── BATCH GC ──────────────────────────────────────────── --}}
-            @else
-            <button wire:click="selectRoom({{ $r['id'] }})"
-                    class="w-full text-left rounded-xl px-3 py-3 transition-all border
-                           {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
-                <div class="flex items-start gap-2.5">
-                    <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm"
-                         style="{{ $r['is_active'] ? 'background:#6b2490;' : 'background:#c4a8d4;' }}">
-                        <i class="fa-solid fa-users"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-1">
-                            <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">
-                                {{ $r['name'] }}
+                @else
+                <button wire:click="selectRoom({{ $r['id'] }})"
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all border
+                               {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm"
+                             style="{{ $r['is_active'] ? 'background:#6b2490;' : 'background:#c4a8d4;' }}">
+                            <i class="fa-solid fa-users"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-1">
+                                <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">{{ $r['name'] }}</p>
+                                @if($r['latest_time'])<span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>@endif
+                            </div>
+                            <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>{{ $r['batch'] }}</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ strtoupper($r['course_code']) }}</span>
+                            </div>
+                            @if($r['latest_body'])
+                            <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
+                                @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
+                                {{ Str::limit($r['latest_body'], 38) }}
                             </p>
-                            @if($r['latest_time'])
-                            <span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>
+                            @else
+                            <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
+                            @endif
+                            @if($r['online_count'] > 0)
+                            <div class="flex items-center gap-1 mt-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
+                            </div>
+                            @else
+                            <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} members</p>
                             @endif
                         </div>
-                        <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
-                            <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]">
-                                <i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>{{ $r['batch'] }}
-                            </span>
-                            <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">
-                                {{ strtoupper($r['course_code']) }}
-                            </span>
-                        </div>
-                        @if($r['latest_body'])
-                        <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
-                            @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
-                            {{ Str::limit($r['latest_body'], 38) }}
-                        </p>
-                        @else
-                        <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
-                        @endif
-                        @if($r['online_count'] > 0)
-                        <div class="flex items-center gap-1 mt-1">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                            <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
-                        </div>
-                        @else
-                        <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} members</p>
-                        @endif
                     </div>
-                </div>
-            </button>
-            @endif
+                </button>
+                @endif
 
             @empty
             <div class="flex flex-col items-center justify-center py-16 text-[#999999] text-center px-4">
@@ -1342,13 +1460,11 @@ new class extends Component {
                     @if($courseFilter !== '' || $batchFilter !== '')
                         No chats match the selected filters.
                     @else
-                        Chats will appear once alumni are added under
-                        <span class="font-semibold text-[#6b2490]">{{ $department }}</span>.
+                        Chats will appear once alumni are added under <span class="font-semibold text-[#6b2490]">{{ $department }}</span>.
                     @endif
                 </p>
                 @if($courseFilter !== '' || $batchFilter !== '')
-                <button wire:click="$set('courseFilter','');$set('batchFilter','');"
-                        class="mt-3 text-xs font-semibold text-[#6b2490] hover:underline">Clear filters</button>
+                <button wire:click="$set('courseFilter','');$set('batchFilter','');" class="mt-3 text-xs font-semibold text-[#6b2490] hover:underline">Clear filters</button>
                 @endif
             </div>
             @endforelse
@@ -1361,14 +1477,11 @@ new class extends Component {
     @if($room)
     <div class="flex flex-1 min-w-0 flex-col">
 
-        {{-- Header --}}
-        <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778]"
-             style="background:#6b2490;">
-
+        {{-- Chat header --}}
+        <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778]" style="background:#6b2490;">
             <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/30">
                 <i class="fa-solid {{ $isStaffRoom ? 'fa-shield-halved' : ($isCourseRoom ? 'fa-layer-group' : 'fa-users') }} text-white text-sm"></i>
             </div>
-
             <div class="flex-1 min-w-0">
                 <p class="text-white font-semibold text-sm leading-tight truncate uppercase tracking-wide">
                     @if($isStaffRoom) Staff Chat
@@ -1385,42 +1498,29 @@ new class extends Component {
                     <span class="text-white/30 text-xs">·</span>
                     @endif
                     @if($isStaffRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1">
-                        <i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators
-                    </span>
+                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators</span>
                     @elseif($isCourseRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1">
-                        <i class="fa-solid fa-users-between-lines text-[10px]"></i>
-                        All Batch Years · {{ $totalCount }} alumni total
-                    </span>
+                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-users-between-lines text-[10px]"></i>All Batch Years · {{ $totalCount }} alumni total</span>
                     @else
-                    <span class="text-white/60 text-xs font-semibold">
-                        {{ strtoupper($room['course_code']) }} · Batch {{ $room['batch'] }}
-                    </span>
+                    <span class="text-white/60 text-xs font-semibold">{{ strtoupper($room['course_code']) }} · Batch {{ $room['batch'] }}</span>
                     @endif
                 </div>
             </div>
-
             <div class="flex items-center gap-1.5 flex-shrink-0">
                 <button wire:click="togglePins"
                         class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
                         style="{{ $showPins ? 'background:rgba(255,255,255,.28);color:#fff;border-color:rgba(255,255,255,.40);' : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.20);' }}">
-                    <i class="fa-solid fa-thumbtack text-xs"></i>
-                    <span class="hidden sm:inline ml-1">Pins</span>
+                    <i class="fa-solid fa-thumbtack text-xs"></i><span class="hidden sm:inline ml-1">Pins</span>
                 </button>
                 <button wire:click="toggleMembers"
                         class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
                         style="{{ $showMembers ? 'background:rgba(255,255,255,.28);color:#fff;border-color:rgba(255,255,255,.40);' : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.20);' }}">
-                    <i class="fa-solid fa-user-group text-xs"></i>
-                    <span class="hidden sm:inline ml-1">Members</span>
+                    <i class="fa-solid fa-user-group text-xs"></i><span class="hidden sm:inline ml-1">Members</span>
                 </button>
             </div>
         </div>
 
-        {{-- Body --}}
         <div class="flex flex-1 min-h-0">
-
-            {{-- Message column --}}
             <div class="flex flex-col flex-1 min-w-0">
 
                 {{-- Message list --}}
@@ -1461,16 +1561,13 @@ new class extends Component {
                                 $bubbleCls = 'bg-white border border-[#ddd3e8] text-[#333333] rounded-bl-none';
                                 $avatarGrad = 'background:#6b2490;';
                             }
-
                             $senderPhotoSrc = $msg['sender_photo'] ?: $defaultAv;
                         @endphp
 
                         @if($dateChanged)
                         <div class="flex items-center gap-3 my-4">
                             <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                            <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">
-                                {{ $msg['date_label'] }}
-                            </span>
+                            <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">{{ $msg['date_label'] }}</span>
                             <div class="flex-1 h-px bg-[#ddd3e8]"></div>
                         </div>
                         @endif
@@ -1492,9 +1589,7 @@ new class extends Component {
                                 <p class="text-xs font-semibold px-1 mb-0.5 {{ $msg['is_director'] ? 'text-violet-700' : 'text-[#6b2490]' }}">
                                     {{ $msg['sender_name'] }}
                                     @if($msg['is_director'])
-                                        <span class="ml-1 text-[10px] font-semibold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">
-                                            <i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director
-                                        </span>
+                                        <span class="ml-1 text-[10px] font-semibold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded"><i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director</span>
                                     @elseif($msg['is_coordinator'])
                                         <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">Coordinator</span>
                                     @endif
@@ -1508,8 +1603,7 @@ new class extends Component {
                                 @endif
 
                                 @if($msg['reply_to'])
-                                <div class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug
-                                    {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#ddd3e8] text-[#666666]' }}">
+                                <div class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#ddd3e8] text-[#666666]' }}">
                                     <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
                                     <span class="truncate block text-xs">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
                                 </div>
@@ -1521,11 +1615,8 @@ new class extends Component {
                                               class="text-sm rounded-lg border border-[#6b2490] px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#6b2490]/30 w-full bg-white shadow-sm"
                                               wire:keydown.escape="cancelEdit"></textarea>
                                     <div class="flex gap-1.5 justify-end">
-                                        <button wire:click="cancelEdit"
-                                                class="text-xs px-3 py-1.5 rounded-lg border border-[#ddd3e8] text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">Cancel</button>
-                                        <button wire:click="saveEdit"
-                                                class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition"
-                                                style="background:#6b2490;">Save</button>
+                                        <button wire:click="cancelEdit" class="text-xs px-3 py-1.5 rounded-lg border border-[#ddd3e8] text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">Cancel</button>
+                                        <button wire:click="saveEdit" class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition" style="background:#6b2490;">Save</button>
                                     </div>
                                 </div>
                                 @else
@@ -1544,14 +1635,13 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- Action bar --}}
+                                {{-- Action toolbar --}}
                                 <div x-show="open"
                                      x-transition:enter="transition ease-out duration-150"
                                      x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
                                      x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                                      x-cloak
                                      class="flex flex-wrap items-center gap-1.5 mt-2 bg-white border border-[#ddd3e8] rounded-2xl px-3 py-2 shadow-lg z-10 w-auto">
-
                                     @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎'] as $rk=>$re)
                                     <button wire:click="react({{ $msg['id'] }},'{{ $rk }}')" @click.stop
                                             class="text-[1.3rem] leading-none transition-transform hover:scale-125 active:scale-110 {{ $msg['my_reaction']===$rk?'opacity-100 scale-110':'opacity-50 hover:opacity-100' }}"
@@ -1586,10 +1676,8 @@ new class extends Component {
                                     </div>
                                     <div x-show="confirmUnsend" class="flex items-center gap-1">
                                         <span class="text-xs text-red-600 font-semibold">Delete?</span>
-                                        <button wire:click="unsend({{ $msg['id'] }})" @click.stop
-                                                class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">Yes</button>
-                                        <button @click.stop="confirmUnsend=false"
-                                                class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#666666] font-semibold hover:bg-[#ddd3e8] transition">No</button>
+                                        <button wire:click="unsend({{ $msg['id'] }})" @click.stop class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">Yes</button>
+                                        <button @click.stop="confirmUnsend=false" class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#666666] font-semibold hover:bg-[#ddd3e8] transition">No</button>
                                     </div>
                                     @endif
                                 </div>
@@ -1598,13 +1686,8 @@ new class extends Component {
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
                                 <div class="mt-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-xl z-20 w-64 overflow-hidden" @click.stop>
                                     <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#ddd3e8] bg-[#fafafa]">
-                                        <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
-                                            <i class="fa-solid fa-face-smile text-[#6b2490] mr-1.5"></i>Reactions
-                                        </p>
-                                        <button wire:click="closeReactionsPopup"
-                                                class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
-                                            <i class="fa-solid fa-xmark text-xs"></i>
-                                        </button>
+                                        <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest"><i class="fa-solid fa-face-smile text-[#6b2490] mr-1.5"></i>Reactions</p>
+                                        <button wire:click="closeReactionsPopup" class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition"><i class="fa-solid fa-xmark text-xs"></i></button>
                                     </div>
                                     <div class="max-h-52 overflow-y-auto">
                                         @php $emojiMap=['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
@@ -1620,10 +1703,7 @@ new class extends Component {
                                                     <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
                                                 </div>
                                                 <div class="flex-1 min-w-0">
-                                                    <p class="text-xs font-semibold text-[#333333] truncate">
-                                                        {{ $reactor['name'] }}
-                                                        @if($reactor['is_me'])<span class="text-[#6b2490] font-semibold">(You)</span>@endif
-                                                    </p>
+                                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $reactor['name'] }}@if($reactor['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
                                                     <p class="text-[10px] font-medium {{ $reactor['type']==='director'?'text-violet-700':'text-[#6b2490]' }}">{{ ucfirst($reactor['type']) }}</p>
                                                 </div>
                                             </div>
@@ -1634,7 +1714,7 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- Reaction pills --}}
+                                {{-- Reaction counts --}}
                                 @if(! empty($msg['reactions']))
                                 <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine']?'justify-end':'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk=>$cnt)
@@ -1652,8 +1732,7 @@ new class extends Component {
                             </div>
 
                             @if($msg['is_mine'])
-                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
-                                 style="background:#6b2490;">
+                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end" style="background:#6b2490;">
                                 <img src="{{ $coordinatorPhoto ?: $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
                             </div>
                             @endif
@@ -1693,7 +1772,7 @@ new class extends Component {
                     @endif
                 </div>
 
-                {{-- Reply preview --}}
+                {{-- Reply bar --}}
                 @if($replyTo)
                 <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#ddd3e8] bg-[#f2e8f9] flex-shrink-0">
                     <div class="w-1 h-10 rounded-full flex-shrink-0" style="background:#6b2490;"></div>
@@ -1701,31 +1780,31 @@ new class extends Component {
                         <p class="text-xs font-semibold text-[#6b2490] truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
                         <p class="text-xs text-[#666666] truncate">{{ Str::limit($replyTo['body'],90) }}</p>
                     </div>
-                    <button wire:click="clearReply"
-                            class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                    <button wire:click="clearReply" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
                 @endif
 
-                {{-- Input area --}}
+                {{-- Compose bar --}}
                 <div class="px-4 py-3 border-t border-[#ddd3e8] bg-white flex-shrink-0" x-data>
-
                     @if($showMentions && ! empty($mentionSuggestions))
                     <div class="mb-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-md overflow-hidden">
                         @foreach($mentionSuggestions as $sug)
                         <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
                                 class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f2e8f9] transition-colors text-left">
-                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white"
-                                 style="background:#6b2490;">
+                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
                                 @if($sug['name']==='everyone')<i class="fa-solid fa-users text-xs"></i>
                                 @else{{ strtoupper(substr($sug['name'],0,1)) }}@endif
                             </div>
                             <div class="flex-1 min-w-0">
                                 <p class="text-sm font-semibold text-[#333333] truncate">&#64;{{ $sug['name'] }}</p>
-                                @if($sug['name']==='everyone')<p class="text-xs text-[#6b2490] font-medium">Notify all members</p>
-                                @elseif($sug['type']==='director')<p class="text-xs text-violet-700 font-medium"><i class="fa-solid fa-shield-halved text-[10px] mr-0.5"></i>Director</p>
-                                @elseif($sug['type']==='coordinator')<p class="text-xs text-[#6b2490] font-medium">Coordinator</p>
+                                @if($sug['name']==='everyone')
+                                    <p class="text-xs text-[#6b2490] font-medium">Notify all members</p>
+                                @elseif($sug['type']==='director')
+                                    <p class="text-xs text-violet-700 font-medium"><i class="fa-solid fa-shield-halved text-[10px] mr-0.5"></i>Director</p>
+                                @elseif($sug['type']==='coordinator')
+                                    <p class="text-xs text-[#6b2490] font-medium">Coordinator</p>
                                 @endif
                             </div>
                         </button>
@@ -1735,8 +1814,7 @@ new class extends Component {
 
                     <div class="flex items-end gap-2">
                         <div class="flex-1 relative">
-                            <textarea
-                                id="chat-input"
+                            <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCourseRoom ? strtoupper($room['course_code']).' All Batches GC' : ($room['name']??'group')) }}… (@ to mention)"
@@ -1761,229 +1839,197 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── SIDE PANEL ──────────────────────────────────────────── --}}
+            {{-- Side panel (Members / Pins) --}}
             @if($showMembers || $showPins)
             <div class="w-72 border-l border-[#ddd3e8] flex flex-col flex-shrink-0 bg-white">
-
                 <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#ddd3e8] flex-shrink-0 bg-[#f9f7fc]">
                     @if($showPins)
                         <i class="fa-solid fa-thumbtack text-amber-600"></i>
                         <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Pinned Messages</p>
                     @elseif($isStaffRoom)
                         <i class="fa-solid fa-shield-halved text-[#6b2490]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">
-                            Staff Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($staffDirectors)+count($staffCoords) }})</span>
-                        </p>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Staff Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($staffDirectors)+count($staffCoords) }})</span></p>
                     @elseif($isCourseRoom)
                         <i class="fa-solid fa-layer-group text-[#6b2490]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">
-                            All Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>
-                            @if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif
-                        </p>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @else
                         <i class="fa-solid fa-user-group text-[#6b2490]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">
-                            Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>
-                            @if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif
-                        </p>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @endif
-                    <button wire:click="{{ $showPins?'togglePins':'toggleMembers' }}"
-                            class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
+                    <button wire:click="{{ $showPins?'togglePins':'toggleMembers' }}" class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
 
                 <div class="flex-1 overflow-y-auto flex flex-col">
-
-                    {{-- Staff members panel --}}
                     @if($showMembers && $isStaffRoom)
-                    @if(! empty($staffDirectors))
-                    <div class="px-3 pt-3 pb-1 flex-shrink-0">
-                        <p class="text-xs font-semibold text-violet-700 uppercase tracking-widest mb-2 px-1">
-                            <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Directors — {{ count($staffDirectors) }}
-                        </p>
-                        @foreach($staffDirectors as $dir)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-violet-50 border border-violet-100">
-                            <div class="relative flex-shrink-0">
-                                <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#4a1d78;">
-                                    <img src="{{ $dir['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                        @if(! empty($staffDirectors))
+                        <div class="px-3 pt-3 pb-1 flex-shrink-0">
+                            <p class="text-xs font-semibold text-violet-700 uppercase tracking-widest mb-2 px-1"><i class="fa-solid fa-shield-halved text-xs mr-1"></i>Directors — {{ count($staffDirectors) }}</p>
+                            @foreach($staffDirectors as $dir)
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-violet-50 border border-violet-100">
+                                <div class="relative flex-shrink-0">
+                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#4a1d78;">
+                                        <img src="{{ $dir['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    </div>
+                                    @if($dir['is_online'])<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>@endif
                                 </div>
-                                @if($dir['is_online'])<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>@endif
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-[#333333] truncate">{{ $dir['name'] }}</p>
-                                <p class="text-xs font-medium {{ $dir['is_online']?'text-emerald-600':'text-violet-700' }}">{{ $dir['is_online']?'🟢 Online':'Director' }}</p>
-                            </div>
-                        </div>
-                        @endforeach
-                    </div>
-                    @endif
-
-                    <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0">
-                        <p class="text-xs font-semibold text-[#6b2490] uppercase tracking-widest mb-2 px-1">
-                            <i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($staffCoords) }}
-                        </p>
-                        <div class="relative">
-                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
-                            <input wire:model.live.debounce.300ms="memberSearch" type="text" placeholder="Search staff…"
-                                   class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
-                        </div>
-                    </div>
-                    <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1 pt-2">
-                        @php $onlineCoords=collect($staffCoords)->where('is_online',true)->values(); $offlineCoords=collect($staffCoords)->where('is_online',false)->values(); @endphp
-                        @foreach($onlineCoords as $coord)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:border-[#c49bdb] hover:bg-[#f2e8f9] transition-all {{ $coord['is_me']?'bg-[#f2e8f9] border-[#c49bdb]':'' }}">
-                            <div class="relative flex-shrink-0">
-                                <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
-                                    <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $dir['name'] }}</p>
+                                    <p class="text-xs font-medium {{ $dir['is_online']?'text-emerald-600':'text-violet-700' }}">{{ $dir['is_online']?'🟢 Online':'Director' }}</p>
                                 </div>
-                                <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                             </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
-                                <p class="text-xs font-medium text-emerald-600">🟢 Online</p>
-                            </div>
+                            @endforeach
                         </div>
-                        @endforeach
-                        @foreach($offlineCoords as $coord)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:bg-[#fafafa] transition-all opacity-70 {{ $coord['is_me']?'bg-[#f2e8f9] border-[#c49bdb] opacity-100':'' }}">
-                            <div class="w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center" style="background:#c4a8d4;">
-                                <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-[#666666] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
-                                <p class="text-xs font-medium text-[#999999]">Offline</p>
-                            </div>
-                        </div>
-                        @endforeach
-                        @if(empty($staffCoords))<div class="flex flex-col items-center justify-center py-8 text-[#999999]"><p class="text-sm font-semibold">No results</p></div>@endif
-                    </div>
-
-                    {{-- Alumni panel (Batch GC or Course GC) --}}
-                    @elseif($showMembers && ! $isStaffRoom)
-
-                    {{-- Coordinators (shown for batch GC and course GC) --}}
-                    @if(! empty($coordinators) && $memberSearch === '')
-                    <div class="px-3 pt-3 pb-1 flex-shrink-0">
-                        <p class="text-xs font-semibold text-[#6b2490] uppercase tracking-widest mb-2 px-1">
-                            <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Coordinators
-                        </p>
-                        @foreach($coordinators as $coord)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-[#f2e8f9] border border-[#ddd3e8]">
-                            <div class="relative flex-shrink-0">
-                                <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
-                                    <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                                </div>
-                                @if($coord['is_online']||$coord['is_me'])<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>@endif
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-xs text-[#6b2490] font-semibold"> (You)</span>@endif</p>
-                                <p class="text-xs text-[#6b2490] font-medium">{{ ($coord['is_online']||$coord['is_me'])?'🟢 Online':'Coordinator' }}</p>
-                            </div>
-                        </div>
-                        @endforeach
-                    </div>
-                    <div class="px-3 pb-1 flex-shrink-0">
-                        <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-1 px-1">
-                            <i class="fa-solid fa-users text-xs mr-1"></i>Alumni
-                            @if($isCourseRoom)<span class="text-[#6b2490] ml-1">· All Batches</span>@endif
-                        </p>
-                    </div>
-                    @endif
-
-                    <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0">
-                        <div class="relative">
-                            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
-                            <input wire:model.live.debounce.300ms="memberSearch" type="text"
-                                   placeholder="{{ $isCourseRoom?'Search all alumni…':'Search alumni…' }}"
-                                   class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
-                        </div>
-                    </div>
-
-                    <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1 pt-2.5">
-                        @php $onlineAlumni=collect($alumni)->where('is_online',true)->values(); $offlineAlumni=collect($alumni)->where('is_online',false)->values(); @endphp
-                        @if(count($onlineAlumni)>0)
-                        <p class="text-xs font-semibold text-emerald-600 uppercase tracking-widest px-1 pb-1">
-                            <i class="fa-solid fa-circle text-[9px] mr-1"></i>Online — {{ count($onlineAlumni) }}
-                        </p>
-                        @foreach($onlineAlumni as $al)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:border-[#c49bdb] hover:bg-[#f2e8f9] transition-all">
-                            <div class="relative flex-shrink-0">
-                                <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
-                                    <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                                </div>
-                                <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-[#333333] truncate">{{ $al['name'] }}</p>
-                                <p class="text-xs font-medium text-emerald-600">
-                                    Online @if($isCourseRoom && $al['batch'])· <span class="text-[#6b2490]">Batch {{ $al['batch'] }}</span>@endif
-                                </p>
-                            </div>
-                        </div>
-                        @endforeach
                         @endif
-                        @if(count($offlineAlumni)>0 && count($onlineAlumni)>0 && $memberSearch==='')
-                        <div class="pt-2.5 pb-1 px-1">
-                            <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">
-                                <i class="fa-solid fa-circle text-[9px] mr-1 opacity-40"></i>Offline — {{ count($offlineAlumni) }}
+                        <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0">
+                            <p class="text-xs font-semibold text-[#6b2490] uppercase tracking-widest mb-2 px-1"><i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($staffCoords) }}</p>
+                            <div class="relative">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
+                                <input wire:model.live.debounce.300ms="memberSearch" type="text" placeholder="Search staff…"
+                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
+                            </div>
+                        </div>
+                        <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1 pt-2">
+                            @php $onlineCoords=collect($staffCoords)->where('is_online',true)->values(); $offlineCoords=collect($staffCoords)->where('is_online',false)->values(); @endphp
+                            @foreach($onlineCoords as $coord)
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:border-[#c49bdb] hover:bg-[#f2e8f9] transition-all {{ $coord['is_me']?'bg-[#f2e8f9] border-[#c49bdb]':'' }}">
+                                <div class="relative flex-shrink-0">
+                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
+                                        <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    </div>
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
+                                    <p class="text-xs font-medium text-emerald-600">🟢 Online</p>
+                                </div>
+                            </div>
+                            @endforeach
+                            @foreach($offlineCoords as $coord)
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:bg-[#fafafa] transition-all opacity-70 {{ $coord['is_me']?'bg-[#f2e8f9] border-[#c49bdb] opacity-100':'' }}">
+                                <div class="w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center" style="background:#c4a8d4;">
+                                    <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#666666] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
+                                    <p class="text-xs font-medium text-[#999999]">Offline</p>
+                                </div>
+                            </div>
+                            @endforeach
+                            @if(empty($staffCoords))
+                            <div class="flex flex-col items-center justify-center py-8 text-[#999999]">
+                                <p class="text-sm font-semibold">No results</p>
+                            </div>
+                            @endif
+                        </div>
+
+                    @elseif($showMembers && ! $isStaffRoom)
+                        @if(! empty($coordinators) && $memberSearch === '')
+                        <div class="px-3 pt-3 pb-1 flex-shrink-0">
+                            <p class="text-xs font-semibold text-[#6b2490] uppercase tracking-widest mb-2 px-1"><i class="fa-solid fa-shield-halved text-xs mr-1"></i>Coordinators</p>
+                            @foreach($coordinators as $coord)
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-[#f2e8f9] border border-[#ddd3e8]">
+                                <div class="relative flex-shrink-0">
+                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
+                                        <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    </div>
+                                    @if($coord['is_online']||$coord['is_me'])<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>@endif
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-xs text-[#6b2490] font-semibold"> (You)</span>@endif</p>
+                                    <p class="text-xs text-[#6b2490] font-medium">{{ ($coord['is_online']||$coord['is_me'])?'🟢 Online':'Coordinator' }}</p>
+                                </div>
+                            </div>
+                            @endforeach
+                        </div>
+                        <div class="px-3 pb-1 flex-shrink-0">
+                            <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-1 px-1">
+                                <i class="fa-solid fa-users text-xs mr-1"></i>Alumni
+                                @if($isCourseRoom)<span class="text-[#6b2490] ml-1">· All Batches</span>@endif
                             </p>
                         </div>
                         @endif
-                        @foreach($offlineAlumni as $al)
-                        <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:bg-[#fafafa] transition-all opacity-70">
-                            <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center" style="background:#c4a8d4;">
-                                <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-xs font-semibold text-[#666666] truncate">{{ $al['name'] }}</p>
-                                <p class="text-xs font-medium text-[#999999]">
-                                    Offline @if($isCourseRoom && $al['batch'])· <span class="text-[#999999]">Batch {{ $al['batch'] }}</span>@endif
-                                </p>
+                        <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0">
+                            <div class="relative">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
+                                <input wire:model.live.debounce.300ms="memberSearch" type="text"
+                                       placeholder="{{ $isCourseRoom?'Search all alumni…':'Search alumni…' }}"
+                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
                             </div>
                         </div>
-                        @endforeach
-                        @if(empty($alumni))
-                        <div class="flex flex-col items-center justify-center py-10 text-[#999999]">
-                            <i class="fa-solid fa-user-slash text-3xl text-[#ddd3e8] mb-3"></i>
-                            <p class="text-sm font-semibold">No results</p>
-                            <p class="text-xs mt-1">Try a different name</p>
-                        </div>
-                        @endif
-                    </div>
-
-                    {{-- Pins panel --}}
-                    @elseif($showPins)
-                    <div class="flex-1 overflow-y-auto p-3 space-y-2">
-                        @forelse($pinnedMessages as $pin)
-                        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                            <div class="flex items-start justify-between gap-2 mb-1.5">
-                                <div class="flex items-center gap-1.5 min-w-0">
-                                    <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
-                                    <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
+                        <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1 pt-2.5">
+                            @php $onlineAlumni=collect($alumni)->where('is_online',true)->values(); $offlineAlumni=collect($alumni)->where('is_online',false)->values(); @endphp
+                            @if(count($onlineAlumni)>0)
+                            <p class="text-xs font-semibold text-emerald-600 uppercase tracking-widest px-1 pb-1"><i class="fa-solid fa-circle text-[9px] mr-1"></i>Online — {{ count($onlineAlumni) }}</p>
+                            @foreach($onlineAlumni as $al)
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:border-[#c49bdb] hover:bg-[#f2e8f9] transition-all">
+                                <div class="relative flex-shrink-0">
+                                    <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
+                                        <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    </div>
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                                 </div>
-                                <button wire:click="togglePin({{ $pin['id'] }})"
-                                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
-                                    <i class="fa-solid fa-xmark text-xs"></i>
-                                </button>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $al['name'] }}</p>
+                                    <p class="text-xs font-medium text-emerald-600">Online @if($isCourseRoom && $al['batch'])· <span class="text-[#6b2490]">Batch {{ $al['batch'] }}</span>@endif</p>
+                                </div>
                             </div>
-                            <p class="text-sm text-[#333333] leading-snug break-words">{{ Str::limit($pin['body'],140) }}</p>
-                            <p class="text-xs text-[#999999] mt-1.5">{{ $pin['pinned_at'] }}</p>
+                            @endforeach
+                            @endif
+                            @if(count($offlineAlumni)>0 && count($onlineAlumni)>0 && $memberSearch==='')
+                            <div class="pt-2.5 pb-1 px-1">
+                                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest"><i class="fa-solid fa-circle text-[9px] mr-1 opacity-40"></i>Offline — {{ count($offlineAlumni) }}</p>
+                            </div>
+                            @endif
+                            @foreach($offlineAlumni as $al)
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:bg-[#fafafa] transition-all opacity-70">
+                                <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center" style="background:#c4a8d4;">
+                                    <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#666666] truncate">{{ $al['name'] }}</p>
+                                    <p class="text-xs font-medium text-[#999999]">Offline @if($isCourseRoom && $al['batch'])· <span class="text-[#999999]">Batch {{ $al['batch'] }}</span>@endif</p>
+                                </div>
+                            </div>
+                            @endforeach
+                            @if(empty($alumni))
+                            <div class="flex flex-col items-center justify-center py-10 text-[#999999]">
+                                <i class="fa-solid fa-user-slash text-3xl text-[#ddd3e8] mb-3"></i>
+                                <p class="text-sm font-semibold">No results</p>
+                                <p class="text-xs mt-1">Try a different name</p>
+                            </div>
+                            @endif
                         </div>
-                        @empty
-                        <div class="flex flex-col items-center justify-center py-14 text-[#999999]">
-                            <i class="fa-solid fa-thumbtack text-4xl text-[#ddd3e8] mb-3"></i>
-                            <p class="text-sm font-semibold">No pinned messages</p>
-                            <p class="text-xs mt-1 text-center">Tap a message then 📌 to pin it.</p>
-                        </div>
-                        @endforelse
-                    </div>
-                    @endif
 
+                    @elseif($showPins)
+                        <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                            @forelse($pinnedMessages as $pin)
+                            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                <div class="flex items-start justify-between gap-2 mb-1.5">
+                                    <div class="flex items-center gap-1.5 min-w-0">
+                                        <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
+                                        <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
+                                    </div>
+                                    <button wire:click="togglePin({{ $pin['id'] }})" class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                                        <i class="fa-solid fa-xmark text-xs"></i>
+                                    </button>
+                                </div>
+                                <p class="text-sm text-[#333333] leading-snug break-words">{{ Str::limit($pin['body'],140) }}</p>
+                                <p class="text-xs text-[#999999] mt-1.5">{{ $pin['pinned_at'] }}</p>
+                            </div>
+                            @empty
+                            <div class="flex flex-col items-center justify-center py-14 text-[#999999]">
+                                <i class="fa-solid fa-thumbtack text-4xl text-[#ddd3e8] mb-3"></i>
+                                <p class="text-sm font-semibold">No pinned messages</p>
+                                <p class="text-xs mt-1 text-center">Tap a message then 📌 to pin it.</p>
+                            </div>
+                            @endforelse
+                        </div>
+                    @endif
                 </div>
             </div>
             @endif
-
         </div>
     </div>
 
