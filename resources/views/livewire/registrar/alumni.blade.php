@@ -16,9 +16,10 @@ new class extends Component {
 
     protected function queryString(): array { return []; }
 
-    public string $alumniSearch = '';
-    public string $alumniBatch  = '';
-    public string $alumniCourse = '';
+    public string $alumniSearch      = '';
+    public string $alumniBatch       = '';
+    public string $alumniCourse      = '';
+    public string $alumniProfileFilter = 'all'; // all | complete | incomplete
 
     public ?int   $viewingProfileId  = null;
     public        $viewingProfile    = null;
@@ -32,15 +33,28 @@ new class extends Component {
 
     public function mount(): void
     {
+        // ── Auto-apply profile filter when coming from dashboard cards ──
+        $filter = request()->query('profile_filter', 'all');
+        if (in_array($filter, ['all', 'complete', 'incomplete'])) {
+            $this->alumniProfileFilter = $filter;
+        }
+
+        // ── Auto-apply batch filter when coming from dashboard batch chart ──
+        $batch = request()->query('batch', '');
+        if ($batch !== '') {
+            $this->alumniBatch = (string) intval($batch);
+        }
+
         if (session()->has('success'))
             $this->dispatch('flash-message', type: 'success', message: session()->pull('success'));
         if (session()->has('error'))
             $this->dispatch('flash-message', type: 'error', message: session()->pull('error'));
     }
 
-    public function updatingAlumniSearch() { $this->resetPage('alumniPage'); }
-    public function updatingAlumniBatch()  { $this->resetPage('alumniPage'); }
-    public function updatingAlumniCourse() { $this->resetPage('alumniPage'); }
+    public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); }
+    public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); }
+    public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); }
+    public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); }
 
     #[Computed]
     public function alumniRecords()
@@ -66,6 +80,12 @@ new class extends Component {
 
         if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
         if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
+
+        // ── Profile completion filter ──
+        if ($this->alumniProfileFilter === 'complete')
+            $q->where('profile_completed', 1);
+        elseif ($this->alumniProfileFilter === 'incomplete')
+            $q->where('profile_completed', 0);
 
         $q->orderByDesc('created_at');
 
@@ -97,9 +117,10 @@ new class extends Component {
 
     public function resetAlumniFilters(): void
     {
-        $this->alumniSearch = '';
-        $this->alumniBatch  = '';
-        $this->alumniCourse = '';
+        $this->alumniSearch        = '';
+        $this->alumniBatch         = '';
+        $this->alumniCourse        = '';
+        $this->alumniProfileFilter = 'all';
         $this->resetPage('alumniPage');
     }
 
@@ -304,6 +325,19 @@ new class extends Component {
     .ar-dropdown-trigger .ar-chevron { transition: transform .18s; font-size: .65rem; opacity: .6; }
     .ar-dropdown-trigger.open .ar-chevron { transform: rotate(180deg); }
 
+    /* ── Profile status filter pills ────────────────────────────── */
+    .ar-status-pill {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 7px 13px; border-radius: 8px; border: 1.5px solid #E8E0F0;
+        font-size: .78rem; font-weight: 600; cursor: pointer;
+        transition: all .15s; background: #fff; color: #333333;
+        white-space: nowrap;
+    }
+    .ar-status-pill:hover { border-color: #c49ed8; color: #7A3F91; }
+    .ar-status-pill.active-all      { background: linear-gradient(135deg,#7A3F91,#9b59b6); color:#fff; border-color:transparent; }
+    .ar-status-pill.active-complete { background: #ecfdf5; color:#059669; border-color:#6ee7b7; }
+    .ar-status-pill.active-incomplete { background: #fffbeb; color:#d97706; border-color:#fcd34d; }
+
     /* ── Profile field labels — semi-bold, not too heavy ─────────── */
     .ar-field-label {
         font-size: .625rem;
@@ -424,9 +458,34 @@ new class extends Component {
     {{-- Table Card --}}
     <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
 
-        {{-- Filters --}}
+        {{-- ── Filter bar ── --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0">
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+
+            {{-- ── Profile Status Pill Tabs (All / Complete / Pending) ── --}}
+            <div class="flex items-center gap-1.5 shrink-0">
+                {{-- All --}}
+                <button type="button"
+                        wire:click="$set('alumniProfileFilter','all')"
+                        class="ar-status-pill {{ $alumniProfileFilter === 'all' ? 'active-all' : '' }}">
+                    All
+                </button>
+                {{-- Complete --}}
+                <button type="button"
+                        wire:click="$set('alumniProfileFilter','complete')"
+                        class="ar-status-pill {{ $alumniProfileFilter === 'complete' ? 'active-complete' : '' }}">
+                    Complete
+                </button>
+                {{-- Pending --}}
+                <button type="button"
+                        wire:click="$set('alumniProfileFilter','incomplete')"
+                        class="ar-status-pill {{ $alumniProfileFilter === 'incomplete' ? 'active-incomplete' : '' }}">
+                    Pending
+                </button>
+            </div>
+
+            {{-- Divider --}}
+            <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
 
             {{-- Search --}}
             <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
@@ -444,7 +503,6 @@ new class extends Component {
                  x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniBatch',val); this.close(); } }"
                  @click.outside="close()" wire:key="batch-dropdown">
                 <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniBatch!=='','open':open }" class="ar-dropdown-trigger">
-                    <i class="fas fa-calendar-alt" style="font-size:.7rem;opacity:.65;"></i>
                     <span>@if($alumniBatch){{ $alumniBatch }}@else All Batch Years @endif</span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
@@ -464,7 +522,6 @@ new class extends Component {
                  x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniCourse',val); this.close(); } }"
                  @click.outside="close()" wire:key="course-dropdown">
                 <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniCourse!=='','open':open }" class="ar-dropdown-trigger">
-                    <i class="fas fa-book" style="font-size:.7rem;opacity:.65;"></i>
                     <span>@if($alumniCourse){{ $alumniCourse }}@else All Courses @endif</span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
@@ -491,6 +548,23 @@ new class extends Component {
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
+
+            {{-- Active filter badges --}}
+            @if($alumniProfileFilter !== 'all')
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border
+                         {{ $alumniProfileFilter === 'complete'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200' }}">
+                Showing {{ $alumniProfileFilter === 'complete' ? 'Complete' : 'Pending' }} only
+                &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
+            </span>
+            @endif
+            @if($alumniBatch !== '')
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
+                <i class="fas fa-calendar text-[10px]"></i>Batch {{ $alumniBatch }}
+                &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
+            </span>
+            @endif
         </div>
 
         {{-- Table wrapper --}}
@@ -516,7 +590,7 @@ new class extends Component {
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                                          class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false">
-                                    <span class="font-semibold text-[#333333] text-sm uppercase truncate">
+                                    <span class="font-semibold text-[#333333] text-sm uppercase truncate block">
                                         {{ $this->formatDisplayName($item->first_name??'',$item->middle_initial??'',$item->last_name??'',$item->suffix??'') }}
                                     </span>
                                 </div>
@@ -577,6 +651,12 @@ new class extends Component {
             <p class="text-white/70 text-sm font-normal">
                 Showing <strong class="text-white font-semibold">{{ $from }}–{{ $to }}</strong>
                 of <strong class="text-white font-semibold">{{ $total }}</strong> alumni
+                @if($alumniProfileFilter !== 'all')
+                    <span class="text-white/50 font-normal">&nbsp;({{ $alumniProfileFilter === 'complete' ? 'complete profiles' : 'pending profiles' }})</span>
+                @endif
+                @if($alumniBatch !== '')
+                    <span class="text-white/50 font-normal">&nbsp;&bull; Batch {{ $alumniBatch }}</span>
+                @endif
             </p>
             @if($lastPage > 1)
             <div class="flex items-center gap-1.5 flex-wrap">
@@ -1013,10 +1093,11 @@ new class extends Component {
 
     function cleanAlumniPageParam() {
         var url = new URL(window.location.href);
-        if (url.searchParams.has('alumniPage')) {
-            url.searchParams.delete('alumniPage');
-            history.replaceState(null, '', url.pathname + (url.search || ''));
-        }
+        var changed = false;
+        if (url.searchParams.has('alumniPage'))     { url.searchParams.delete('alumniPage');     changed = true; }
+        if (url.searchParams.has('profile_filter')) { url.searchParams.delete('profile_filter'); changed = true; }
+        if (url.searchParams.has('batch'))          { url.searchParams.delete('batch');          changed = true; }
+        if (changed) history.replaceState(null, '', url.pathname + (url.search || ''));
     }
     cleanAlumniPageParam();
     document.addEventListener('livewire:updated', cleanAlumniPageParam);

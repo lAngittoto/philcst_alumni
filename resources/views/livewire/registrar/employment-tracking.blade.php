@@ -100,6 +100,7 @@ new class extends Component {
         unset($this->availableBatches);
         unset($this->availableCourses);
         unset($this->courseMap);
+        unset($this->availableModalBatchesForFilter);
     }
 
     private function baseQuery(): \Illuminate\Database\Query\Builder
@@ -252,6 +253,53 @@ new class extends Component {
     {
         return DB::table('alumni')->whereNull('deleted_at')
             ->select('course_code')->distinct()->orderBy('course_code')->pluck('course_code');
+    }
+
+    // ── Smart batch filter: only batches that have records for the current modal filter ──
+    #[Computed]
+    public function availableModalBatchesForFilter()
+    {
+        $filter = $this->modalFilter;
+
+        // no_record: batches that have at least one alumni WITHOUT an employment record
+        if ($filter === 'no_record') {
+            return DB::table('alumni as a')
+                ->whereNull('a.deleted_at')
+                ->whereNotExists(fn($sq) => $sq
+                    ->from('employment_trackings as et')
+                    ->whereColumn('et.alumni_id', 'a.id')
+                    ->whereNull('et.deleted_at')
+                )
+                ->select('a.batch')->distinct()->orderByDesc('a.batch')->pluck('a.batch');
+        }
+
+        $q = DB::table('alumni as a')
+            ->whereNull('a.deleted_at')
+            ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
+            ->join('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
+            ->select('a.batch')->distinct()->orderByDesc('a.batch');
+
+        match ($filter) {
+            'employed'      => $q->where('et.employment_status', 'employed'),
+            'self_employed' => $q->where('et.employment_status', 'self_employed'),
+            'unemployed'    => $q->where('et.employment_status', 'unemployed'),
+            'employed_all'  => $q->whereIn('et.employment_status', ['employed', 'self_employed']),
+            'abroad'        => $q->where('et.work_location', 'abroad')->whereIn('et.employment_status', ['employed','self_employed']),
+            'local'         => $q->where('et.work_location', 'local')->whereIn('et.employment_status', ['employed','self_employed']),
+            'relevance_all' => (function() use ($q) {
+                $active = $this->modalRelevanceActive;
+                $dbValues = array_merge(...array_map(fn($v) => match($v) {
+                    'relevant'           => ['yes', 'relevant'],
+                    'partially_relevant' => ['partially', 'partially_relevant'],
+                    'not_relevant'       => ['no', 'not_relevant'],
+                    default              => [$v],
+                }, $active ?: ['relevant','partially_relevant','not_relevant']));
+                $q->whereIn('et.course_relevance', $dbValues);
+            })(),
+            default => null,
+        };
+
+        return $q->pluck('a.batch');
     }
 
     #[Computed]
@@ -549,6 +597,7 @@ new class extends Component {
         $this->modalSearch       = '';
         $this->activeModal       = 'detail';
         unset($this->modalRecords);
+        unset($this->availableModalBatchesForFilter);
     }
 
     public function openReports(): void
@@ -578,6 +627,7 @@ new class extends Component {
         }
         $this->modalPage = 1;
         unset($this->modalRecords);
+        unset($this->availableModalBatchesForFilter);
     }
 
     public function updatingModalSearch(): void { $this->modalPage = 1; }
@@ -613,6 +663,7 @@ new class extends Component {
         $this->modalCourse = ''; $this->modalCourseLocked = false;
         $this->modalSearch = ''; $this->modalPage = 1;
         unset($this->modalRecords);
+        unset($this->availableModalBatchesForFilter);
     }
 
     public function closeModal(): void
@@ -627,6 +678,7 @@ new class extends Component {
         $this->reportStatus = ''; $this->reportPage = 1;
         $this->showPrintData = false;
         unset($this->modalRecords, $this->reportRecords, $this->reportTotals, $this->allReportRecordsForPrint);
+        unset($this->availableModalBatchesForFilter);
         $this->computeStats();
         $this->buildCharts();
         unset($this->courseAnalytics);
@@ -729,18 +781,28 @@ new class extends Component {
     }
     .cb-row-tip.visible { opacity: 1; }
 
-    /* ── Stat card: transparent border by default, colored on hover ── */
+    /* ── Stat card: subtle border tint on hover, no bloom ── */
     .stat-card {
-        border-color: transparent !important;
+        border: 1.5px solid #E8E0F0 !important;
         transition: border-color .18s ease, box-shadow .18s ease;
     }
-    .stat-card-employed:hover  { border-color: #10b981 !important; box-shadow: 0 4px 16px rgba(16,185,129,.15) !important; }
-    .stat-card-self:hover      { border-color: #3b82f6 !important; box-shadow: 0 4px 16px rgba(59,130,246,.15) !important; }
-    .stat-card-unemployed:hover{ border-color: #f59e0b !important; box-shadow: 0 4px 16px rgba(245,158,11,.15) !important; }
-    .stat-card-abroad:hover    { border-color: #f59e0b !important; box-shadow: 0 4px 16px rgba(245,158,11,.15) !important; }
-    .stat-card-local:hover     { border-color: #14b8a6 !important; box-shadow: 0 4px 16px rgba(20,184,166,.15) !important; }
-    .stat-card-nofill:hover    { border-color: #9ca3af !important; box-shadow: 0 4px 16px rgba(156,163,175,.15) !important; }
-    .stat-card-submitted:hover { border-color: #7a3f91 !important; box-shadow: 0 4px 16px rgba(122,63,145,.15) !important; }
+    .stat-card:hover {
+        box-shadow: 0 2px 10px rgba(0,0,0,.07) !important;
+    }
+    .stat-card-employed:hover  { border-color: #6ee7b7 !important; }
+    .stat-card-self:hover      { border-color: #93c5fd !important; }
+    .stat-card-unemployed:hover{ border-color: #fcd34d !important; }
+    .stat-card-abroad:hover    { border-color: #fcd34d !important; }
+    .stat-card-local:hover     { border-color: #5eead4 !important; }
+    .stat-card-nofill:hover    { border-color: #d1d5db !important; }
+    .stat-card-submitted:hover { border-color: #c4b5fd !important; }
+
+    /* ── Disabled batch option ── */
+    .batch-option-disabled {
+        opacity: .38;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
 </style>
 
 {{-- Course breakdown cursor tooltip --}}
@@ -804,7 +866,7 @@ new class extends Component {
     <div class="flex gap-2 flex-wrap lg:flex-nowrap">
         @foreach($statCards as [$filter, $count, $icon, $iconBg, $iconColor, $hoverClass, $label, $rate])
         <div wire:click="openModal('{{ $filter }}')"
-             class="group relative bg-white border rounded-2xl p-2.5 flex items-center gap-2.5
+             class="group relative bg-white rounded-2xl p-2.5 flex items-center gap-2.5
                     shadow-sm cursor-pointer flex-1 min-w-0 overflow-visible stat-card {{ $hoverClass }}">
             {{-- Tooltip --}}
             <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -834,7 +896,7 @@ new class extends Component {
 
             {{-- Status donut --}}
             <div onclick="empOpenModal('','',null)"
-                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[rgba(122,63,145,.3)]
+                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-[#10b981] shrink-0"></span>
@@ -848,7 +910,7 @@ new class extends Component {
 
             {{-- Location donut --}}
             <div onclick="empOpenModal('','',null)"
-                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[rgba(122,63,145,.3)]
+                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-purple-400 shrink-0"></span>
@@ -862,7 +924,7 @@ new class extends Component {
 
             {{-- Relevance donut --}}
             <div onclick="empOpenModal('relevance_all','',null)"
-                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[rgba(122,63,145,.3)]
+                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
@@ -876,7 +938,7 @@ new class extends Component {
 
             {{-- Top Courses bar --}}
             <div onclick="empOpenModal('employed_all','',null)"
-                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[rgba(122,63,145,.3)]
+                 class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
@@ -891,7 +953,7 @@ new class extends Component {
         </div>
 
         {{-- ── Batch bar ── --}}
-        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[rgba(122,63,145,.28)]
+        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                     transition-all cursor-pointer flex flex-col overflow-hidden" style="height:260px;">
             <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-[7px]">
@@ -1025,25 +1087,19 @@ new class extends Component {
     $isRelMode  = $this->isRelevanceFilter;
     $isUnemp    = $this->modalFilter === 'unemployed';
 
-    // CHANGED: Email and Contact are now separate columns
-    // Location col: hide for unemployed/no_record/abroad/local
-    $showLocationCol  = !in_array($this->modalFilter, ['unemployed','no_record','abroad','local']);
-    // Relevance col: hide for unemployed/no_record
-    $showRelevanceCol = !in_array($this->modalFilter, ['unemployed','no_record']);
-    // Show email/contact split columns only for unemployed and no_record
+    $showLocationCol      = !in_array($this->modalFilter, ['unemployed','no_record','abroad','local']);
+    $showRelevanceCol     = !in_array($this->modalFilter, ['unemployed','no_record']);
     $showEmailContactSplit = in_array($this->modalFilter, ['unemployed','no_record']);
 
-    // Total col count: base 6 (no job col when split) + dynamic
-    // Base cols: #, Alumni, Student ID, Course, Status, [Job/Email], [Contact?], [Location?], [Relevance?], Batch
     $totalCols = 7
-        + ($showEmailContactSplit ? 1 : 0)   // extra Contact col
+        + ($showEmailContactSplit ? 1 : 0)
         + ($showLocationCol ? 1 : 0)
         + ($showRelevanceCol ? 1 : 0);
 
     $jobColHeader = match(true) {
-        $showEmailContactSplit                           => 'Email Address',
-        $this->modalFilter === 'self_employed'           => 'Business Name',
-        default                                          => 'Job / Business',
+        $showEmailContactSplit                 => 'Email Address',
+        $this->modalFilter === 'self_employed' => 'Business Name',
+        default                                => 'Job / Business',
     };
 
     $statusBadge = [
@@ -1100,6 +1156,9 @@ new class extends Component {
                    || ($modalCourse !== '' && !$modalCourseLocked)
                    || $modalSearch !== '';
 
+    // ── Smart batch list: only batches relevant to the current filter ──
+    $smartBatches = $this->availableModalBatchesForFilter;
+
     $rTotal    = $records->total();
     $rPp       = $records->perPage();
     $rCp       = $records->currentPage();
@@ -1147,7 +1206,6 @@ new class extends Component {
                 <i class="fas fa-filter text-[10px]"></i>Filters
             </span>
 
-            {{-- CHANGED: Search bar widened --}}
             <div class="relative w-72 shrink-0" wire:ignore
                  x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{if(v!==this.q)this.q=v;}); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
@@ -1195,6 +1253,7 @@ new class extends Component {
         </div>
 
         <div class="flex flex-wrap gap-2 items-center">
+            {{-- ── Smart Batch Dropdown ── --}}
             @if(!$modalBatchLocked)
             <div class="relative" x-data="{ open:false }" @click.outside="open=false">
                 <button type="button" @click="open=!open"
@@ -1208,11 +1267,24 @@ new class extends Component {
                      bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
                     <button type="button" @click="$wire.set('modalBatch',null); open=false"
                             class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111]
-                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalBatch === null ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Batches</button>
+                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalBatch === null ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">
+                        All Batches
+                        @if($smartBatches->count() < $this->availableBatches->count())
+                            <span class="ml-1 text-[10px] text-[#7A3F91] font-normal opacity-70">({{ $smartBatches->count() }} with records)</span>
+                        @endif
+                    </button>
                     @foreach($this->availableBatches as $bYear)
-                    <button type="button" @click="$wire.set('modalBatch',{{ $bYear }}); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111]
-                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">Batch {{ $bYear }}</button>
+                    @php $hasRecords = $smartBatches->contains($bYear); @endphp
+                    <button type="button"
+                            @if($hasRecords) @click="$wire.set('modalBatch',{{ $bYear }}); open=false" @endif
+                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold transition
+                                   {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : 'text-[#111111]' }}
+                                   {{ $hasRecords ? 'hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer' : 'batch-option-disabled' }}">
+                        Batch {{ $bYear }}
+                        @if(!$hasRecords)
+                            <span class="ml-1 text-[10px] font-normal text-gray-400">— no records</span>
+                        @endif
+                    </button>
                     @endforeach
                 </div>
             </div>
@@ -1298,9 +1370,7 @@ new class extends Component {
                     <th class="px-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-28">Student ID</th>
                     <th class="px-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-24">Course</th>
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Status</th>
-                    {{-- CHANGED: For unemployed/no_record this is Email Address column --}}
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider" style="min-width:200px;">{{ $jobColHeader }}</th>
-                    {{-- CHANGED: Extra Contact Number column only for unemployed/no_record --}}
                     @if($showEmailContactSplit)
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider" style="min-width:140px;">Contact Number</th>
                     @endif
@@ -1325,8 +1395,6 @@ new class extends Component {
                     $rowStatus  = $row->employment_status ?? '';
                     $isRowEmp   = $rowStatus === 'employed';
                     $isRowSelf  = $rowStatus === 'self_employed';
-                    $isRowUnemp = $rowStatus === 'unemployed';
-                    $isRowNone  = is_null($row->employment_status ?? null);
                     $rowJob     = $row->job_title ?? null;
                     $rowCompany = $row->company_name ?? null;
                     $rowEmail   = $row->email ?? null;
@@ -1343,18 +1411,16 @@ new class extends Component {
                             <p class="text-sm font-semibold truncate uppercase text-[#111111]">{{ $dName }}</p>
                         </div>
                     </td>
-                    {{-- Student ID --}}
                     <td class="px-3 py-3">
                         <p class="text-xs font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</p>
                     </td>
-                    {{-- Course --}}
                     <td class="px-3 py-3">
                         <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F9F7FC] text-[#7a3f91]">
                             {{ $row->course_code ?? '—' }}
                         </span>
                     </td>
                     <td class="px-4 py-3">
-                        @if($isNoRecord || $isRowNone)
+                        @if($isNoRecord || is_null($row->employment_status ?? null))
                             <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border text-[#111111] bg-gray-50 border-gray-200">
                                 No Record
                             </span>
@@ -1366,18 +1432,14 @@ new class extends Component {
                             <span class="text-xs text-[#111111]">—</span>
                         @endif
                     </td>
-
-                    {{-- CHANGED: Job/Email column logic --}}
                     <td class="px-4 py-3" style="min-width:200px;">
                         @if($showEmailContactSplit)
-                            {{-- Unemployed / No Record: show Email in this column --}}
                             @if($rowEmail)
                                 <p class="text-xs text-[#111111]">{{ $rowEmail }}</p>
                             @else
                                 <span class="text-xs text-[#111111]">—</span>
                             @endif
                         @elseif($isRowEmp)
-                            {{-- Employed: Job Title + Company --}}
                             @if($rowJob)
                                 <p class="text-xs font-semibold text-[#111111]">{{ $rowJob }}</p>
                                 @if($rowCompany)<p class="text-xs text-[#111111] mt-0.5">{{ $rowCompany }}</p>@endif
@@ -1385,7 +1447,6 @@ new class extends Component {
                                 <span class="text-xs text-[#111111]">—</span>
                             @endif
                         @elseif($isRowSelf)
-                            {{-- CHANGED: Self-Employed: Business Name (company_name) only, NO job title --}}
                             @if($rowCompany)
                                 <p class="text-xs font-semibold text-[#111111]">{{ $rowCompany }}</p>
                             @else
@@ -1402,8 +1463,6 @@ new class extends Component {
                             @endif
                         @endif
                     </td>
-
-                    {{-- CHANGED: Separate Contact Number column for unemployed/no_record --}}
                     @if($showEmailContactSplit)
                     <td class="px-4 py-3" style="min-width:140px;">
                         @if($rowContact)
@@ -1413,7 +1472,6 @@ new class extends Component {
                         @endif
                     </td>
                     @endif
-
                     @if($showLocationCol)
                     <td class="px-4 py-3 text-center">
                         @if($loc)
@@ -1470,12 +1528,10 @@ new class extends Component {
                     class="emp-pg-btn emp-pg-nav">
                 <i class="fas fa-chevron-left text-xs"></i>
             </button>
-
             @if($rPgStart > 1)
                 <button wire:click="$set('modalPage',1)" class="emp-pg-btn emp-pg-nav">1</button>
                 @if($rPgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
             @endif
-
             @for($p = $rPgStart; $p <= $rPgEnd; $p++)
                 @if($p === $rCp)
                     <span class="emp-pg-btn emp-pg-active">{{ $p }}</span>
@@ -1483,18 +1539,15 @@ new class extends Component {
                     <button wire:click="$set('modalPage',{{ $p }})" class="emp-pg-btn emp-pg-nav">{{ $p }}</button>
                 @endif
             @endfor
-
             @if($rPgEnd < $rLastPage)
                 @if($rPgEnd < $rLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                 <button wire:click="$set('modalPage',{{ $rLastPage }})" class="emp-pg-btn emp-pg-nav">{{ $rLastPage }}</button>
             @endif
-
             <button @if($rCp >= $rLastPage) disabled @endif
                     wire:click="$set('modalPage',{{ min($rLastPage,$rCp+1) }})"
                     class="emp-pg-btn emp-pg-nav">
                 <i class="fas fa-chevron-right text-xs"></i>
             </button>
-
             <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $rCp }} / {{ $rLastPage }}</span>
         </div>
     </div>
@@ -1769,16 +1822,13 @@ new class extends Component {
             of <strong class="text-white font-semibold">{{ number_format($rrTotal) }}</strong> records
         </p>
         <div class="flex items-center gap-1.5 flex-wrap">
-            <button @if($rrCp <= 1) disabled @endif wire:click="reportPrev"
-                    class="emp-pg-btn emp-pg-nav">
+            <button @if($rrCp <= 1) disabled @endif wire:click="reportPrev" class="emp-pg-btn emp-pg-nav">
                 <i class="fas fa-chevron-left text-xs"></i>
             </button>
-
             @if($rrPgStart > 1)
                 <button wire:click="$set('reportPage',1)" class="emp-pg-btn emp-pg-nav">1</button>
                 @if($rrPgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
             @endif
-
             @for($p = $rrPgStart; $p <= $rrPgEnd; $p++)
                 @if($p === $rrCp)
                     <span class="emp-pg-btn emp-pg-active">{{ $p }}</span>
@@ -1786,17 +1836,13 @@ new class extends Component {
                     <button wire:click="$set('reportPage',{{ $p }})" class="emp-pg-btn emp-pg-nav">{{ $p }}</button>
                 @endif
             @endfor
-
             @if($rrPgEnd < $rrLastPage)
                 @if($rrPgEnd < $rrLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                 <button wire:click="$set('reportPage',{{ $rrLastPage }})" class="emp-pg-btn emp-pg-nav">{{ $rrLastPage }}</button>
             @endif
-
-            <button @if($rrCp >= $rrLastPage) disabled @endif wire:click="reportNext"
-                    class="emp-pg-btn emp-pg-nav">
+            <button @if($rrCp >= $rrLastPage) disabled @endif wire:click="reportNext" class="emp-pg-btn emp-pg-nav">
                 <i class="fas fa-chevron-right text-xs"></i>
             </button>
-
             <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $rrCp }} / {{ $rrLastPage }}</span>
         </div>
     </div>
@@ -1926,14 +1972,8 @@ new class extends Component {
                     tip.style.top  = e.clientY + 'px';
                     tip.classList.add('visible');
                 });
-                row.addEventListener('mouseleave', function () {
-                    if (!tip) return;
-                    tip.classList.remove('visible');
-                });
-                row.addEventListener('click', function () {
-                    if (!tip) return;
-                    tip.classList.remove('visible');
-                });
+                row.addEventListener('mouseleave', function () { if (!tip) return; tip.classList.remove('visible'); });
+                row.addEventListener('click',      function () { if (!tip) return; tip.classList.remove('visible'); });
             });
         }
         bindCbRows();

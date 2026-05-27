@@ -380,7 +380,9 @@ new class extends Component {
     @dash-open-emp.window="$wire.openEmpModal($event.detail.filter ?? '')">
 
     <div id="__dash_batch_data" class="hidden"
-         data-batches="{{ $this->allBatches->toJson() }}">
+         data-batches="{{ $this->allBatches->toJson() }}"
+         data-alumni-route="{{ route('registrar.alumni') }}"
+         data-emp-route="{{ route('registrar.employment.tracking') }}">
     </div>
 
     <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-4 max-w-screen-2xl mx-auto">
@@ -401,9 +403,9 @@ new class extends Component {
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
 
             {{-- Total Alumni --}}
-            <div wire:click="openAlumniModal('all')"
-                 class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                        hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985]">
+            <a href="{{ route('registrar.alumni') }}?profile_filter=all"
+               class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                      hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] block no-underline">
                 <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -411,7 +413,7 @@ new class extends Component {
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
                              [.relative:hover_&]:opacity-100">
-                    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View All Alumni
+                    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View All Alumni Records
                 </span>
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
@@ -427,12 +429,12 @@ new class extends Component {
                         <i class="fas fa-arrow-trend-up text-sm"></i> +{{ $this->newThisMonth }} this month
                     </p>
                 @endif
-            </div>
+            </a>
 
             {{-- Profile Complete --}}
-            <div wire:click="openAlumniModal('complete')"
-                 class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                        hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985]">
+            <a href="{{ route('registrar.alumni') }}?profile_filter=complete"
+               class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                      hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -455,12 +457,12 @@ new class extends Component {
                          style="width:{{ $this->completionRate }}%;"></div>
                 </div>
                 <p class="text-xs text-[#333333] mt-1 font-normal">{{ $this->completionRate }}% completion rate</p>
-            </div>
+            </a>
 
             {{-- Profile Pending --}}
-            <div wire:click="openAlumniModal('incomplete')"
-                 class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                        hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985]">
+            <a href="{{ route('registrar.alumni') }}?profile_filter=incomplete"
+               class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                      hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -483,7 +485,7 @@ new class extends Component {
                         {{ round(($this->profileIncomplete / $this->totalAlumni) * 100) }}% still need info
                     </p>
                 @endif
-            </div>
+            </a>
 
             {{-- Total Courses --}}
             <div wire:click="openAlumniModal('courses')"
@@ -524,11 +526,50 @@ new class extends Component {
                 $submitted    = $ec['submitted'];
                 $total        = $this->totalAlumni;
                 $submittedPct = $total > 0 ? round(($submitted / $total) * 100) : 0;
+
+                $empRoute = route('registrar.employment.tracking');
+
                 $empRows = [
-                    ['label'=>'Employed',      'count'=>$ec['employed'],   'icon'=>'fa-user-tie',        'color'=>'#7A3F91','light'=>'#F9F7FC','border'=>'#E8E0F0','filter'=>'employed',      'tip'=>'View Employed Alumni'],
-                    ['label'=>'Self-Employed', 'count'=>$ec['self'],       'icon'=>'fa-store',           'color'=>'#2563eb','light'=>'#EFF6FF','border'=>'#BFDBFE','filter'=>'self_employed', 'tip'=>'View Self-Employed Alumni'],
-                    ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'icon'=>'fa-magnifying-glass','color'=>'#d97706','light'=>'#FFFBEB','border'=>'#FCD34D','filter'=>'unemployed',    'tip'=>'View Unemployed Alumni'],
-                    ['label'=>'No Record',     'count'=>$ec['noRecord'],   'icon'=>'fa-circle-minus',    'color'=>'#374151','light'=>'#F9FAFB','border'=>'#E5E7EB','filter'=>'no_record',     'tip'=>'View No Employment Record'],
+                    [
+                        'label'  => 'Employed',
+                        'count'  => $ec['employed'],
+                        'icon'   => 'fa-user-tie',
+                        'color'  => '#7A3F91',
+                        'light'  => '#F9F7FC',
+                        'border' => '#E8E0F0',
+                        'tip'    => 'View Employed Alumni',
+                        'href'   => $empRoute . '?autoModal=employed',
+                    ],
+                    [
+                        'label'  => 'Self-Employed',
+                        'count'  => $ec['self'],
+                        'icon'   => 'fa-store',
+                        'color'  => '#2563eb',
+                        'light'  => '#EFF6FF',
+                        'border' => '#BFDBFE',
+                        'tip'    => 'View Self-Employed Alumni',
+                        'href'   => $empRoute . '?autoModal=self_employed',
+                    ],
+                    [
+                        'label'  => 'Unemployed',
+                        'count'  => $ec['unemployed'],
+                        'icon'   => 'fa-magnifying-glass',
+                        'color'  => '#d97706',
+                        'light'  => '#FFFBEB',
+                        'border' => '#FCD34D',
+                        'tip'    => 'View Unemployed Alumni',
+                        'href'   => $empRoute . '?autoModal=unemployed',
+                    ],
+                    [
+                        'label'  => 'No Record',
+                        'count'  => $ec['noRecord'],
+                        'icon'   => 'fa-circle-minus',
+                        'color'  => '#374151',
+                        'light'  => '#F9FAFB',
+                        'border' => '#E5E7EB',
+                        'tip'    => 'View No Employment Record',
+                        'href'   => $empRoute . '?autoModal=no_record',
+                    ],
                 ];
             @endphp
 
@@ -558,10 +599,10 @@ new class extends Component {
                     </div>
                     <div class="space-y-2">
                         @foreach($empRows as $row)
-                        <div class="relative overflow-visible cursor-pointer rounded-xl border p-3
-                                    transition-all duration-150 hover:shadow-md active:scale-[.98]"
-                             style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }};"
-                             wire:click="openEmpModal('{{ $row['filter'] }}')">
+                        <a href="{{ $row['href'] }}"
+                           class="relative overflow-visible no-underline rounded-xl border p-3 flex items-center justify-between
+                                  transition-all duration-150 hover:shadow-md active:scale-[.98]"
+                           style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }}; display:flex;">
                             <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                                          bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                                          px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -571,26 +612,24 @@ new class extends Component {
                                          [.relative:hover_&]:opacity-100">
                                 <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>{{ $row['tip'] }}
                             </span>
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                                         style="background:{{ $row['color'] }}20; color:{{ $row['color'] }};">
-                                        <i class="fas {{ $row['icon'] }} text-xs"></i>
-                                    </div>
-                                    <span class="text-sm font-semibold text-[#111111]">{{ $row['label'] }}</span>
+                            <div class="flex items-center gap-2">
+                                <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                                     style="background:{{ $row['color'] }}20; color:{{ $row['color'] }};">
+                                    <i class="fas {{ $row['icon'] }} text-xs"></i>
                                 </div>
-                                <div class="flex items-center gap-1.5">
-                                    <span class="text-2xl font-semibold" style="color:{{ $row['color'] }};">{{ number_format($row['count']) }}</span>
-                                    <i class="fas fa-chevron-right text-xs text-[#AAAAAA]"></i>
-                                </div>
+                                <span class="text-sm font-semibold text-[#111111]">{{ $row['label'] }}</span>
                             </div>
-                        </div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-2xl font-semibold" style="color:{{ $row['color'] }};">{{ number_format($row['count']) }}</span>
+                                <i class="fas fa-chevron-right text-xs text-[#AAAAAA]"></i>
+                            </div>
+                        </a>
                         @endforeach
                     </div>
                 </div>
             </div>
 
-            {{-- ── Alumni by Batch Year — Chart.js with multicolor bars ── --}}
+            {{-- ── Alumni by Batch Year ── --}}
             @if($this->allBatches->count() > 0)
             <div class="lg:col-span-2 bg-white border border-[#E8E0F0] rounded-[14px] shadow-sm overflow-hidden flex flex-col
                         cursor-pointer transition-all duration-200 hover:shadow-[0_5px_16px_rgba(122,63,145,.11)] hover:border-[rgba(122,63,145,.28)]">
@@ -599,7 +638,7 @@ new class extends Component {
                         <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
                         <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Alumni by Batch Year</span>
                         <span class="text-[.68rem] text-[#555555] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
-                            <i class="fas fa-hand-pointer"></i> Click bar
+                            <i class="fas fa-hand-pointer"></i> Click bar to view alumni
                         </span>
                     </div>
                     <div id="dashBatchNavControls" class="hidden items-center gap-2">
@@ -894,7 +933,6 @@ new class extends Component {
             </table>
 
             @else
-            {{-- Alumni Table --}}
             <table class="w-full border-collapse" style="min-width:760px;">
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
@@ -924,9 +962,7 @@ new class extends Component {
                             </div>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="text-sm font-mono font-semibold text-[#111111]">
-                                {{ $alumni->student_id }}
-                            </span>
+                            <span class="text-sm font-mono font-semibold text-[#111111]">{{ $alumni->student_id }}</span>
                         </td>
                         <td class="px-4 py-3">
                             <span class="font-mono text-sm font-semibold text-[#111111]">{{ $alumni->course_code }}</span>
@@ -1022,27 +1058,28 @@ new class extends Component {
 
     {{-- ═══════════════════════════════════════════════════════════
          EMPLOYMENT FULL-SCREEN MODAL
+         (kept for @dash-open-emp.window event compatibility)
     ═══════════════════════════════════════════════════════════ --}}
     @if($activeModal === 'employment')
     @php
-        $records     = $this->empModalRecords;
-        $isNoRecord  = $this->empFilter === 'no_record';
-        $isUnemployed = $this->empFilter === 'unemployed';
-        $isEmployed   = $this->empFilter === 'employed';
+        $records        = $this->empModalRecords;
+        $isNoRecord     = $this->empFilter === 'no_record';
+        $isUnemployed   = $this->empFilter === 'unemployed';
+        $isEmployed     = $this->empFilter === 'employed';
         $isSelfEmployed = $this->empFilter === 'self_employed';
 
         $statusBadge = [
             'employed'      => ['Employed',      'text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0]', 'fa-user-tie'],
-            'self_employed' => ['Self-Employed',  'text-blue-700 bg-blue-50 border-blue-200',       'fa-store'],
-            'unemployed'    => ['Unemployed',     'text-amber-700 bg-amber-50 border-amber-200',    'fa-magnifying-glass'],
+            'self_employed' => ['Self-Employed',  'text-blue-700 bg-blue-50 border-blue-200',      'fa-store'],
+            'unemployed'    => ['Unemployed',     'text-amber-700 bg-amber-50 border-amber-200',   'fa-magnifying-glass'],
         ];
 
         $allEmpTabs = [
-            [''             , 'All',           'fa-briefcase'],
-            ['employed'     , 'Employed',       'fa-user-tie'],
-            ['self_employed', 'Self-Employed',  'fa-store'],
-            ['unemployed'   , 'Unemployed',     'fa-magnifying-glass'],
-            ['no_record'    , 'No Record',      'fa-circle-minus'],
+            [''             , 'All',          'fa-briefcase'],
+            ['employed'     , 'Employed',      'fa-user-tie'],
+            ['self_employed', 'Self-Employed', 'fa-store'],
+            ['unemployed'   , 'Unemployed',    'fa-magnifying-glass'],
+            ['no_record'    , 'No Record',     'fa-circle-minus'],
         ];
         $empTabsLocked  = ($empFilter !== '');
         $visibleEmpTabs = $empTabsLocked
@@ -1060,15 +1097,10 @@ new class extends Component {
         $ePgStart  = max(1, $eCp - 2);
         $ePgEnd    = min($eLastPage, $eCp + 2);
 
-        if ($isEmployed) {
-            $dynColLabel = 'Job Title';
-        } elseif ($isSelfEmployed) {
-            $dynColLabel = 'Business Name';
-        } elseif ($isUnemployed || $isNoRecord) {
-            $dynColLabel = 'Contact Number';
-        } else {
-            $dynColLabel = 'Company';
-        }
+        if ($isEmployed)              $dynColLabel = 'Job Title';
+        elseif ($isSelfEmployed)      $dynColLabel = 'Business Name';
+        elseif ($isUnemployed || $isNoRecord) $dynColLabel = 'Contact Number';
+        else                          $dynColLabel = 'Company';
     @endphp
     <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 animate-[dashPageIn_.22s_cubic-bezier(.4,0,.2,1)_both]"
          @keydown.escape.window="$wire.closeModal()">
@@ -1107,14 +1139,11 @@ new class extends Component {
 
         {{-- Toolbar --}}
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-
             <div class="flex flex-wrap gap-3 items-center mb-3">
-
                 <span class="text-xs font-bold tracking-widest uppercase shrink-0 px-2.5 py-1.5 rounded-lg border
                              text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0] pointer-events-none">
                     <i class="fas fa-filter text-[10px] mr-1"></i>Filters
                 </span>
-
                 <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.empSearch ?? ''; $wire.$watch('empSearch', v => { if(v!==this.q) this.q=v; }); } }">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
@@ -1125,7 +1154,6 @@ new class extends Component {
                                   focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
                            autocomplete="off">
                 </div>
-
                 <div class="flex flex-wrap gap-1.5 items-center">
                     @foreach($visibleEmpTabs as [$val, $lbl, $icon])
                     <button
@@ -1144,11 +1172,8 @@ new class extends Component {
                     </span>
                     @endif
                 </div>
-
             </div>
-
             <div class="flex flex-wrap gap-2 items-center">
-
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('empBatchFilter',val); this.close(); } }"
                      @click.outside="close()">
@@ -1181,7 +1206,6 @@ new class extends Component {
                         @endforeach
                     </div>
                 </div>
-
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('empCourseFilter',val); this.close(); } }"
                      @click.outside="close()">
@@ -1214,7 +1238,6 @@ new class extends Component {
                         @endforeach
                     </div>
                 </div>
-
                 @if($empHasSecondaryFilter)
                 <div class="flex items-center gap-1.5 flex-wrap">
                     <span class="text-xs text-[#333333] font-normal">Filtering by:</span>
@@ -1239,9 +1262,7 @@ new class extends Component {
                     </button>
                 </div>
                 @endif
-
             </div>
-
         </div>
 
         {{-- Table --}}
@@ -1268,7 +1289,6 @@ new class extends Component {
                             $row->first_name ?? '', $row->middle_initial ?? '',
                             $row->last_name  ?? '', $row->suffix ?? ''
                         );
-
                         $rowStatus = $isNoRecord ? 'no_record' : ($row->employment_status ?? '');
                         if ($rowStatus === 'employed') {
                             $dynCellValue = $row->job_title ?? null;
@@ -1296,9 +1316,7 @@ new class extends Component {
                             </div>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="text-sm font-mono font-semibold text-[#111111]">
-                                {{ $row->student_id ?? '—' }}
-                            </span>
+                            <span class="text-sm font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</span>
                         </td>
                         <td class="px-4 py-3">
                             <span class="text-sm font-semibold text-[#111111]">{{ $row->course_code ?? '—' }}</span>
@@ -1409,7 +1427,6 @@ new class extends Component {
 (function () {
     'use strict';
 
-    // ── Multi-color palette for batch bars ──────────────────────────
     var BAR_COLORS = [
         { bg: 'rgba(122,63,145,0.82)',  border: '#7A3F91' },
         { bg: 'rgba(37,99,235,0.80)',   border: '#2563eb' },
@@ -1432,6 +1449,11 @@ new class extends Component {
         catch (e) { return null; }
     }
 
+    function getAlumniRoute() {
+        var el = document.getElementById('__dash_batch_data');
+        return el ? (el.getAttribute('data-alumni-route') || '') : '';
+    }
+
     function sliceDashBatch(data, start) {
         var end = start + BATCH_PAGE_SIZE;
         return {
@@ -1451,7 +1473,6 @@ new class extends Component {
             if (existing) existing.destroy();
         }
 
-        // Assign colors cycling through the palette per bar
         var bgColors     = slice.labels.map(function(_, i){ return BAR_COLORS[i % BAR_COLORS.length].bg; });
         var borderColors = slice.labels.map(function(_, i){ return BAR_COLORS[i % BAR_COLORS.length].border; });
 
@@ -1477,7 +1498,7 @@ new class extends Component {
                     tooltip: {
                         callbacks: {
                             title: function (items) { return 'Batch ' + items[0].label; },
-                            label: function (ctx)   { return ' ' + ctx.parsed.y + ' alumni'; },
+                            label: function (ctx)   { return ' ' + ctx.parsed.y + ' alumni — click to view'; },
                         },
                     },
                 },
@@ -1497,9 +1518,9 @@ new class extends Component {
                     if (elements && elements.length) {
                         var batch = slice.labels[elements[0].index];
                         if (batch === undefined || batch === null) return;
-                        window.dispatchEvent(new CustomEvent('dash-open-alumni', {
-                            detail: { filter: 'all', batch: parseInt(batch) }
-                        }));
+                        var baseRoute = getAlumniRoute();
+                        if (!baseRoute) return;
+                        window.location.href = baseRoute + '?profile_filter=all&batch=' + parseInt(batch);
                     }
                 },
             },
