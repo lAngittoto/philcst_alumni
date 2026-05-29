@@ -52,59 +52,48 @@
         }
         .notif-item:hover .notif-hover-label { opacity: 1; }
 
-        .notif-close-btn {
+        /* ── Close button tooltip ── */
+        .notif-close-wrap {
             position: relative;
-            width: 28px;
-            height: 28px;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            border-radius: 8px;
-            color: rgba(255,255,255,0.5);
-            transition: color 0.18s ease, background 0.18s ease;
-            cursor: pointer;
-            margin-left: 4px;
-            flex-shrink: 0;
         }
-        .notif-close-btn:hover {
-            color: #fff;
-            background: rgba(255,255,255,0.12);
-        }
-        .notif-close-btn .close-tooltip {
-            pointer-events: none;
+        .notif-close-tip {
             position: absolute;
             top: calc(100% + 7px);
-            right: 0;
-            background: rgba(0,0,0,0.88);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a1a;
             color: #fff;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             letter-spacing: 0.06em;
-            padding: 5px 12px;
-            border-radius: 20px;
+            padding: 4px 10px;
+            border-radius: 7px;
             white-space: nowrap;
+            pointer-events: none;
             opacity: 0;
-            transform: translateY(-4px);
-            transition: opacity 0.18s ease, transform 0.18s ease;
-            z-index: 99999;
-            display: flex;
-            align-items: center;
+            transition: opacity 0.15s ease;
+            z-index: 100000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.30);
         }
-        .notif-close-btn:hover .close-tooltip {
-            opacity: 1;
-            transform: translateY(0);
-        }
-        .notif-close-btn .close-tooltip::before {
+        .notif-close-tip::after {
             content: '';
             position: absolute;
             bottom: 100%;
-            right: 8px;
+            left: 50%;
+            transform: translateX(-50%);
             border: 5px solid transparent;
-            border-bottom-color: rgba(0,0,0,0.88);
+            border-bottom-color: #1a1a1a;
         }
+        .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
     </style>
 
     <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    //  STORE FACTORY — fresh object every call, no shared-reference bugs
+    // ─────────────────────────────────────────────────────────────────────────
     window.__makeAlumniNotifsStore = function () {
         return {
             open:       false,
@@ -129,21 +118,109 @@
                     });
                     if (res.ok) {
                         var raw = await res.json();
-                        this.items = Array.from(raw).sort(function (a, b) {
-                            return new Date(b.created_at) - new Date(a.created_at);
-                        });
+                        this.items = this._groupByDay(raw);
                     }
                 } catch (e) { /* silently fail */ }
             },
 
-            get unread() {
-                return this.items.filter(function (n) { return !n.read; }).length;
+            // ─── GROUP-BY-DAY (same logic as Registrar) ───────────────────
+            _groupByDay(rows) {
+                var map = new Map();
+                Array.from(rows)
+                    .sort(function (a, b) {
+                        return new Date(b.created_at) - new Date(a.created_at);
+                    })
+                    .forEach(function (n) {
+                        var day = n.created_at
+                            ? new Date(n.created_at).toISOString().slice(0, 10)
+                            : 'unknown';
+                        var rawDedup = n.dedup_key || '';
+
+                        // ── Employment events: group all into one per day ──
+                        var isEmpEvent = (
+                            rawDedup.startsWith('employment_update') ||
+                            rawDedup.startsWith('employment::')      ||
+                            rawDedup.startsWith('recorded::')        ||
+                            rawDedup.startsWith('updated::')         ||
+                            n.title === 'Employment Status Updated'  ||
+                            n.title === 'New Employment Record'      ||
+                            n.icon  === 'chart-line'
+                        );
+
+                        // ── Message events: group all messages per day ──
+                        var isMsgEvent = (
+                            rawDedup.startsWith('message-received::') ||
+                            n.icon  === 'comments'
+                        );
+
+                        // ── Job events: group all jobs per day ──
+                        var isJobEvent = (
+                            rawDedup.startsWith('job-posted::') ||
+                            n.icon  === 'briefcase'
+                        );
+
+                        // ── Event/calendar events: group all events per day ──
+                        var isCalEvent = (
+                            rawDedup.startsWith('event-announced::') ||
+                            n.icon  === 'calendar'
+                        );
+
+                        var groupKey;
+                        if (isEmpEvent) {
+                            groupKey = 'employment_day::' + day;
+                        } else if (isMsgEvent) {
+                            groupKey = 'message_day::' + day;
+                        } else if (isJobEvent) {
+                            groupKey = 'job_day::' + day;
+                        } else if (isCalEvent) {
+                            groupKey = 'calendar_day::' + day;
+                        } else {
+                            // Everything else: group by title + dedup_key + day
+                            groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
+                        }
+
+                        if (map.has(groupKey)) {
+                            var g = map.get(groupKey);
+                            g.count = (g.count || 1) + (n.count || 1);
+                            if (!n.read) g.read = false;
+                            g._ids.push(n.id);
+
+                            // Update message based on group type
+                            if (isEmpEvent) {
+                                g.message = g.count + ' employment update(s) today.';
+                                g.title   = 'Employment Status Updated';
+                            } else if (isMsgEvent) {
+                                g.message = g.count + ' new message(s) today.';
+                                g.title   = g.count + ' New Messages';
+                            } else if (isJobEvent) {
+                                g.message = g.count + ' new job posting(s) today.';
+                                g.title   = 'New Job Postings';
+                            } else if (isCalEvent) {
+                                g.message = g.count + ' new event(s) announced today.';
+                                g.title   = 'New Events Announced';
+                            }
+                        } else {
+                            map.set(groupKey, Object.assign({}, n, {
+                                count: n.count || 1,
+                                _ids:  [n.id],
+                                title: isEmpEvent ? 'Employment Status Updated'
+                                     : isMsgEvent ? (n.title || 'New Message')
+                                     : isJobEvent ? (n.title || 'New Job Posting')
+                                     : isCalEvent ? (n.title || 'New Event Announced')
+                                     : n.title,
+                                icon:  isEmpEvent ? 'chart-line'
+                                     : isMsgEvent ? 'comments'
+                                     : isJobEvent ? 'briefcase'
+                                     : isCalEvent ? 'calendar'
+                                     : (n.icon || 'bell'),
+                            }));
+                        }
+                    });
+                return Array.from(map.values());
             },
 
-            get unreadJobs() {
-                return this.items.some(function (n) {
-                    return !n.read && n.icon === 'briefcase';
-                }) ? 1 : 0;
+            get unread() {
+                return this.items.filter(function (n) { return !n.read; }).length;
             },
 
             toggle() { this.open = !this.open; },
@@ -182,6 +259,9 @@
         };
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SAFE ACCESSOR
+    // ─────────────────────────────────────────────────────────────────────────
     window.__safeAlumniNotifsStore = function () {
         try {
             if (window.Alpine && typeof Alpine.store === 'function') {
@@ -192,6 +272,9 @@
         return null;
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  INTERNAL BOOT HELPER
+    // ─────────────────────────────────────────────────────────────────────────
     window.__bootAlumniNotifsStore = function () {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         if (!Alpine.store('alumniNotifs')) {
@@ -201,10 +284,16 @@
         if (s && !s._pollTimer) s.init();
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PATH A — alpine:init
+    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:init', function () {
         Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PATH B — alpine:initialized
+    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:initialized', function () {
         setTimeout(function () {
             var s = window.__safeAlumniNotifsStore();
@@ -212,12 +301,18 @@
         }, 0);
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PATH C — window load
+    // ─────────────────────────────────────────────────────────────────────────
     window.addEventListener('load', function () {
         var s = window.__safeAlumniNotifsStore();
         if (s) { if (s.items.length === 0) s.init(); }
         else    { window.__bootAlumniNotifsStore(); }
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PATH D — livewire:navigated (wire:navigate SPA page swaps)
+    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
@@ -236,6 +331,9 @@
         }, 150);
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PATH E — IIFE IMMEDIATE BOOT
+    // ─────────────────────────────────────────────────────────────────────────
     ;(function () {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         var s = Alpine.store('alumniNotifs');
@@ -246,6 +344,9 @@
         if (s && !s._pollTimer) setTimeout(function () { s.init(); }, 100);
     })();
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Re-fetch on tab focus
+    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') {
             var s = window.__safeAlumniNotifsStore();
@@ -253,6 +354,9 @@
         }
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PANEL POSITIONING
+    // ─────────────────────────────────────────────────────────────────────────
     function positionAlumniPanel() {
         var btn   = document.getElementById('alumni-bell-btn');
         var panel = document.getElementById('alumni-notif-panel');
@@ -277,6 +381,9 @@
         if (s && s.open) positionAlumniPanel();
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  CURSOR-FOLLOWING TOOLTIP
+    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('mousemove', function (e) {
         var target = e.target;
         if (!target || typeof target.closest !== 'function') return;
@@ -288,9 +395,9 @@
         label.style.top  = (e.clientY + 14) + 'px';
     });
 
-    /* ─────────────────────────────────────────────────────────────────────────
-       NOTIFICATION EVENT LISTENERS
-    ───────────────────────────────────────────────────────────────────────── */
+    // ─────────────────────────────────────────────────────────────────────────
+    //  NOTIFICATION EVENT LISTENERS
+    // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstAlumniNotifListeners) {
         window.__philcstAlumniNotifListeners = true;
 
@@ -303,7 +410,7 @@
 
         async function _saveAlumniNotif(payload) {
             try {
-                var res = await window.fetch('/alumni/notifications', {
+                await window.fetch('/alumni/notifications', {
                     method: 'POST',
                     headers: {
                         'Content-Type':     'application/json',
@@ -333,10 +440,6 @@
                 dedup_key:  'profile-updated',
             });
         });
-
-        /* ── Employment: intentionally omitted ──
-           Livewire's saveAlumniNotification() writes these server-side.
-           A JS listener here would double-write every time. */
 
         /* ── Event Announced ── */
         window.addEventListener('event-announced', function (e) {
@@ -391,8 +494,6 @@
             var s = window.__safeAlumniNotifsStore();
             if (s) {
                 s._fetch();
-                /* Second fetch after a short delay handles race conditions where
-                   the DB write hasn't fully committed when the first fetch fires. */
                 setTimeout(function () {
                     var s2 = window.__safeAlumniNotifsStore();
                     if (s2) s2._fetch();
@@ -659,18 +760,20 @@
                 Mark all read
             </button>
 
-            <button
-                type="button"
-                @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
-                class="notif-close-btn"
-                aria-label="Close notifications">
-                <i class="fas fa-xmark" style="font-size:14px;"></i>
-                <span class="close-tooltip">Close</span>
-            </button>
+            {{-- ── Close button with tooltip ── --}}
+            <div class="notif-close-wrap ml-1">
+                <span class="notif-close-tip">Close</span>
+                <button type="button"
+                        @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
+                        class="w-7 h-7 flex items-center justify-center rounded-lg
+                               text-white/50 hover:text-white hover:bg-white/10 transition">
+                    <i class="fas fa-xmark" style="font-size:14px;"></i>
+                </button>
+            </div>
         </div>
     </div>
 
-    {{-- Notification list --}}
+    {{-- Scrollable notification list --}}
     <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
         <template x-if="$store.alumniNotifs && $store.alumniNotifs.items.length === 0">
@@ -686,6 +789,7 @@
             </div>
         </template>
 
+        {{-- Notification items --}}
         <template x-if="$store.alumniNotifs">
             <template x-for="notif in $store.alumniNotifs.items" :key="notif.id">
                 <div
@@ -711,6 +815,7 @@
                         }
                     ">
 
+                    {{-- Icon --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
                          style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
                         <i class="fas text-[#7A3F91]"
@@ -718,6 +823,7 @@
                            style="font-size:15px;"></i>
                     </div>
 
+                    {{-- Content --}}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-start justify-between gap-2">
                             <div class="flex items-center gap-1.5 flex-wrap">
@@ -725,6 +831,7 @@
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
 
+                                {{-- Count badge --}}
                                 <span
                                     x-show="Number(notif.count) > 1"
                                     x-cloak
@@ -780,15 +887,14 @@
                                   class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                         </div>
 
+                        {{-- Message --}}
                         <p class="text-[#666666] mt-1 leading-relaxed"
                            style="font-size:12px;
                                   display:-webkit-box;
                                   -webkit-line-clamp:2;
                                   -webkit-box-orient:vertical;
                                   overflow:hidden;"
-                           x-text="Number(notif.count) > 1
-                               ? notif.message + ' (' + Number(notif.count) + ' today)'
-                               : notif.message">
+                           x-text="notif.message">
                         </p>
 
                         <div class="flex items-center gap-1 mt-2">
@@ -821,6 +927,16 @@
 </div>
 
 @livewireScripts
+
+{{-- ✅ CLOSE ON OUTSIDE CLICK --}}
+<div
+    x-data
+    x-show="$store.alumniNotifs && $store.alumniNotifs.open"
+    x-cloak
+    @click="$store.alumniNotifs && $store.alumniNotifs.close()"
+    class="fixed inset-0"
+    style="z-index: 9998; background: transparent;">
+</div>
 
 </body>
 </html>

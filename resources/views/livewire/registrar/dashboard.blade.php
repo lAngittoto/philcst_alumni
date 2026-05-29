@@ -1,5 +1,3 @@
-{{-- resources/views/livewire/registrar/dashboard.blade.php --}}
-
 <?php
 
 use Livewire\Volt\Component;
@@ -527,48 +525,46 @@ new class extends Component {
                 $total        = $this->totalAlumni;
                 $submittedPct = $total > 0 ? round(($submitted / $total) * 100) : 0;
 
-                $empRoute = route('registrar.employment.tracking');
-
                 $empRows = [
                     [
-                        'label'  => 'Employed',
-                        'count'  => $ec['employed'],
-                        'icon'   => 'fa-user-tie',
-                        'color'  => '#7A3F91',
-                        'light'  => '#F9F7FC',
-                        'border' => '#E8E0F0',
-                        'tip'    => 'View Employed Alumni',
-                        'href'   => $empRoute . '?autoModal=employed',
+                        'label'       => 'Employed',
+                        'count'       => $ec['employed'],
+                        'color'       => '#7A3F91',
+                        'light'       => '#F9F7FC',
+                        'border'      => '#E8E0F0',
+                        'filter'      => 'employed',
+                        'tooltip'     => 'View All Employed',
+                        'hoverBorder' => '#7A3F91',
                     ],
                     [
-                        'label'  => 'Self-Employed',
-                        'count'  => $ec['self'],
-                        'icon'   => 'fa-store',
-                        'color'  => '#2563eb',
-                        'light'  => '#EFF6FF',
-                        'border' => '#BFDBFE',
-                        'tip'    => 'View Self-Employed Alumni',
-                        'href'   => $empRoute . '?autoModal=self_employed',
+                        'label'       => 'Self-Employed',
+                        'count'       => $ec['self'],
+                        'color'       => '#2563eb',
+                        'light'       => '#EFF6FF',
+                        'border'      => '#BFDBFE',
+                        'filter'      => 'self_employed',
+                        'tooltip'     => 'View All Self-Employed',
+                        'hoverBorder' => '#2563eb',
                     ],
                     [
-                        'label'  => 'Unemployed',
-                        'count'  => $ec['unemployed'],
-                        'icon'   => 'fa-magnifying-glass',
-                        'color'  => '#d97706',
-                        'light'  => '#FFFBEB',
-                        'border' => '#FCD34D',
-                        'tip'    => 'View Unemployed Alumni',
-                        'href'   => $empRoute . '?autoModal=unemployed',
+                        'label'       => 'Unemployed',
+                        'count'       => $ec['unemployed'],
+                        'color'       => '#d97706',
+                        'light'       => '#FFFBEB',
+                        'border'      => '#FCD34D',
+                        'filter'      => 'unemployed',
+                        'tooltip'     => 'View All Unemployed',
+                        'hoverBorder' => '#d97706',
                     ],
                     [
-                        'label'  => 'No Record',
-                        'count'  => $ec['noRecord'],
-                        'icon'   => 'fa-circle-minus',
-                        'color'  => '#374151',
-                        'light'  => '#F9FAFB',
-                        'border' => '#E5E7EB',
-                        'tip'    => 'View No Employment Record',
-                        'href'   => $empRoute . '?autoModal=no_record',
+                        'label'       => 'No Record',
+                        'count'       => $ec['noRecord'],
+                        'color'       => '#374151',
+                        'light'       => '#F9FAFB',
+                        'border'      => '#E5E7EB',
+                        'filter'      => 'no_record',
+                        'tooltip'     => 'View All Without Record',
+                        'hoverBorder' => '#374151',
                     ],
                 ];
             @endphp
@@ -599,31 +595,25 @@ new class extends Component {
                     </div>
                     <div class="space-y-2">
                         @foreach($empRows as $row)
-                        <a href="{{ $row['href'] }}"
-                           class="relative overflow-visible no-underline rounded-xl border p-3 flex items-center justify-between
-                                  transition-all duration-150 hover:shadow-md active:scale-[.98]"
-                           style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }}; display:flex;">
+                        {{-- ✅ Each row: relative + overflow-visible para lalabas ang tooltip --}}
+                        <div wire:click="openEmpModal('{{ $row['filter'] }}')"
+                             class="relative overflow-visible rounded-xl border p-3 flex items-center justify-between
+                                    transition-all duration-150 hover:shadow-md active:scale-[.98] cursor-pointer group"
+                             style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }};">
+
+                            {{-- Tooltip — same style as stat cards, appears above --}}
                             <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                                          bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                                          px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                                         opacity-0 z-50 shadow-lg
+                                         opacity-0 group-hover:opacity-100 z-50 shadow-lg transition-opacity duration-150
                                          before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
-                                         before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
-                                         [.relative:hover_&]:opacity-100">
-                                <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>{{ $row['tip'] }}
+                                         before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]">
+                                <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>{{ $row['tooltip'] }}
                             </span>
-                            <div class="flex items-center gap-2">
-                                <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                                     style="background:{{ $row['color'] }}20; color:{{ $row['color'] }};">
-                                    <i class="fas {{ $row['icon'] }} text-xs"></i>
-                                </div>
-                                <span class="text-sm font-semibold text-[#111111]">{{ $row['label'] }}</span>
-                            </div>
-                            <div class="flex items-center gap-1.5">
-                                <span class="text-2xl font-semibold" style="color:{{ $row['color'] }};">{{ number_format($row['count']) }}</span>
-                                <i class="fas fa-chevron-right text-xs text-[#AAAAAA]"></i>
-                            </div>
-                        </a>
+
+                            <span class="text-sm font-semibold text-[#111111]">{{ $row['label'] }}</span>
+                            <span class="text-2xl font-semibold" style="color:{{ $row['color'] }};">{{ number_format($row['count']) }}</span>
+                        </div>
                         @endforeach
                     </div>
                 </div>
@@ -746,16 +736,15 @@ new class extends Component {
 
                 <span class="text-xs font-bold tracking-widest uppercase shrink-0 px-2.5 py-1.5 rounded-lg border
                              text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0] pointer-events-none">
-                    <i class="fas fa-filter text-[10px] mr-1"></i>Filters
+                    Filters
                 </span>
 
                 <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.alumniModalSearch ?? ''; $wire.$watch('alumniModalSearch', v => { if(v!==this.q) this.q=v; }); } }">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('alumniModalSearch', q)"
                            placeholder="{{ $alumniModalFilter === 'courses' ? 'Search course, name, college…' : 'Search name, ID, course, batch…' }}"
-                           class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900
+                           class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900
                                   focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
                            autocomplete="off">
                 </div>
@@ -765,18 +754,16 @@ new class extends Component {
                     @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
                     <button
                         @if($alumniTabsClickable) wire:click="$set('alumniModalFilter','{{ $val }}')" @endif
-                        class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5
+                        class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all
                                {{ $alumniModalFilter === $val
                                     ? 'text-white border-transparent bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]'
                                     : 'bg-white text-[#111111] border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
                                {{ !$alumniTabsClickable ? 'cursor-default' : 'active:scale-95' }}">
-                        <i class="fas {{ $icon }} text-[10px]"></i>{{ $lbl }}
+                        {{ $lbl }}
                     </button>
                     @endforeach
                     @if(!$alumniTabsClickable && !$isAllNoFilter)
-                    <span class="flex items-center gap-1 text-xs text-[#333333] font-normal ml-1">
-                        <i class="fas fa-lock text-gray-300 text-xs"></i> Filtered view
-                    </span>
+                    <span class="text-xs text-[#333333] font-normal ml-1">Filtered view</span>
                     @endif
                 </div>
                 @endif
@@ -795,10 +782,7 @@ new class extends Component {
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
                                    text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
-                        <i class="fas fa-calendar-alt opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($alumniModalBatch) Batch {{ $alumniModalBatch }} @else All Batch Years @endif</span>
-                        <i class="fas fa-chevron-down opacity-60 transition-transform duration-[180ms]"
-                           :class="{ 'rotate-180': open }" style="font-size:.62rem;"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -823,8 +807,7 @@ new class extends Component {
                 @else
                 <span class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border
                              bg-[#F9F7FC] text-[#7A3F91] border-[#7A3F91]">
-                    <i class="fas fa-calendar-check text-[10px]"></i>Batch {{ $alumniModalBatch }}
-                    <i class="fas fa-lock text-[9px] opacity-50 ml-0.5"></i>
+                    Batch {{ $alumniModalBatch }}
                 </span>
                 @endif
 
@@ -836,10 +819,7 @@ new class extends Component {
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
                                    text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
-                        <i class="fas fa-book-open opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($alumniModalCourseFilter) {{ $alumniModalCourseFilter }} @else All Courses @endif</span>
-                        <i class="fas fa-chevron-down opacity-60 transition-transform duration-[180ms]"
-                           :class="{ 'rotate-180': open }" style="font-size:.62rem;"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -867,12 +847,12 @@ new class extends Component {
                     <span class="text-xs text-[#333333] font-normal">Filtering by:</span>
                     @if($alumniModalBatch && !$alumniModalBatchLocked)
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            <i class="fas fa-calendar text-[10px]"></i> Batch {{ $alumniModalBatch }}
+                            Batch {{ $alumniModalBatch }}
                         </span>
                     @endif
                     @if($alumniModalCourseFilter)
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            <i class="fas fa-book text-[10px]"></i> {{ $alumniModalCourseFilter }}
+                            {{ $alumniModalCourseFilter }}
                         </span>
                     @endif
                     @if(!$alumniModalBatchLocked || $alumniModalCourseFilter)
@@ -1058,7 +1038,6 @@ new class extends Component {
 
     {{-- ═══════════════════════════════════════════════════════════
          EMPLOYMENT FULL-SCREEN MODAL
-         (kept for @dash-open-emp.window event compatibility)
     ═══════════════════════════════════════════════════════════ --}}
     @if($activeModal === 'employment')
     @php
@@ -1142,15 +1121,14 @@ new class extends Component {
             <div class="flex flex-wrap gap-3 items-center mb-3">
                 <span class="text-xs font-bold tracking-widest uppercase shrink-0 px-2.5 py-1.5 rounded-lg border
                              text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0] pointer-events-none">
-                    <i class="fas fa-filter text-[10px] mr-1"></i>Filters
+                    Filters
                 </span>
                 <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.empSearch ?? ''; $wire.$watch('empSearch', v => { if(v!==this.q) this.q=v; }); } }">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('empSearch', q)"
                            placeholder="Search name, ID, company, email…"
-                           class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900
+                           class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900
                                   focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
                            autocomplete="off">
                 </div>
@@ -1158,18 +1136,16 @@ new class extends Component {
                     @foreach($visibleEmpTabs as [$val, $lbl, $icon])
                     <button
                         @if(!$empTabsLocked) wire:click="$set('empFilter','{{ $val }}')" @endif
-                        class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5
+                        class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all
                                {{ $this->empFilter === $val
                                     ? 'text-white border-transparent bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]'
                                     : 'bg-white text-[#111111] border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
                                {{ $empTabsLocked ? 'cursor-default' : 'active:scale-95' }}">
-                        <i class="fas {{ $icon }} text-[10px]"></i>{{ $lbl }}
+                        {{ $lbl }}
                     </button>
                     @endforeach
                     @if($empTabsLocked)
-                    <span class="flex items-center gap-1 text-xs text-[#333333] font-normal ml-1">
-                        <i class="fas fa-lock text-gray-300 text-[10px]"></i> Filtered view
-                    </span>
+                    <span class="text-xs text-[#333333] font-normal ml-1">Filtered view</span>
                     @endif
                 </div>
             </div>
@@ -1182,10 +1158,7 @@ new class extends Component {
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
                                    text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
-                        <i class="fas fa-calendar-alt opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($empBatchFilter) Batch {{ $empBatchFilter }} @else All Batch Years @endif</span>
-                        <i class="fas fa-chevron-down opacity-60 transition-transform duration-[180ms]"
-                           :class="{ 'rotate-180': open }" style="font-size:.62rem;"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -1214,10 +1187,7 @@ new class extends Component {
                             class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
                                    text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] transition-all duration-150">
-                        <i class="fas fa-book-open opacity-70" style="font-size:.68rem;"></i>
                         <span>@if($empCourseFilter) {{ $empCourseFilter }} @else All Courses @endif</span>
-                        <i class="fas fa-chevron-down opacity-60 transition-transform duration-[180ms]"
-                           :class="{ 'rotate-180': open }" style="font-size:.62rem;"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]

@@ -807,7 +807,7 @@ new class extends Component {
 
 {{-- Course breakdown cursor tooltip --}}
 <div id="cb-cursor-tip" class="cb-row-tip">
-    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Details
+    View Details
 </div>
 
 {{-- Chart data bridge --}}
@@ -834,14 +834,23 @@ new class extends Component {
             </div>
             <div>
                 <h1 class="text-xl font-bold leading-tight text-gray-900">Employment Tracking</h1>
-                <p class="text-xs text-gray-500 mt-0.5">System-wide alumni employment analytics &amp; records</p>
+                <p class="text-xs text-black mt-0.5">System-wide alumni employment analytics &amp; records</p>
             </div>
         </div>
+
+        {{-- ── ICON-ONLY PRINT BUTTON (main page) — tooltip BELOW ── --}}
         <button wire:click="openReports"
-                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold shadow text-white
-                       bg-[#7a3f91] hover:bg-[#5e2f72] transition active:scale-95">
-            <i class="fas fa-print"></i>
-            <span>Print</span>
+                class="group relative w-9 h-9 rounded-xl flex items-center justify-center shadow text-white overflow-visible
+                       bg-[#7a3f91] hover:bg-[#5e2f72] transition active:scale-95 cursor-pointer">
+            <span class="absolute top-[calc(100%+8px)] right-0
+                         bg-[#1a1a1a] text-white text-[10px] font-bold uppercase tracking-widest
+                         px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
+                         opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-50
+                         before:content-[''] before:absolute before:bottom-full before:right-2.5
+                         before:border-[5px] before:border-transparent before:border-b-[#1a1a1a]">
+                Print Records
+            </span>
+            <i class="fas fa-print text-sm"></i>
         </button>
     </div>
 
@@ -875,14 +884,14 @@ new class extends Component {
                          opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-50
                          before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                          before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]">
-                <i class="fas fa-eye mr-1 text-[9px]"></i>View {{ $label }}
+                View {{ $label }}
             </span>
             <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 {{ $iconBg }}">
                 <i class="fa-solid {{ $icon }} {{ $iconColor }}" style="font-size:.9rem;"></i>
             </div>
             <div class="min-w-0">
                 <p class="text-xl font-bold leading-none text-gray-900 stat-number-anim">{{ number_format($count) }}</p>
-                <p class="text-[.70rem] font-semibold text-gray-600 mt-0.5">{{ $label }}</p>
+                <p class="text-[.70rem] font-semibold text-black mt-0.5">{{ $label }}</p>
                 <p class="text-[.67rem] font-bold mt-0.5 {{ $iconColor }}">{{ $rate }}</p>
             </div>
         </div>
@@ -900,8 +909,8 @@ new class extends Component {
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-[#10b981] shrink-0"></span>
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest">Status</span>
-                    <span class="ml-auto text-[.65rem] text-gray-400 font-medium flex items-center gap-1"><i class="fas fa-hand-pointer"></i> Click</span>
+                    <span class="text-[.72rem] font-bold text-black uppercase tracking-widest">Status</span>
+                    <span class="ml-auto text-[.65rem] text-black font-medium">Click</span>
                 </div>
                 <div class="flex-1 min-h-0 flex items-center justify-center p-1" wire:ignore>
                     <canvas id="chartStatus" style="max-height:100%;max-width:100%;"></canvas>
@@ -914,8 +923,8 @@ new class extends Component {
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-purple-400 shrink-0"></span>
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest">Location</span>
-                    <span class="ml-auto text-[.65rem] text-gray-400 font-medium flex items-center gap-1"><i class="fas fa-hand-pointer"></i> Click</span>
+                    <span class="text-[.72rem] font-bold text-black uppercase tracking-widest">Location</span>
+                    <span class="ml-auto text-[.65rem] text-black font-medium">Click</span>
                 </div>
                 <div class="flex-1 min-h-0 flex items-center justify-center p-1" wire:ignore>
                     <canvas id="chartLocation" style="max-height:100%;max-width:100%;"></canvas>
@@ -928,8 +937,8 @@ new class extends Component {
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest">Relevance</span>
-                    <span class="ml-auto text-[.65rem] text-gray-400 font-medium flex items-center gap-1"><i class="fas fa-hand-pointer"></i> Click</span>
+                    <span class="text-[.72rem] font-bold text-black uppercase tracking-widest">Relevance</span>
+                    <span class="ml-auto text-[.65rem] text-black font-medium">Click</span>
                 </div>
                 <div class="flex-1 min-h-0 flex items-center justify-center p-1" wire:ignore>
                     <canvas id="chartRelevance" style="max-height:100%;max-width:100%;"></canvas>
@@ -942,8 +951,8 @@ new class extends Component {
                         transition-all cursor-pointer flex flex-col overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-gray-100 bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                     <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest">Top Courses</span>
-                    <span class="ml-auto text-[.65rem] text-gray-400 font-medium flex items-center gap-1"><i class="fas fa-hand-pointer"></i> Click bar</span>
+                    <span class="text-[.72rem] font-bold text-black uppercase tracking-widest">Top Courses</span>
+                    <span class="ml-auto text-[.65rem] text-black font-medium">Click bar</span>
                 </div>
                 <div class="flex-1 min-h-0 p-1" wire:ignore>
                     <canvas id="chartCourse" style="max-height:100%;width:100%;"></canvas>
@@ -958,10 +967,8 @@ new class extends Component {
             <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-[7px]">
                     <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
-                    <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Employment by Batch Year</span>
-                    <span class="text-[.68rem] text-[#555555] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
-                        <i class="fas fa-hand-pointer"></i> Click bar
-                    </span>
+                    <span class="text-[.78rem] font-bold text-black uppercase tracking-[.06em]">Employment by Batch Year</span>
+                    <span class="text-[.68rem] text-black font-medium ml-2 pointer-events-none">Click bar</span>
                 </div>
                 <div id="batchNavControls" class="hidden items-center gap-2">
                     <button id="batchPrev"
@@ -971,7 +978,7 @@ new class extends Component {
                                    disabled:opacity-35 disabled:cursor-not-allowed">
                         <i class="fa-solid fa-chevron-left" style="font-size:.60rem;"></i>
                     </button>
-                    <span id="batchPageInfo" class="text-[.74rem] font-semibold text-[#333333] whitespace-nowrap"></span>
+                    <span id="batchPageInfo" class="text-[.74rem] font-semibold text-black whitespace-nowrap"></span>
                     <button id="batchNext"
                             class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91] text-[.75rem]
                                    cursor-pointer flex items-center justify-center
@@ -995,8 +1002,8 @@ new class extends Component {
                     <i class="fas fa-table text-white" style="font-size:.65rem;"></i>
                 </div>
                 <div>
-                    <p class="text-sm font-bold leading-tight text-[#111111]">Course Breakdown</p>
-                    <p class="text-[10px] text-[#555555]">Employment rate per course — click any row to view details</p>
+                    <p class="text-sm font-bold leading-tight text-black">Course Breakdown</p>
+                    <p class="text-[10px] text-black">Employment rate per course — click any row to view details</p>
                 </div>
             </div>
             <span class="text-[11px] font-semibold px-2 py-1 rounded-lg bg-[#F9F7FC] text-[#7a3f91] border border-[#E8E0F0]">
@@ -1008,8 +1015,8 @@ new class extends Component {
             <table class="w-full border-collapse" style="min-width:580px;">
                 <thead class="sticky top-0 z-10">
                     <tr class="bg-[#f5f0fa] border-b-2 border-[#E8E0F0]">
-                        <th class="pl-4 pr-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#111111]">Course</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[#111111]">Total</th>
+                        <th class="pl-4 pr-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-black">Course</th>
+                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-black">Total</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-emerald-700">Employed</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-blue-700">Self-Employed</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-amber-700">Unemployed</th>
@@ -1029,11 +1036,11 @@ new class extends Component {
                                 {{ $cr->course_code ?? '—' }}
                             </span>
                             @if($courseFullName)
-                                <p class="text-[11px] mt-0.5 font-semibold text-[#333333] leading-tight">{{ $courseFullName }}</p>
+                                <p class="text-[11px] mt-0.5 font-semibold text-black leading-tight">{{ $courseFullName }}</p>
                             @endif
                         </td>
                         <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-bold text-[#111111]">{{ number_format($cr->total) }}</span>
+                            <span class="text-xs font-bold text-black">{{ number_format($cr->total) }}</span>
                         </td>
                         <td class="px-3 py-2.5 text-center">
                             <span class="text-xs font-semibold text-emerald-700">{{ number_format($cr->employed) }}</span>
@@ -1053,17 +1060,17 @@ new class extends Component {
                                     <div class="h-full rounded-full bg-[#10b981] transition-all duration-500"
                                          style="width:{{ $cr->emp_rate }}%;"></div>
                                 </div>
-                                <span class="text-[11px] font-bold w-9 text-right shrink-0 text-[#111111]">
+                                <span class="text-[11px] font-bold w-9 text-right shrink-0 text-black">
                                     {{ $cr->emp_rate }}%
                                 </span>
                             </div>
-                            <p class="text-[10px] mt-0.5 text-[#555555]">{{ $cr->response_rate }}% response</p>
+                            <p class="text-[10px] mt-0.5 text-black">{{ $cr->response_rate }}% response</p>
                         </td>
                     </tr>
                     @empty
                     <tr>
                         <td colspan="7" class="py-10 text-center">
-                            <p class="text-sm font-semibold text-[#333333]">No course data available</p>
+                            <p class="text-sm font-semibold text-black">No course data available</p>
                         </td>
                     </tr>
                     @endforelse
@@ -1120,12 +1127,11 @@ new class extends Component {
         'not_relevant'       => ['Not Relevant',       'text-red-600 bg-red-50 border-red-200'],
     ];
     $relChips = [
-        ['relevant',           'Relevant',           'fa-circle-check',       'text-emerald-700 bg-emerald-50 border-emerald-200'],
-        ['partially_relevant', 'Partially Relevant', 'fa-circle-half-stroke', 'text-amber-700 bg-amber-50 border-amber-200'],
-        ['not_relevant',       'Not Relevant',       'fa-circle-xmark',       'text-red-600 bg-red-50 border-red-200'],
+        ['relevant',           'Relevant',           'text-emerald-700 bg-emerald-50 border-emerald-200'],
+        ['partially_relevant', 'Partially Relevant', 'text-amber-700 bg-amber-50 border-amber-200'],
+        ['not_relevant',       'Not Relevant',       'text-red-600 bg-red-50 border-red-200'],
     ];
     $relLockedLabels = ['relevant' => 'Relevant', 'partially_relevant' => 'Partially Relevant', 'not_relevant' => 'Not Relevant'];
-    $relLockedIcons  = ['relevant' => 'fa-circle-check', 'partially_relevant' => 'fa-circle-half-stroke', 'not_relevant' => 'fa-circle-xmark'];
 
     $visibleStatusTabs = [[
         $modalFilter,
@@ -1138,16 +1144,6 @@ new class extends Component {
             'abroad'        => 'Abroad',
             'local'         => 'Local',
             default         => 'All Records',
-        },
-        match($modalFilter) {
-            'employed'      => 'fa-user-tie',
-            'self_employed' => 'fa-store',
-            'employed_all'  => 'fa-briefcase',
-            'unemployed'    => 'fa-magnifying-glass',
-            'no_record'     => 'fa-circle-minus',
-            'abroad'        => 'fa-plane-departure',
-            'local'         => 'fa-house',
-            default         => 'fa-briefcase',
         },
     ]];
 
@@ -1203,15 +1199,14 @@ new class extends Component {
         <div class="flex flex-wrap gap-2 items-center mb-2">
             <span class="inline-flex items-center gap-1.5 text-[.72rem] font-bold uppercase tracking-wider
                          text-[#7A3F91] px-2.5 py-1.5 rounded-lg border border-[#E8E0F0] bg-[#F9F7FC] whitespace-nowrap shrink-0">
-                <i class="fas fa-filter text-[10px]"></i>Filters
+                Filters
             </span>
 
             <div class="relative w-72 shrink-0" wire:ignore
                  x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{if(v!==this.q)this.q=v;}); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
                        placeholder="Search name, ID, email, company…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-[#111111]
+                       class="w-full pl-4 pr-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-black
                               focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-purple-100 transition"
                        autocomplete="off">
             </div>
@@ -1221,29 +1216,26 @@ new class extends Component {
             @if($isRelMode && $modalRelevanceLocked)
                 @php $lockedVal = $modalRelevanceActive[0] ?? 'relevant'; @endphp
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border bg-[#7A3F91] text-white border-transparent">
-                    <i class="fas {{ $relLockedIcons[$lockedVal] ?? 'fa-chart-pie' }} text-[10px]"></i>
                     {{ $relLockedLabels[$lockedVal] ?? 'Relevant' }}
-                    <i class="fas fa-lock text-[9px] opacity-60 ml-0.5"></i>
                 </span>
             @elseif($isRelMode)
                 <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-[11px] font-semibold text-[#111111]">Relevance:</span>
-                    @foreach($relChips as [$relVal, $relLbl, $relIcon, $relColors])
+                    <span class="text-[11px] font-semibold text-black">Relevance:</span>
+                    @foreach($relChips as [$relVal, $relLbl, $relColors])
                     @php $isRelActive = in_array($relVal, $modalRelevanceActive ?? []); @endphp
                     <button wire:click="toggleRelevance('{{ $relVal }}')"
                             class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition active:scale-95
-                                   {{ $isRelActive ? 'bg-[#7A3F91] text-white border-transparent shadow-md' : 'bg-white text-[#111111] border-gray-200 opacity-65 hover:opacity-100 hover:border-purple-300 hover:text-[#7A3F91] '.$relColors }}">
-                        <i class="fas {{ $relIcon }} text-[10px]"></i> {{ $relLbl }}
-                        @if($isRelActive)<i class="fas fa-check text-[9px] opacity-80 ml-0.5"></i>@endif
+                                   {{ $isRelActive ? 'bg-[#7A3F91] text-white border-transparent shadow-md' : 'bg-white text-black border-gray-200 opacity-65 hover:opacity-100 hover:border-purple-300 hover:text-[#7A3F91] '.$relColors }}">
+                        {{ $relLbl }}
+                        @if($isRelActive) ✓@endif
                     </button>
                     @endforeach
                 </div>
             @else
                 <div class="flex items-center gap-1.5">
-                    @foreach($visibleStatusTabs as [$tabVal, $tabLbl, $tabIcon])
+                    @foreach($visibleStatusTabs as [$tabVal, $tabLbl])
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border bg-[#7A3F91] text-white border-transparent">
-                        <i class="fas {{ $tabIcon }} text-[10px]"></i>{{ $tabLbl }}
-                        <i class="fas fa-lock text-[9px] opacity-60 ml-0.5"></i>
+                        {{ $tabLbl }}
                     </span>
                     @endforeach
                 </div>
@@ -1257,16 +1249,15 @@ new class extends Component {
             @if(!$modalBatchLocked)
             <div class="relative" x-data="{ open:false }" @click.outside="open=false">
                 <button type="button" @click="open=!open"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-[#111111] cursor-pointer transition
+                        class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
                                {{ $modalBatch !== null ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                    <i class="fas fa-calendar-alt text-[.68rem] opacity-70"></i>
                     @if($modalBatch) Batch {{ $modalBatch }} @else All Batches @endif
                     <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
                 </button>
                 <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
                      bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
                     <button type="button" @click="$wire.set('modalBatch',null); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111]
+                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
                                    hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalBatch === null ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">
                         All Batches
                         @if($smartBatches->count() < $this->availableBatches->count())
@@ -1278,7 +1269,7 @@ new class extends Component {
                     <button type="button"
                             @if($hasRecords) @click="$wire.set('modalBatch',{{ $bYear }}); open=false" @endif
                             class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold transition
-                                   {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : 'text-[#111111]' }}
+                                   {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : 'text-black' }}
                                    {{ $hasRecords ? 'hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer' : 'batch-option-disabled' }}">
                         Batch {{ $bYear }}
                         @if(!$hasRecords)
@@ -1290,53 +1281,52 @@ new class extends Component {
             </div>
             @else
             <span class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]">
-                <i class="fas fa-calendar-check text-[10px]"></i>Batch {{ $modalBatch }}<i class="fas fa-lock text-[9px] opacity-50 ml-0.5"></i>
+                Batch {{ $modalBatch }}
             </span>
             @endif
 
             @if(!$modalCourseLocked)
             <div class="relative" x-data="{ open:false }" @click.outside="open=false">
                 <button type="button" @click="open=!open"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-[#111111] cursor-pointer transition
+                        class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
                                {{ $modalCourse !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                    <i class="fas fa-book-open text-[.68rem] opacity-70"></i>
                     @if($modalCourse) {{ $modalCourse }} @else All Courses @endif
                     <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
                 </button>
                 <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
                      bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
                     <button type="button" @click="$wire.set('modalCourse',''); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111]
+                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
                                    hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Courses</button>
                     @foreach($this->availableCourses as $cCode)
                     <button type="button" @click="$wire.set('modalCourse','{{ $cCode }}'); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111]
+                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
                                    hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $cCode }}</button>
                     @endforeach
                 </div>
             </div>
             @else
             <span class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border border-blue-500 bg-blue-50 text-blue-700">
-                <i class="fas fa-book-open text-[10px]"></i>{{ $modalCourse }}<i class="fas fa-lock text-[9px] opacity-50 ml-0.5"></i>
+                {{ $modalCourse }}
             </span>
             @endif
 
             @if($hasSubFilters && $hasChipsToShow)
             <div class="flex items-center gap-1.5 ml-1">
-                <span class="text-xs text-[#111111]">Filtering:</span>
+                <span class="text-xs text-black">Filtering:</span>
                 @if($modalBatch !== null && !$modalBatchLocked)
                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91]">
-                    <i class="fas fa-calendar text-[10px]"></i> Batch {{ $modalBatch }}
+                    Batch {{ $modalBatch }}
                 </span>
                 @endif
                 @if($modalCourse !== '' && !$modalCourseLocked)
                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91]">
-                    <i class="fas fa-book text-[10px]"></i> {{ $modalCourse }}
+                    {{ $modalCourse }}
                 </span>
                 @endif
                 @if($modalSearch !== '')
                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91]">
-                    <i class="fas fa-search text-[10px]"></i> "{{ Str::limit($modalSearch,20) }}"
+                    "{{ Str::limit($modalSearch,20) }}"
                 </span>
                 @endif
                 <button wire:click="clearModalFilters" wire:loading.attr="disabled"
@@ -1365,22 +1355,22 @@ new class extends Component {
         <table class="w-full border-collapse" style="min-width:{{ $showEmailContactSplit ? '980px' : ($showLocationCol && $showRelevanceCol ? '900px' : '700px') }};">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-10">#</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Alumni</th>
-                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-28">Student ID</th>
-                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-24">Course</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Status</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider" style="min-width:200px;">{{ $jobColHeader }}</th>
+                    <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider w-10">#</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider">Alumni</th>
+                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider w-28">Student ID</th>
+                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider w-24">Course</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider">Status</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider" style="min-width:200px;">{{ $jobColHeader }}</th>
                     @if($showEmailContactSplit)
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider" style="min-width:140px;">Contact Number</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-black uppercase tracking-wider" style="min-width:140px;">Contact Number</th>
                     @endif
                     @if($showLocationCol)
-                    <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Location</th>
+                    <th class="px-4 py-2.5 text-center text-xs font-semibold text-black uppercase tracking-wider">Location</th>
                     @endif
                     @if($showRelevanceCol)
-                    <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Relevance</th>
+                    <th class="px-4 py-2.5 text-center text-xs font-semibold text-black uppercase tracking-wider">Relevance</th>
                     @endif
-                    <th class="px-4 pr-6 lg:pr-10 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
+                    <th class="px-4 pr-6 lg:pr-10 py-2.5 text-center text-xs font-semibold text-black uppercase tracking-wider">Batch</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
@@ -1408,11 +1398,11 @@ new class extends Component {
                         <div class="flex items-center gap-2.5">
                             <img src="{{ $photo }}" alt="{{ e($row->first_name ?? '') }}"
                                  class="w-8 h-8 rounded-lg object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{{ $dName }}</p>
+                            <p class="text-sm font-semibold truncate uppercase text-black">{{ $dName }}</p>
                         </div>
                     </td>
                     <td class="px-3 py-3">
-                        <p class="text-xs font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</p>
+                        <p class="text-xs font-mono font-semibold text-black">{{ $row->student_id ?? '—' }}</p>
                     </td>
                     <td class="px-3 py-3">
                         <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F9F7FC] text-[#7a3f91]">
@@ -1421,7 +1411,7 @@ new class extends Component {
                     </td>
                     <td class="px-4 py-3">
                         @if($isNoRecord || is_null($row->employment_status ?? null))
-                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border text-[#111111] bg-gray-50 border-gray-200">
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border text-black bg-gray-50 border-gray-200">
                                 No Record
                             </span>
                         @elseif($badge)
@@ -1429,46 +1419,46 @@ new class extends Component {
                                 {{ $badge[0] }}
                             </span>
                         @else
-                            <span class="text-xs text-[#111111]">—</span>
+                            <span class="text-xs text-black">—</span>
                         @endif
                     </td>
                     <td class="px-4 py-3" style="min-width:200px;">
                         @if($showEmailContactSplit)
                             @if($rowEmail)
-                                <p class="text-xs text-[#111111]">{{ $rowEmail }}</p>
+                                <p class="text-xs text-black">{{ $rowEmail }}</p>
                             @else
-                                <span class="text-xs text-[#111111]">—</span>
+                                <span class="text-xs text-black">—</span>
                             @endif
                         @elseif($isRowEmp)
                             @if($rowJob)
-                                <p class="text-xs font-semibold text-[#111111]">{{ $rowJob }}</p>
-                                @if($rowCompany)<p class="text-xs text-[#111111] mt-0.5">{{ $rowCompany }}</p>@endif
+                                <p class="text-xs font-semibold text-black">{{ $rowJob }}</p>
+                                @if($rowCompany)<p class="text-xs text-black mt-0.5">{{ $rowCompany }}</p>@endif
                             @else
-                                <span class="text-xs text-[#111111]">—</span>
+                                <span class="text-xs text-black">—</span>
                             @endif
                         @elseif($isRowSelf)
                             @if($rowCompany)
-                                <p class="text-xs font-semibold text-[#111111]">{{ $rowCompany }}</p>
+                                <p class="text-xs font-semibold text-black">{{ $rowCompany }}</p>
                             @else
-                                <span class="text-xs text-[#111111]">—</span>
+                                <span class="text-xs text-black">—</span>
                             @endif
                         @else
                             @if($rowJob)
-                                <p class="text-xs font-semibold text-[#111111]">{{ $rowJob }}</p>
-                                @if($rowCompany)<p class="text-xs text-[#111111] mt-0.5">{{ $rowCompany }}</p>@endif
+                                <p class="text-xs font-semibold text-black">{{ $rowJob }}</p>
+                                @if($rowCompany)<p class="text-xs text-black mt-0.5">{{ $rowCompany }}</p>@endif
                             @elseif($rowCompany)
-                                <p class="text-xs text-[#111111]">{{ $rowCompany }}</p>
+                                <p class="text-xs text-black">{{ $rowCompany }}</p>
                             @else
-                                <span class="text-xs text-[#111111]">—</span>
+                                <span class="text-xs text-black">—</span>
                             @endif
                         @endif
                     </td>
                     @if($showEmailContactSplit)
                     <td class="px-4 py-3" style="min-width:140px;">
                         @if($rowContact)
-                            <p class="text-xs text-[#111111]">{{ $rowContact }}</p>
+                            <p class="text-xs text-black">{{ $rowContact }}</p>
                         @else
-                            <span class="text-xs text-[#111111]">—</span>
+                            <span class="text-xs text-black">—</span>
                         @endif
                     </td>
                     @endif
@@ -1479,7 +1469,7 @@ new class extends Component {
                                 {{ $loc[0] }}
                             </span>
                         @else
-                            <span class="text-xs text-[#111111]">—</span>
+                            <span class="text-xs text-black">—</span>
                         @endif
                     </td>
                     @endif
@@ -1490,12 +1480,12 @@ new class extends Component {
                                 {{ $relBdg[0] }}
                             </span>
                         @else
-                            <span class="text-xs text-[#111111]">—</span>
+                            <span class="text-xs text-black">—</span>
                         @endif
                     </td>
                     @endif
                     <td class="px-4 pr-6 lg:pr-10 py-3 text-center">
-                        <span class="text-sm font-semibold text-[#111111]">{{ $row->batch ?? '—' }}</span>
+                        <span class="text-sm font-semibold text-black">{{ $row->batch ?? '—' }}</span>
                     </td>
                 </tr>
                 @empty
@@ -1505,8 +1495,8 @@ new class extends Component {
                             <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#F0E6F8]">
                                 <i class="fas fa-briefcase text-xl" style="color:#c89de0;"></i>
                             </div>
-                            <p class="text-sm font-semibold text-[#333333]">No records found</p>
-                            <p class="text-xs text-[#111111]">Try adjusting your filters or search terms</p>
+                            <p class="text-sm font-semibold text-black">No records found</p>
+                            <p class="text-xs text-black">Try adjusting your filters or search terms</p>
                         </div>
                     </td>
                 </tr>
@@ -1609,15 +1599,25 @@ new class extends Component {
             </div>
         </div>
         <div class="flex items-center gap-2">
+
+            {{-- ── ICON-ONLY PRINT BUTTON (reports modal) ── --}}
             <button
                 x-data="{ busy: false }"
                 @click="busy = true; $wire.loadPrintData()"
                 @emp-print-ready.window="busy = false; empPrintReport()"
                 :disabled="busy"
-                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-white/15 hover:bg-white/25 border border-white/25 text-white transition active:scale-95 disabled:opacity-60 disabled:cursor-wait">
+                class="group relative w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white
+                       flex items-center justify-center hover:bg-white/20 transition cursor-pointer overflow-visible
+                       disabled:opacity-60 disabled:cursor-wait">
+                <span class="absolute top-[calc(100%+8px)] right-0 bg-gray-900/90 text-white text-[10px] font-bold
+                             uppercase tracking-widest px-2.5 py-1 rounded-lg whitespace-nowrap pointer-events-none
+                             opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-50
+                             before:content-[''] before:absolute before:bottom-full before:right-2.5
+                             before:border-4 before:border-transparent before:border-b-gray-900/90"
+                      x-show="!busy">Print Records</span>
                 <i class="fas" :class="busy ? 'fa-spinner fa-spin' : 'fa-print'"></i>
-                <span x-text="busy ? 'Preparing…' : 'Print'"></span>
             </button>
+
             <button wire:click="closeModal"
                     class="group relative w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white
                            flex items-center justify-center hover:bg-white/20 transition cursor-pointer overflow-visible">
@@ -1634,52 +1634,51 @@ new class extends Component {
     {{-- Filters bar --}}
     <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0 flex flex-wrap gap-3 items-center">
         <span class="text-xs font-bold uppercase tracking-wider text-[#7A3F91]">
-            <i class="fas fa-filter mr-1 text-[10px]"></i>Filter Records:
+            Filter Records:
         </span>
 
         <div class="relative" x-data="{ open:false }" @click.outside="open=false">
             <button type="button" @click="open=!open"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-[#111111] cursor-pointer transition
+                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
                            {{ $reportBatch !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                <i class="fas fa-calendar-alt text-[.68rem] opacity-70"></i>
                 @if($reportBatch) Batch {{ $reportBatch }} @else All Batches @endif
                 <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
             </button>
             <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
                  bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
                 <button type="button" @click="$wire.set('reportBatch',''); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111] hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Batches</button>
+                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Batches</button>
                 @foreach($this->availableBatches as $bYear)
                 <button type="button" @click="$wire.set('reportBatch','{{ $bYear }}'); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111] hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">Batch {{ $bYear }}</button>
+                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">Batch {{ $bYear }}</button>
                 @endforeach
             </div>
         </div>
 
         <div class="relative" x-data="{ open:false }" @click.outside="open=false">
             <button type="button" @click="open=!open"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-[#111111] cursor-pointer transition
+                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
                            {{ $reportCourse !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                <i class="fas fa-book-open text-[.68rem] opacity-70"></i>
                 @if($reportCourse) {{ $reportCourse }} @else All Courses @endif
                 <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
             </button>
             <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
                  bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
                 <button type="button" @click="$wire.set('reportCourse',''); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111] hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Courses</button>
+                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
+                               hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Courses</button>
                 @foreach($this->availableCourses as $cCode)
                 <button type="button" @click="$wire.set('reportCourse','{{ $cCode }}'); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111] hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $cCode }}</button>
+                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
+                               hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $cCode }}</button>
                 @endforeach
             </div>
         </div>
 
         <div class="relative" x-data="{ open:false }" @click.outside="open=false">
             <button type="button" @click="open=!open"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-[#111111] cursor-pointer transition
+                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
                            {{ $reportStatus !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                <i class="fas fa-filter text-[.68rem] opacity-70"></i>
                 @if($reportStatus === 'employed') Employed
                 @elseif($reportStatus === 'self_employed') Self-Employed
                 @elseif($reportStatus === 'unemployed') Unemployed
@@ -1695,7 +1694,7 @@ new class extends Component {
                     ['unemployed','Unemployed'],['no_record','No Record']
                 ] as [$val,$lbl])
                 <button type="button" @click="$wire.set('reportStatus','{{ $val }}'); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-[#111111] hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportStatus === $val ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $lbl }}</button>
+                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportStatus === $val ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $lbl }}</button>
                 @endforeach
             </div>
         </div>
@@ -1713,7 +1712,7 @@ new class extends Component {
                 [$rEmp,   'Employed',     'bg-emerald-50', 'text-emerald-700', 'border-emerald-200', 'fa-user-tie'],
                 [$rSelf,  'Self-Employed','bg-blue-50',    'text-blue-700',    'border-blue-200',    'fa-store'],
                 [$rUnemp, 'Unemployed',   'bg-amber-50',   'text-amber-700',   'border-amber-200',   'fa-magnifying-glass'],
-                [$rNone,  'No Record',    'bg-gray-50',    'text-[#111111]',   'border-gray-200',    'fa-circle-minus'],
+                [$rNone,  'No Record',    'bg-gray-50',    'text-black',       'border-gray-200',    'fa-circle-minus'],
             ] as [$cnt,$lbl,$bg,$color,$border,$ico])
             <div class="rounded-xl p-3 flex items-center gap-2.5 border {{ $bg }} {{ $border }}">
                 <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 {{ $bg }}">
@@ -1746,8 +1745,8 @@ new class extends Component {
                 <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#F0E6F8]">
                     <i class="fas fa-file-circle-xmark text-xl" style="color:#c89de0;"></i>
                 </div>
-                <p class="text-sm font-semibold text-[#333333]">No records match your filters</p>
-                <p class="text-xs text-[#111111]">Try adjusting the batch, course, or status filter above</p>
+                <p class="text-sm font-semibold text-black">No records match your filters</p>
+                <p class="text-xs text-black">Try adjusting the batch, course, or status filter above</p>
             </div>
             @else
             <table class="w-full border-collapse" style="min-width:680px;">
@@ -1779,10 +1778,10 @@ new class extends Component {
                             <span class="text-xs font-semibold text-[#7A3F91]/40">{{ str_pad($rowN,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
                         <td class="px-3 py-3">
-                            <p class="font-semibold text-xs uppercase whitespace-nowrap text-[#111111]">{{ $fullName }}</p>
+                            <p class="font-semibold text-xs uppercase whitespace-nowrap text-black">{{ $fullName }}</p>
                         </td>
                         <td class="px-3 py-3">
-                            <p class="font-mono text-xs text-[#111111]">{{ $r->student_id ?? '—' }}</p>
+                            <p class="font-mono text-xs text-black">{{ $r->student_id ?? '—' }}</p>
                         </td>
                         <td class="px-3 py-3">
                             <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F9F7FC] text-[#7A3F91]">{{ $r->course_code ?? '—' }}</span>
@@ -1796,14 +1795,14 @@ new class extends Component {
                                     {{ $sLabel[0] }}
                                 </span>
                             @else
-                                <span class="text-[10px] font-semibold text-[#111111]">No Record</span>
+                                <span class="text-[10px] font-semibold text-black">No Record</span>
                             @endif
                         </td>
                         <td class="px-3 pr-6 lg:pr-10 py-3">
                             @if($r->email ?? null)
-                                <span class="text-[11px] text-[#111111]">{{ $r->email }}</span>
+                                <span class="text-[11px] text-black">{{ $r->email }}</span>
                             @else
-                                <span class="text-[10px] text-[#111111]">—</span>
+                                <span class="text-[10px] text-black">—</span>
                             @endif
                         </td>
                     </tr>
@@ -2038,7 +2037,7 @@ new class extends Component {
                         position: 'bottom',
                         labels: {
                             font: { size: 9, weight: '600' },
-                            color: '#333333',
+                            color: '#000',
                             padding: 6,
                             usePointStyle: true,
                             pointStyleWidth: 6,
@@ -2157,11 +2156,11 @@ new class extends Component {
                 scales: {
                     x: {
                         grid: { display: false },
-                        ticks: { font: { size: 11, weight: '600' }, color: '#111111' },
+                        ticks: { font: { size: 11, weight: '600' }, color: '#000' },
                     },
                     y: {
                         grid: { color: '#f3f4f6' },
-                        ticks: { font: { size: 10, weight: '500' }, color: '#333333', precision: 0 },
+                        ticks: { font: { size: 10, weight: '500' }, color: '#000', precision: 0 },
                         beginAtZero: true,
                     },
                 },
@@ -2233,12 +2232,12 @@ new class extends Component {
                 scales: {
                     x: {
                         grid: { color: '#f3f4f6' },
-                        ticks: { font: { size: 10, weight: '500' }, color: '#333333', precision: 0 },
+                        ticks: { font: { size: 10, weight: '500' }, color: '#000', precision: 0 },
                         beginAtZero: true,
                     },
                     y: {
                         grid: { display: false },
-                        ticks: { font: { size: 10, weight: '600' }, color: '#111111' },
+                        ticks: { font: { size: 10, weight: '600' }, color: '#000' },
                     },
                 },
                 onClick: function (event, elements) {

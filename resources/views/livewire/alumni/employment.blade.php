@@ -46,7 +46,7 @@ new class extends Component {
     public string $education_status    = '';
 
     public array $snapshot = [];
-    
+
     private const SNAP_KEYS = [
         'employment_status', 'company_name', 'job_title', 'custom_job_title',
         'employment_type', 'work_location', 'career_path', 'education_status',
@@ -336,7 +336,7 @@ new class extends Component {
         return $current !== $snap;
     }
 
-    // ── FIXED: upsert alumni notification — same dedup_key today → increment count ──
+    // ── Alumni notification: ONE per alumni per day (dedup_key has no status suffix) ──
     protected function saveAlumniNotification(array $payload): void
     {
         try {
@@ -376,7 +376,7 @@ new class extends Component {
         }
     }
 
-    // ── FIXED: same dedup per-day for registrar too ──
+    // ── Registrar notification: ONE per alumni per day (dedup_key has no status suffix) ──
     protected function saveRegistrarNotification(array $payload): void
     {
         try {
@@ -469,8 +469,10 @@ new class extends Component {
         $finalRelevance = $working ? ($this->course_relevance ?: 'no') : null;
 
         try {
-            $now = now(); $isNew = ($this->trackingId === 0);
+            $now       = now();
+            $isNew     = ($this->trackingId === 0);
             $oldStatus = $this->snapshot['employment_status'] ?? null;
+
             $data = [
                 'alumni_id'           => $this->alumniId,
                 'employment_status'   => $this->employment_status,
@@ -486,70 +488,69 @@ new class extends Component {
                 'created_at'          => $now,
                 'updated_at'          => $now,
             ];
+
             DB::transaction(function () use ($data, $now) {
                 if ($this->trackingId) {
                     DB::table('employment_trackings')->where('id', $this->trackingId)->update(['deleted_at' => $now, 'updated_at' => $now]);
                 }
                 $this->trackingId = DB::table('employment_trackings')->insertGetId($data);
             });
-            $this->hasRecord = true; $this->editing = false;
+
+            $this->hasRecord = true;
+            $this->editing   = false;
             $this->successMessage = 'Employment information updated successfully!';
 
             $alumni = \App\Models\Alumni::find($this->alumniId);
-            $name = trim(($alumni->first_name ?? '') . ' ' . ($alumni->last_name ?? ''));
+            $name   = trim(($alumni->first_name ?? '') . ' ' . ($alumni->last_name ?? ''));
+            $newStatusLabel = $this->statusLabel($this->employment_status);
+            $oldStatusLabel = $oldStatus ? $this->statusLabel($oldStatus) : '';
 
+            // ── REGISTRAR NOTIFICATION ──
+            // dedup_key: "employment::{alumni_id}" — NO status suffix → one entry per alumni per day
             if ($isNew) {
-                $this->saveRegistrarNotification([
-                    'icon'       => 'briefcase',
-                    'title'      => 'New Employment Record',
-                    'message'    => $name . ' submitted a new employment record as ' . $this->statusLabel($this->employment_status) . '.',
-                    'link_route' => 'registrar.employment.tracking',
-                    'link_label' => 'View Tracking',
-                    'dedup_key'  => 'recorded::' . $this->alumniId . '::' . $this->employment_status,
-                ]);
+                $registrarMsg = $name . ' submitted their first employment record as ' . $newStatusLabel . '.';
             } else {
-                $from = $oldStatus ? ' from ' . $this->statusLabel($oldStatus) : '';
-                $this->saveRegistrarNotification([
-                    'icon'       => 'arrow-rotate-right',
-                    'title'      => 'Employment Status Updated',
-                    'message'    => $name . ' updated their employment status' . $from . ' to ' . $this->statusLabel($this->employment_status) . '.',
-                    'link_route' => 'registrar.employment.tracking',
-                    'link_label' => 'View Tracking',
-                    'dedup_key'  => 'updated::' . $this->alumniId . '::' . $this->employment_status,
-                ]);
+                $registrarMsg = $name . ' updated their employment status'
+                    . ($oldStatusLabel ? ' from ' . $oldStatusLabel : '')
+                    . ' to ' . $newStatusLabel . '.';
             }
+
+            $this->saveRegistrarNotification([
+                'icon'       => $isNew ? 'briefcase' : 'arrow-rotate-right',
+                'title'      => $isNew ? 'New Employment Record' : 'Employment Status Updated',
+                'message'    => $registrarMsg,
+                'link_route' => 'registrar.employment.tracking',
+                'link_label' => 'View Tracking',
+                // ONE key per alumni per day — no status suffix
+                'dedup_key'  => 'employment::' . $this->alumniId,
+            ]);
+
+            // ── ALUMNI NOTIFICATION ──
+            // dedup_key: "employment-tracking" — NO status suffix → one entry per alumni per day
+            if ($isNew) {
+                $alumniMsg = 'Your employment record has been submitted successfully as ' . $newStatusLabel . '. Pending admin review.';
+            } else {
+                $alumniMsg = 'Your employment status has been updated'
+                    . ($oldStatusLabel ? ' from ' . $oldStatusLabel : '')
+                    . ' to ' . $newStatusLabel . '.';
+            }
+
+            $this->saveAlumniNotification([
+                'icon'       => 'chart-line',
+                'title'      => $isNew ? 'Employment Record Submitted' : 'Employment Status Updated',
+                'message'    => $alumniMsg,
+                'link_route' => 'alumni.employment',
+                'link_label' => 'View Employment',
+                // ONE key per day — no status suffix so all daily updates merge here
+                'dedup_key'  => 'employment-tracking',
+            ]);
 
             $this->dispatch('show-emp-toast', type: 'success', message: $this->successMessage);
-
-            $statusStr = $this->statusLabel($this->employment_status);
-            $fromStr   = $oldStatus ? $this->statusLabel($oldStatus) : '';
-
-            if ($isNew) {
-                $this->saveAlumniNotification([
-                    'icon'       => 'chart-line',
-                    'title'      => 'Employment Record Submitted',
-                    'message'    => 'Your employment record has been submitted successfully'
-                                   . ($statusStr ? ' as ' . $statusStr : '') . '. Pending admin review.',
-                    'link_route' => 'alumni.employment',
-                    'link_label' => 'View Employment',
-                    'dedup_key'  => 'employment-submitted',
-                ]);
-            } else {
-                $this->saveAlumniNotification([
-                    'icon'       => 'chart-line',
-                    'title'      => 'Employment Status Updated',
-                    'message'    => 'Your employment status has been updated'
-                                   . ($fromStr   ? ' from ' . $fromStr   : '')
-                                   . ($statusStr ? ' to '   . $statusStr : '') . '.',
-                    'link_route' => 'alumni.employment',
-                    'link_label' => 'View Employment',
-                    'dedup_key'  => 'employment-updated::' . $this->employment_status,
-                ]);
-            }
-
             $this->dispatch('refresh-alumni-notifs');
             $this->loadRecords();
+
             Log::info("Employment saved | alumni_id:{$this->alumniId} | status:{$this->employment_status}");
+
         } catch (\Throwable $e) {
             Log::error('Employment save error: ' . $e->getMessage());
             $this->errorMessage = 'Failed to save. Please try again.';

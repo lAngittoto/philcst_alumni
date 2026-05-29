@@ -269,9 +269,6 @@ new class extends Component {
 <div class="flex flex-col" style="min-height: calc(100vh - 120px);">
 
 <style>
-/* ── Only styles that cannot be expressed in Tailwind ── */
-
-/* Custom select arrow */
 select.filter-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
@@ -282,7 +279,6 @@ select.filter-input {
     appearance: none;
 }
 
-/* Cursor-follow tooltip */
 .jb-hover-tip {
     position: fixed;
     pointer-events: none;
@@ -301,26 +297,71 @@ select.filter-input {
     border-top-color: #111827;
 }
 
-/* Detail page animation */
 @keyframes detailIn {
     from { opacity: 0; }
     to   { opacity: 1; }
 }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
 
-/* Share modal animation */
 @keyframes panelIn {
     from { opacity: 0; transform: scale(.97) translateY(8px); }
     to   { opacity: 1; transform: none; }
 }
 .share-sheet { animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
-/* Thin custom scrollbar */
 .scroll-thin::-webkit-scrollbar       { width: 4px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 
-/* Content pre-wrap for job description */
 .pre-wrap { white-space: pre-wrap; }
+
+.share-modal-wrapper {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Icon-only tooltip pattern reused across detail bar */
+.ic-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    transition: all .15s;
+    cursor: pointer;
+    border: 1px solid transparent;
+    flex-shrink: 0;
+}
+.ic-btn .tip {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: #111827;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 200;
+}
+.ic-btn .tip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    right: 10px;
+    border: 4px solid transparent;
+    border-bottom-color: #111827;
+}
+.ic-btn:hover .tip { opacity: 1; }
 </style>
 
 {{-- Cursor-follow tooltip --}}
@@ -394,6 +435,9 @@ select.filter-input {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
+            {{-- FILTERS label --}}
+            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+
             <select wire:model.live="filterType"
                     class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                            hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
@@ -462,7 +506,6 @@ select.filter-input {
                     elseif ($daysLeft === 1) $dlLabel = '1 day left';
                     else                     $dlLabel = $daysLeft . ' days left';
 
-                    // Deadline colour classes (Tailwind)
                     if ($daysLeft <= 3)       { $dlClass = 'text-red-600 font-bold'; $dlIcon = 'fa-fire'; }
                     elseif ($daysLeft <= 14)  { $dlClass = 'text-orange-700 font-semibold'; $dlIcon = 'fa-clock'; }
                     else                      { $dlClass = 'text-gray-900 font-medium'; $dlIcon = 'fa-calendar'; }
@@ -520,19 +563,13 @@ select.filter-input {
                                 <i class="fas {{ $dlIcon }} text-xs"></i>
                                 {{ $dlLabel }}
                             </span>
+                            {{-- Share button — icon only, blue, tooltip --}}
                             <button type="button"
                                     data-jb-share
                                     wire:click.stop="openShareModal({{ $job->id }})"
-                                    class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg
-                                           border border-blue-200 bg-blue-50 text-blue-700
-                                           hover:border-blue-300 hover:bg-blue-100 transition z-[2] flex-shrink-0 group">
-                                <span class="absolute bottom-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold
-                                             px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100
-                                             transition shadow-md after:content-[''] after:absolute after:top-full after:right-2
-                                             after:border-4 after:border-transparent after:border-t-gray-900">
-                                    Share
-                                </span>
+                                    class="ic-btn border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100 z-[2]">
                                 <i class="fas fa-share-nodes text-[11px]"></i>
+                                <span class="tip">Share</span>
                             </button>
                         </div>
                     </div>
@@ -586,7 +623,6 @@ select.filter-input {
             </p>
 
             <div class="flex items-center gap-1 flex-wrap">
-                {{-- Prev --}}
                 <button wire:click="previousPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
@@ -621,7 +657,6 @@ select.filter-input {
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif
 
-                {{-- Next --}}
                 <button wire:click="nextPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
@@ -666,35 +701,21 @@ select.filter-input {
 <div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-hidden"
      @keydown.escape.window="$wire.closeDetail()">
 
-    {{-- Purple top bar --}}
+    {{-- Purple top bar — icon-only buttons with tooltips --}}
     <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
         <span class="text-[15px] text-white font-semibold truncate flex-1 min-w-0">{{ $job->job_title }}</span>
         <div class="flex items-center gap-1.5 flex-shrink-0">
-            {{-- Share --}}
+            {{-- Share — icon only, blue, tooltip --}}
             <button type="button" wire:click="openShareModal({{ $job->id }})"
-                    class="group relative w-8 h-8 rounded-lg flex items-center justify-center
-                           bg-white/12 border border-white/22 text-white hover:bg-white/24 transition cursor-pointer">
-                <span class="absolute top-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold uppercase
-                             tracking-wide px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0
-                             group-hover:opacity-100 transition shadow-md z-[200]
-                             before:content-[''] before:absolute before:bottom-full before:right-2.5
-                             before:border-4 before:border-transparent before:border-b-gray-900">
-                    Share
-                </span>
+                    class="ic-btn bg-blue-500 hover:bg-blue-400 border-blue-300/40 text-white shadow-sm">
                 <i class="fas fa-share-nodes text-[13px]"></i>
+                <span class="tip">Share</span>
             </button>
-            {{-- Close --}}
+            {{-- Close — icon only, red, tooltip --}}
             <button type="button" wire:click="closeDetail"
-                    class="group relative w-8 h-8 rounded-lg flex items-center justify-center
-                           bg-white/12 border border-white/22 text-white hover:bg-white/24 transition cursor-pointer">
-                <span class="absolute top-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold uppercase
-                             tracking-wide px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0
-                             group-hover:opacity-100 transition shadow-md z-[200]
-                             before:content-[''] before:absolute before:bottom-full before:right-2.5
-                             before:border-4 before:border-transparent before:border-b-gray-900">
-                    Close
-                </span>
+                    class="ic-btn bg-red-500 hover:bg-red-400 border-red-300/40 text-white shadow-sm">
                 <i class="fas fa-xmark text-[14px]"></i>
+                <span class="tip">Close</span>
             </button>
         </div>
     </div>
@@ -724,7 +745,6 @@ select.filter-input {
 
     {{-- Info strip --}}
     <div class="bg-white border-b border-gray-200 flex flex-wrap flex-shrink-0">
-        {{-- Company --}}
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
             <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Company</span>
             <span class="text-base font-semibold text-gray-900">{{ $job->company_name }}</span>
@@ -732,12 +752,10 @@ select.filter-input {
                 <span class="text-sm text-gray-700">{{ $displayType }}</span>
             @endif
         </div>
-        {{-- Location --}}
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
             <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Location</span>
             <span class="text-base font-semibold text-gray-900">{{ $job->location ?: '—' }}</span>
         </div>
-        {{-- Salary --}}
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
             <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Salary</span>
             @if($job->salary)
@@ -746,7 +764,6 @@ select.filter-input {
                 <span class="text-base italic font-normal text-gray-500">Not disclosed</span>
             @endif
         </div>
-        {{-- Deadline --}}
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
             <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Deadline</span>
             <span class="text-base {{ $dlValueClass }}">{{ $dl->format('M d, Y') }}</span>
@@ -755,7 +772,6 @@ select.filter-input {
                 {{ $dlLabel }}
             </span>
         </div>
-        {{-- Posted --}}
         <div class="flex-1 min-w-[110px] px-5 py-3 flex flex-col gap-0.5">
             <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Posted</span>
             <span class="text-base font-semibold text-gray-900">{{ $createdPH->format('M d, Y') }}</span>
@@ -776,7 +792,6 @@ select.filter-input {
             </div>
             @endif
 
-            {{-- Job Description --}}
             <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div class="px-5 py-3 border-b border-gray-100">
                     <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Job Description</span>
@@ -784,7 +799,6 @@ select.filter-input {
                 <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $job->description }}</div>
             </div>
 
-            {{-- Qualifications + How to Apply --}}
             @if($hasQual || $hasInstr)
             <div class="{{ ($hasQual && $hasInstr) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
                 @if($hasQual)
@@ -814,7 +828,7 @@ select.filter-input {
 @endif
 
 
-{{-- ══ SHARE MODAL ══ --}}
+{{-- ══ SHARE MODAL — 90VH, NO SCROLL ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->jobsBaseUrl();
@@ -822,8 +836,11 @@ select.filter-input {
     $shareDlFormatted = $shareDeadline
         ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
         : '';
-    $shareDescPreview = mb_strlen($shareDescription) > 160
-        ? mb_substr($shareDescription, 0, 160) . '…'
+
+    $fieldCount = (int)(bool)$shareEmpType + (int)(bool)$shareLocation + (int)(bool)$shareExpLevel + (int)(bool)$shareSalary + (int)(bool)$shareDlFormatted;
+    $descLimit  = $fieldCount >= 4 ? 100 : ($fieldCount >= 2 ? 140 : 180);
+    $shareDescPreview = mb_strlen($shareDescription) > $descLimit
+        ? mb_substr($shareDescription, 0, $descLimit) . '…'
         : $shareDescription;
 
     $fbLines   = [];
@@ -867,8 +884,12 @@ select.filter-input {
          async shareOnMessenger() {
              await this.copyText(this.fbText); this.messengerCopied = true;
              const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-             if (isMobile) { window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl); setTimeout(() => window.open('https://www.messenger.com/','_blank','noopener'), 1500); }
-             else { window.open('https://www.messenger.com/','_blank','noopener'); }
+             if (isMobile) {
+                 window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
+                 setTimeout(() => window.open('https://www.messenger.com/new','_blank','noopener'), 1500);
+             } else {
+                 window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
+             }
              setTimeout(() => this.messengerCopied = false, 7000);
          },
          async copyLinkFn() { await this.copyText(this.baseUrl); this.copied = true; setTimeout(() => this.copied = false, 2500); }
@@ -878,11 +899,11 @@ select.filter-input {
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="$wire.closeShareModal()">
 
-    <div class="share-sheet bg-white rounded-2xl w-full max-w-[900px] max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-2xl share-modal-wrapper">
 
         {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0">
-            <h2 class="text-sm font-semibold flex items-center gap-2.5 text-gray-800">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2 text-gray-800">
                 <i class="fas fa-share-nodes text-sky-600 text-xs"></i> Share Job Posting
             </h2>
             <button wire:click="closeShareModal" type="button"
@@ -891,55 +912,57 @@ select.filter-input {
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+        {{-- Body --}}
+        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
             {{-- LEFT: Preview --}}
-            <div class="flex-1 px-6 py-5 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-4 overflow-y-auto scroll-thin">
-                <p class="text-xs font-bold uppercase tracking-widest text-gray-500 flex-shrink-0">Post Preview</p>
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Post Preview</p>
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
-                    <div class="border-b border-gray-100 px-5 py-4 bg-gray-50">
-                        <p class="font-semibold text-sm text-gray-900">{{ $shareJobTitle }}</p>
-                        <p class="text-xs mt-0.5 font-medium text-gray-500">{{ $shareCompany }}</p>
-                        <div class="flex flex-wrap gap-1.5 mt-2">
-                            @if($shareEmpType)     <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">{{ $shareEmpType }}</span> @endif
-                            @if($shareLocation)    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">{{ $shareLocation }}</span> @endif
-                            @if($shareExpLevel)    <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">{{ $shareExpLevel }}</span> @endif
-                            @if($shareSalary)      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700">{{ $shareSalary }}</span> @endif
-                            @if($shareDlFormatted) <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-red-50 text-red-600">Deadline: {{ $shareDlFormatted }}</span> @endif
+                    <div class="border-b border-gray-100 px-4 py-3 bg-gray-50">
+                        <p class="font-semibold text-gray-900 leading-tight" style="font-size:clamp(12px,1.2vw,14px);">{{ $shareJobTitle }}</p>
+                        <p class="font-medium text-gray-500 mt-0.5" style="font-size:clamp(10px,1vw,12px);">{{ $shareCompany }}</p>
+                        <div class="flex flex-wrap gap-1 mt-1.5">
+                            @if($shareEmpType)     <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareEmpType }}</span> @endif
+                            @if($shareLocation)    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareLocation }}</span> @endif
+                            @if($shareExpLevel)    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareExpLevel }}</span> @endif
+                            @if($shareSalary)      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-emerald-700 bg-emerald-50" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareSalary }}</span> @endif
+                            @if($shareDlFormatted) <span class="inline-flex items-center px-1.5 py-0.5 rounded text-red-600 bg-red-50" style="font-size:clamp(9px,0.85vw,11px);">Deadline: {{ $shareDlFormatted }}</span> @endif
                         </div>
                     </div>
                     @if($shareDescPreview)
-                    <div class="px-5 py-3 border-b border-gray-100">
-                        <p class="text-xs leading-relaxed text-gray-600">{{ $shareDescPreview }}</p>
+                    <div class="px-4 py-2 border-b border-gray-100">
+                        <p class="leading-relaxed text-gray-600" style="font-size:clamp(10px,0.9vw,12px);">{{ $shareDescPreview }}</p>
                     </div>
                     @endif
-                    <div class="px-5 py-2 bg-gray-50">
-                        <span class="text-xs uppercase tracking-wider font-semibold text-gray-500">{{ strtoupper($shareHost) }}</span>
+                    <div class="px-4 py-2 bg-gray-50">
+                        <span class="uppercase tracking-wider font-semibold text-gray-400" style="font-size:clamp(9px,0.8vw,11px);">{{ strtoupper($shareHost) }}</span>
                     </div>
                 </div>
 
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+                <div class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-blue-500 text-xs flex-shrink-0 mt-0.5"></i>
                     <p class="text-xs text-blue-700 leading-relaxed">
                         Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the caption and opens the platform.
-                        Press <kbd class="bg-blue-100 px-1 rounded font-mono">Ctrl+V</kbd> to paste.
+                        Press <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd> (or <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">⌘V</kbd>) to paste it.
                     </p>
                 </div>
-
             </div>
 
             {{-- RIGHT: Share buttons --}}
-            <div class="w-full md:w-72 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto scroll-thin">
-                <p class="text-xs font-bold uppercase tracking-widest text-gray-500">Share via</p>
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Share via</p>
 
-                <div x-show="fbCopied" x-cloak x-transition class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-start gap-2">
+                <div x-show="fbCopied" x-cloak x-transition
+                     class="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-start gap-2">
                     <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-emerald-800">Opened! Press Ctrl+V to paste.</p>
+                    <p class="text-xs font-semibold text-emerald-800">Caption copied! Paste it on Facebook.</p>
                 </div>
-                <div x-show="messengerCopied" x-cloak x-transition class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-2">
+                <div x-show="messengerCopied" x-cloak x-transition
+                     class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-start gap-2">
                     <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-blue-800">Opened! Press Ctrl+V to paste.</p>
+                    <p class="text-xs font-semibold text-blue-800">Caption copied! Pick a contact in Messenger and paste.</p>
                 </div>
 
                 {{-- Facebook --}}
@@ -950,24 +973,52 @@ select.filter-input {
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Caption copied automatically</p>
+                        <p class="text-[10px] text-white/60 mt-0.5">Caption auto-copied · paste to post</p>
                     </div>
                 </button>
 
                 {{-- Messenger --}}
                 <button type="button" @click="shareOnMessenger()"
                         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer"
-                        style="background:linear-gradient(to right,#00B2FF,#006AFF);">
+                        style="background:linear-gradient(135deg,#0099FF,#A033FF);">
                     <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4"><defs><linearGradient id="mgr2" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs><path fill="url(#mgr2)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
+                            <defs>
+                                <linearGradient id="mgr3" x1="0%" y1="100%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#0099FF"/>
+                                    <stop offset="100%" style="stop-color:#A033FF"/>
+                                </linearGradient>
+                            </defs>
+                            <path fill="url(#mgr3)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Caption copied automatically</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Pick a contact · paste caption</p>
+                    </div>
+                    <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
+                </button>
+
+                <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start gap-2">
+                    <i class="fas fa-lightbulb text-amber-500 text-[10px] flex-shrink-0 mt-0.5"></i>
+                    <p class="text-[10px] text-gray-500 leading-relaxed">
+                        Messenger will open. Search a contact, start a conversation, then press <span class="font-semibold text-gray-700">Ctrl+V</span> to paste the job details.
+                    </p>
+                </div>
+
+                {{-- Batch Chat --}}
+                <button type="button" wire:click="shareToChat"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
+                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/20">
+                        <i class="fas fa-comments text-white text-sm"></i>
+                    </span>
+                    <div class="text-left flex-1">
+                        <p class="text-xs font-semibold">Post to Batch Chat</p>
+                        <p class="text-[10px] text-white/60 mt-0.5">Notify all your batchmates</p>
                     </div>
                 </button>
 
-                <div class="relative my-1">
+                <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
                         <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white text-gray-400">or copy link</span>
@@ -988,10 +1039,10 @@ select.filter-input {
                 </button>
 
                 <button type="button" wire:click="closeShareModal"
-                        class="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer mt-1">
+                        class="w-full px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer">
                     Close
                 </button>
-                <p class="text-[10px] text-center text-gray-400">Sharing disabled for expired postings.</p>
+                <p class="text-[10px] text-center text-gray-400">Sharing is disabled for expired postings.</p>
             </div>
         </div>
     </div>

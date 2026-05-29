@@ -5,16 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ config('app.name', 'Philcst') }} - Registrar</title>
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
     @livewireStyles
-
     <style>
         [x-cloak] { display: none !important; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-
         #bell-btn {
             background: transparent !important;
             border: none !important;
@@ -52,8 +48,44 @@
             z-index: 99999;
         }
         .notif-item:hover .notif-hover-label { opacity: 1; }
-    </style>
 
+        /* ── Close button tooltip ── */
+        .notif-close-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .notif-close-tip {
+            position: absolute;
+            top: calc(100% + 7px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a1a;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            padding: 4px 10px;
+            border-radius: 7px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            z-index: 100000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.30);
+        }
+        .notif-close-tip::after {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-bottom-color: #1a1a1a;
+        }
+        .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
+    </style>
     <script>
     // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY — fresh object every call, no shared-reference bugs
@@ -63,18 +95,15 @@
             open:       false,
             items:      [],
             _pollTimer: null,
-
             async init() {
                 await this._fetch();
                 this._startPolling();
             },
-
             _startPolling() {
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
                 this._pollTimer = setInterval(function () { self._fetch(); }, 5000);
             },
-
             async _fetch() {
                 try {
                     var res = await window.fetch('/registrar/notifications', {
@@ -86,7 +115,6 @@
                     }
                 } catch (e) { /* silently fail */ }
             },
-
             _groupByDay(rows) {
                 var map = new Map();
                 Array.from(rows)
@@ -94,34 +122,43 @@
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
                     .forEach(function (n) {
-                        var day      = n.created_at
+                        var day = n.created_at
                             ? new Date(n.created_at).toISOString().slice(0, 10)
                             : 'unknown';
-                        var dedupKey = n.dedup_key || (n.message || '').slice(0, 40);
-                        var key      = (n.title || '') + '::' + day + '::' + dedupKey;
-
-                        if (map.has(key)) {
-                            var g = map.get(key);
+                        var rawDedup = n.dedup_key || '';
+                        var isEmpEvent = (
+                            rawDedup.startsWith('employment::') ||
+                            rawDedup.startsWith('recorded::')   ||
+                            rawDedup.startsWith('updated::')    ||
+                            n.title === 'Employment Status Updated' ||
+                            n.title === 'New Employment Record'
+                        );
+                        var groupKey = isEmpEvent
+                            ? 'employment_day::' + day
+                            : (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
+                        if (map.has(groupKey)) {
+                            var g = map.get(groupKey);
                             g.count = (g.count || 1) + (n.count || 1);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
+                            g.message = g.count + ' employment status update(s) today.';
+                            g.title   = 'Employment Status Updated';
                         } else {
-                            map.set(key, Object.assign({}, n, {
+                            map.set(groupKey, Object.assign({}, n, {
                                 count: n.count || 1,
-                                _ids:  [n.id]
+                                _ids:  [n.id],
+                                title:   isEmpEvent ? 'Employment Status Updated' : n.title,
+                                icon:    isEmpEvent ? 'arrow-rotate-right'        : (n.icon || 'bell'),
                             }));
                         }
                     });
                 return Array.from(map.values());
             },
-
             get unread() {
                 return this.items.filter(function (n) { return !n.read; }).length;
             },
-
             toggle() { this.open = !this.open; },
             close()  { this.open = false; },
-
             async markRead(item) {
                 if (item.read) return;
                 item.read = true;
@@ -139,7 +176,6 @@
                     } catch (e) { /* ignore */ }
                 }
             },
-
             async markAllRead() {
                 this.items.forEach(function (n) { n.read = true; });
                 try {
@@ -154,7 +190,6 @@
             },
         };
     };
-
     // ─────────────────────────────────────────────────────────────────────────
     //  SAFE ACCESSOR
     // ─────────────────────────────────────────────────────────────────────────
@@ -167,38 +202,28 @@
         } catch (e) { /* ignore */ }
         return null;
     };
-
     // ─────────────────────────────────────────────────────────────────────────
     //  INTERNAL BOOT HELPER
-    //  Registers the store (if missing) and starts polling (if not started).
-    //  Safe to call multiple times — idempotent.
     // ─────────────────────────────────────────────────────────────────────────
     window.__bootNotifsStore = function () {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
-
-        // Register store if it does not exist yet
         if (!Alpine.store('notifs')) {
             Alpine.store('notifs', window.__makeNotifsStore());
         }
-
         var s = Alpine.store('notifs');
         if (!s) return;
-
-        // Start polling only if not already running
         if (!s._pollTimer) {
             s.init();
         }
     };
-
     // ─────────────────────────────────────────────────────────────────────────
-    //  PATH A — alpine:init  (normal first page load)
+    //  PATH A — alpine:init
     // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:init', function () {
         Alpine.store('notifs', window.__makeNotifsStore());
     });
-
     // ─────────────────────────────────────────────────────────────────────────
-    //  PATH B — alpine:initialized  (primary trigger on normal page load)
+    //  PATH B — alpine:initialized
     // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:initialized', function () {
         setTimeout(function () {
@@ -206,84 +231,51 @@
             if (s && !s._pollTimer) s.init();
         }, 0);
     });
-
     // ─────────────────────────────────────────────────────────────────────────
-    //  PATH C — window load  (safety net after all resources ready)
+    //  PATH C — window load
     // ─────────────────────────────────────────────────────────────────────────
     window.addEventListener('load', function () {
         var s = window.__safeNotifsStore();
         if (s) {
             if (s.items.length === 0) s.init();
         } else {
-            // Alpine exists but store wasn't registered — boot it now
             window.__bootNotifsStore();
         }
     });
-
     // ─────────────────────────────────────────────────────────────────────────
-    //  PATH D — livewire:navigated  (wire:navigate SPA page swaps)
-    //
-    //  FIX: Instead of replacing the store (which can break Alpine's reactive
-    //  proxy references that DOM elements already hold), we MUTATE the existing
-    //  store. Replacing with a new object disconnects existing DOM bindings.
+    //  PATH D — livewire:navigated (wire:navigate SPA page swaps)
     // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('livewire:navigated', function () {
-        // Give Alpine ~150ms to finish processing the new DOM before we touch
-        // the store. 50ms was too tight on slower connections/devices.
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
-
             var s = Alpine.store('notifs');
-
             if (s) {
-                // MUTATE the existing store — preserves Alpine's reactive proxy
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open  = false;
                 s.items = [];
                 s.init();
             } else {
-                // Store doesn't exist yet (e.g. first time registrar layout loads
-                // via SPA from a different layout like the login page)
                 Alpine.store('notifs', window.__makeNotifsStore());
                 var newStore = Alpine.store('notifs');
                 if (newStore) newStore.init();
             }
         }, 150);
     });
-
     // ─────────────────────────────────────────────────────────────────────────
-    //  PATH E — IIFE IMMEDIATE BOOT  ← THE KEY FIX
-    //
-    //  When wire:navigate navigates FROM a different layout (e.g. login page
-    //  with app.blade.php) TO the registrar layout, Livewire re-executes this
-    //  script block. At that moment:
-    //    • Alpine is ALREADY initialized (it persists across SPA navigations)
-    //    • alpine:init will NOT fire again
-    //    • livewire:navigated may have ALREADY fired before this script ran
-    //
-    //  This IIFE runs the instant the script is parsed — no event needed.
-    //  It's idempotent: safe even if other paths already ran.
+    //  PATH E — IIFE IMMEDIATE BOOT
     // ─────────────────────────────────────────────────────────────────────────
     ;(function immediateBootOnSpaNavigation() {
-        // Alpine not loaded yet on true first page load — that's fine,
-        // PATH A/B will handle it. We only act if Alpine is already live.
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
-
         var s = Alpine.store('notifs');
-
         if (!s) {
-            // First time registrar layout is seen in this SPA session
             Alpine.store('notifs', window.__makeNotifsStore());
             s = Alpine.store('notifs');
         }
-
         if (s && !s._pollTimer) {
-            // Slight delay so the new DOM is painted before we fetch
             setTimeout(function () { s.init(); }, 100);
         }
     })();
-
     // ─────────────────────────────────────────────────────────────────────────
     //  Re-fetch on tab focus
     // ─────────────────────────────────────────────────────────────────────────
@@ -293,7 +285,6 @@
             if (s) s._fetch();
         }
     });
-
     // ─────────────────────────────────────────────────────────────────────────
     //  PANEL POSITIONING
     // ─────────────────────────────────────────────────────────────────────────
@@ -302,9 +293,7 @@
         var panel = document.getElementById('notif-panel');
         var aside = document.querySelector('aside');
         if (!btn || !panel) return;
-
         var btnRect = btn.getBoundingClientRect();
-
         if (aside && window.innerWidth >= 1024) {
             var asideRect = aside.getBoundingClientRect();
             panel.style.left  = (asideRect.right + 12) + 'px';
@@ -317,12 +306,10 @@
         }
     }
     window.positionPanel = positionPanel;
-
     window.addEventListener('resize', function () {
         var s = window.__safeNotifsStore();
         if (s && s.open) positionPanel();
     });
-
     // ─────────────────────────────────────────────────────────────────────────
     //  CURSOR-FOLLOWING TOOLTIP
     // ─────────────────────────────────────────────────────────────────────────
@@ -336,24 +323,20 @@
         label.style.left = (e.clientX + 14) + 'px';
         label.style.top  = (e.clientY + 14) + 'px';
     });
-
     // ─────────────────────────────────────────────────────────────────────────
-    //  LIVEWIRE → DB BRIDGE  (emit custom events → save notifications to DB)
+    //  LIVEWIRE → DB BRIDGE
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstNotifListeners) {
         window.__philcstNotifListeners = true;
-
         function _detail(e) {
             var d = e.detail;
             if (!d) return {};
             return Array.isArray(d) ? (d[0] || {}) : d;
         }
-
         function _statusLabel(raw) {
             var map = { employed: 'Employed', self_employed: 'Self-Employed', unemployed: 'Unemployed' };
             return map[raw] || (raw ? raw.replace(/_/g, ' ') : 'N/A');
         }
-
         async function _saveNotif(payload) {
             try {
                 await window.fetch('/registrar/notifications', {
@@ -374,7 +357,6 @@
                 }, 600);
             } catch (e) { /* ignore */ }
         }
-
         window.addEventListener('alumni-registered', function (e) {
             var d = _detail(e);
             _saveNotif({
@@ -386,7 +368,6 @@
                 dedup_key:  'registered',
             });
         });
-
         window.addEventListener('alumni-imported', function (e) {
             var d = _detail(e);
             _saveNotif({
@@ -398,20 +379,18 @@
                 dedup_key:  'imported',
             });
         });
-
         window.addEventListener('employment-recorded', function (e) {
             var d      = _detail(e);
             var status = d.status || 'unknown';
             _saveNotif({
-                icon:       'briefcase',
-                title:      'New Employment Record',
-                message:    (d.name || 'An alumni') + ' submitted a new employment record as ' + _statusLabel(status) + '.',
+                icon:       'arrow-rotate-right',
+                title:      'Employment Status Updated',
+                message:    (d.name || 'An alumni') + ' submitted their employment record as ' + _statusLabel(status) + '.',
                 link_route: 'registrar.employment.tracking',
                 link_label: 'View Tracking',
-                dedup_key:  'recorded::' + status,
+                dedup_key:  'employment_update',
             });
         });
-
         window.addEventListener('employment-updated', function (e) {
             var d      = _detail(e);
             var status = d.status || 'unknown';
@@ -422,22 +401,16 @@
                 message:    (d.name || 'An alumni') + ' updated their employment status' + from + ' to ' + _statusLabel(status) + '.',
                 link_route: 'registrar.employment.tracking',
                 link_label: 'View Tracking',
-                dedup_key:  'updated::' + status,
+                dedup_key:  'employment_update',
             });
         });
     }
     </script>
-
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-
-<body
-    class="antialiased"
-    x-data="{ sidebarOpen: false }"
-    @click="$store.notifs && $store.notifs.open && $store.notifs.close()">
-
+{{-- ✅ TANGGAL NA ang @click close dito sa body --}}
+<body class="antialiased" x-data="{ sidebarOpen: false }">
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
-
     {{-- Mobile overlay --}}
     <div x-show="sidebarOpen"
          x-transition:enter="transition opacity-ease-out duration-300"
@@ -449,7 +422,6 @@
          @click="sidebarOpen = false"
          class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
-
     {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
     <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
            class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
@@ -457,10 +429,8 @@
                   lg:translate-x-0 lg:static lg:inset-0
                   flex flex-col h-full text-[#333333] shrink-0"
            style="background:#FFFFFF; border-right:1px solid #E8E0F0;">
-
         {{-- Sidebar Header --}}
         <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
-
             {{-- Branding --}}
             <div class="text-left min-w-0 flex-1 pr-2">
                 <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
@@ -470,7 +440,6 @@
                     Records Management
                 </p>
             </div>
-
             {{-- Bell Button --}}
             <button
                 id="bell-btn"
@@ -478,14 +447,12 @@
                 @click.stop="$store.notifs && $store.notifs.toggle(); positionPanel();"
                 title="Notifications"
                 aria-label="Open notifications">
-
                 <i class="bell-icon fas fa-bell"
                    :class="$store.notifs && $store.notifs.unread > 0 ? 'fa-shake' : ''"
                    style="font-size:20px; color:#7A3F91;
                           --fa-animation-duration:4s;
                           --fa-animation-iteration-count:infinite;
                           pointer-events:none;"></i>
-
                 <span
                     x-show="$store.notifs && $store.notifs.unread > 0"
                     x-cloak
@@ -501,17 +468,14 @@
                                 : ($store.notifs ? $store.notifs.unread : 0)">
                 </span>
             </button>
-
             {{-- Mobile close --}}
             <button @click="sidebarOpen = false"
                     class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
                 <i class="fa-solid fa-circle-xmark text-xl"></i>
             </button>
         </div>
-
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
-
             @php
                 $sidebarLinks = [
                     ['route' => 'registrar.dashboard',           'icon' => 'gauge-high', 'label' => 'Dashboard'],
@@ -520,7 +484,6 @@
                     ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',  'label' => 'Employment Tracking'],
                 ];
             @endphp
-
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->routeIs($link['route']); @endphp
                 <a href="{{ route($link['route']) }}"
@@ -529,25 +492,21 @@
                           {{ $isActive
                               ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
                               : 'hover:bg-[#F9F7FC]' }}">
-
                     <div class="w-10 h-10 flex items-center justify-center rounded-lg
                                 transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
                          style="background-color:{{ $isActive ? '#EDE9F8' : '#F9F7FC' }};color:#7A3F91;">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
-
                     <span class="font-medium tracking-wide
                                  {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
                         {{ $link['label'] }}
                     </span>
-
                     @if($isActive)
                         <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
                     @endif
                 </a>
             @endforeach
         </nav>
-
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST" action="{{ route('logout') }}">
@@ -561,10 +520,8 @@
             </form>
         </div>
     </aside>
-
     {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-
         {{-- Mobile top bar --}}
         <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
                        lg:hidden shrink-0 z-30">
@@ -582,7 +539,6 @@
             <h2 class="text-lg font-bold text-[#333333]">Registrar Portal</h2>
             <div class="w-10"></div>
         </header>
-
         {{-- Page content --}}
         <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8">
             <div class="container mx-auto">
@@ -590,9 +546,7 @@
             </div>
         </div>
     </main>
-
 </div>
-
 {{-- ══════════════════════════════════════════════════════════════════════════
      NOTIFICATION PANEL
 ════════════════════════════════════════════════════════════════════════════ --}}
@@ -620,7 +574,6 @@
         box-shadow: 0 24px 60px -8px rgba(122,63,145,0.30),
                     0 6px 24px rgba(0,0,0,0.10);
     ">
-
     {{-- Panel Header --}}
     <div class="flex items-center justify-between px-5 py-4 shrink-0"
          style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
@@ -644,24 +597,21 @@
                     style="font-size:11px;">
                 Mark all read
             </button>
-            <button type="button"
-                    @click.stop="$store.notifs && $store.notifs.close()"
-                    class="w-7 h-7 flex items-center justify-center rounded-lg
-                           text-white/50 hover:text-white hover:bg-white/10 transition ml-1">
-                <i class="fas fa-xmark" style="font-size:14px;"></i>
-            </button>
+
+            {{-- ── Close button with tooltip ── --}}
+            <div class="notif-close-wrap ml-1">
+                <span class="notif-close-tip">Close</span>
+                <button type="button"
+                        @click.stop="$store.notifs && $store.notifs.close()"
+                        class="w-7 h-7 flex items-center justify-center rounded-lg
+                               text-white/50 hover:text-white hover:bg-white/10 transition">
+                    <i class="fas fa-xmark" style="font-size:14px;"></i>
+                </button>
+            </div>
         </div>
     </div>
-
     {{-- Scrollable notification list --}}
     <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
-
-        {{-- ── FIX (Bug 1): Use x-if instead of x-show for the empty state.
-             x-show keeps the element in the DOM and relies on CSS display toggling,
-             which can cause it to remain visible alongside x-for items due to
-             Alpine's async reactive evaluation order after an async _fetch().
-             x-if physically removes / inserts the element, guaranteeing it is
-             gone from the DOM the moment items.length > 0. ── --}}
         <template x-if="$store.notifs && $store.notifs.items.length === 0">
             <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
                 <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
@@ -674,7 +624,6 @@
                 </p>
             </div>
         </template>
-
         {{-- Notification items --}}
         <template x-if="$store.notifs">
             <template x-for="notif in $store.notifs.items" :key="notif.id">
@@ -696,7 +645,6 @@
                             window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                         }
                     ">
-
                     {{-- Icon --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
                          style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
@@ -704,7 +652,6 @@
                            :class="'fa-' + (notif.icon || 'bell')"
                            style="font-size:15px;"></i>
                     </div>
-
                     {{-- Content --}}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-start justify-between gap-2">
@@ -712,6 +659,7 @@
                                 <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
+                                {{-- Count badge --}}
                                 <span
                                     x-show="notif.count > 1"
                                     x-cloak
@@ -725,18 +673,15 @@
                             <span x-show="!notif.read" x-cloak
                                   class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1"></span>
                         </div>
-
+                        {{-- Message --}}
                         <p class="text-[#666666] mt-1 leading-relaxed"
                            style="font-size:12px;
                                   display:-webkit-box;
                                   -webkit-line-clamp:2;
                                   -webkit-box-orient:vertical;
                                   overflow:hidden;"
-                           x-text="notif.count > 1
-                               ? notif.message + ' (' + notif.count + ' today)'
-                               : notif.message">
+                           x-text="notif.message">
                         </p>
-
                         <div class="flex items-center gap-1 mt-2">
                             <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
                             <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
@@ -749,7 +694,6 @@
                             </span>
                         </div>
                     </div>
-
                     <span class="notif-hover-label">
                         <i class="fas fa-eye" style="font-size:10px;margin-right:5px;"></i>View Details
                     </span>
@@ -757,7 +701,6 @@
             </template>
         </template>
     </div>
-
     {{-- Panel Footer --}}
     <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
         <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
@@ -765,8 +708,15 @@
         </p>
     </div>
 </div>
-
 @livewireScripts
-
+{{-- ✅ CLOSE ON OUTSIDE CLICK — narito na sa baba, after ng lahat ng elements --}}
+<div
+    x-data
+    x-show="$store.notifs && $store.notifs.open"
+    x-cloak
+    @click="$store.notifs && $store.notifs.close()"
+    class="fixed inset-0"
+    style="z-index: 9998; background: transparent;">
+</div>
 </body>
 </html>
