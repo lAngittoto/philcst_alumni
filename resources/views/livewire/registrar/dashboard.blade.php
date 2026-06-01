@@ -595,13 +595,11 @@ new class extends Component {
                     </div>
                     <div class="space-y-2">
                         @foreach($empRows as $row)
-                        {{-- ✅ Each row: relative + overflow-visible para lalabas ang tooltip --}}
                         <div wire:click="openEmpModal('{{ $row['filter'] }}')"
                              class="relative overflow-visible rounded-xl border p-3 flex items-center justify-between
                                     transition-all duration-150 hover:shadow-md active:scale-[.98] cursor-pointer group"
                              style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }};">
 
-                            {{-- Tooltip — same style as stat cards, appears above --}}
                             <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                                          bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                                          px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -729,60 +727,57 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Toolbar --}}
+        {{-- ── Toolbar ── --}}
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
+            <div class="flex flex-wrap gap-2 items-center">
 
-            <div class="flex flex-wrap gap-3 items-center mb-3">
+                {{-- FILTERS label --}}
+                <span class="text-[10px] font-bold tracking-widest uppercase text-[#888] shrink-0 mr-1">FILTERS</span>
 
-                <span class="text-xs font-bold tracking-widest uppercase shrink-0 px-2.5 py-1.5 rounded-lg border
-                             text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0] pointer-events-none">
-                    Filters
-                </span>
+                {{-- Tab pills --}}
+                @if($alumniModalFilter !== 'courses')
+                    @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
+                    <button
+                        @if($alumniTabsClickable) wire:click="$set('alumniModalFilter','{{ $val }}')" @endif
+                        class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold border transition-all duration-150
+                               {{ $alumniModalFilter === $val
+                                    ? 'text-white border-transparent shadow-sm'
+                                    : 'bg-white text-[#111111] border-[#E0E0E0] hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
+                               {{ !$alumniTabsClickable ? 'cursor-default' : 'active:scale-95 cursor-pointer' }}"
+                        @if($alumniModalFilter === $val) style="background:linear-gradient(135deg,#7A3F91,#9b59b6);" @endif>
+                        {{ $lbl }}
+                    </button>
+                    @endforeach
+                @endif
 
-                <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
+                {{-- Search --}}
+                <div class="relative" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.alumniModalSearch ?? ''; $wire.$watch('alumniModalSearch', v => { if(v!==this.q) this.q=v; }); } }">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none">
+                        <i class="fas fa-search" style="font-size:.7rem;"></i>
+                    </span>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('alumniModalSearch', q)"
-                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search course, name, college…' : 'Search name, ID, course, batch…' }}"
-                           class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900
-                                  focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
+                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search course, name, college…' : 'Search name, ID, course…' }}"
+                           class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-gray-900
+                                  focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-56"
                            autocomplete="off">
                 </div>
 
                 @if($alumniModalFilter !== 'courses')
-                <div class="flex flex-wrap gap-1.5 items-center">
-                    @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
-                    <button
-                        @if($alumniTabsClickable) wire:click="$set('alumniModalFilter','{{ $val }}')" @endif
-                        class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all
-                               {{ $alumniModalFilter === $val
-                                    ? 'text-white border-transparent bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]'
-                                    : 'bg-white text-[#111111] border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
-                               {{ !$alumniTabsClickable ? 'cursor-default' : 'active:scale-95' }}">
-                        {{ $lbl }}
-                    </button>
-                    @endforeach
-                    @if(!$alumniTabsClickable && !$isAllNoFilter)
-                    <span class="text-xs text-[#333333] font-normal ml-1">Filtered view</span>
-                    @endif
-                </div>
-                @endif
 
-            </div>
-
-            @if($alumniModalFilter !== 'courses')
-            <div class="flex flex-wrap gap-2 items-center">
-
+                {{-- Batch Year dropdown --}}
                 @if(!$alumniModalBatchLocked)
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniModalBatch', val===''?null:parseInt(val)); this.close(); } }"
                      @click.outside="close()">
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.alumniModalBatch !== null }"
-                            class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
-                                   hover:border-[#c49ed8] transition-all duration-150">
+                            class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                                   text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                                   hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
                         <span>@if($alumniModalBatch) Batch {{ $alumniModalBatch }} @else All Batch Years @endif</span>
+                        <i class="fas fa-chevron-down text-[9px] opacity-50"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -805,21 +800,23 @@ new class extends Component {
                     </div>
                 </div>
                 @else
-                <span class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border
+                <span class="inline-flex items-center gap-2 px-3 py-[7px] rounded-full text-xs font-semibold border
                              bg-[#F9F7FC] text-[#7A3F91] border-[#7A3F91]">
                     Batch {{ $alumniModalBatch }}
                 </span>
                 @endif
 
+                {{-- Course dropdown --}}
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniModalCourseFilter',val); this.close(); } }"
                      @click.outside="close()">
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.alumniModalCourseFilter !== '' }"
-                            class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
-                                   hover:border-[#c49ed8] transition-all duration-150">
+                            class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                                   text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                                   hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
                         <span>@if($alumniModalCourseFilter) {{ $alumniModalCourseFilter }} @else All Courses @endif</span>
+                        <i class="fas fa-chevron-down text-[9px] opacity-50"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -842,31 +839,19 @@ new class extends Component {
                     </div>
                 </div>
 
-                @if($alumniModalBatch || $alumniModalCourseFilter)
-                <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-xs text-[#333333] font-normal">Filtering by:</span>
-                    @if($alumniModalBatch && !$alumniModalBatchLocked)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            Batch {{ $alumniModalBatch }}
-                        </span>
-                    @endif
-                    @if($alumniModalCourseFilter)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            {{ $alumniModalCourseFilter }}
-                        </span>
-                    @endif
-                    @if(!$alumniModalBatchLocked || $alumniModalCourseFilter)
-                    <button wire:click="clearAlumniModalFilters" class="text-xs text-red-400 hover:text-red-600 font-semibold transition-colors">
-                        <span wire:loading.remove wire:target="clearAlumniModalFilters">Clear all</span>
-                        <span wire:loading wire:target="clearAlumniModalFilters">Clearing…</span>
-                    </button>
-                    @endif
-                </div>
+                {{-- Reset button --}}
+                @if($alumniModalBatch || $alumniModalCourseFilter || $alumniModalSearch)
+                <button wire:click="clearAlumniModalFilters"
+                        class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-full text-xs font-semibold border
+                               border-[#E0E0E0] bg-white text-[#555555] hover:border-red-300 hover:text-red-500 transition-all duration-150 cursor-pointer">
+                    <i class="fas fa-rotate-left text-[10px]"></i>
+                    Reset
+                </button>
                 @endif
 
-            </div>
-            @endif
+                @endif {{-- end if not courses --}}
 
+            </div>
         </div>
 
         {{-- Table --}}
@@ -1116,49 +1101,52 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Toolbar --}}
+        {{-- ── Toolbar ── --}}
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-            <div class="flex flex-wrap gap-3 items-center mb-3">
-                <span class="text-xs font-bold tracking-widest uppercase shrink-0 px-2.5 py-1.5 rounded-lg border
-                             text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0] pointer-events-none">
-                    Filters
-                </span>
-                <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
+            <div class="flex flex-wrap gap-2 items-center">
+
+                {{-- FILTERS label --}}
+                <span class="text-[10px] font-bold tracking-widest uppercase text-[#888] shrink-0 mr-1">FILTERS</span>
+
+                {{-- Tab pills --}}
+                @foreach($visibleEmpTabs as [$val, $lbl, $icon])
+                <button
+                    @if(!$empTabsLocked) wire:click="$set('empFilter','{{ $val }}')" @endif
+                    class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold border transition-all duration-150
+                           {{ $this->empFilter === $val
+                                ? 'text-white border-transparent shadow-sm'
+                                : 'bg-white text-[#111111] border-[#E0E0E0] hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
+                           {{ $empTabsLocked ? 'cursor-default' : 'active:scale-95 cursor-pointer' }}"
+                    @if($this->empFilter === $val) style="background:linear-gradient(135deg,#7A3F91,#9b59b6);" @endif>
+                    {{ $lbl }}
+                </button>
+                @endforeach
+
+                {{-- Search --}}
+                <div class="relative" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.empSearch ?? ''; $wire.$watch('empSearch', v => { if(v!==this.q) this.q=v; }); } }">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none">
+                        <i class="fas fa-search" style="font-size:.7rem;"></i>
+                    </span>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('empSearch', q)"
                            placeholder="Search name, ID, company, email…"
-                           class="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900
-                                  focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
+                           class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-gray-900
+                                  focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-56"
                            autocomplete="off">
                 </div>
-                <div class="flex flex-wrap gap-1.5 items-center">
-                    @foreach($visibleEmpTabs as [$val, $lbl, $icon])
-                    <button
-                        @if(!$empTabsLocked) wire:click="$set('empFilter','{{ $val }}')" @endif
-                        class="px-3 py-2 rounded-lg text-xs font-semibold border transition-all
-                               {{ $this->empFilter === $val
-                                    ? 'text-white border-transparent bg-gradient-to-br from-[#7A3F91] to-[#9b59b6]'
-                                    : 'bg-white text-[#111111] border-gray-200 hover:border-[#d4aaeb] hover:text-[#7A3F91]' }}
-                               {{ $empTabsLocked ? 'cursor-default' : 'active:scale-95' }}">
-                        {{ $lbl }}
-                    </button>
-                    @endforeach
-                    @if($empTabsLocked)
-                    <span class="text-xs text-[#333333] font-normal ml-1">Filtered view</span>
-                    @endif
-                </div>
-            </div>
-            <div class="flex flex-wrap gap-2 items-center">
+
+                {{-- Batch Year dropdown --}}
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('empBatchFilter',val); this.close(); } }"
                      @click.outside="close()">
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.empBatchFilter !== '' }"
-                            class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
-                                   hover:border-[#c49ed8] transition-all duration-150">
+                            class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                                   text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                                   hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
                         <span>@if($empBatchFilter) Batch {{ $empBatchFilter }} @else All Batch Years @endif</span>
+                        <i class="fas fa-chevron-down text-[9px] opacity-50"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -1179,15 +1167,18 @@ new class extends Component {
                         @endforeach
                     </div>
                 </div>
+
+                {{-- Course dropdown --}}
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('empCourseFilter',val); this.close(); } }"
                      @click.outside="close()">
                     <button type="button" @click="toggle()"
                             :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.empCourseFilter !== '' }"
-                            class="inline-flex items-center gap-1.5 px-[11px] py-2 border border-[#E8E0F0] rounded-lg
-                                   text-[.78rem] font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
-                                   hover:border-[#c49ed8] transition-all duration-150">
+                            class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                                   text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                                   hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
                         <span>@if($empCourseFilter) {{ $empCourseFilter }} @else All Courses @endif</span>
+                        <i class="fas fa-chevron-down text-[9px] opacity-50"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
                                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
@@ -1208,30 +1199,17 @@ new class extends Component {
                         @endforeach
                     </div>
                 </div>
+
+                {{-- Reset button --}}
                 @if($empHasSecondaryFilter)
-                <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-xs text-[#333333] font-normal">Filtering by:</span>
-                    @if($empBatchFilter)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            <i class="fas fa-calendar text-[10px]"></i> Batch {{ $empBatchFilter }}
-                        </span>
-                    @endif
-                    @if($empCourseFilter)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            <i class="fas fa-book text-[10px]"></i> {{ $empCourseFilter }}
-                        </span>
-                    @endif
-                    @if($empSearch)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                            <i class="fas fa-search text-[10px]"></i> "{{ Str::limit($empSearch, 20) }}"
-                        </span>
-                    @endif
-                    <button wire:click="clearEmpModalFilters" class="text-xs text-red-400 hover:text-red-600 font-semibold transition-colors">
-                        <span wire:loading.remove wire:target="clearEmpModalFilters">Clear all</span>
-                        <span wire:loading wire:target="clearEmpModalFilters">Clearing…</span>
-                    </button>
-                </div>
+                <button wire:click="clearEmpModalFilters"
+                        class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-full text-xs font-semibold border
+                               border-[#E0E0E0] bg-white text-[#555555] hover:border-red-300 hover:text-red-500 transition-all duration-150 cursor-pointer">
+                    <i class="fas fa-rotate-left text-[10px]"></i>
+                    Reset
+                </button>
                 @endif
+
             </div>
         </div>
 

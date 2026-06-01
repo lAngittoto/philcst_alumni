@@ -42,35 +42,28 @@ new class extends Component {
     public array $recentEvents = [];
     public array $recentJobs   = [];
 
-    // ── Modal state ───────────────────────────────────────────────
     public string $activeModal     = '';
     public string $eventModalTitle = 'Events';
     public array  $modalEvents     = [];
     public array  $modalJobs       = [];
     public array  $modalRsvps      = [];
 
-    // ── Search filters ────────────────────────────────────────────
-    public string $eventSearch = '';
-    public string $jobSearch   = '';
+    public string $eventSearch       = '';
+    public string $eventStatusFilter = '';
+    public string $jobSearch         = '';
+    public string $jobTypeFilter     = '';
 
-    // ── Jobs modal pagination ─────────────────────────────────────
     public int $jobModalPage     = 1;
     public int $jobModalPageSize = 20;
-
-    // ── Events modal pagination ───────────────────────────────────
     public int $eventModalPage     = 1;
     public int $eventModalPageSize = 20;
-
-    // ── RSVPs modal pagination ────────────────────────────────────
     public int $rsvpModalPage     = 1;
     public int $rsvpModalPageSize = 20;
 
-    // ── Detail view state ─────────────────────────────────────────
     public array $selectedEvent      = [];
     public array $selectedJob        = [];
     public array $selectedEmployment = [];
 
-    // ── Profile photo helper ──────────────────────────────────────
     public function getProfilePhotoUrl(): string
     {
         $path = $this->alumniPhoto;
@@ -174,7 +167,6 @@ new class extends Component {
             ->where('response', 'CONFIRMED')->count();
     }
 
-    // ── Fetch all events for modal (latest/newest first) ──────────
     private function fetchAllEvents(bool $upcomingOnly = false): array
     {
         $college = $this->alumniCollege;
@@ -236,20 +228,22 @@ new class extends Component {
 
     public function openUpcomingEventsModal(): void
     {
-        $this->eventModalTitle = 'Upcoming Events';
-        $this->modalEvents     = $this->fetchAllEvents(upcomingOnly: true);
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
+        $this->eventModalTitle   = 'Upcoming Events';
+        $this->modalEvents       = $this->fetchAllEvents(upcomingOnly: true);
+        $this->eventSearch       = '';
+        $this->eventStatusFilter = '';
+        $this->eventModalPage    = 1;
+        $this->activeModal       = 'events';
     }
 
     public function openTotalEventsModal(): void
     {
-        $this->eventModalTitle = 'All Events';
-        $this->modalEvents     = $this->fetchAllEvents(upcomingOnly: false);
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
+        $this->eventModalTitle   = 'All Events';
+        $this->modalEvents       = $this->fetchAllEvents(upcomingOnly: false);
+        $this->eventSearch       = '';
+        $this->eventStatusFilter = '';
+        $this->eventModalPage    = 1;
+        $this->activeModal       = 'events';
     }
 
     public function openJobsModal(): void
@@ -277,25 +271,25 @@ new class extends Component {
             ])->toArray();
 
         $this->jobSearch    = '';
+        $this->jobTypeFilter = '';
         $this->jobModalPage = 1;
         $this->activeModal  = 'jobs';
     }
 
-    public function updatingJobSearch(): void  { $this->jobModalPage = 1; }
-    public function updatingEventSearch(): void { $this->eventModalPage = 1; }
-    public function jobPrevPage(): void        { if ($this->jobModalPage > 1) $this->jobModalPage--; }
-    public function jobNextPage(int $lastPage): void
-    {
+    public function updatingJobSearch(): void        { $this->jobModalPage = 1; }
+    public function updatingJobTypeFilter(): void    { $this->jobModalPage = 1; }
+    public function updatingEventSearch(): void      { $this->eventModalPage = 1; }
+    public function updatingEventStatusFilter(): void { $this->eventModalPage = 1; }
+    public function jobPrevPage(): void              { if ($this->jobModalPage > 1) $this->jobModalPage--; }
+    public function jobNextPage(int $lastPage): void {
         if ($this->jobModalPage < $lastPage) $this->jobModalPage++;
     }
     public function eventPrevPage(): void { if ($this->eventModalPage > 1) $this->eventModalPage--; }
-    public function eventNextPage(int $lastPage): void
-    {
+    public function eventNextPage(int $lastPage): void {
         if ($this->eventModalPage < $lastPage) $this->eventModalPage++;
     }
     public function rsvpPrevPage(): void { if ($this->rsvpModalPage > 1) $this->rsvpModalPage--; }
-    public function rsvpNextPage(int $lastPage): void
-    {
+    public function rsvpNextPage(int $lastPage): void {
         if ($this->rsvpModalPage < $lastPage) $this->rsvpModalPage++;
     }
 
@@ -342,9 +336,9 @@ new class extends Component {
             ];
         }
 
-        $this->modalRsvps   = $result;
+        $this->modalRsvps    = $result;
         $this->rsvpModalPage = 1;
-        $this->activeModal  = 'rsvps';
+        $this->activeModal   = 'rsvps';
     }
 
     public function openEventDetail(int $id, string $source = 'ADMIN'): void
@@ -357,9 +351,34 @@ new class extends Component {
             $e = AdminEvent::withoutTrashed()->find($id);
         }
 
-        if (!$e) {
-            $this->activeModal = '';
-            return;
+        if (!$e) { $this->activeModal = ''; return; }
+
+        $rsvp = \App\Models\EventRsvp::where('alumni_id', $this->alumniId)
+            ->where('event_id', $id)
+            ->first();
+
+        $rsvpResponse = $rsvp ? strtoupper($rsvp->response ?? '') : '';
+        $isConfirmed  = $rsvpResponse === 'CONFIRMED';
+
+        $attending = \App\Models\EventRsvp::where('event_id', $id)->where('response', 'CONFIRMED')->count();
+        $maybe     = \App\Models\EventRsvp::where('event_id', $id)->where('response', 'MAYBE')->count();
+        $no        = \App\Models\EventRsvp::where('event_id', $id)->where('response', 'NO')->count();
+
+        $organizer = null;
+        if (strtoupper($source) === 'ORGANIZER') {
+            try {
+                $organizerId = $e->organizer_id ?? 0;
+                if ($organizerId) {
+                    foreach (['organizers', 'users'] as $table) {
+                        if (\Illuminate\Support\Facades\Schema::hasTable($table)) {
+                            $organizer = DB::table($table)->where('id', $organizerId)->first();
+                            if ($organizer) break;
+                        }
+                    }
+                }
+            } catch (\Throwable $ex) {
+                $organizer = null;
+            }
         }
 
         $this->selectedEvent = [
@@ -374,10 +393,20 @@ new class extends Component {
             'venue'       => $e->venue ?? '',
             'photo'       => $e->photo_url ?? '',
             'description' => $e->description ?? '',
+            'additional_notes' => $e->additional_notes ?? $e->notes ?? '',
             'status'      => $e->status ?? '',
             'target_participants' => $e->target_participants ?? '',
             'is_upcoming' => $e->event_date->gt($now),
-            'organizer'   => isset($e->organizer_name) ? $e->organizer_name : (strtoupper($source) === 'ORGANIZER' ? 'Organizer Event' : 'Admin Event'),
+            'organizer_name'  => $organizer ? trim(($organizer->first_name ?? '') . ' ' . ($organizer->last_name ?? '')) : '',
+            'organizer_email' => $organizer?->email ?? '',
+            'organizer_phone' => $organizer?->contact_number ?? $e->contact_phone ?? '',
+            'is_confirmed'    => $isConfirmed,
+            'rsvp_response'   => $rsvpResponse,
+            'attending_count' => $attending,
+            'maybe_count'     => $maybe,
+            'no_count'        => $no,
+            'posted_at'       => $e->created_at ? $e->created_at->setTimezone('Asia/Manila')->format('M d, Y') : '',
+            'posted_ago'      => $e->created_at ? $e->created_at->setTimezone('Asia/Manila')->diffForHumans() : '',
         ];
         $this->activeModal = 'event_detail';
     }
@@ -395,21 +424,18 @@ new class extends Component {
             ->latest('created_at')
             ->first();
 
-        if (!$employment) {
-            $this->activeModal = '';
-            return;
-        }
+        if (!$employment) { $this->activeModal = ''; return; }
 
         $sMap = [
             'employed'      => ['Employed',      'fa-user-tie',         '#16a34a', '#F0FDF4', '#BBF7D0'],
             'self_employed' => ['Self-Employed',  'fa-store',            '#0891b2', '#ECFEFF', '#a5f3fc'],
             'unemployed'    => ['Unemployed',     'fa-magnifying-glass', '#d97706', '#FFFBEB', '#fde68a'],
         ];
-        $empInfo = $sMap[$employment->employment_status ?? ''] ?? ['—', 'fa-briefcase', '#7A3F91', '#F9F7FC', '#E8E0F0'];
+        $empInfo = $sMap[$employment->employment_status ?? ''] ?? ['—', 'fa-briefcase', '#333333', '#F9F7FC', '#E8E0F0'];
 
         $eMap = [
-            'pursuing_masteral'  => ['Pursuing Masteral',  'fa-scroll',     '#5c2d7a', '#EDE0F5', '#c9ace0'],
-            'pursuing_doctorate' => ['Pursuing Doctorate', 'fa-hat-wizard', '#7A3F91', '#F9F7FC', '#E8E0F0'],
+            'pursuing_masteral'  => ['Pursuing Masteral',  'fa-scroll',     '#333333', '#EDE0F5', '#c9ace0'],
+            'pursuing_doctorate' => ['Pursuing Doctorate', 'fa-hat-wizard', '#333333', '#F9F7FC', '#E8E0F0'],
         ];
         $eduInfo = $eMap[$employment->education_status ?? ''] ?? null;
 
@@ -452,6 +478,11 @@ new class extends Component {
         $this->activeModal = 'employment_detail';
     }
 
+    public function openProfileModal(): void
+    {
+        $this->activeModal = 'profile_detail';
+    }
+
     public function openJobDetail(int $id): void
     {
         $j = JobPosting::find($id);
@@ -467,10 +498,12 @@ new class extends Component {
                 'location'                 => $j->location ?? '',
                 'salary'                   => $j->salary   ?? '',
                 'deadline'                 => $deadline->format('M d, Y'),
+                'deadline_full'            => $deadline->format('F d, Y'),
                 'days_left'                => (int) now('Asia/Manila')->startOfDay()->diffInDays(
                     $deadline->copy()->startOfDay(), false
                 ),
                 'posted_at'                => $postedAt ? $postedAt->format('M d, Y') : '',
+                'posted_at_full'           => $postedAt ? $postedAt->format('F d, Y \a\t g:i A') : '',
                 'posted_ago'               => $postedAt ? $postedAt->diffForHumans(now('Asia/Manila')) : '',
                 'target_college'           => $this->safeColumn($j, 'target_college'),
                 'status'                   => $j->status ?? 'ACTIVE',
@@ -487,17 +520,11 @@ new class extends Component {
 
     private function safeColumn($model, string $column): string
     {
-        try {
-            return $model->$column ?? '';
-        } catch (\Throwable) {
-            return '';
-        }
+        try { return $model->$column ?? ''; }
+        catch (\Throwable) { return ''; }
     }
 
-    public function closeModal(): void
-    {
-        $this->activeModal = '';
-    }
+    public function closeModal(): void { $this->activeModal = ''; }
 
     public function getGreeting(): string
     {
@@ -510,655 +537,430 @@ new class extends Component {
 
 <div>
 
-{{-- ══ Global cursor-following tooltip ══ --}}
-<div id="alumni-float-tip"></div>
-
 <style>
-    /* ── Animations ──────────────────────────────────────────── */
-    @keyframes dashModalIn {
-        from { opacity:0; transform:translateY(10px); }
-        to   { opacity:1; transform:translateY(0); }
-    }
+    /* ── Animations ── */
+    @keyframes dashPageIn  { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes dashModalIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     .dash-modal-enter { animation: dashModalIn .22s cubic-bezier(.4,0,.2,1) both; }
+    @keyframes slideInFull { from { opacity:0; } to { opacity:1; } }
+    .fs-in, .evt-detail-in, .emp-detail-in, .id-card-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
+    @keyframes newPulse {
+        0%,100% { box-shadow:0 0 0 0 rgba(37,99,235,.4); }
+        50%      { box-shadow:0 0 0 4px rgba(37,99,235,0); }
+    }
+    .new-badge { animation: newPulse 2s ease-in-out infinite; }
 
-    /* ── Cursor-following tooltip ────────────────────────────── */
-    #alumni-float-tip {
-        position: fixed;
-        background: #1a1a1a;
-        color: #fff;
+    /* ── STAT CARD TOOLTIP (appears ABOVE) ── */
+    .dash-stat-card {
+        position: relative;
+        overflow: visible;
+    }
+    .dash-stat-card .stat-tooltip {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #000000;
+        color: #ffffff;
         font-size: 10px;
         font-weight: 700;
-        letter-spacing: .05em;
+        letter-spacing: 0.05em;
         padding: 5px 11px;
         border-radius: 7px;
         white-space: nowrap;
         pointer-events: none;
         opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 99999;
-        box-shadow: 0 4px 14px rgba(0,0,0,.35);
-        transform: translate(-50%, calc(-100% - 10px));
+        transition: opacity 0.15s;
+        z-index: 9999;
     }
-
-    /* ── Stat cards ──────────────────────────────────────────── */
-    .stat-card {
-        position: relative;
-        overflow: visible;
-        transition: box-shadow .18s ease, border-color .18s ease, transform .12s ease;
-        cursor: pointer;
-    }
-    .stat-card:active { transform: scale(.985); }
-
-    .stat-card::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        background: transparent;
-        transition: background .18s ease;
-        pointer-events: none;
-        z-index: 1;
-    }
-    .stat-card:hover::after {
-        background: rgba(122, 63, 145, 0.035);
-    }
-
-    /* ── Stat card hover tooltip (black bg, white text, eye icon) ── */
-    .dash-hover-tip {
-        position: absolute;
-        bottom: calc(100% + 8px);
-        left: 50%;
-        transform: translateX(-50%);
-        background: #1a1a1a;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: .05em;
-        padding: 6px 13px;
-        border-radius: 7px;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 200;
-        box-shadow: 0 4px 14px rgba(0,0,0,.30);
-    }
-    .dash-hover-tip::after {
+    .dash-stat-card .stat-tooltip::after {
         content: '';
         position: absolute;
         top: 100%;
         left: 50%;
         transform: translateX(-50%);
         border: 5px solid transparent;
-        border-top-color: #1a1a1a;
+        border-top-color: #000000;
     }
-    .stat-card:hover .dash-hover-tip { opacity: 1; }
+    .dash-stat-card:hover .stat-tooltip { opacity: 1; }
 
-    /* ── Table row hover ─────────────────────────────────────── */
-    .dash-table-row {
-        transition: background .10s;
-        cursor: pointer;
-        position: relative;
-    }
-    .dash-table-row:hover { background: #F5F0FA !important; }
-
-    /* ── Row hover "View Details" tooltip ───────────────────── */
-    .row-hover-tip {
+    /* ── Close button tooltip — BOTTOM ── */
+    .close-btn-wrap { position: relative; }
+    .close-btn-wrap .close-tooltip {
         position: absolute;
-        top: 50%;
-        right: 16px;
-        transform: translateY(-50%);
-        background: #1a1a1a;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: .04em;
-        padding: 6px 13px;
-        border-radius: 8px;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 50;
-        box-shadow: 0 4px 14px rgba(0,0,0,.30);
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
-    .row-hover-tip::before {
-        content: '';
-        position: absolute;
-        right: 100%;
-        top: 50%;
-        transform: translateY(-50%);
-        border: 5px solid transparent;
-        border-right-color: #1a1a1a;
-    }
-    .dash-table-row:hover .row-hover-tip { opacity: 1; }
-
-    /* ── Close button ────────────────────────────────────────── */
-    .dash-close-btn {
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 36px;
-        height: 36px;
-        border-radius: 10px;
-        background: rgba(255,255,255,.12);
-        border: 1px solid rgba(255,255,255,.2);
-        color: #fff;
-        cursor: pointer;
-        transition: background .15s;
-        overflow: visible;
-    }
-    .dash-close-btn:hover { background: rgba(255,255,255,.22); }
-    .dash-close-tip {
-        position: absolute;
-        top: calc(100% + 8px);
-        right: 0;
-        background: rgba(27,6,46,.88);
-        color: #fff;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: .08em;
-        text-transform: uppercase;
+        top: calc(100% + 7px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #000000;
+        color: #ffffff;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
         padding: 4px 10px;
-        border-radius: 7px;
+        border-radius: 6px;
         white-space: nowrap;
         pointer-events: none;
         opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 200;
-        box-shadow: 0 4px 12px rgba(0,0,0,.28);
+        transition: opacity 0.15s;
+        z-index: 9999;
     }
-    .dash-close-tip::before {
+    .close-btn-wrap .close-tooltip::after {
         content: '';
         position: absolute;
         bottom: 100%;
-        right: 10px;
-        border: 5px solid transparent;
-        border-bottom-color: rgba(27,6,46,.88);
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-bottom-color: #000000;
     }
-    .dash-close-btn:hover .dash-close-tip { opacity: 1; }
+    .close-btn-wrap:hover .close-tooltip { opacity: 1; }
 
-    /* ── Modal pagination buttons ────────────────────────────── */
-    .dash-pg-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 32px;
-        height: 32px;
-        padding: 0 10px;
-        border-radius: 8px;
-        font-size: .8rem;
-        font-weight: 700;
-        transition: all .15s;
-        border: 1.5px solid transparent;
+    /* ── VIEW DETAILS pill — follows cursor, yellow arrow below ── */
+    .view-details-pill {
+        position: fixed;
+        pointer-events: none;
+        z-index: 99999;
+        transform: translate(-50%, -140%);
+        opacity: 0;
+        transition: opacity 0.1s ease;
+        white-space: nowrap;
     }
-    .dash-pg-active { background: rgba(255,255,255,1); color: #7A3F91; border-color: rgba(255,255,255,1); }
-    .dash-pg-nav    { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.25); }
-    .dash-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
-    .dash-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
-
-    /* ── Scrollbar ───────────────────────────────────────────── */
-    .dash-scroll { scrollbar-width:thin; scrollbar-color:#d1d5db #f9fafb; }
-    .dash-scroll::-webkit-scrollbar { width: 4px; }
-    .dash-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
-
-    /* ── Profile col scrollable ──────────────────────────────── */
-    .dash-profile-col {
-        overflow-y: auto;
-        scrollbar-width: thin;
-        scrollbar-color: #e0d0ef #f9f7fc;
+    /* Arrow pointing DOWN from pill */
+    .view-details-pill::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 6px solid transparent;
+        border-top-color: #EAB308;
+        margin-top: -1px;
     }
-    .dash-profile-col::-webkit-scrollbar { width: 4px; }
-    .dash-profile-col::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
 
-    /* ── Full-screen detail modal ────────────────────────────── */
-    @keyframes slideInFull {
-        from { opacity:0; }
-        to   { opacity:1; }
-    }
-    .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
-    .scroll-c::-webkit-scrollbar { width: 5px; }
-    .scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-    .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-    .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-    .meta-row-icon {
-        width: 2.25rem; height: 2.25rem; border-radius: 0.625rem;
-        display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-    }
-    .meta-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #555555; margin-bottom: 0.2rem; }
-    .meta-value { font-size: 1rem; font-weight: 700; color: #333333; line-height: 1.3; }
-    .meta-sub   { font-size: 0.9rem; color: #333333; margin-top: 0.15rem; }
-
-    /* ── Job / Employment detail card styles ──────────────────── */
-    .job-detail-meta-card {
-        background: #fff;
-        border: 1px solid #E8E0F0;
-        border-radius: 12px;
-        padding: 14px 16px;
+    /* ── Filter bar ── */
+    .filter-bar {
         display: flex;
-        flex-direction: column;
-        gap: 2px;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px 20px;
+        background: #ffffff;
+        border-bottom: 1px solid #e5e7eb;
+        flex-shrink: 0;
     }
-    .job-detail-meta-label {
+    .filter-bar-label {
         font-size: 0.68rem;
-        font-weight: 700;
+        font-weight: 800;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #999999;
-        margin-bottom: 2px;
+        color: #7A3F91;
+        white-space: nowrap;
+        flex-shrink: 0;
     }
-    .job-detail-meta-value {
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: #222222;
-        line-height: 1.3;
+    .filter-divider {
+        width: 1px;
+        height: 22px;
+        background: #e5e7eb;
+        flex-shrink: 0;
     }
-    .job-detail-meta-sub {
+    .filter-search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 180px;
+        max-width: 320px;
+    }
+    .filter-search-wrap .fi-icon {
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #9ca3af;
+        font-size: 0.7rem;
+        pointer-events: none;
+    }
+    .filter-search-input {
+        width: 100%;
+        padding: 7px 12px 7px 32px;
+        border: 1.5px solid #e5e7eb;
+        border-radius: 8px;
         font-size: 0.82rem;
-        color: #777777;
         font-weight: 500;
-        margin-top: 1px;
+        color: #111111;
+        background: #ffffff;
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .job-tag {
+    .filter-search-input:focus {
+        border-color: #7A3F91;
+        box-shadow: 0 0 0 3px rgba(122,63,145,0.1);
+    }
+    .filter-search-input::placeholder { color: #9ca3af; }
+
+    .filter-select-wrap {
+        position: relative;
+        flex-shrink: 0;
+    }
+    .filter-select {
+        appearance: none;
+        padding: 7px 32px 7px 12px;
+        border: 1.5px solid #e5e7eb;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #111111;
+        background: #ffffff;
+        outline: none;
+        cursor: pointer;
+        min-width: 120px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .filter-select:focus {
+        border-color: #7A3F91;
+        box-shadow: 0 0 0 3px rgba(122,63,145,0.1);
+    }
+    .filter-select-caret {
+        pointer-events: none;
+        position: absolute;
+        right: 11px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 0;
+        height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid #6b7280;
+    }
+
+    .filter-reset-btn {
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        font-size: 0.75rem;
-        font-weight: 700;
-        padding: 5px 11px;
-        border-radius: 99px;
-        border: 1px solid transparent;
-    }
-
-    /* ── Employment detail modal layout ──────────────────────── */
-    @keyframes empDetailIn {
-        from { opacity:0; }
-        to   { opacity:1; }
-    }
-    .emp-detail-in { animation: empDetailIn .22s cubic-bezier(.4,0,.2,1) both; }
-    .emp-scroll::-webkit-scrollbar { width: 5px; }
-    .emp-scroll::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-    .emp-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-    .emp-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-    .emp-detail-meta-label {
-        font-size: 0.68rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #999999;
-        margin-bottom: 2px;
-    }
-    .emp-detail-meta-value {
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: #222222;
-        line-height: 1.3;
-    }
-    .emp-detail-meta-sub {
+        padding: 7px 13px;
+        border: 1.5px solid #e5e7eb;
+        border-radius: 8px;
         font-size: 0.82rem;
-        color: #777777;
-        font-weight: 500;
-        margin-top: 1px;
+        font-weight: 600;
+        color: #111111;
+        background: #ffffff;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: border-color 0.15s, color 0.15s;
+        flex-shrink: 0;
     }
-
-    /* ── Event detail modal ──────────────────────────────────── */
-    @keyframes evtDetailIn {
-        from { opacity:0; }
-        to   { opacity:1; }
+    .filter-reset-btn:hover {
+        border-color: #f87171;
+        color: #ef4444;
     }
-    .evt-detail-in { animation: evtDetailIn .22s cubic-bezier(.4,0,.2,1) both; }
-    .evt-scroll::-webkit-scrollbar { width: 5px; }
-    .evt-scroll::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-    .evt-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-    .evt-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-    .evt-detail-meta-label {
-        font-size: 0.68rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #999999;
-        margin-bottom: 2px;
-    }
-    .evt-detail-meta-value {
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: #222222;
-        line-height: 1.3;
-    }
-    .evt-detail-meta-sub {
-        font-size: 0.82rem;
-        color: #777777;
-        font-weight: 500;
-        margin-top: 1px;
-    }
-
-    /* ── "NEW" badge pulse ───────────────────────────────────── */
-    @keyframes newPulse {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(37,99,235,.4); }
-        50%       { box-shadow: 0 0 0 4px rgba(37,99,235,0); }
-    }
-    .new-badge { animation: newPulse 2s ease-in-out infinite; }
-
-    /* ── Global font-size bumps (excludes page header) ──────── */
-    /* Stat card numbers */
-    .stat-card .stat-number { font-size: 2rem !important; }
-    /* Stat card labels */
-    .stat-card .stat-label  { font-size: 0.875rem !important; }
-    /* Profile card text */
-    .profile-name  { font-size: 0.95rem !important; }
-    .profile-id    { font-size: 0.82rem !important; }
-    .profile-badge { font-size: 0.78rem !important; }
-    .profile-row-label { font-size: 0.85rem !important; }
-    .profile-row-value { font-size: 0.85rem !important; }
-    .profile-sub-text  { font-size: 0.78rem !important; }
-    /* Modal table */
-    .modal-th  { font-size: 0.75rem !important; }
-    .modal-td-primary   { font-size: 0.9rem !important; }
-    .modal-td-secondary { font-size: 0.82rem !important; }
-    /* Badge/tag text in modals */
-    .modal-badge { font-size: 0.78rem !important; }
-    /* Pagination */
-    .modal-pagination-text { font-size: 0.85rem !important; }
 </style>
 
-{{-- ═══ DASHBOARD ROOT ═══════════════════════════════════════════ --}}
+{{-- Cursor-following script for View Details pill --}}
+<script>
+document.addEventListener('mousemove', function(e) {
+    document.querySelectorAll('.view-details-pill').forEach(function(pill) {
+        pill.style.left = e.clientX + 'px';
+        pill.style.top  = (e.clientY - 8) + 'px';
+    });
+});
+</script>
+
+{{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
 <div class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto">
 
     {{-- ═══ PAGE HEADER ════════════════════════════════════════════ --}}
-    <div class="flex items-center gap-3 mb-4">
+    <div class="flex items-center gap-3 mb-5">
         <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-             style="background:#7A3F91;">
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             <i class="fas fa-gauge-high text-white text-base"></i>
         </div>
         <div>
-            <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Alumni Dashboard</h1>
-            <p class="text-sm text-[#666666] font-normal">{{ now()->format('l, F j, Y') }}</p>
+            <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Alumni Dashboard</h1>
+            <p class="text-sm text-[#333333] font-normal">{{ now()->format('l, F j, Y') }}</p>
         </div>
 
         @if(!$profileComplete || !$hasEmployment)
-        <div class="ml-auto hidden sm:flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold"
-             style="background:#F9F7FC; border-color:#d9c9e8; color:#5a2d72;">
-            <i class="fas fa-triangle-exclamation text-sm" style="color:#9b59b6;"></i>
+        <div class="ml-auto hidden sm:flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold bg-[#F9F7FC] border-[#d9c9e8] text-[#111111]">
+            <i class="fas fa-triangle-exclamation text-sm text-[#9b59b6]"></i>
             <span>@if(!$profileComplete) Complete your profile @else Add employment info @endif</span>
             <a href="{{ !$profileComplete ? route('alumni.information') : route('alumni.employment') }}"
-               class="px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90"
-               style="background:#7A3F91;">
+               class="px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90 bg-[#7A3F91]">
                 Go <i class="fas fa-arrow-right text-xs ml-0.5"></i>
             </a>
         </div>
         @endif
     </div>
 
-    {{-- ═══ STAT CARDS ══════════════════════════════════════════════ --}}
-    @php
-        $empCardMap = [
-            'employed'      => ['Employed',      'fa-user-tie',         '#7A3F91', '#F9F7FC', '#E8E0F0', '#7A3F91'],
-            'self_employed' => ['Self-Employed',  'fa-store',            '#5c2d7a', '#EDE0F5', '#c9ace0', '#5c2d7a'],
-            'unemployed'    => ['Unemployed',     'fa-magnifying-glass', '#9b59b6', '#F5EDF9', '#dbbcef', '#9b59b6'],
-        ];
-        $empCard = $empCardMap[$employmentStatus] ?? null;
-    @endphp
+    {{-- ═══ MAIN GRID ══════════════════════════════════════════════ --}}
+    @php $photoUrl = $this->getProfilePhotoUrl(); @endphp
 
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+    <div class="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 items-start">
 
-        {{-- Upcoming Events --}}
-        <div wire:click="openUpcomingEventsModal"
-             class="stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                    hover:shadow-md hover:border-[#2563eb]/40">
-            <span class="dash-hover-tip"><i class="fas fa-eye mr-1.5"></i>View Details</span>
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:#2563eb;">
-                    <i class="fas fa-calendar-check text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase"
-                      style="background:#EFF6FF; color:#1d4ed8; border:1px solid #bfdbfe;">Upcoming</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none stat-number">{{ $upcomingEvents }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal stat-label">Upcoming Events</p>
-            @if($upcomingEvents > 0)
-                <p class="text-xs font-semibold mt-2 flex items-center gap-1" style="color:#2563eb;">
-                    <i class="fas fa-arrow-trend-up text-sm"></i> For your college
-                </p>
-            @endif
-        </div>
+        {{-- ══ LEFT: Profile Card ═══════════════════════════════════ --}}
+        <div>
+            <div class="rounded-2xl overflow-hidden shadow-md border border-[#E8E0F0] bg-white">
 
-        {{-- Total Events --}}
-        <div wire:click="openTotalEventsModal"
-             class="stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                    hover:shadow-md hover:border-[#059669]/40">
-            <span class="dash-hover-tip"><i class="fas fa-eye mr-1.5"></i>View Details</span>
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:#059669;">
-                    <i class="fas fa-calendar-days text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase"
-                      style="background:#ECFDF5; color:#047857; border:1px solid #a7f3d0;">Total</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none stat-number">{{ $totalEvents }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal stat-label">Total Events</p>
-        </div>
-
-        {{-- Active Jobs --}}
-        <div wire:click="openJobsModal"
-             class="stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                    hover:shadow-md hover:border-[#d97706]/40">
-            <span class="dash-hover-tip"><i class="fas fa-eye mr-1.5"></i>View Details</span>
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:#d97706;">
-                    <i class="fas fa-briefcase text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase"
-                      style="background:#FFFBEB; color:#b45309; border:1px solid #fde68a;">Jobs</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none stat-number">{{ $activeJobs }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal stat-label">Active Job Posts</p>
-            @if($activeJobs > 0)
-                <p class="text-xs font-semibold mt-2 flex items-center gap-1" style="color:#d97706;">
-                    <i class="fas fa-circle-dot text-sm"></i> Open for your college
-                </p>
-            @endif
-        </div>
-
-        {{-- My RSVPs --}}
-        <div wire:click="openRsvpsModal"
-             class="stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                    hover:shadow-md hover:border-[#0891b2]/40">
-            <span class="dash-hover-tip"><i class="fas fa-eye mr-1.5"></i>View Details</span>
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:#0891b2;">
-                    <i class="fas fa-circle-check text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase"
-                      style="background:#ECFEFF; color:#0e7490; border:1px solid #a5f3fc;">RSVPs</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none stat-number">{{ $myRsvps }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal stat-label">My RSVPs</p>
-            @if($myRsvps > 0)
-                <div class="mt-2 h-1.5 rounded-full overflow-hidden" style="background:#cffafe;">
-                    <div class="h-full rounded-full transition-all duration-700"
-                         style="width:{{ min(($myRsvps / max($totalEvents,1)) * 100, 100) }}%;
-                                background:#0891b2;"></div>
-                </div>
-                <p class="text-xs text-[#999999] mt-1 font-normal">Confirmed attendances</p>
-            @endif
-        </div>
-
-        {{-- Employment Status Card --}}
-        <div wire:click="openEmploymentModal"
-             class="stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
-                    {{ $hasEmployment ? 'hover:shadow-md hover:border-[#7A3F91]/40' : 'hover:shadow-md hover:border-[#e11d48]/40' }}">
-            <span class="dash-hover-tip">
-                <i class="fas fa-eye mr-1.5"></i>View Details
-            </span>
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:{{ $hasEmployment ? ($empCard ? $empCard[2] : '#7A3F91') : '#e11d48' }};">
-                    <i class="fas {{ $hasEmployment ? ($empCard ? $empCard[1] : 'fa-briefcase') : 'fa-triangle-exclamation' }} text-white text-base"></i>
-                </div>
-                @if($hasEmployment && $empCard)
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase"
-                          style="background:{{ $empCard[4] }}20; color:{{ $empCard[2] }}; border:1px solid {{ $empCard[4] }};">
-                        Active
-                    </span>
-                @else
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full uppercase"
-                          style="background:#FFF1F2; color:#e11d48; border:1px solid #FECDD3;">
-                        Missing
-                    </span>
-                @endif
-            </div>
-
-            @if($hasEmployment && $empCard)
-                <p class="text-xl font-semibold text-[#333333] leading-tight truncate stat-number" style="font-size:1.15rem !important;">
-                    {{ $empCard[0] }}
-                </p>
-                <p class="text-sm text-[#666666] mt-0.5 font-normal stat-label">Employment Status</p>
-                @if($jobTitle)
-                    <p class="text-xs font-semibold mt-2 truncate uppercase" style="color:{{ $empCard[2] }};">
-                        <i class="fas fa-id-badge mr-1" style="font-size:.65rem;"></i>{{ $jobTitle }}
-                    </p>
-                @elseif($employmentStatus === 'unemployed')
-                    <p class="text-xs font-semibold mt-2 flex items-center gap-1" style="color:#9b59b6;">
-                        <i class="fas fa-magnifying-glass text-sm"></i> Seeking work
-                    </p>
-                @endif
-            @else
-                <p class="text-xl font-semibold leading-tight" style="color:#e11d48; font-size:1.15rem !important;">No Record</p>
-                <p class="text-sm text-[#666666] mt-0.5 font-normal stat-label">Employment Status</p>
-                <p class="text-xs font-semibold mt-2 flex items-center gap-1" style="color:#e11d48;">
-                    <i class="fas fa-plus-circle text-sm"></i> Add record now
-                </p>
-            @endif
-        </div>
-
-    </div>
-
-    {{-- ═══ PROFILE CARD (2 columns only — no employment column) ═══ --}}
-
-    <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden">
-
-        {{-- Header --}}
-        <div class="px-5 py-3.5 border-b border-[#E8E0F0]"
-             style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                    <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:#7A3F91;">
-                        <i class="fas fa-user text-white" style="font-size:11px;"></i>
+                {{-- Photo banner --}}
+                <div class="relative w-full overflow-hidden h-[220px] bg-[#EDE0F5]">
+                    <img src="{{ $photoUrl }}"
+                         alt="{{ $alumniFirstName }}"
+                         class="w-full h-full object-cover object-top"
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                    <div class="w-full h-full items-center justify-center font-black text-white hidden text-[5rem]"
+                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6); display:none;">
+                        {{ strtoupper(substr($alumniFirstName, 0, 1)) ?: '?' }}
                     </div>
-                    <p class="text-sm font-semibold text-[#333333] uppercase tracking-wide">My Profile</p>
-                </div>
-                @if(!$hasEmployment)
-                <a href="{{ route('alumni.employment') }}"
-                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
-                   style="background:#7A3F91;">
-                    <i class="fas fa-plus text-xs"></i> Add Employment
-                </a>
-                @endif
-            </div>
-        </div>
-
-        <div class="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-            {{-- ── Column 1: Photo + Name + IDs ── --}}
-            <div class="flex flex-col gap-3">
-
-                <div class="flex items-center gap-3">
-                    @php $photoUrl = $this->getProfilePhotoUrl(); @endphp
-                    <div class="w-16 h-16 rounded-xl flex-shrink-0 overflow-hidden shadow ring-2 ring-[#E8E0F0]">
-                        <img src="{{ $photoUrl }}"
-                             alt="{{ $alumniFirstName }}"
-                             class="w-full h-full object-cover"
-                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <div class="w-full h-full items-center justify-center text-xl font-black text-white hidden"
-                             style="background:#7A3F91; display:none;">
-                            {{ strtoupper(substr($alumniFirstName, 0, 1)) ?: '?' }}
-                        </div>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <p class="font-semibold text-[#333333] leading-snug truncate uppercase profile-name"
-                           style="font-size:0.95rem;">
+                    <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.65) 100%);"></div>
+                    <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
+                        <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.15rem]"
+                           style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
                             {{ $alumniName ?: '—' }}
                         </p>
-                        <p class="text-[#999999] font-mono mt-0.5 profile-id"
-                           style="font-size:0.82rem;">{{ $alumniStudentId ?: 'No student ID' }}</p>
-                        @if(!$profileComplete)
-                        <a href="{{ route('alumni.information') }}"
-                           class="inline-flex items-center gap-1 mt-1 font-semibold px-2 py-0.5 rounded-full profile-badge"
-                           style="background:#FFF7ED; color:#d97706; border:1px solid #fed7aa; font-size:0.78rem;">
-                            <i class="fas fa-circle-exclamation" style="font-size:0.7rem;"></i> Incomplete
-                        </a>
+                        <p class="font-mono text-[0.8rem]" style="color:rgba(255,255,255,.65);">{{ $alumniStudentId ?: 'No student ID' }}</p>
+                    </div>
+                </div>
+
+                {{-- Body --}}
+                <div class="px-4 py-3 flex flex-col gap-1">
+                    <div class="flex items-start justify-between gap-2 py-2 border-b border-[#F3F4F6] last:border-b-0">
+                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0 mt-0.5">Course</span>
+                        <span class="text-[0.88rem] font-semibold text-right break-words font-mono text-[#111111]">{{ $alumniCourseCode ?: '—' }}</span>
+                    </div>
+                    @if($alumniCourseFull)
+                    <div class="flex items-start justify-between gap-2 py-2 border-b border-[#F3F4F6] last:border-b-0">
+                        <span class="text-[0.82rem] font-semibold text-right break-words max-w-[180px] text-[#111111]">{{ $alumniCourseFull }}</span>
+                    </div>
+                    @endif
+                    @if($alumniCollege)
+                    <div class="flex items-start justify-between gap-2 py-2 border-b border-[#F3F4F6] last:border-b-0">
+                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0 mt-0.5">College</span>
+                        <span class="text-[0.82rem] font-semibold text-right break-words uppercase max-w-[180px] text-[#111111]">{{ $alumniCollege }}</span>
+                    </div>
+                    @endif
+                    @if($alumniBatch)
+                    <div class="flex items-start justify-between gap-2 py-2 border-b border-[#F3F4F6] last:border-b-0">
+                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0 mt-0.5">Batch</span>
+                        <span class="text-[0.88rem] font-semibold text-right break-words text-[#111111]">{{ $alumniBatch }}</span>
+                    </div>
+                    @endif
+                    <div class="flex items-start justify-between gap-2 py-2 border-b border-[#F3F4F6] last:border-b-0">
+                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0 mt-0.5">Student ID</span>
+                        <span class="text-[0.83rem] font-semibold text-right break-words font-mono text-[#111111]">{{ $alumniStudentId ?: '—' }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- ══ RIGHT: Stat Cards ═══════════════════════════════════ --}}
+        <div class="grid grid-cols-2 gap-3">
+
+            {{-- Card 1: Upcoming Events --}}
+            <div wire:click="openUpcomingEventsModal"
+                 class="dash-stat-card cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-lg hover:border-blue-300 transition-all duration-150 active:scale-[.985]">
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1" style="font-size:.65rem;"></i>View Upcoming Events</span>
+                <div class="flex items-start justify-between mb-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-blue-600">
+                        <i class="fas fa-calendar-check text-white text-base"></i>
+                    </div>
+                    <span class="font-semibold px-2 py-0.5 rounded-full uppercase text-blue-700 border border-blue-200 bg-blue-50 text-[0.72rem]">Upcoming</span>
+                </div>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.4rem]">{{ $upcomingEvents }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.95rem]">Upcoming Events</p>
+            </div>
+
+            {{-- Card 2: Total Events --}}
+            <div wire:click="openTotalEventsModal"
+                 class="dash-stat-card cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-lg hover:border-green-300 transition-all duration-150 active:scale-[.985]">
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1" style="font-size:.65rem;"></i>View All Events</span>
+                <div class="flex items-start justify-between mb-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-emerald-600">
+                        <i class="fas fa-calendar-days text-white text-base"></i>
+                    </div>
+                    <span class="font-semibold px-2 py-0.5 rounded-full uppercase text-emerald-700 border border-emerald-200 bg-emerald-50 text-[0.72rem]">Total</span>
+                </div>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.4rem]">{{ $totalEvents }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.95rem]">Total Events</p>
+            </div>
+
+            {{-- Card 3: Active Jobs --}}
+            <div wire:click="openJobsModal"
+                 class="dash-stat-card cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-lg hover:border-amber-300 transition-all duration-150 active:scale-[.985]">
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1" style="font-size:.65rem;"></i>View Active Job Posts</span>
+                <div class="flex items-start justify-between mb-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-amber-600">
+                        <i class="fas fa-briefcase text-white text-base"></i>
+                    </div>
+                    <span class="font-semibold px-2 py-0.5 rounded-full uppercase text-amber-700 border border-amber-200 bg-amber-50 text-[0.72rem]">Jobs</span>
+                </div>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.4rem]">{{ $activeJobs }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.95rem]">Active Job Posts</p>
+            </div>
+
+            {{-- Card 4: My RSVPs --}}
+            <div wire:click="openRsvpsModal"
+                 class="dash-stat-card cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-lg hover:border-cyan-300 transition-all duration-150 active:scale-[.985]">
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1" style="font-size:.65rem;"></i>View My Confirmed RSVPs</span>
+                <div class="flex items-start justify-between mb-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-cyan-600">
+                        <i class="fas fa-circle-check text-white text-base"></i>
+                    </div>
+                    <span class="font-semibold px-2 py-0.5 rounded-full uppercase text-cyan-700 border border-cyan-200 bg-cyan-50 text-[0.72rem]">RSVPs</span>
+                </div>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.4rem]">{{ $myRsvps }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.95rem]">My RSVPs</p>
+                @if($myRsvps > 0)
+                    <div class="mt-2 h-1.5 rounded-full overflow-hidden bg-cyan-100">
+                        <div class="h-full rounded-full transition-all duration-700 bg-cyan-600"
+                             style="width:{{ min(($myRsvps / max($totalEvents,1)) * 100, 100) }}%;"></div>
+                    </div>
+                @endif
+            </div>
+
+            {{-- Card 5: Employment — spans full width --}}
+            @php
+                $empCardMap = [
+                    'employed'      => ['Employed',      'fa-user-tie',         '#7A3F91', '#F9F7FC', '#E8E0F0'],
+                    'self_employed' => ['Self-Employed',  'fa-store',            '#5c2d7a', '#EDE0F5', '#c9ace0'],
+                    'unemployed'    => ['Unemployed',     'fa-magnifying-glass', '#9b59b6', '#F5EDF9', '#dbbcef'],
+                ];
+                $empCard = $empCardMap[$employmentStatus] ?? null;
+            @endphp
+            <div wire:click="openEmploymentModal"
+                 class="dash-stat-card cursor-pointer col-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 transition-all duration-150 active:scale-[.985]
+                        {{ $hasEmployment ? 'hover:shadow-lg hover:border-[#7A3F91]/40' : 'hover:shadow-lg hover:border-red-300' }}">
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1" style="font-size:.65rem;"></i>{{ $hasEmployment ? 'View Employment Details' : 'Add Employment Record' }}</span>
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow-md shrink-0"
+                         style="background:{{ $hasEmployment ? ($empCard ? $empCard[2] : '#7A3F91') : '#e11d48' }};">
+                        <i class="fas {{ $hasEmployment ? ($empCard ? $empCard[1] : 'fa-briefcase') : 'fa-triangle-exclamation' }} text-white text-lg"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        @if($hasEmployment && $empCard)
+                            <p class="font-bold text-[#111111] truncate text-[1.5rem] leading-tight tracking-tight">{{ $empCard[0] }}</p>
+                            <p class="font-normal mt-0.5 text-[#333333] text-[0.9rem]">Employment Status</p>
+                            @if($jobTitle)
+                                <p class="font-semibold mt-1 truncate uppercase text-[0.8rem] text-[#333333]">
+                                    <i class="fas fa-id-badge mr-1 text-[0.65rem]"></i>{{ $jobTitle }}
+                                    @if($companyName) · {{ $companyName }} @endif
+                                </p>
+                            @endif
                         @else
-                        <span class="inline-flex items-center gap-1 mt-1 font-semibold px-2 py-0.5 rounded-full profile-badge"
-                              style="background:#ECFDF5; color:#047857; border:1px solid #a7f3d0; font-size:0.78rem;">
-                            <i class="fas fa-circle-check" style="font-size:0.7rem;"></i> Profile Complete
-                        </span>
+                            <p class="font-bold leading-tight text-red-600 text-[1.5rem]">No Record</p>
+                            <p class="font-normal mt-0.5 text-[#333333] text-[0.9rem]">Employment Status</p>
+                            <p class="font-semibold mt-1 flex items-center gap-1 text-red-600 text-[0.8rem]">
+                                <i class="fas fa-plus-circle"></i> Add record now
+                            </p>
                         @endif
                     </div>
                 </div>
-
-                {{-- Batch --}}
-                <div class="rounded-xl border p-3 flex items-center justify-between"
-                     style="background:#EDE0F5; border-color:#c9ace0;">
-                    <div class="flex items-center gap-2">
-                        <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style="background:#059669;">
-                            <i class="fas fa-calendar-check text-white text-xs"></i>
-                        </div>
-                        <span class="font-semibold text-[#333333] profile-row-label" style="font-size:0.88rem;">Batch</span>
-                    </div>
-                    <span class="font-semibold profile-row-value" style="color:#5c2d7a; font-size:0.88rem;">{{ $alumniBatch ?: '—' }}</span>
-                </div>
-
             </div>
 
-            {{-- ── Column 2: Course + College ── --}}
-            <div class="flex flex-col gap-3">
-
-                <div class="rounded-xl border p-3"
-                     style="background:#F9F7FC; border-color:#E8E0F0;">
-                    <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center gap-2">
-                            <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style="background:#2563eb;">
-                                <i class="fas fa-book-open text-white text-xs"></i>
-                            </div>
-                            <span class="font-semibold text-[#333333] profile-row-label" style="font-size:0.88rem;">Course</span>
-                        </div>
-                        <span class="font-semibold text-[#7A3F91] font-mono profile-row-value" style="font-size:0.88rem;">{{ $alumniCourseCode ?: '—' }}</span>
-                    </div>
-                    @if($alumniCourseFull)
-                    <p class="text-[#888888] font-normal mt-1 pl-9 leading-snug profile-sub-text" style="font-size:0.78rem;">{{ $alumniCourseFull }}</p>
-                    @endif
-                </div>
-
-                @if($alumniCollege)
-                <div class="rounded-xl border p-3" style="background:#F5EDF9; border-color:#dbbcef;">
-                    <div class="flex items-center gap-2 mb-1">
-                        <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style="background:#d97706;">
-                            <i class="fas fa-university text-white text-xs"></i>
-                        </div>
-                        <span class="font-semibold text-[#333333] profile-row-label" style="font-size:0.88rem;">College</span>
-                    </div>
-                    <p class="font-semibold text-[#666666] uppercase leading-snug pl-9 profile-sub-text" style="font-size:0.78rem;">{{ $alumniCollege }}</p>
-                </div>
-                @endif
-
-            </div>
-
-        </div>
-    </div>
+        </div>{{-- end stat grid --}}
+    </div>{{-- end main grid --}}
 
 </div>
 
 
 {{-- ════════════════════════════════════════════════════════════════
-     MODAL: EVENTS
+     MODAL: EVENTS LIST
 ════════════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'events')
 @php
@@ -1167,6 +969,8 @@ new class extends Component {
             str_contains(strtolower($e['title']), strtolower($eventSearch)) ||
             str_contains(strtolower($e['venue'] ?? ''), strtolower($eventSearch))
         ))
+        ->when($eventStatusFilter === 'upcoming', fn($c) => $c->filter(fn($e) => $e['is_upcoming']))
+        ->when($eventStatusFilter === 'completed', fn($c) => $c->filter(fn($e) => !$e['is_upcoming']))
         ->values();
 
     $evtModalTotal    = $filteredModalEvents->count();
@@ -1175,15 +979,14 @@ new class extends Component {
     $evtModalFrom     = $evtModalTotal > 0 ? ($evtModalSafePage - 1) * $eventModalPageSize + 1 : 0;
     $evtModalTo       = min($evtModalSafePage * $eventModalPageSize, $evtModalTotal);
     $displayEvents    = $filteredModalEvents->slice(($evtModalSafePage - 1) * $eventModalPageSize, $eventModalPageSize)->values()->toArray();
-
     $evtPgStart = max(1, $evtModalSafePage - 2);
     $evtPgEnd   = min($evtModalLastPage, $evtModalSafePage + 2);
 @endphp
 <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 dash-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-6 lg:px-10 py-3.5 shrink-0 shadow"
-         style="background:#7A3F91;">
+    {{-- Header --}}
+    <div class="flex items-center justify-between px-6 py-3.5 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                 <i class="fas fa-calendar-check text-white text-sm"></i>
@@ -1193,104 +996,120 @@ new class extends Component {
                 <p class="text-white/60 text-xs font-normal">{{ $evtModalTotal }} record(s) · Latest first</p>
             </div>
         </div>
-        <button wire:click="closeModal" class="dash-close-btn">
-            <span class="dash-close-tip">Close</span>
-            <i class="fas fa-xmark text-sm"></i>
-        </button>
-    </div>
-
-    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-        <div class="flex flex-wrap gap-3 items-center">
-            <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.eventSearch??''; $wire.$watch('eventSearch',v=>{ if(v!==this.q) this.q=v; }); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                <input type="text" x-model="q"
-                       @input.debounce.300ms="$wire.set('eventSearch', q)"
-                       placeholder="Search event title or venue…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900
-                              focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
-                       autocomplete="off">
-            </div>
-            <span class="text-xs text-gray-400 font-normal hidden sm:inline">
-                <i class="fas fa-sort-amount-down text-[10px] mr-1"></i> Newest events first
-            </span>
+        <div class="close-btn-wrap">
+            <span class="close-tooltip">Close</span>
+            <button wire:click="closeModal" class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                <i class="fas fa-xmark text-sm"></i>
+            </button>
         </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto min-h-0 dash-scroll relative">
+    {{-- Filter bar --}}
+    <div class="filter-bar">
+        <span class="filter-bar-label">Filters</span>
+        <div class="filter-divider"></div>
+
+        <div class="filter-search-wrap" wire:ignore
+             x-data="{ q:'', init(){ this.q=$wire.eventSearch??''; $wire.$watch('eventSearch',v=>{ if(v!==this.q) this.q=v; }); } }">
+            <i class="fas fa-search fi-icon"></i>
+            <input type="text" x-model="q"
+                   @input.debounce.300ms="$wire.set('eventSearch', q)"
+                   placeholder="Title, venue..."
+                   class="filter-search-input"
+                   autocomplete="off">
+        </div>
+
+        <div class="filter-select-wrap">
+            <select wire:model.live="eventStatusFilter" class="filter-select">
+                <option value="">All Status</option>
+                <option value="upcoming">Upcoming</option>
+                <option value="completed">Completed</option>
+            </select>
+            <div class="filter-select-caret"></div>
+        </div>
+
+        @if($eventSearch || $eventStatusFilter)
+        <button wire:click="$set('eventSearch',''); $set('eventStatusFilter','')" class="filter-reset-btn">
+            <i class="fas fa-rotate-left text-xs"></i> Reset
+        </button>
+        @endif
+    </div>
+
+    {{-- Table --}}
+    <div class="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-[#d4b8e8] scrollbar-track-[#f9fafb]">
         <table class="w-full border-collapse" style="min-width:560px;">
-            <thead class="sticky top-0 z-10" style="background:#f5f0fa;">
+            <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-14 modal-th" style="font-size:0.75rem;">#</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-16 modal-th" style="font-size:0.75rem;">Photo</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Event Title</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Date</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Time</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell modal-th" style="font-size:0.75rem;">Venue</th>
-                    <th class="px-4 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Status</th>
+                    <th class="pl-6 pr-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider w-12 text-[0.72rem]">#</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider w-14 text-[0.72rem]">Photo</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Event Title</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Date</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Time</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider hidden sm:table-cell text-[0.72rem]">Venue</th>
+                    <th class="px-3 py-2.5 text-center font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Status</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($displayEvents as $idx => $evt)
-                <tr class="dash-table-row bg-white" wire:click="openEventDetail({{ $evt['id'] }}, '{{ $evt['source'] }}')">
-                    {{-- Row hover tooltip --}}
-                    <span class="row-hover-tip">
-                        <i class="fas fa-eye" style="font-size:0.75rem;"></i> View Details
-                    </span>
-                    <td class="pl-6 lg:pl-10 pr-3 py-3.5">
-                        <span class="font-semibold" style="color:#c0a0d8; font-size:0.82rem;">{{ str_pad($evtModalFrom + $idx,2,'0',STR_PAD_LEFT) }}</span>
+                <tr class="table-hover-row relative cursor-pointer bg-white hover:bg-[#F5F0FA] transition-colors duration-100"
+                    wire:click="openEventDetail({{ $evt['id'] }}, '{{ $evt['source'] }}')"
+                    x-data="{}"
+                    @mouseenter="$el.querySelector('.view-details-pill').style.opacity='1'"
+                    @mouseleave="$el.querySelector('.view-details-pill').style.opacity='0'">
+
+                    <td class="p-0 m-0 border-0 w-0 overflow-visible" style="position:static;">
+                        <span class="view-details-pill inline-flex items-center gap-[5px] px-4 py-1.5 rounded-lg text-[0.72rem] font-bold tracking-[.05em] uppercase text-white shadow-xl" style="background:#EAB308; color:#1a1a1a;">
+                            <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
+                            View Details
+                        </span>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <div class="w-11 h-11 rounded-xl overflow-hidden flex-shrink-0" style="background:#f0e6f8;">
+                    <td class="pl-6 pr-3 py-3">
+                        <span class="font-semibold text-[#333333] text-[0.8rem]">{{ str_pad($evtModalFrom + $idx,2,'0',STR_PAD_LEFT) }}</span>
+                    </td>
+                    <td class="px-3 py-3">
+                        <div class="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-[#f0e6f8]">
                             @if($evt['photo'])
                                 <img src="{{ $evt['photo'] }}" class="w-full h-full object-cover" alt="">
                             @else
                                 <div class="w-full h-full flex items-center justify-center">
-                                    <i class="fas fa-calendar-days text-sm" style="color:#7A3F91;"></i>
+                                    <i class="fas fa-calendar-days text-sm text-[#333333]"></i>
                                 </div>
                             @endif
                         </div>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="font-semibold text-gray-900 modal-td-primary" style="font-size:0.9rem;">{{ $evt['title'] }}</p>
-                        @if(!empty($evt['date_ago']))
-                        <p class="text-gray-400 mt-0.5 modal-td-secondary" style="font-size:0.78rem;">{{ $evt['date_ago'] }}</p>
-                        @endif
+                    <td class="px-3 py-3">
+                        <p class="font-semibold text-[#111111] text-[0.88rem]">{{ $evt['title'] }}</p>
+                        @if(!empty($evt['date_ago']))<p class="text-[#333333] mt-0.5 text-[0.75rem]">{{ $evt['date_ago'] }}</p>@endif
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="font-semibold text-gray-800 modal-td-primary" style="font-size:0.9rem;">{{ $evt['date'] }}</p>
+                    <td class="px-3 py-3">
+                        <p class="font-semibold text-[#111111] text-[0.88rem]">{{ $evt['date'] }}</p>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="font-semibold text-gray-800 modal-td-primary" style="font-size:0.9rem;">{{ $evt['time'] }}</p>
-                        @if(!empty($evt['end_time']))
-                        <p class="text-gray-400 font-normal modal-td-secondary" style="font-size:0.78rem;">– {{ $evt['end_time'] }}</p>
-                        @endif
+                    <td class="px-3 py-3">
+                        <p class="font-semibold text-[#111111] text-[0.88rem]">{{ $evt['time'] }}</p>
+                        @if(!empty($evt['end_time']))<p class="text-[#333333] text-[0.75rem]">– {{ $evt['end_time'] }}</p>@endif
                     </td>
-                    <td class="px-4 py-3.5 hidden sm:table-cell">
-                        <p class="text-gray-500 modal-td-primary" style="font-size:0.9rem;">{{ $evt['venue'] ?: '—' }}</p>
+                    <td class="px-3 py-3 hidden sm:table-cell">
+                        <p class="text-[#333333] text-[0.88rem]">{{ $evt['venue'] ?: '—' }}</p>
                     </td>
-                    <td class="px-4 py-3.5 text-center">
+                    <td class="px-3 py-3 text-center">
                         @if($evt['is_upcoming'] ?? true)
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold border modal-badge"
-                                  style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0; font-size:0.78rem;">
-                                <i class="fas fa-clock" style="font-size:0.65rem;"></i> Upcoming
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold border text-[#111111] border-[#E8E0F0] bg-[#F9F7FC] text-[0.75rem]">
+                                <i class="fas fa-clock text-[#333333] text-[0.62rem]"></i> Upcoming
                             </span>
                         @else
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold border bg-green-50 text-green-700 border-green-200 modal-badge"
-                                  style="font-size:0.78rem;">
-                                <i class="fas fa-circle-check" style="font-size:0.65rem;"></i> Done
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold border bg-green-50 text-green-700 border-green-200 text-[0.75rem]">
+                                <i class="fas fa-circle-check text-[0.62rem]"></i> Completed
                             </span>
                         @endif
                     </td>
                 </tr>
                 @empty
-                <tr><td colspan="7" class="py-20 text-center">
+                <tr><td colspan="8" class="py-20 text-center">
                     <div class="flex flex-col items-center gap-3">
-                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
-                            <i class="fas fa-calendar-days text-xl" style="color:#c89de0;"></i>
+                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center bg-[#f0e6f8]">
+                            <i class="fas fa-calendar-days text-xl text-[#333333]"></i>
                         </div>
-                        <p class="font-semibold text-gray-400" style="font-size:0.9rem;">No events found</p>
-                        <p class="text-gray-300 font-normal" style="font-size:0.82rem;">Try adjusting your search</p>
+                        <p class="font-semibold text-[#333333] text-[0.9rem]">No events found</p>
                     </div>
                 </td></tr>
                 @endforelse
@@ -1298,40 +1117,37 @@ new class extends Component {
         </table>
     </div>
 
-    <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-         style="background:#7A3F91;">
-        <p class="text-white/70 modal-pagination-text" style="font-size:0.85rem;">
-            Showing <strong class="text-white font-semibold">{{ $evtModalFrom }}–{{ $evtModalTo }}</strong>
-            of <strong class="text-white font-semibold">{{ number_format($evtModalTotal) }}</strong> records
+    {{-- Pagination --}}
+    <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-[#7A3F91]">
+        <p class="text-white/70 text-[0.82rem]">
+            Showing <strong class="text-white">{{ $evtModalFrom }}–{{ $evtModalTo }}</strong>
+            of <strong class="text-white">{{ number_format($evtModalTotal) }}</strong>
         </p>
         <div class="flex items-center gap-1.5 flex-wrap">
-            <button @disabled($evtModalSafePage <= 1)
-                    wire:click="eventPrevPage"
-                    class="dash-pg-btn dash-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-
+            <button @disabled($evtModalSafePage <= 1) wire:click="eventPrevPage"
+                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all disabled:opacity-35 disabled:cursor-not-allowed">
+                <i class="fas fa-chevron-left text-xs"></i>
+            </button>
             @if($evtPgStart > 1)
-                <button wire:click="$set('eventModalPage', 1)" class="dash-pg-btn dash-pg-nav">1</button>
+                <button wire:click="$set('eventModalPage', 1)" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">1</button>
                 @if($evtPgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
             @endif
-
             @for($p = $evtPgStart; $p <= $evtPgEnd; $p++)
                 @if($p === $evtModalSafePage)
-                    <span class="dash-pg-btn dash-pg-active">{{ $p }}</span>
+                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white text-[#7A3F91] border border-white">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('eventModalPage', {{ $p }})" class="dash-pg-btn dash-pg-nav">{{ $p }}</button>
+                    <button wire:click="$set('eventModalPage', {{ $p }})" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">{{ $p }}</button>
                 @endif
             @endfor
-
             @if($evtPgEnd < $evtModalLastPage)
                 @if($evtPgEnd < $evtModalLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                <button wire:click="$set('eventModalPage', {{ $evtModalLastPage }})" class="dash-pg-btn dash-pg-nav">{{ $evtModalLastPage }}</button>
+                <button wire:click="$set('eventModalPage', {{ $evtModalLastPage }})" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">{{ $evtModalLastPage }}</button>
             @endif
-
-            <button @disabled($evtModalSafePage >= $evtModalLastPage)
-                    wire:click="eventNextPage({{ $evtModalLastPage }})"
-                    class="dash-pg-btn dash-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-
-            <span class="text-white/60 font-semibold ml-1 hidden sm:inline" style="font-size:0.82rem;">Page {{ $evtModalSafePage }}/{{ $evtModalLastPage }}</span>
+            <button @disabled($evtModalSafePage >= $evtModalLastPage) wire:click="eventNextPage({{ $evtModalLastPage }})"
+                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all disabled:opacity-35 disabled:cursor-not-allowed">
+                <i class="fas fa-chevron-right text-xs"></i>
+            </button>
+            <span class="text-white/60 font-semibold ml-1 hidden sm:inline text-[0.8rem]">Page {{ $evtModalSafePage }}/{{ $evtModalLastPage }}</span>
         </div>
     </div>
 
@@ -1340,16 +1156,18 @@ new class extends Component {
 
 
 {{-- ════════════════════════════════════════════════════════════════
-     MODAL: JOBS
+     MODAL: JOBS LIST
 ════════════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'jobs')
 @php
+    $allJobTypes = collect($modalJobs)->pluck('type')->unique()->filter()->values()->toArray();
     $filteredJobs = collect($modalJobs)
         ->when($jobSearch !== '', fn($c) => $c->filter(fn($j) =>
             str_contains(strtolower($j['title']),   strtolower($jobSearch)) ||
             str_contains(strtolower($j['company']), strtolower($jobSearch)) ||
             str_contains(strtolower($j['location'] ?? ''), strtolower($jobSearch))
         ))
+        ->when($jobTypeFilter !== '', fn($c) => $c->filter(fn($j) => $j['type'] === $jobTypeFilter))
         ->values();
 
     $jobTotalCount = $filteredJobs->count();
@@ -1357,17 +1175,15 @@ new class extends Component {
     $jobSafePage   = min($jobModalPage, $jobLastPage);
     $jobFrom       = $jobTotalCount > 0 ? ($jobSafePage - 1) * $jobModalPageSize + 1 : 0;
     $jobTo         = min($jobSafePage * $jobModalPageSize, $jobTotalCount);
-
-    $displayJobs = $filteredJobs->slice(($jobSafePage - 1) * $jobModalPageSize, $jobModalPageSize)->values()->toArray();
-
+    $displayJobs   = $filteredJobs->slice(($jobSafePage - 1) * $jobModalPageSize, $jobModalPageSize)->values()->toArray();
     $jPgStart = max(1, $jobSafePage - 2);
     $jPgEnd   = min($jobLastPage, $jobSafePage + 2);
 @endphp
 <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 dash-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-6 lg:px-10 py-3.5 shrink-0 shadow"
-         style="background:#7A3F91;">
+    {{-- Header --}}
+    <div class="flex items-center justify-between px-6 py-3.5 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                 <i class="fas fa-briefcase text-white text-sm"></i>
@@ -1377,41 +1193,60 @@ new class extends Component {
                 <p class="text-white/60 text-xs font-normal">{{ $jobTotalCount }} record(s) · Latest first</p>
             </div>
         </div>
-        <button wire:click="closeModal" class="dash-close-btn">
-            <span class="dash-close-tip">Close</span>
-            <i class="fas fa-xmark text-sm"></i>
-        </button>
-    </div>
-
-    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-        <div class="flex flex-wrap gap-3 items-center">
-            <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.jobSearch??''; $wire.$watch('jobSearch',v=>{ if(v!==this.q) this.q=v; }); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                <input type="text" x-model="q"
-                       @input.debounce.300ms="$wire.set('jobSearch', q)"
-                       placeholder="Search title, company, location…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900
-                              focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all"
-                       autocomplete="off">
-            </div>
-            <span class="text-xs text-gray-400 font-normal hidden sm:inline">
-                <i class="fas fa-sort-amount-down text-[10px] mr-1"></i> Newest postings first
-            </span>
+        <div class="close-btn-wrap">
+            <span class="close-tooltip">Close</span>
+            <button wire:click="closeModal" class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                <i class="fas fa-xmark text-sm"></i>
+            </button>
         </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto min-h-0 dash-scroll relative">
+    {{-- Filter bar --}}
+    <div class="filter-bar">
+        <span class="filter-bar-label">Filters</span>
+        <div class="filter-divider"></div>
+
+        <div class="filter-search-wrap" wire:ignore
+             x-data="{ q:'', init(){ this.q=$wire.jobSearch??''; $wire.$watch('jobSearch',v=>{ if(v!==this.q) this.q=v; }); } }">
+            <i class="fas fa-search fi-icon"></i>
+            <input type="text" x-model="q"
+                   @input.debounce.300ms="$wire.set('jobSearch', q)"
+                   placeholder="Title, company, location..."
+                   class="filter-search-input"
+                   autocomplete="off">
+        </div>
+
+        @if(count($allJobTypes) > 0)
+        <div class="filter-select-wrap">
+            <select wire:model.live="jobTypeFilter" class="filter-select">
+                <option value="">All Types</option>
+                @foreach($allJobTypes as $jtype)
+                <option value="{{ $jtype }}">{{ $jtype }}</option>
+                @endforeach
+            </select>
+            <div class="filter-select-caret"></div>
+        </div>
+        @endif
+
+        @if($jobSearch || $jobTypeFilter)
+        <button wire:click="$set('jobSearch',''); $set('jobTypeFilter','')" class="filter-reset-btn">
+            <i class="fas fa-rotate-left text-xs"></i> Reset
+        </button>
+        @endif
+    </div>
+
+    {{-- Table --}}
+    <div class="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-[#d4b8e8] scrollbar-track-[#f9fafb]">
         <table class="w-full border-collapse" style="min-width:580px;">
-            <thead class="sticky top-0 z-10" style="background:#f5f0fa;">
+            <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-14 modal-th" style="font-size:0.75rem;">#</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Job Title</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Company</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell modal-th" style="font-size:0.75rem;">Type</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell modal-th" style="font-size:0.75rem;">Location</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell modal-th" style="font-size:0.75rem;">Salary</th>
-                    <th class="px-4 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Deadline</th>
+                    <th class="pl-6 pr-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider w-12 text-[0.72rem]">#</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Job Title</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Company</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider hidden sm:table-cell text-[0.72rem]">Type</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider hidden md:table-cell text-[0.72rem]">Location</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider hidden md:table-cell text-[0.72rem]">Salary</th>
+                    <th class="px-3 py-2.5 text-center font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Deadline</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
@@ -1421,59 +1256,61 @@ new class extends Component {
                     $isUrgent = ($job['days_left'] ?? 99) <= 7;
                     $isNew    = str_contains($job['posted_ago'] ?? '', 'hour') || str_contains($job['posted_ago'] ?? '', 'minute') || str_contains($job['posted_ago'] ?? '', '1 day');
                 @endphp
-                <tr class="dash-table-row bg-white" wire:click="openJobDetail({{ $job['id'] }})">
-                    {{-- Row hover tooltip --}}
-                    <span class="row-hover-tip">
-                        <i class="fas fa-eye" style="font-size:0.75rem;"></i> View Details
-                    </span>
-                    <td class="pl-6 lg:pl-10 pr-3 py-3.5">
-                        <span class="font-semibold" style="color:#c0a0d8; font-size:0.82rem;">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
+                <tr class="table-hover-row relative cursor-pointer bg-white hover:bg-[#F5F0FA] transition-colors duration-100"
+                    wire:click="openJobDetail({{ $job['id'] }})"
+                    x-data="{}"
+                    @mouseenter="$el.querySelector('.view-details-pill').style.opacity='1'"
+                    @mouseleave="$el.querySelector('.view-details-pill').style.opacity='0'">
+
+                    <td class="p-0 m-0 border-0 w-0 overflow-visible" style="position:static;">
+                        <span class="view-details-pill inline-flex items-center gap-[5px] px-4 py-1.5 rounded-lg text-[0.72rem] font-bold tracking-[.05em] uppercase shadow-xl" style="background:#EAB308; color:#1a1a1a;">
+                            <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
+                            View Details
+                        </span>
                     </td>
-                    <td class="px-4 py-3.5">
+                    <td class="pl-6 pr-3 py-3">
+                        <span class="font-semibold text-[#333333] text-[0.8rem]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
+                    </td>
+                    <td class="px-3 py-3">
                         <div class="flex items-center gap-2">
-                            <p class="font-semibold text-gray-900 truncate modal-td-primary" style="max-width:200px; font-size:0.9rem;">{{ $job['title'] }}</p>
+                            <p class="font-semibold text-[#111111] truncate max-w-[200px] text-[0.88rem]">{{ $job['title'] }}</p>
                             @if($isNew)
-                            <span class="new-badge inline-flex items-center px-1.5 py-0.5 rounded-full font-black uppercase"
-                                  style="background:#2563eb; color:#fff; font-size:0.65rem;">NEW</span>
+                            <span class="new-badge inline-flex items-center px-1.5 py-0.5 rounded-full font-black uppercase text-white bg-blue-600 text-[0.62rem]">NEW</span>
                             @endif
                         </div>
-                        @if(!empty($job['posted_ago']))
-                        <p class="text-gray-400 mt-0.5 modal-td-secondary" style="font-size:0.78rem;">Posted {{ $job['posted_ago'] }}</p>
-                        @endif
+                        @if(!empty($job['posted_ago']))<p class="text-[#333333] mt-0.5 text-[0.75rem]">Posted {{ $job['posted_ago'] }}</p>@endif
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="text-gray-600 truncate modal-td-primary" style="max-width:160px; font-size:0.9rem;">{{ $job['company'] }}</p>
+                    <td class="px-3 py-3">
+                        <p class="text-[#333333] truncate max-w-[160px] text-[0.88rem]">{{ $job['company'] }}</p>
                     </td>
-                    <td class="px-4 py-3.5 hidden sm:table-cell">
-                        <span class="inline-flex items-center px-2.5 py-1 rounded-full font-semibold border modal-badge"
-                              style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0; font-size:0.78rem;">
+                    <td class="px-3 py-3 hidden sm:table-cell">
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full font-semibold border text-[#111111] border-[#E8E0F0] bg-[#F9F7FC] text-[0.75rem]">
                             {{ $job['type'] }}
                         </span>
                     </td>
-                    <td class="px-4 py-3.5 hidden md:table-cell">
-                        <p class="text-gray-500 modal-td-primary" style="font-size:0.9rem;">{{ $job['location'] ?: '—' }}</p>
+                    <td class="px-3 py-3 hidden md:table-cell">
+                        <p class="text-[#333333] text-[0.88rem]">{{ $job['location'] ?: '—' }}</p>
                     </td>
-                    <td class="px-4 py-3.5 hidden md:table-cell">
-                        <p class="font-semibold modal-td-primary" style="color:#7A3F91; font-size:0.9rem;">{{ $job['salary'] ?: '—' }}</p>
+                    <td class="px-3 py-3 hidden md:table-cell">
+                        <p class="font-semibold text-[#111111] text-[0.88rem]">{{ $job['salary'] ?: '—' }}</p>
                     </td>
-                    <td class="px-4 py-3.5 text-center">
-                        <p class="font-semibold {{ $isUrgent ? 'text-red-600' : 'text-gray-500' }} modal-td-secondary" style="font-size:0.82rem;">
+                    <td class="px-3 py-3 text-center">
+                        <p class="font-semibold text-[0.8rem] {{ $isUrgent ? 'text-red-600' : 'text-[#111111]' }}">
                             <i class="fas fa-{{ $isUrgent ? 'fire' : 'calendar' }} mr-0.5"></i>
                             {{ $job['deadline'] }}
                         </p>
                         @if($isUrgent)
-                        <p class="text-red-400 font-normal mt-0.5 modal-td-secondary" style="font-size:0.78rem;">{{ $job['days_left'] }}d left</p>
+                        <p class="text-red-400 font-normal mt-0.5 text-[0.75rem]">{{ $job['days_left'] }}d left</p>
                         @endif
                     </td>
                 </tr>
                 @empty
-                <tr><td colspan="7" class="py-20 text-center">
+                <tr><td colspan="8" class="py-20 text-center">
                     <div class="flex flex-col items-center gap-3">
-                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
-                            <i class="fas fa-briefcase text-xl" style="color:#c89de0;"></i>
+                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center bg-[#f0e6f8]">
+                            <i class="fas fa-briefcase text-xl text-[#333333]"></i>
                         </div>
-                        <p class="font-semibold text-gray-400" style="font-size:0.9rem;">No active job postings</p>
-                        <p class="text-gray-300 font-normal" style="font-size:0.82rem;">Try adjusting your search</p>
+                        <p class="font-semibold text-[#333333] text-[0.9rem]">No active job postings</p>
                     </div>
                 </td></tr>
                 @endforelse
@@ -1481,40 +1318,37 @@ new class extends Component {
         </table>
     </div>
 
-    <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-         style="background:#7A3F91;">
-        <p class="text-white/70 modal-pagination-text" style="font-size:0.85rem;">
-            Showing <strong class="text-white font-semibold">{{ $jobFrom }}–{{ $jobTo }}</strong>
-            of <strong class="text-white font-semibold">{{ number_format($jobTotalCount) }}</strong> records
+    {{-- Pagination --}}
+    <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-[#7A3F91]">
+        <p class="text-white/70 text-[0.82rem]">
+            Showing <strong class="text-white">{{ $jobFrom }}–{{ $jobTo }}</strong>
+            of <strong class="text-white">{{ number_format($jobTotalCount) }}</strong>
         </p>
         <div class="flex items-center gap-1.5 flex-wrap">
-            <button @disabled($jobSafePage <= 1)
-                    wire:click="jobPrevPage"
-                    class="dash-pg-btn dash-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-
+            <button @disabled($jobSafePage <= 1) wire:click="jobPrevPage"
+                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all disabled:opacity-35 disabled:cursor-not-allowed">
+                <i class="fas fa-chevron-left text-xs"></i>
+            </button>
             @if($jPgStart > 1)
-                <button wire:click="$set('jobModalPage', 1)" class="dash-pg-btn dash-pg-nav">1</button>
+                <button wire:click="$set('jobModalPage', 1)" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">1</button>
                 @if($jPgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
             @endif
-
             @for($p = $jPgStart; $p <= $jPgEnd; $p++)
                 @if($p === $jobSafePage)
-                    <span class="dash-pg-btn dash-pg-active">{{ $p }}</span>
+                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white text-[#7A3F91] border border-white">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('jobModalPage', {{ $p }})" class="dash-pg-btn dash-pg-nav">{{ $p }}</button>
+                    <button wire:click="$set('jobModalPage', {{ $p }})" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">{{ $p }}</button>
                 @endif
             @endfor
-
             @if($jPgEnd < $jobLastPage)
                 @if($jPgEnd < $jobLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                <button wire:click="$set('jobModalPage', {{ $jobLastPage }})" class="dash-pg-btn dash-pg-nav">{{ $jobLastPage }}</button>
+                <button wire:click="$set('jobModalPage', {{ $jobLastPage }})" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">{{ $jobLastPage }}</button>
             @endif
-
-            <button @disabled($jobSafePage >= $jobLastPage)
-                    wire:click="jobNextPage({{ $jobLastPage }})"
-                    class="dash-pg-btn dash-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-
-            <span class="text-white/60 font-semibold ml-1 hidden sm:inline" style="font-size:0.82rem;">Page {{ $jobSafePage }}/{{ $jobLastPage }}</span>
+            <button @disabled($jobSafePage >= $jobLastPage) wire:click="jobNextPage({{ $jobLastPage }})"
+                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all disabled:opacity-35 disabled:cursor-not-allowed">
+                <i class="fas fa-chevron-right text-xs"></i>
+            </button>
+            <span class="text-white/60 font-semibold ml-1 hidden sm:inline text-[0.8rem]">Page {{ $jobSafePage }}/{{ $jobLastPage }}</span>
         </div>
     </div>
 
@@ -1533,15 +1367,14 @@ new class extends Component {
     $rsvpFrom     = $rsvpTotal > 0 ? ($rsvpSafePage - 1) * $rsvpModalPageSize + 1 : 0;
     $rsvpTo       = min($rsvpSafePage * $rsvpModalPageSize, $rsvpTotal);
     $displayRsvps = array_slice($modalRsvps, ($rsvpSafePage - 1) * $rsvpModalPageSize, $rsvpModalPageSize);
-
     $rsvpPgStart = max(1, $rsvpSafePage - 2);
     $rsvpPgEnd   = min($rsvpLastPage, $rsvpSafePage + 2);
 @endphp
 <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 dash-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-6 lg:px-10 py-3.5 shrink-0 shadow"
-         style="background:#7A3F91;">
+    {{-- Header --}}
+    <div class="flex items-center justify-between px-6 py-3.5 shrink-0 shadow bg-[#7A3F91]">
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                 <i class="fas fa-circle-check text-white text-sm"></i>
@@ -1551,86 +1384,73 @@ new class extends Component {
                 <p class="text-white/60 text-xs font-normal">{{ $rsvpTotal }} record(s) · Latest first</p>
             </div>
         </div>
-        <button wire:click="closeModal" class="dash-close-btn">
-            <span class="dash-close-tip">Close</span>
-            <i class="fas fa-xmark text-sm"></i>
-        </button>
-    </div>
-
-    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-        <div class="flex items-center justify-end">
-            <span class="text-sm text-gray-400 font-normal">
-                <strong class="text-gray-600">{{ $rsvpTotal }}</strong> confirmed RSVP(s) · newest first
-            </span>
+        <div class="close-btn-wrap">
+            <span class="close-tooltip">Close</span>
+            <button wire:click="closeModal" class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                <i class="fas fa-xmark text-sm"></i>
+            </button>
         </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto min-h-0 dash-scroll">
+    {{-- Table --}}
+    <div class="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-[#d4b8e8] scrollbar-track-[#f9fafb]">
         <table class="w-full border-collapse" style="min-width:500px;">
-            <thead class="sticky top-0 z-10" style="background:#f5f0fa;">
+            <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-14 modal-th" style="font-size:0.75rem;">#</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-16 modal-th" style="font-size:0.75rem;">Photo</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Event</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Event Date</th>
-                    <th class="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell modal-th" style="font-size:0.75rem;">Venue</th>
-                    <th class="px-4 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider modal-th" style="font-size:0.75rem;">Status</th>
+                    <th class="pl-6 pr-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider w-12 text-[0.72rem]">#</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider w-14 text-[0.72rem]">Photo</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Event</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider text-[0.72rem]">Event Date</th>
+                    <th class="px-3 py-2.5 text-left font-semibold text-[#333333] uppercase tracking-wider hidden sm:table-cell text-[0.72rem]">Venue</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
                 @forelse($displayRsvps as $idx => $rsvp)
-                <tr class="dash-table-row bg-white" wire:click="openEventDetail({{ $rsvp['event_id'] }}, '{{ $rsvp['source'] }}')">
-                    {{-- Row hover tooltip --}}
-                    <span class="row-hover-tip">
-                        <i class="fas fa-eye" style="font-size:0.75rem;"></i> View Details
-                    </span>
-                    <td class="pl-6 lg:pl-10 pr-3 py-3.5">
-                        <span class="font-semibold" style="color:#c0a0d8; font-size:0.82rem;">{{ str_pad($rsvpFrom + $idx,2,'0',STR_PAD_LEFT) }}</span>
+                <tr class="table-hover-row relative cursor-pointer bg-white hover:bg-[#F5F0FA] transition-colors duration-100"
+                    wire:click="openEventDetail({{ $rsvp['event_id'] }}, '{{ $rsvp['source'] }}')"
+                    x-data="{}"
+                    @mouseenter="$el.querySelector('.view-details-pill').style.opacity='1'"
+                    @mouseleave="$el.querySelector('.view-details-pill').style.opacity='0'">
+
+                    <td class="p-0 m-0 border-0 w-0 overflow-visible" style="position:static;">
+                        <span class="view-details-pill inline-flex items-center gap-[5px] px-4 py-1.5 rounded-lg text-[0.72rem] font-bold tracking-[.05em] uppercase shadow-xl" style="background:#EAB308; color:#1a1a1a;">
+                            <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
+                            View Details
+                        </span>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <div class="w-11 h-11 rounded-xl overflow-hidden" style="background:#f0e6f8;">
+                    <td class="pl-6 pr-3 py-3">
+                        <span class="font-semibold text-[#333333] text-[0.8rem]">{{ str_pad($rsvpFrom + $idx,2,'0',STR_PAD_LEFT) }}</span>
+                    </td>
+                    <td class="px-3 py-3">
+                        <div class="w-10 h-10 rounded-xl overflow-hidden bg-[#f0e6f8]">
                             @if($rsvp['photo'])
                                 <img src="{{ $rsvp['photo'] }}" class="w-full h-full object-cover" alt="">
                             @else
                                 <div class="w-full h-full flex items-center justify-center">
-                                    <i class="fas fa-calendar-days text-sm" style="color:#7A3F91;"></i>
+                                    <i class="fas fa-calendar-days text-sm text-[#333333]"></i>
                                 </div>
                             @endif
                         </div>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="font-semibold text-gray-900 modal-td-primary" style="font-size:0.9rem;">{{ $rsvp['title'] }}</p>
-                        <p class="text-gray-400 font-normal mt-0.5 modal-td-secondary" style="font-size:0.78rem;">RSVP'd: {{ $rsvp['rsvp_date'] }}</p>
+                    <td class="px-3 py-3">
+                        <p class="font-semibold text-[#111111] text-[0.88rem]">{{ $rsvp['title'] }}</p>
+                        <p class="text-[#333333] font-normal mt-0.5 text-[0.75rem]">RSVP'd: {{ $rsvp['rsvp_date'] }}</p>
                     </td>
-                    <td class="px-4 py-3.5">
-                        <p class="font-semibold text-gray-800 modal-td-primary" style="font-size:0.9rem;">{{ $rsvp['date'] }}</p>
-                        <p class="text-gray-400 font-normal modal-td-secondary" style="font-size:0.78rem;">{{ $rsvp['time'] }}</p>
+                    <td class="px-3 py-3">
+                        <p class="font-semibold text-[#111111] text-[0.88rem]">{{ $rsvp['date'] }}</p>
+                        <p class="text-[#333333] font-normal text-[0.75rem]">{{ $rsvp['time'] }}</p>
                     </td>
-                    <td class="px-4 py-3.5 hidden sm:table-cell">
-                        <p class="text-gray-500 modal-td-primary" style="font-size:0.9rem;">{{ $rsvp['venue'] ?: '—' }}</p>
-                    </td>
-                    <td class="px-4 py-3.5 text-center">
-                        @if($rsvp['is_upcoming'])
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold border modal-badge"
-                                  style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0; font-size:0.78rem;">
-                                <i class="fas fa-circle-check" style="font-size:0.65rem;"></i> Confirmed
-                            </span>
-                        @else
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold border bg-green-50 text-green-700 border-green-200 modal-badge"
-                                  style="font-size:0.78rem;">
-                                <i class="fas fa-circle-check" style="font-size:0.65rem;"></i> Attended
-                            </span>
-                        @endif
+                    <td class="px-3 py-3 hidden sm:table-cell">
+                        <p class="text-[#333333] text-[0.88rem]">{{ $rsvp['venue'] ?: '—' }}</p>
                     </td>
                 </tr>
                 @empty
                 <tr><td colspan="6" class="py-20 text-center">
                     <div class="flex flex-col items-center gap-3">
-                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
-                            <i class="fas fa-circle-check text-xl" style="color:#c89de0;"></i>
+                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center bg-[#f0e6f8]">
+                            <i class="fas fa-circle-check text-xl text-[#333333]"></i>
                         </div>
-                        <p class="font-semibold text-gray-400" style="font-size:0.9rem;">No confirmed RSVPs yet</p>
-                        <p class="text-gray-300 font-normal" style="font-size:0.82rem;">RSVP to upcoming events to see them here</p>
+                        <p class="font-semibold text-[#333333] text-[0.9rem]">No confirmed RSVPs yet</p>
                     </div>
                 </td></tr>
                 @endforelse
@@ -1638,40 +1458,37 @@ new class extends Component {
         </table>
     </div>
 
-    <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-         style="background:#7A3F91;">
-        <p class="text-white/70 modal-pagination-text" style="font-size:0.85rem;">
-            Showing <strong class="text-white font-semibold">{{ $rsvpFrom }}–{{ $rsvpTo }}</strong>
-            of <strong class="text-white font-semibold">{{ number_format($rsvpTotal) }}</strong> RSVP(s)
+    {{-- Pagination --}}
+    <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-[#7A3F91]">
+        <p class="text-white/70 text-[0.82rem]">
+            Showing <strong class="text-white">{{ $rsvpFrom }}–{{ $rsvpTo }}</strong>
+            of <strong class="text-white">{{ number_format($rsvpTotal) }}</strong> RSVP(s)
         </p>
         <div class="flex items-center gap-1.5 flex-wrap">
-            <button @disabled($rsvpSafePage <= 1)
-                    wire:click="rsvpPrevPage"
-                    class="dash-pg-btn dash-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-
+            <button @disabled($rsvpSafePage <= 1) wire:click="rsvpPrevPage"
+                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all disabled:opacity-35 disabled:cursor-not-allowed">
+                <i class="fas fa-chevron-left text-xs"></i>
+            </button>
             @if($rsvpPgStart > 1)
-                <button wire:click="$set('rsvpModalPage', 1)" class="dash-pg-btn dash-pg-nav">1</button>
+                <button wire:click="$set('rsvpModalPage', 1)" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">1</button>
                 @if($rsvpPgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
             @endif
-
             @for($p = $rsvpPgStart; $p <= $rsvpPgEnd; $p++)
                 @if($p === $rsvpSafePage)
-                    <span class="dash-pg-btn dash-pg-active">{{ $p }}</span>
+                    <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white text-[#7A3F91] border border-white">{{ $p }}</span>
                 @else
-                    <button wire:click="$set('rsvpModalPage', {{ $p }})" class="dash-pg-btn dash-pg-nav">{{ $p }}</button>
+                    <button wire:click="$set('rsvpModalPage', {{ $p }})" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">{{ $p }}</button>
                 @endif
             @endfor
-
             @if($rsvpPgEnd < $rsvpLastPage)
                 @if($rsvpPgEnd < $rsvpLastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                <button wire:click="$set('rsvpModalPage', {{ $rsvpLastPage }})" class="dash-pg-btn dash-pg-nav">{{ $rsvpLastPage }}</button>
+                <button wire:click="$set('rsvpModalPage', {{ $rsvpLastPage }})" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all">{{ $rsvpLastPage }}</button>
             @endif
-
-            <button @disabled($rsvpSafePage >= $rsvpLastPage)
-                    wire:click="rsvpNextPage({{ $rsvpLastPage }})"
-                    class="dash-pg-btn dash-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-
-            <span class="text-white/60 font-semibold ml-1 hidden sm:inline" style="font-size:0.82rem;">Page {{ $rsvpSafePage }}/{{ $rsvpLastPage }}</span>
+            <button @disabled($rsvpSafePage >= $rsvpLastPage) wire:click="rsvpNextPage({{ $rsvpLastPage }})"
+                    class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-[0.8rem] font-bold bg-white/15 text-white border border-white/25 hover:bg-white/28 hover:border-white/50 transition-all disabled:opacity-35 disabled:cursor-not-allowed">
+                <i class="fas fa-chevron-right text-xs"></i>
+            </button>
+            <span class="text-white/60 font-semibold ml-1 hidden sm:inline text-[0.8rem]">Page {{ $rsvpSafePage }}/{{ $rsvpLastPage }}</span>
         </div>
     </div>
 
@@ -1680,7 +1497,7 @@ new class extends Component {
 
 
 {{-- ════════════════════════════════════════════════════════════════
-     MODAL: EVENT DETAIL  (full-screen)
+     MODAL: EVENT DETAIL
 ════════════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'event_detail' && !empty($selectedEvent))
 @php
@@ -1690,257 +1507,144 @@ new class extends Component {
 <div class="fixed inset-0 z-[9999] flex flex-col bg-white overflow-hidden evt-detail-in"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-5 py-3 shrink-0 shadow-md"
+    {{-- Detail Header --}}
+    <div class="flex items-center justify-between px-6 h-12 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)]"
          style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
         <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-calendar-check text-white text-sm"></i>
+            <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                <i class="fas fa-calendar-check text-white text-xs"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-white/60 text-[10px] font-semibold uppercase tracking-widest truncate">
-                    Event Details
-                </p>
-                <h2 class="text-white font-semibold text-base leading-tight truncate">{{ $evt['title'] ?? '' }}</h2>
+                <p class="text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">EVENT</p>
+                <p class="text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[460px]">{{ $evt['title'] ?? '' }}</p>
             </div>
         </div>
-        <button wire:click="closeModal" type="button"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition cursor-pointer ml-3 flex-shrink-0">
-            <i class="fas fa-xmark text-sm"></i><span class="hidden sm:inline">Close</span>
-        </button>
-    </div>
-
-    <div class="shrink-0 border-b border-gray-100 bg-white">
-        <div class="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100">
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#F0F7FF;">
-                    <i class="fas fa-calendar text-sm" style="color:#2563eb;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="evt-detail-meta-label">Event Date</p>
-                    <p class="evt-detail-meta-value">{{ $evt['date_raw'] ?: $evt['date'] }}</p>
-                    @if(!empty($evt['date_ago']))
-                    <p class="evt-detail-meta-sub">{{ $evt['date_ago'] }}</p>
-                    @endif
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#F9F7FC;">
-                    <i class="fas fa-clock text-sm" style="color:#7A3F91;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="evt-detail-meta-label">Time</p>
-                    <p class="evt-detail-meta-value">{{ $evt['time'] ?: '—' }}</p>
-                    @if(!empty($evt['end_time']))
-                    <p class="evt-detail-meta-sub">Until {{ $evt['end_time'] }}</p>
-                    @endif
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#FFF1F2;">
-                    <i class="fas fa-location-dot text-sm" style="color:#e11d48;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="evt-detail-meta-label">Venue</p>
-                    <p class="evt-detail-meta-value truncate">{{ $evt['venue'] ?: 'TBA' }}</p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background:{{ $evtIsUpcoming ? '#F9F7FC' : '#F0FDF4' }};">
-                    <i class="fas fa-{{ $evtIsUpcoming ? 'hourglass-half' : 'circle-check' }} text-sm"
-                       style="color:{{ $evtIsUpcoming ? '#7A3F91' : '#16a34a' }};"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="evt-detail-meta-label">Status</p>
-                    <p class="evt-detail-meta-value" style="color:{{ $evtIsUpcoming ? '#7A3F91' : '#16a34a' }};">
-                        {{ $evtIsUpcoming ? 'Upcoming' : 'Completed' }}
-                    </p>
-                    <p class="evt-detail-meta-sub">{{ strtoupper($evt['status'] ?? '') }}</p>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100 flex flex-wrap items-center gap-2">
-
-        <span class="job-tag" style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0;">
-            <i class="fas fa-building text-[10px]"></i> PHILCST
-        </span>
-
-        <span class="job-tag" style="background:{{ $evtIsUpcoming ? '#EFF6FF' : '#ECFDF5' }}; color:{{ $evtIsUpcoming ? '#2563eb' : '#047857' }}; border-color:{{ $evtIsUpcoming ? '#BFDBFE' : '#a7f3d0' }};">
-            <i class="fas fa-{{ $evtIsUpcoming ? 'clock' : 'circle-check' }} text-[10px]"></i>
-            {{ $evtIsUpcoming ? 'Upcoming Event' : 'Completed Event' }}
-        </span>
-
-        @if(!empty($evt['source']))
-        <span class="job-tag" style="background:#FFFBEB; color:#B45309; border-color:#FDE68A;">
-            <i class="fas fa-tag text-[10px]"></i>
-            {{ $evt['source'] === 'ORGANIZER' ? 'Organizer Event' : 'Admin Event' }}
-        </span>
-        @endif
-
-        @if(!empty($evt['target_participants']))
-        <span class="job-tag" style="background:#FFF1F2; color:#e11d48; border-color:#FECDD3;">
-            <i class="fas fa-users text-[10px]"></i>
-            {{ Str::limit($evt['target_participants'], 40) }}
-        </span>
-        @endif
-
-    </div>
-
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-
-        <div class="w-full lg:w-[280px] flex flex-col shrink-0 border-b lg:border-b-0 lg:border-r border-gray-100 bg-white overflow-y-auto evt-scroll"
-             style="scrollbar-width:thin;">
-            <div class="p-4 flex flex-col gap-3">
-
-                @if(!empty($evt['photo']))
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm" style="aspect-ratio:16/9; background:#f0e6f8;">
-                    <img src="{{ $evt['photo'] }}" class="w-full h-full object-cover" alt="{{ $evt['title'] }}">
-                </div>
-                @else
-                <div class="rounded-xl border border-gray-100 flex items-center justify-center" style="aspect-ratio:16/9; background:#f0e6f8;">
-                    <div class="text-center">
-                        <i class="fas fa-calendar-days text-3xl mb-2" style="color:#c89de0;"></i>
-                        <p class="text-gray-400 font-normal" style="font-size:0.78rem;">No photo available</p>
-                    </div>
-                </div>
-                @endif
-
-                <div class="rounded-xl border p-4 flex items-center gap-3"
-                     style="background:{{ $evtIsUpcoming ? '#F9F7FC' : '#F0FDF4' }}; border-color:{{ $evtIsUpcoming ? '#E8E0F0' : '#BBF7D0' }};">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                         style="background:{{ $evtIsUpcoming ? '#EDE0F5' : '#DCFCE7' }};">
-                        <i class="fas fa-{{ $evtIsUpcoming ? 'hourglass-half' : 'circle-check' }} text-sm"
-                           style="color:{{ $evtIsUpcoming ? '#7A3F91' : '#16a34a' }};"></i>
-                    </div>
-                    <div>
-                        <p class="evt-detail-meta-label">Event Status</p>
-                        <p class="evt-detail-meta-value" style="color:{{ $evtIsUpcoming ? '#7A3F91' : '#16a34a' }};">
-                            {{ $evtIsUpcoming ? 'Upcoming' : 'Completed' }}
-                        </p>
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#EFF6FF; border-color:#BFDBFE;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#DBEAFE;">
-                        <i class="fas fa-calendar text-sm" style="color:#2563eb;"></i>
-                    </div>
-                    <div>
-                        <p class="evt-detail-meta-label">Date</p>
-                        <p class="evt-detail-meta-value">{{ $evt['date_raw'] ?: $evt['date'] }}</p>
-                        @if(!empty($evt['date_ago']))
-                        <p class="evt-detail-meta-sub">{{ $evt['date_ago'] }}</p>
-                        @endif
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#F9F7FC; border-color:#E8E0F0;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#EDE0F5;">
-                        <i class="fas fa-clock text-sm" style="color:#7A3F91;"></i>
-                    </div>
-                    <div>
-                        <p class="evt-detail-meta-label">Time</p>
-                        <p class="evt-detail-meta-value">{{ $evt['time'] ?: '—' }}</p>
-                        @if(!empty($evt['end_time']))
-                        <p class="evt-detail-meta-sub">Until {{ $evt['end_time'] }}</p>
-                        @endif
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#FFF1F2; border-color:#FECDD3;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#FFE4E6;">
-                        <i class="fas fa-location-dot text-sm" style="color:#e11d48;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="evt-detail-meta-label">Venue</p>
-                        <p class="evt-detail-meta-value truncate">{{ $evt['venue'] ?: 'TBA' }}</p>
-                    </div>
-                </div>
-
-                <button wire:click="closeModal"
-                        class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 active:scale-95"
-                        style="background:#7A3F91;">
-                    <i class="fas fa-xmark text-xs"></i> Close
+        <div class="flex items-center gap-2 shrink-0 ml-4">
+            <div class="close-btn-wrap">
+                <span class="close-tooltip">Close</span>
+                <button wire:click="closeModal" type="button"
+                        class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                    <i class="fas fa-xmark text-sm"></i>
                 </button>
-
             </div>
         </div>
+    </div>
 
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
+    <div class="flex-1 min-h-0 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
+        <div class="max-w-4xl mx-auto px-5 py-6 flex flex-col gap-5">
 
-            <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100">
-                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Event Details</p>
+            <div>
+                <h1 class="text-2xl font-bold text-[#111111] leading-tight mb-2">{{ $evt['title'] ?? '' }}</h1>
+                <div class="flex flex-wrap gap-2 mb-1">
+                    <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border
+                                {{ $evtIsUpcoming ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-green-50 text-emerald-700 border-green-200' }}">
+                        <i class="fas fa-circle text-[0.4rem]"></i>
+                        {{ $evtIsUpcoming ? 'Upcoming' : 'Completed' }}
+                    </span>
+                    @if(!empty($evt['target_participants']))
+                        @foreach(explode(',', $evt['target_participants']) as $tp)
+                        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#F9F7FC] border-[#E8E0F0]">
+                            {{ trim($tp) }}
+                        </span>
+                        @endforeach
+                    @endif
+                </div>
             </div>
 
-            <div class="flex-1 min-h-0 overflow-y-auto evt-scroll px-5 py-4 flex flex-col gap-4">
+            {{-- Meta strip --}}
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                <div class="px-4 py-3 border-r border-b sm:border-b-0 border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Date</p>
+                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $evt['date_raw'] ?: $evt['date'] }}</p>
+                    <p class="text-[0.78rem] text-[#333333] mt-px">{{ $evt['time'] }}{{ !empty($evt['end_time']) ? ' – '.$evt['end_time'] : '' }}</p>
+                </div>
+                <div class="px-4 py-3 border-r border-b sm:border-b-0 border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Venue</p>
+                    <p class="text-[0.82rem] font-bold text-[#111111] leading-snug">{{ strtoupper($evt['venue'] ?: 'TBA') }}</p>
+                </div>
+                @if(!empty($evt['target_participants']))
+                <div class="px-4 py-3 border-r border-b lg:border-b-0 border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Open For</p>
+                    <p class="text-[0.82rem] font-bold text-[#111111] leading-snug">{{ $evt['target_participants'] }}</p>
+                </div>
+                @endif
+                <div class="px-4 py-3 border-r border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Responses</p>
+                    <p class="text-[0.92rem] font-bold text-green-600 leading-snug">{{ $evt['attending_count'] ?? 0 }} Attending</p>
+                    <p class="text-[0.78rem] text-[#333333] mt-px">{{ $evt['maybe_count'] ?? 0 }} Maybe · {{ $evt['no_count'] ?? 0 }} No</p>
+                </div>
+                <div class="px-4 py-3 border-r border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Your RSVP</p>
+                    @if(!empty($evt['is_confirmed']) && $evt['is_confirmed'])
+                        <p class="text-[0.92rem] font-bold text-green-600 leading-snug">CONFIRMED</p>
+                    @else
+                        <p class="text-[0.92rem] font-bold text-[#333333] leading-snug">Not RSVP'd</p>
+                    @endif
+                </div>
+                <div class="px-4 py-3">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Posted</p>
+                    <p class="text-[0.85rem] font-bold text-[#111111] leading-snug">{{ $evt['posted_at'] ?: '—' }}</p>
+                    @if($evt['posted_ago'])<p class="text-[0.78rem] text-[#333333] mt-px">{{ $evt['posted_ago'] }}</p>@endif
+                </div>
+            </div>
 
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-purple-50">
-                            <i class="fas fa-calendar-star text-purple-500 text-[10px]"></i>
-                        </span>
-                        Event Information
-                    </h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <p class="evt-detail-meta-label">Event Title</p>
-                            <p class="font-bold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $evt['title'] }}</p>
-                        </div>
-                        <div>
-                            <p class="evt-detail-meta-label">Event Date & Time</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $evt['date_raw'] ?: $evt['date'] }}</p>
-                            <p class="text-gray-500 mt-0.5" style="font-size:0.85rem;">
-                                {{ $evt['time'] }}{{ !empty($evt['end_time']) ? ' – ' . $evt['end_time'] : '' }}
-                            </p>
-                        </div>
-                        @if(!empty($evt['venue']))
-                        <div>
-                            <p class="evt-detail-meta-label">Venue / Location</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $evt['venue'] }}</p>
+            @if(!empty($evt['photo']))
+            <div class="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-[#F0E6F8]" style="aspect-ratio:16/6;">
+                <img src="{{ $evt['photo'] }}" alt="{{ $evt['title'] }}" class="w-full h-full object-cover">
+            </div>
+            @endif
+
+            @if(!empty($evt['description']))
+            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">ABOUT THIS EVENT</p>
+                <p class="font-semibold text-[#111111] mb-2 text-[0.95rem]">Description:</p>
+                <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($evt['description']) }}</p>
+            </div>
+            @endif
+
+            @if(!empty($evt['additional_notes']) || !empty($evt['organizer_name']) || !empty($evt['organizer_email']) || !empty($evt['organizer_phone']))
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                @if(!empty($evt['additional_notes']))
+                <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                    <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">ADDITIONAL NOTES</p>
+                    <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap italic">"{{ trim($evt['additional_notes']) }}"</p>
+                </div>
+                @endif
+                @if(!empty($evt['organizer_name']) || !empty($evt['organizer_email']) || !empty($evt['organizer_phone']))
+                <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                    <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">CONTACT INFORMATION</p>
+                    <div>
+                        @if(!empty($evt['organizer_name']))
+                        <div class="flex items-center gap-2.5 py-2.5 border-b border-[#F3F4F6] last:border-b-0">
+                            <div class="w-8 h-8 rounded-lg bg-[#F3F4F6] flex items-center justify-center shrink-0">
+                                <i class="fas fa-user text-xs text-[#333333]"></i>
+                            </div>
+                            <span class="font-semibold text-[#111111] text-[0.9rem]">{{ $evt['organizer_name'] }}</span>
                         </div>
                         @endif
-                        @if(!empty($evt['target_participants']))
-                        <div>
-                            <p class="evt-detail-meta-label">Target Participants</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $evt['target_participants'] }}</p>
+                        @if(!empty($evt['organizer_email']))
+                        <div class="flex items-center gap-2.5 py-2.5 border-b border-[#F3F4F6] last:border-b-0">
+                            <div class="w-8 h-8 rounded-lg bg-[#F3F4F6] flex items-center justify-center shrink-0">
+                                <i class="fas fa-envelope text-xs text-[#333333]"></i>
+                            </div>
+                            <span class="text-[#333333] text-[0.88rem]">{{ $evt['organizer_email'] }}</span>
+                        </div>
+                        @endif
+                        @if(!empty($evt['organizer_phone']))
+                        <div class="flex items-center gap-2.5 py-2.5 border-b border-[#F3F4F6] last:border-b-0">
+                            <div class="w-8 h-8 rounded-lg bg-[#F3F4F6] flex items-center justify-center shrink-0">
+                                <i class="fas fa-phone text-xs text-[#333333]"></i>
+                            </div>
+                            <span class="text-[#333333] text-[0.88rem]">{{ $evt['organizer_phone'] }}</span>
                         </div>
                         @endif
                     </div>
                 </div>
-
-                @if(!empty($evt['description']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-blue-50">
-                            <i class="fas fa-file-lines text-blue-500 text-[10px]"></i>
-                        </span>
-                        Description
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-lg p-4 border border-gray-100"
-                         style="line-height:1.75; color:#333333; font-size:0.95rem;">{{ trim($evt['description']) }}</div>
-                </div>
                 @endif
-
-                @if(empty($evt['description']) && empty($evt['target_participants']))
-                <div class="flex-1 flex items-center justify-center py-10">
-                    <div class="text-center">
-                        <div class="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
-                            <i class="fas fa-file-circle-question text-lg text-gray-300"></i>
-                        </div>
-                        <p class="font-medium" style="color:#555555; font-size:0.95rem;">No additional details provided.</p>
-                    </div>
-                </div>
-                @endif
-
             </div>
-        </div>
+            @endif
 
+        </div>
     </div>
 </div>
 @endif
@@ -1957,305 +1661,142 @@ new class extends Component {
 <div class="fixed inset-0 z-[9999] flex flex-col bg-white overflow-hidden fs-in"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-5 py-3 shrink-0 shadow-md"
-         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+    {{-- Detail Header --}}
+    <div class="flex items-center justify-between px-6 h-12 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)]"
+         style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
         <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-briefcase text-white text-sm"></i>
+            <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                <i class="fas fa-briefcase text-white text-xs"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-white/60 text-[10px] font-semibold uppercase tracking-widest truncate">
-                    {{ $selectedJob['company'] ?? '' }}
-                </p>
-                <h2 class="text-white font-semibold text-base leading-tight truncate">{{ $selectedJob['title'] ?? '' }}</h2>
+                <p class="text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">JOB DETAILS</p>
+                <p class="text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[460px]">{{ $selectedJob['title'] ?? '' }}</p>
             </div>
         </div>
-        <button wire:click="closeModal" type="button"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition cursor-pointer ml-3 flex-shrink-0">
-            <i class="fas fa-xmark text-sm"></i><span class="hidden sm:inline">Close</span>
-        </button>
-    </div>
-
-    <div class="shrink-0 border-b border-gray-100 bg-white">
-        <div class="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100">
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#FFF1F2;">
-                    <i class="fas fa-location-dot text-sm" style="color:#e11d48;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="job-detail-meta-label">Location</p>
-                    <p class="job-detail-meta-value truncate">{{ $selectedJob['location'] ?: 'Not specified' }}</p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#F0FDF4;">
-                    <i class="fas fa-money-bill-wave text-sm" style="color:#16a34a;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="job-detail-meta-label">Salary</p>
-                    <p class="job-detail-meta-value">{{ $selectedJob['salary'] ?: 'Not disclosed' }}</p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background:{{ $jobUrgent ? '#FEF2F2' : '#FFFBEB' }};">
-                    <i class="fas fa-{{ $jobUrgent ? 'fire' : 'calendar' }} text-sm"
-                       style="color:{{ $jobUrgent ? '#DC2626' : '#D97706' }};"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="job-detail-meta-label">Deadline</p>
-                    <p class="job-detail-meta-value {{ $jobUrgent ? 'text-red-600' : '' }}">{{ $selectedJob['deadline'] ?? '—' }}</p>
-                    @if($jobUrgent)
-                        <p class="job-detail-meta-sub text-red-400">{{ $selectedJob['days_left'] }} days left</p>
-                    @else
-                        <p class="job-detail-meta-sub">{{ $selectedJob['days_left'] }} days left</p>
-                    @endif
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#EFF6FF;">
-                    <i class="fas fa-clock text-sm" style="color:#2563eb;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="job-detail-meta-label">Posted</p>
-                    <p class="job-detail-meta-value">{{ $selectedJob['posted_at'] ?: '—' }}</p>
-                    @if($selectedJob['posted_ago'])
-                        <p class="job-detail-meta-sub">{{ $selectedJob['posted_ago'] }}</p>
-                    @endif
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100 flex flex-wrap items-center gap-2">
-
-        <span class="job-tag" style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0;">
-            <i class="fas fa-building text-[10px]"></i> PHILCST
-        </span>
-
-        @if(!empty($selectedJob['type']))
-        <span class="job-tag" style="background:#EFF6FF; color:#2563eb; border-color:#BFDBFE;">
-            <i class="fas fa-id-badge text-[10px]"></i> {{ $selectedJob['type'] }}
-        </span>
-        @endif
-
-        @if(!empty($selectedJob['experience']))
-        <span class="job-tag" style="background:#FEF3C7; color:#B45309; border-color:#FDE68A;">
-            <i class="fas fa-layer-group text-[10px]"></i> {{ $selectedJob['experience'] }}
-        </span>
-        @endif
-
-        @if(!empty($selectedJob['target_college']))
-        <span class="job-tag" style="background:#FFF1F2; color:#e11d48; border-color:#FECDD3;">
-            <i class="fas fa-graduation-cap text-[10px]"></i> {{ $selectedJob['target_college'] }}
-        </span>
-        @endif
-
-    </div>
-
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-
-        <div class="w-full lg:w-[280px] flex flex-col shrink-0 border-b lg:border-b-0 lg:border-r border-gray-100 bg-white overflow-y-auto scroll-c"
-             style="scrollbar-width:thin;">
-
-            <div class="p-4 flex flex-col gap-3">
-
-                <div class="rounded-xl border p-4 flex items-center gap-3"
-                     style="background:{{ $jobIsActive ? '#F0FDF4' : '#F9F7FC' }}; border-color:{{ $jobIsActive ? '#BBF7D0' : '#E8E0F0' }};">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                         style="background:{{ $jobIsActive ? '#dcfce7' : '#ede9fe' }};">
-                        <i class="fas fa-{{ $jobIsActive ? 'circle-check' : 'circle-pause' }} text-sm"
-                           style="color:{{ $jobIsActive ? '#16a34a' : '#7c3aed' }};"></i>
-                    </div>
-                    <div>
-                        <p class="job-detail-meta-label">Status</p>
-                        <p class="job-detail-meta-value" style="color:{{ $jobIsActive ? '#16a34a' : '#7c3aed' }};">
-                            {{ $jobIsActive ? 'Active' : ucfirst(strtolower($selectedJob['status'] ?? '')) }}
-                        </p>
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#EFF6FF; border-color:#BFDBFE;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#DBEAFE;">
-                        <i class="fas fa-id-badge text-sm" style="color:#2563eb;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="job-detail-meta-label">Employment Type</p>
-                        <p class="job-detail-meta-value">{{ $selectedJob['type'] ?? '—' }}</p>
-                        @if(!empty($selectedJob['experience']))
-                        <p class="job-detail-meta-sub">{{ $selectedJob['experience'] }}</p>
-                        @endif
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#F9F7FC; border-color:#E8E0F0;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#EDE0F5;">
-                        <i class="fas fa-building text-sm" style="color:#7A3F91;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="job-detail-meta-label">Company</p>
-                        <p class="job-detail-meta-value truncate">{{ $selectedJob['company'] ?? '—' }}</p>
-                        <p class="job-detail-meta-sub">PHILCST</p>
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#FFF1F2; border-color:#FECDD3;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#FFE4E6;">
-                        <i class="fas fa-location-dot text-sm" style="color:#e11d48;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="job-detail-meta-label">Location</p>
-                        <p class="job-detail-meta-value truncate">{{ $selectedJob['location'] ?: 'Not specified' }}</p>
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#F0FDF4; border-color:#BBF7D0;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#DCFCE7;">
-                        <i class="fas fa-money-bill-wave text-sm" style="color:#16a34a;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="job-detail-meta-label">Salary</p>
-                        <p class="job-detail-meta-value" style="color:{{ $selectedJob['salary'] ? '#16a34a' : '#999999' }};">
-                            {{ $selectedJob['salary'] ?: 'Not disclosed' }}
-                        </p>
-                    </div>
-                </div>
-
-                <div class="rounded-xl border p-4 flex items-center gap-3"
-                     style="background:{{ $jobUrgent ? '#FEF2F2' : '#FFFBEB' }}; border-color:{{ $jobUrgent ? '#FECACA' : '#FDE68A' }};">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                         style="background:{{ $jobUrgent ? '#FEE2E2' : '#FEF3C7' }};">
-                        <i class="fas fa-{{ $jobUrgent ? 'fire' : 'calendar' }} text-sm"
-                           style="color:{{ $jobUrgent ? '#DC2626' : '#D97706' }};"></i>
-                    </div>
-                    <div>
-                        <p class="job-detail-meta-label">Application Deadline</p>
-                        <p class="job-detail-meta-value {{ $jobUrgent ? 'text-red-600' : '' }}">{{ $selectedJob['deadline'] ?? '—' }}</p>
-                        <p class="job-detail-meta-sub {{ $jobUrgent ? 'text-red-400' : '' }}">{{ $selectedJob['days_left'] }} day(s) left</p>
-                    </div>
-                </div>
-
-                @if(!empty($selectedJob['target_college']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#FFF1F2; border-color:#FECDD3;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#FFE4E6;">
-                        <i class="fas fa-graduation-cap text-sm" style="color:#e11d48;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="job-detail-meta-label">Target College</p>
-                        <p class="job-detail-meta-value truncate" style="color:#e11d48;">{{ $selectedJob['target_college'] }}</p>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($selectedJob['contact_person']) || !empty($selectedJob['contact_email']) || !empty($selectedJob['contact_phone']))
-                <div class="rounded-xl border p-4" style="background:#F9F7FC; border-color:#E8E0F0;">
-                    <p class="job-detail-meta-label mb-2.5">Contact Information</p>
-                    <div class="flex flex-col gap-2.5">
-                        @if(!empty($selectedJob['contact_person']))
-                        <div class="flex items-center gap-2.5">
-                            <div class="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#EDE0F5;">
-                                <i class="fas fa-user text-[10px]" style="color:#7A3F91;"></i>
-                            </div>
-                            <span class="font-semibold" style="color:#333333; font-size:0.9rem;">{{ $selectedJob['contact_person'] }}</span>
-                        </div>
-                        @endif
-                        @if(!empty($selectedJob['contact_email']))
-                        <div class="flex items-center gap-2.5">
-                            <div class="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#EFF6FF;">
-                                <i class="fas fa-envelope text-[10px]" style="color:#2563eb;"></i>
-                            </div>
-                            <span class="truncate" style="color:#333333; font-size:0.9rem;">{{ $selectedJob['contact_email'] }}</span>
-                        </div>
-                        @endif
-                        @if(!empty($selectedJob['contact_phone']))
-                        <div class="flex items-center gap-2.5">
-                            <div class="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#F0FDF4;">
-                                <i class="fas fa-phone text-[10px]" style="color:#16a34a;"></i>
-                            </div>
-                            <span style="color:#333333; font-size:0.9rem;">{{ $selectedJob['contact_phone'] }}</span>
-                        </div>
-                        @endif
-                    </div>
-                </div>
-                @endif
-
-                @if($selectedJob['posted_at'])
-                <p class="text-gray-400 font-normal text-center" style="font-size:0.82rem;">
-                    Posted {{ $selectedJob['posted_ago'] }} &bull; {{ $selectedJob['posted_at'] }}
-                </p>
-                @endif
-
-                <button wire:click="closeModal"
-                        class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 active:scale-95"
-                        style="background:#7A3F91;">
-                    <i class="fas fa-xmark text-xs"></i> Close
+        <div class="flex items-center gap-2 shrink-0 ml-4">
+            <div class="close-btn-wrap">
+                <span class="close-tooltip">Close</span>
+                <button wire:click="closeModal" type="button"
+                        class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                    <i class="fas fa-xmark text-sm"></i>
                 </button>
             </div>
         </div>
+    </div>
 
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
+    <div class="flex-1 min-h-0 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
+        <div class="max-w-4xl mx-auto px-5 py-6 flex flex-col gap-5">
 
-            <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100">
-                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Job Details</p>
+            <div>
+                <p class="text-xs font-bold uppercase tracking-widest text-[#9CA3AF] mb-1">JOB TITLE</p>
+                <h1 class="text-2xl font-bold text-[#111111] leading-tight mb-1">{{ $selectedJob['title'] ?? '' }}</h1>
+                <p class="text-sm font-semibold text-[#333333] mb-3">{{ $selectedJob['company'] ?? '' }}</p>
+                <div class="flex flex-wrap gap-2">
+                    <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST</span>
+                    @if(!empty($selectedJob['type']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-blue-700 bg-blue-50 border-blue-200"><i class="fas fa-id-badge text-[10px]"></i> {{ $selectedJob['type'] }}</span>@endif
+                    @if(!empty($selectedJob['experience']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-amber-700 bg-amber-50 border-amber-200">{{ $selectedJob['experience'] }}</span>@endif
+                    @if(!empty($selectedJob['target_college']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-red-600 bg-red-50 border-red-200"><i class="fas fa-graduation-cap text-[10px]"></i> {{ $selectedJob['target_college'] }}</span>@endif
+                    @if($jobUrgent)
+                    <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-red-600 bg-red-50 border-red-200">
+                        <i class="fas fa-fire text-[10px]"></i> {{ $selectedJob['days_left'] }} days left
+                    </span>
+                    @endif
+                </div>
             </div>
 
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c px-5 py-4 flex flex-col gap-4">
-
-                @if(!empty($selectedJob['description']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-blue-50">
-                            <i class="fas fa-file-lines text-blue-500 text-[10px]"></i>
-                        </span>
-                        Job Description
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-lg p-4 border border-gray-100" style="line-height:1.75; color:#333333; font-size:0.95rem;">{{ trim($selectedJob['description']) }}</div>
+            {{-- Meta strip --}}
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                <div class="px-4 py-3 border-r border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Company</p>
+                    <p class="text-[0.85rem] font-bold text-[#111111] leading-snug">{{ $selectedJob['company'] ?: '—' }}</p>
                 </div>
-                @endif
+                <div class="px-4 py-3 border-r border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Location</p>
+                    <p class="text-[0.85rem] font-bold text-[#111111] leading-snug">{{ $selectedJob['location'] ?: 'Not specified' }}</p>
+                </div>
+                <div class="px-4 py-3 border-r border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Salary</p>
+                    <p class="text-[0.85rem] font-bold text-[#111111] leading-snug">{{ $selectedJob['salary'] ?: 'Not disclosed' }}</p>
+                </div>
+                <div class="px-4 py-3 border-r border-gray-100">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Deadline</p>
+                    <p class="text-[0.85rem] font-bold leading-snug {{ $jobUrgent ? 'text-red-600' : 'text-[#111111]' }}">{{ $selectedJob['deadline_full'] ?? $selectedJob['deadline'] }}</p>
+                    <p class="text-[0.78rem] mt-px {{ $jobUrgent ? 'text-red-400' : 'text-[#333333]' }}">
+                        <i class="fas fa-{{ $jobUrgent ? 'fire' : 'clock' }} mr-0.5 text-[0.65rem]"></i>
+                        {{ $selectedJob['days_left'] }} days left
+                    </p>
+                </div>
+                <div class="px-4 py-3">
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Posted</p>
+                    <p class="text-[0.85rem] font-bold text-[#111111] leading-snug">{{ $selectedJob['posted_at'] ?: '—' }}</p>
+                    @if($selectedJob['posted_ago'])<p class="text-[0.78rem] text-[#333333] mt-px">{{ $selectedJob['posted_ago'] }}</p>@endif
+                </div>
+            </div>
 
+            @if($jobUrgent)
+            <div class="flex items-center gap-2.5 px-4 py-3 rounded-xl border-l-4 border-red-500 bg-red-50 text-[0.85rem] font-semibold text-red-600">
+                <i class="fas fa-fire text-sm"></i>
+                Only <strong>{{ $selectedJob['days_left'] }} days</strong> left. Closes {{ $selectedJob['deadline_full'] ?? $selectedJob['deadline'] }}.
+            </div>
+            @endif
+
+            @if(!empty($selectedJob['description']))
+            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">JOB DESCRIPTION</p>
+                <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($selectedJob['description']) }}</p>
+            </div>
+            @endif
+
+            @if(!empty($selectedJob['qualifications']) || !empty($selectedJob['application_instructions']))
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 @if(!empty($selectedJob['qualifications']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-purple-50">
-                            <i class="fas fa-list-check text-purple-500 text-[10px]"></i>
-                        </span>
-                        Qualifications
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-purple-50/50 rounded-lg p-4 border border-purple-100" style="line-height:1.75; color:#333333; font-size:0.95rem;">{{ trim($selectedJob['qualifications']) }}</div>
+                <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                    <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">QUALIFICATIONS</p>
+                    <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($selectedJob['qualifications']) }}</p>
                 </div>
                 @endif
-
                 @if(!empty($selectedJob['application_instructions']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-50">
-                            <i class="fas fa-paper-plane text-emerald-500 text-[10px]"></i>
-                        </span>
-                        How to Apply
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-emerald-50/50 rounded-lg p-4 border border-emerald-100" style="line-height:1.75; color:#333333; font-size:0.95rem;">{{ trim($selectedJob['application_instructions']) }}</div>
+                <div class="bg-green-50 border border-green-200 rounded-xl px-5 py-[18px]">
+                    <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-green-700 mb-3">HOW TO APPLY</p>
+                    <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($selectedJob['application_instructions']) }}</p>
                 </div>
                 @endif
-
-                @if(empty($selectedJob['description']) && empty($selectedJob['qualifications']) && empty($selectedJob['application_instructions']))
-                <div class="flex-1 flex items-center justify-center py-10">
-                    <div class="text-center">
-                        <div class="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
-                            <i class="fas fa-file-circle-question text-lg text-gray-300"></i>
-                        </div>
-                        <p class="font-medium" style="color:#555555; font-size:0.95rem;">No additional details provided.</p>
-                    </div>
-                </div>
-                @endif
-
             </div>
-        </div>
+            @endif
 
+            @if(!empty($selectedJob['contact_person']) || !empty($selectedJob['contact_email']) || !empty($selectedJob['contact_phone']))
+            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">CONTACT INFORMATION</p>
+                <div>
+                    @if(!empty($selectedJob['contact_person']))
+                    <div class="flex items-center gap-2.5 py-2.5 border-b border-[#F3F4F6] last:border-b-0">
+                        <div class="w-8 h-8 rounded-lg bg-[#F3F4F6] flex items-center justify-center shrink-0"><i class="fas fa-user text-xs text-[#333333]"></i></div>
+                        <span class="font-semibold text-[#111111] text-[0.9rem]">{{ $selectedJob['contact_person'] }}</span>
+                    </div>
+                    @endif
+                    @if(!empty($selectedJob['contact_email']))
+                    <div class="flex items-center gap-2.5 py-2.5 border-b border-[#F3F4F6] last:border-b-0">
+                        <div class="w-8 h-8 rounded-lg bg-[#F3F4F6] flex items-center justify-center shrink-0"><i class="fas fa-envelope text-xs text-[#333333]"></i></div>
+                        <span class="text-[#333333] text-[0.88rem]">{{ $selectedJob['contact_email'] }}</span>
+                    </div>
+                    @endif
+                    @if(!empty($selectedJob['contact_phone']))
+                    <div class="flex items-center gap-2.5 py-2.5 border-b border-[#F3F4F6] last:border-b-0">
+                        <div class="w-8 h-8 rounded-lg bg-[#F3F4F6] flex items-center justify-center shrink-0"><i class="fas fa-phone text-xs text-[#333333]"></i></div>
+                        <span class="text-[#333333] text-[0.88rem]">{{ $selectedJob['contact_phone'] }}</span>
+                    </div>
+                    @endif
+                </div>
+            </div>
+            @endif
+
+            @if(!empty($selectedJob['posted_at_full']))
+            <p class="text-center text-[#9CA3AF] font-normal text-[0.82rem]">
+                Posted {{ $selectedJob['posted_at_full'] }}
+            </p>
+            @endif
+
+        </div>
     </div>
 </div>
 @endif
@@ -2265,387 +1806,150 @@ new class extends Component {
      MODAL: EMPLOYMENT DETAIL
 ════════════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'employment_detail' && !empty($selectedEmployment))
-@php
-    $emp = $selectedEmployment;
-@endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-white overflow-hidden emp-detail-in"
+@php $emp = $selectedEmployment; @endphp
+<div class="fixed inset-0 z-[9999] flex flex-col bg-[#F9FAFB] overflow-hidden emp-detail-in"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-5 py-3 shrink-0 shadow-md"
+    {{-- Detail Header --}}
+    <div class="flex items-center justify-between px-6 h-12 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)]"
          style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
         <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-briefcase text-white text-sm"></i>
+            <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                <i class="fas fa-briefcase text-white text-xs"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-white/60 text-[10px] font-semibold uppercase tracking-widest truncate">My Employment Record</p>
-                <h2 class="text-white font-semibold text-base leading-tight truncate">
-                    {{ $emp['job_title'] ?: ($emp['status_label'] ?: 'Employment Details') }}
-                </h2>
+                <p class="text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">MY EMPLOYMENT RECORD</p>
+                <p class="text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[460px]">{{ $emp['job_title'] ?: ($emp['status_label'] ?: 'Employment Details') }}</p>
             </div>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0 ml-3">
+        <div class="flex items-center gap-2 shrink-0 ml-4">
             <a href="{{ route('alumni.employment') }}"
-               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition cursor-pointer">
-                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline">Edit</span>
+               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
+                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Edit</span>
             </a>
-            <button wire:click="closeModal" type="button"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition cursor-pointer">
-                <i class="fas fa-xmark text-sm"></i><span class="hidden sm:inline">Close</span>
-            </button>
-        </div>
-    </div>
-
-    <div class="shrink-0 border-b border-gray-100 bg-white">
-        <div class="grid grid-cols-2 lg:grid-cols-4 divide-x divide-gray-100">
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background:{{ $emp['status_bg'] }}; border:1px solid {{ $emp['status_border'] }};">
-                    <i class="fas {{ $emp['status_icon'] }} text-sm" style="color:{{ $emp['status_color'] }};"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="emp-detail-meta-label">Status</p>
-                    <p class="emp-detail-meta-value font-bold" style="color:{{ $emp['status_color'] }};">
-                        {{ $emp['status_label'] ?: '—' }}
-                    </p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#EFF6FF;">
-                    <i class="fas fa-id-badge text-sm" style="color:#2563eb;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="emp-detail-meta-label">Job Title</p>
-                    <p class="emp-detail-meta-value truncate">{{ $emp['job_title'] ?: '—' }}</p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#F9F7FC;">
-                    <i class="fas fa-building text-sm" style="color:#7A3F91;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="emp-detail-meta-label">Company</p>
-                    <p class="emp-detail-meta-value truncate">{{ $emp['company_name'] ?: '—' }}</p>
-                </div>
-            </div>
-
-            <div class="flex items-center gap-3 px-5 py-4">
-                <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#ECFDF5;">
-                    <i class="fas fa-calendar-check text-sm" style="color:#059669;"></i>
-                </div>
-                <div class="min-w-0">
-                    <p class="emp-detail-meta-label">Date Hired</p>
-                    <p class="emp-detail-meta-value">{{ $emp['date_hired'] ?: '—' }}</p>
-                    @if($emp['date_hired_ago'])
-                        <p class="emp-detail-meta-sub">{{ $emp['date_hired_ago'] }}</p>
-                    @endif
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100 flex flex-wrap items-center gap-2">
-
-        <span class="job-tag" style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0;">
-            <i class="fas fa-building text-[10px]"></i> PHILCST Alumni
-        </span>
-
-        @if(!empty($emp['employment_type']))
-        <span class="job-tag" style="background:#EFF6FF; color:#2563eb; border-color:#BFDBFE;">
-            <i class="fas fa-id-badge text-[10px]"></i> {{ $emp['employment_type'] }}
-        </span>
-        @endif
-
-        @if(!empty($emp['industry']))
-        <span class="job-tag" style="background:#FEF3C7; color:#B45309; border-color:#FDE68A;">
-            <i class="fas fa-industry text-[10px]"></i> {{ $emp['industry'] }}
-        </span>
-        @endif
-
-        @if(!empty($emp['edu_label']))
-        <span class="job-tag" style="background:#EDE0F5; color:#5c2d7a; border-color:#c9ace0;">
-            <i class="fas fa-graduation-cap text-[10px]"></i> {{ $emp['edu_label'] }}
-        </span>
-        @endif
-
-        @if(!empty($emp['abroad']) && $emp['abroad'])
-        <span class="job-tag" style="background:#ECFEFF; color:#0e7490; border-color:#a5f3fc;">
-            <i class="fas fa-globe text-[10px]"></i> Working Abroad
-        </span>
-        @endif
-
-    </div>
-
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-
-        <div class="w-full lg:w-[280px] flex flex-col shrink-0 border-b lg:border-b-0 lg:border-r border-gray-100 bg-white overflow-y-auto emp-scroll"
-             style="scrollbar-width:thin;">
-            <div class="p-4 flex flex-col gap-3">
-
-                <div class="rounded-xl border p-4 flex items-center gap-3"
-                     style="background:{{ $emp['status_bg'] }}; border-color:{{ $emp['status_border'] }};">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                         style="background:{{ $emp['status_color'] }}22;">
-                        <i class="fas {{ $emp['status_icon'] }} text-sm" style="color:{{ $emp['status_color'] }};"></i>
-                    </div>
-                    <div>
-                        <p class="emp-detail-meta-label">Employment Status</p>
-                        <p class="emp-detail-meta-value" style="color:{{ $emp['status_color'] }};">{{ $emp['status_label'] ?: '—' }}</p>
-                    </div>
-                </div>
-
-                @if(!empty($emp['employment_type']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#EFF6FF; border-color:#BFDBFE;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#DBEAFE;">
-                        <i class="fas fa-id-badge text-sm" style="color:#2563eb;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="emp-detail-meta-label">Employment Type</p>
-                        <p class="emp-detail-meta-value">{{ $emp['employment_type'] }}</p>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['company_name']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#F9F7FC; border-color:#E8E0F0;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#EDE0F5;">
-                        <i class="fas fa-building text-sm" style="color:#7A3F91;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="emp-detail-meta-label">Company / Employer</p>
-                        <p class="emp-detail-meta-value truncate">{{ $emp['company_name'] }}</p>
-                        @if(!empty($emp['company_address']))
-                        <p class="emp-detail-meta-sub truncate">{{ $emp['company_address'] }}</p>
-                        @endif
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['monthly_salary']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#F0FDF4; border-color:#BBF7D0;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#DCFCE7;">
-                        <i class="fas fa-money-bill-wave text-sm" style="color:#16a34a;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="emp-detail-meta-label">Monthly Salary</p>
-                        <p class="emp-detail-meta-value" style="color:#16a34a;">{{ $emp['monthly_salary'] }}</p>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['date_hired']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#ECFDF5; border-color:#a7f3d0;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#d1fae5;">
-                        <i class="fas fa-calendar-check text-sm" style="color:#059669;"></i>
-                    </div>
-                    <div>
-                        <p class="emp-detail-meta-label">Date Hired</p>
-                        <p class="emp-detail-meta-value">{{ $emp['date_hired'] }}</p>
-                        @if(!empty($emp['date_hired_ago']))
-                        <p class="emp-detail-meta-sub">{{ $emp['date_hired_ago'] }}</p>
-                        @endif
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['abroad']) && !empty($emp['country']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#ECFEFF; border-color:#a5f3fc;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#cffafe;">
-                        <i class="fas fa-globe text-sm" style="color:#0891b2;"></i>
-                    </div>
-                    <div class="min-w-0">
-                        <p class="emp-detail-meta-label">Country</p>
-                        <p class="emp-detail-meta-value truncate">{{ $emp['country'] }}</p>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['linkedin_url']))
-                <div class="rounded-xl border p-4 flex items-center gap-3" style="background:#EFF6FF; border-color:#BFDBFE;">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:#DBEAFE;">
-                        <i class="fab fa-linkedin text-sm" style="color:#0a66c2;"></i>
-                    </div>
-                    <div class="min-w-0 flex-1">
-                        <p class="emp-detail-meta-label">LinkedIn</p>
-                        <a href="{{ $emp['linkedin_url'] }}" target="_blank" rel="noopener"
-                           class="emp-detail-meta-value truncate block hover:underline"
-                           style="color:#0a66c2;" onclick="event.stopPropagation()">
-                            View Profile
-                        </a>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['updated_at']))
-                <p class="text-gray-400 font-normal text-center" style="font-size:0.82rem;">
-                    Last updated {{ $emp['updated_ago'] }}
-                </p>
-                @endif
-
-                <a href="{{ route('alumni.employment') }}"
-                   class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 active:scale-95"
-                   style="background:#7A3F91;">
-                    <i class="fas fa-pen text-xs"></i> Edit Employment
-                </a>
-                <button wire:click="closeModal"
-                        class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition active:scale-95 bg-white">
-                    <i class="fas fa-xmark text-xs"></i> Close
+            <div class="close-btn-wrap">
+                <span class="close-tooltip">Close</span>
+                <button wire:click="closeModal" type="button"
+                        class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                    <i class="fas fa-xmark text-sm"></i>
                 </button>
             </div>
         </div>
+    </div>
 
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
+    {{-- Tag row --}}
+    <div class="flex flex-wrap gap-1.5 items-center px-5 py-2 bg-white border-b border-[#F3F4F6] shrink-0">
+        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST Alumni</span>
+        @if(!empty($emp['employment_type']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-blue-700 bg-blue-50 border-blue-200"><i class="fas fa-id-badge text-[10px]"></i> {{ $emp['employment_type'] }}</span>@endif
+        @if(!empty($emp['industry']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-amber-700 bg-amber-50 border-amber-200"><i class="fas fa-industry text-[10px]"></i> {{ $emp['industry'] }}</span>@endif
+        @if(!empty($emp['edu_label']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#EDE0F5] border-[#c9ace0]"><i class="fas fa-graduation-cap text-[10px]"></i> {{ $emp['edu_label'] }}</span>@endif
+        @if(!empty($emp['abroad']) && $emp['abroad'])<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-cyan-700 bg-cyan-50 border-cyan-200"><i class="fas fa-globe text-[10px]"></i> Working Abroad</span>@endif
+    </div>
 
-            <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-100">
-                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Employment Details</p>
+    {{-- Meta strip --}}
+    <div class="flex flex-wrap border-b border-[#E5E7EB] bg-white shrink-0">
+        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Status</p>
+            <p class="text-[0.92rem] font-bold leading-snug" style="color:{{ $emp['status_color'] }};">{{ $emp['status_label'] ?: '—' }}</p>
+        </div>
+        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Job Title</p>
+            <p class="text-[0.92rem] font-bold leading-snug truncate max-w-[180px] text-[#111111]">{{ $emp['job_title'] ?: '—' }}</p>
+        </div>
+        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Company</p>
+            <p class="text-[0.92rem] font-bold leading-snug truncate max-w-[180px] text-[#111111]">{{ $emp['company_name'] ?: '—' }}</p>
+        </div>
+        <div class="px-5 py-3 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Date Hired</p>
+            <p class="text-[0.92rem] font-bold leading-snug text-[#111111]">{{ $emp['date_hired'] ?: '—' }}</p>
+            @if($emp['date_hired_ago'])<p class="text-[0.78rem] text-[#333333] mt-px">{{ $emp['date_hired_ago'] }}</p>@endif
+        </div>
+    </div>
+
+    {{-- Body --}}
+    <div class="flex-1 min-h-0 overflow-y-auto bg-[#F9FAFB] px-6 py-5 flex flex-col gap-3.5 [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
+
+        @if(!empty($emp['job_title']) || !empty($emp['company_name']) || !empty($emp['industry']))
+        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">POSITION INFORMATION</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                @if(!empty($emp['job_title']))
+                <div>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Job Title / Position</p>
+                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug uppercase">{{ $emp['job_title'] }}</p>
+                </div>
+                @endif
+                @if(!empty($emp['company_name']))
+                <div>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Company / Employer</p>
+                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $emp['company_name'] }}</p>
+                    @if(!empty($emp['company_address']))<p class="text-[0.78rem] text-[#333333] mt-px">{{ $emp['company_address'] }}</p>@endif
+                </div>
+                @endif
+                @if(!empty($emp['industry']))
+                <div>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Industry</p>
+                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $emp['industry'] }}</p>
+                </div>
+                @endif
+                @if(!empty($emp['monthly_salary']))
+                <div>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Monthly Salary</p>
+                    <p class="text-[0.92rem] font-bold text-green-600 leading-snug">{{ $emp['monthly_salary'] }}</p>
+                </div>
+                @endif
+                @if(!empty($emp['date_hired']))
+                <div>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Date Hired</p>
+                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $emp['date_hired'] }}</p>
+                    @if(!empty($emp['date_hired_ago']))<p class="text-[0.78rem] text-[#333333] mt-px">{{ $emp['date_hired_ago'] }}</p>@endif
+                </div>
+                @endif
             </div>
+        </div>
+        @endif
 
-            <div class="flex-1 min-h-0 overflow-y-auto emp-scroll px-5 py-4 flex flex-col gap-4">
+        @if(!empty($emp['skills']))
+        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">SKILLS</p>
+            <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($emp['skills']) }}</p>
+        </div>
+        @endif
 
-                @if(!empty($emp['job_title']) || !empty($emp['company_name']) || !empty($emp['industry']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-4 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-blue-50">
-                            <i class="fas fa-id-card text-blue-500 text-[10px]"></i>
-                        </span>
-                        Position Information
-                    </h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        @if(!empty($emp['job_title']))
-                        <div>
-                            <p class="emp-detail-meta-label">Job Title / Position</p>
-                            <p class="font-bold text-gray-900 mt-0.5 uppercase" style="font-size:0.95rem;">{{ $emp['job_title'] }}</p>
-                        </div>
-                        @endif
-                        @if(!empty($emp['company_name']))
-                        <div>
-                            <p class="emp-detail-meta-label">Company / Employer</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $emp['company_name'] }}</p>
-                            @if(!empty($emp['company_address']))
-                            <p class="text-gray-500 mt-0.5" style="font-size:0.85rem;">{{ $emp['company_address'] }}</p>
-                            @endif
-                        </div>
-                        @endif
-                        @if(!empty($emp['industry']))
-                        <div>
-                            <p class="emp-detail-meta-label">Industry</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $emp['industry'] }}</p>
-                        </div>
-                        @endif
-                        @if(!empty($emp['employment_type']))
-                        <div>
-                            <p class="emp-detail-meta-label">Employment Type</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $emp['employment_type'] }}</p>
-                        </div>
-                        @endif
-                        @if(!empty($emp['monthly_salary']))
-                        <div>
-                            <p class="emp-detail-meta-label">Monthly Salary</p>
-                            <p class="font-bold mt-0.5" style="color:#16a34a; font-size:0.95rem;">{{ $emp['monthly_salary'] }}</p>
-                        </div>
-                        @endif
-                        @if(!empty($emp['date_hired']))
-                        <div>
-                            <p class="emp-detail-meta-label">Date Hired</p>
-                            <p class="font-semibold text-gray-900 mt-0.5" style="font-size:0.95rem;">{{ $emp['date_hired'] }}</p>
-                            @if(!empty($emp['date_hired_ago']))
-                            <p class="text-gray-400 mt-0.5" style="font-size:0.85rem;">{{ $emp['date_hired_ago'] }}</p>
-                            @endif
-                        </div>
-                        @endif
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['edu_label']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-4 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-purple-50">
-                            <i class="fas fa-graduation-cap text-purple-500 text-[10px]"></i>
-                        </span>
-                        Education Status
-                    </h3>
-                    <div class="flex items-center gap-3 px-3 py-3 rounded-lg border"
-                         style="background:#EDE0F5; border-color:#c9ace0;">
-                        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                             style="background:{{ $emp['edu_color'] }}22; color:{{ $emp['edu_color'] }};">
-                            <i class="fas {{ $emp['edu_icon'] }} text-sm"></i>
-                        </div>
-                        <p class="font-semibold text-gray-900" style="font-size:0.95rem;">{{ $emp['edu_label'] }}</p>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['skills']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-amber-50">
-                            <i class="fas fa-star text-amber-500 text-[10px]"></i>
-                        </span>
-                        Skills
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-amber-50/40 rounded-lg p-4 border border-amber-100"
-                         style="line-height:1.75; color:#333333; font-size:0.95rem;">{{ trim($emp['skills']) }}</div>
-                </div>
-                @endif
-
-                @if(!empty($emp['abroad']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-4 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-cyan-50">
-                            <i class="fas fa-globe text-cyan-500 text-[10px]"></i>
-                        </span>
-                        Work Location
-                    </h3>
-                    <div class="flex items-center gap-3 px-3 py-3 rounded-lg border" style="background:#ECFEFF; border-color:#a5f3fc;">
-                        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#cffafe; color:#0891b2;">
-                            <i class="fas fa-plane-departure text-sm"></i>
-                        </div>
-                        <div>
-                            <p class="font-bold text-gray-900" style="font-size:0.95rem;">Working Abroad</p>
-                            @if(!empty($emp['country']))
-                            <p class="text-gray-500 mt-0.5" style="font-size:0.85rem;">{{ $emp['country'] }}</p>
-                            @endif
-                        </div>
-                    </div>
-                </div>
-                @endif
-
-                @if(!empty($emp['remarks']))
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-6 h-6 rounded-lg flex items-center justify-center bg-gray-100">
-                            <i class="fas fa-note-sticky text-gray-400 text-[10px]"></i>
-                        </span>
-                        Remarks / Notes
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-lg p-4 border border-gray-100"
-                         style="line-height:1.75; color:#333333; font-size:0.95rem;">{{ trim($emp['remarks']) }}</div>
-                </div>
-                @endif
-
-                @if(empty($emp['job_title']) && empty($emp['company_name']) && empty($emp['industry']) &&
-                    empty($emp['edu_label']) && empty($emp['skills']) && empty($emp['remarks']))
-                <div class="flex-1 flex items-center justify-center py-10">
-                    <div class="text-center">
-                        <div class="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
-                            <i class="fas fa-file-circle-question text-lg text-gray-300"></i>
-                        </div>
-                        <p class="font-medium" style="color:#555555; font-size:0.95rem;">No additional details on record.</p>
-                        <a href="{{ route('alumni.employment') }}"
-                           class="inline-flex items-center gap-1.5 mt-3 px-4 py-2 rounded-xl text-xs font-semibold text-white transition hover:opacity-90"
-                           style="background:#7A3F91;">
-                            <i class="fas fa-plus text-xs"></i> Add Details
-                        </a>
-                    </div>
-                </div>
-                @endif
-
+        @if(!empty($emp['linkedin_url']) || !empty($emp['remarks']))
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            @if(!empty($emp['linkedin_url']))
+            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">LINKEDIN</p>
+                <a href="{{ $emp['linkedin_url'] }}" target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-2 text-sm font-semibold hover:underline text-[#0a66c2]">
+                    <i class="fab fa-linkedin"></i> View Profile
+                </a>
             </div>
+            @endif
+            @if(!empty($emp['remarks']))
+            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">REMARKS</p>
+                <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($emp['remarks']) }}</p>
+            </div>
+            @endif
+        </div>
+        @endif
+
+        @if(!empty($emp['updated_at']))
+        <p class="text-center text-[#9CA3AF] font-normal text-[0.82rem]">Last updated {{ $emp['updated_ago'] }}</p>
+        @endif
+
+        <div class="flex flex-wrap gap-2">
+            <a href="{{ route('alumni.employment') }}"
+               class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
+                <i class="fas fa-pen text-xs"></i> Edit Employment
+            </a>
+            <button wire:click="closeModal"
+                    class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-[#333333] hover:bg-gray-50 transition bg-white">
+                <i class="fas fa-xmark text-xs"></i> Close
+            </button>
         </div>
 
     </div>
@@ -2653,52 +1957,199 @@ new class extends Component {
 @endif
 
 
-{{-- ══ Cursor-following tooltip script ══ --}}
-<script>
-(function () {
-    'use strict';
+{{-- ════════════════════════════════════════════════════════════════
+     MODAL: PROFILE DETAIL
+════════════════════════════════════════════════════════════════ --}}
+@if($activeModal === 'profile_detail')
+@php
+    $empCardMap3 = [
+        'employed'      => ['Employed',      'fa-user-tie',         '#16a34a', '#F0FDF4', '#BBF7D0'],
+        'self_employed' => ['Self-Employed',  'fa-store',            '#0891b2', '#ECFEFF', '#a5f3fc'],
+        'unemployed'    => ['Unemployed',     'fa-magnifying-glass', '#d97706', '#FFFBEB', '#fde68a'],
+    ];
+    $empInfo3 = $empCardMap3[$employmentStatus] ?? null;
+@endphp
+<div class="fixed inset-0 z-[9999] flex flex-col bg-white overflow-hidden id-card-in"
+     @keydown.escape.window="$wire.closeModal()">
 
-    if (window._alumniCursorTipBound) return;
-    window._alumniCursorTipBound = true;
+    {{-- Detail Header --}}
+    <div class="flex items-center justify-between px-6 h-12 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)]"
+         style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                <i class="fas fa-user text-white text-xs"></i>
+            </div>
+            <div class="min-w-0">
+                <p class="text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">MY ALUMNI PROFILE</p>
+                <p class="text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[460px] uppercase">{{ $alumniName ?: '—' }}</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0 ml-4">
+            <a href="{{ route('alumni.information') }}"
+               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
+                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Edit Profile</span>
+            </a>
+            <div class="close-btn-wrap">
+                <span class="close-tooltip">Close</span>
+                <button wire:click="closeModal" type="button"
+                        class="flex items-center justify-center w-9 h-9 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition cursor-pointer">
+                    <i class="fas fa-xmark text-sm"></i>
+                </button>
+            </div>
+        </div>
+    </div>
 
-    function getTip() {
-        return document.getElementById('alumni-float-tip');
-    }
+    {{-- Meta strip --}}
+    <div class="flex flex-wrap border-b border-[#E5E7EB] bg-white shrink-0">
+        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Course</p>
+            <p class="text-[0.92rem] font-bold leading-snug font-mono text-[#111111]">{{ $alumniCourseCode ?: '—' }}</p>
+            @if($alumniCourseFull)<p class="text-[0.78rem] text-[#333333] mt-px truncate max-w-[160px]">{{ $alumniCourseFull }}</p>@endif
+        </div>
+        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Batch Year</p>
+            <p class="text-[0.92rem] font-bold leading-snug text-[#111111]">{{ $alumniBatch ?: '—' }}</p>
+        </div>
+        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">College</p>
+            <p class="text-[0.92rem] font-bold leading-snug truncate uppercase max-w-[160px] text-[#111111]">{{ $alumniCollege ?: '—' }}</p>
+        </div>
+        <div class="px-5 py-3 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Profile Status</p>
+            <p class="text-[0.92rem] font-bold leading-snug {{ $profileComplete ? 'text-green-600' : 'text-amber-600' }}">
+                {{ $profileComplete ? 'Complete' : 'Incomplete' }}
+            </p>
+        </div>
+    </div>
 
-    document.addEventListener('mousemove', function (e) {
-        var tip = getTip();
-        if (tip && tip._ctipVisible) {
-            tip.style.left = e.clientX + 'px';
-            tip.style.top  = e.clientY + 'px';
-        }
-    });
+    {{-- Tag row --}}
+    <div class="flex flex-wrap gap-1.5 items-center px-5 py-2 bg-white border-b border-[#F3F4F6] shrink-0">
+        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST Alumni</span>
+        @if($alumniCourseCode)<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-blue-700 bg-blue-50 border-blue-200"><i class="fas fa-book-open text-[10px]"></i> {{ $alumniCourseCode }}</span>@endif
+        @if($alumniBatch)<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-green-700 bg-green-50 border-green-200"><i class="fas fa-calendar-check text-[10px]"></i> Batch {{ $alumniBatch }}</span>@endif
+        @if($hasEmployment && $empInfo3)<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border" style="background:{{ $empInfo3[3] }}; color:{{ $empInfo3[2] }}; border-color:{{ $empInfo3[4] }};"><i class="fas {{ $empInfo3[1] }} text-[10px]"></i> {{ $empInfo3[0] }}</span>@endif
+    </div>
 
-    document.addEventListener('mouseover', function (e) {
-        var el = e.target.closest('[data-ctip]');
-        if (!el) return;
-        var tip = getTip();
-        if (!tip) return;
-        tip.textContent  = el.getAttribute('data-ctip');
-        tip._ctipVisible = true;
-        tip.style.opacity = '1';
-    });
+    {{-- Body --}}
+    <div class="flex-1 min-h-0 overflow-y-auto bg-[#F9FAFB] px-6 py-5 flex flex-col gap-3.5 [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
 
-    document.addEventListener('mouseout', function (e) {
-        var el = e.target.closest('[data-ctip]');
-        if (!el) return;
-        var related = e.relatedTarget;
-        if (related && el.contains(related)) return;
-        var tip = getTip();
-        if (!tip) return;
-        tip._ctipVisible  = false;
-        tip.style.opacity = '0';
-    });
+        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+            <div class="flex flex-col sm:flex-row gap-5">
+                <div class="w-full sm:w-36 shrink-0">
+                    <div class="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-[#EDE0F5]" style="aspect-ratio:3/4;">
+                        <img src="{{ $this->getProfilePhotoUrl() }}" alt="{{ $alumniFirstName }}" class="w-full h-full object-cover"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="w-full h-full items-center justify-center text-5xl font-black text-white hidden bg-[#7A3F91]"
+                             style="display:none;">
+                            {{ strtoupper(substr($alumniFirstName, 0, 1)) ?: '?' }}
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="mb-3">
+                        <p class="text-xl font-bold text-[#111111] uppercase tracking-wide leading-tight">{{ $alumniName ?: '—' }}</p>
+                        <p class="text-sm text-[#333333] font-mono mt-0.5">{{ $alumniStudentId ?: 'No student ID' }}</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Course Code</p>
+                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug font-mono">{{ $alumniCourseCode ?: '—' }}</p>
+                        </div>
+                        @if($alumniCourseFull)
+                        <div>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Course</p>
+                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $alumniCourseFull }}</p>
+                        </div>
+                        @endif
+                        @if($alumniCollege)
+                        <div>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">College</p>
+                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug uppercase">{{ $alumniCollege }}</p>
+                        </div>
+                        @endif
+                        <div>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Batch / Graduation Year</p>
+                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $alumniBatch ?: '—' }}</p>
+                        </div>
+                        <div>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Profile Status</p>
+                            <p class="text-[0.92rem] font-bold leading-snug {{ $profileComplete ? 'text-emerald-600' : 'text-amber-600' }}">
+                                <i class="fas fa-{{ $profileComplete ? 'circle-check' : 'circle-exclamation' }} mr-1"></i>
+                                {{ $profileComplete ? 'Profile Complete' : 'Incomplete' }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    document.addEventListener('livewire:navigating', function () {
-        var tip = getTip();
-        if (tip) { tip._ctipVisible = false; tip.style.opacity = '0'; }
-    });
-})();
-</script>
+        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">EMPLOYMENT SUMMARY</p>
+            @if($hasEmployment && $empInfo3)
+            <div class="flex items-center gap-3 p-3 rounded-xl border mb-4"
+                 style="background:{{ $empInfo3[3] }}; border-color:{{ $empInfo3[4] }};">
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                     style="background:{{ $empInfo3[2] }}22;">
+                    <i class="fas {{ $empInfo3[1] }} text-sm" style="color:{{ $empInfo3[2] }};"></i>
+                </div>
+                <div>
+                    <p class="font-bold text-[0.9rem]" style="color:{{ $empInfo3[2] }};">{{ $empInfo3[0] }}</p>
+                    @if($jobTitle)<p class="text-[#333333] font-semibold uppercase text-[0.8rem]">{{ $jobTitle }}@if($companyName) · {{ $companyName }}@endif</p>@endif
+                </div>
+            </div>
+            <button wire:click="openEmploymentModal"
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
+                <i class="fas fa-eye text-xs"></i> View Full Employment Details
+            </button>
+            @else
+            <div class="flex flex-col items-center py-6 gap-3">
+                <div class="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center">
+                    <i class="fas fa-triangle-exclamation text-xl text-red-400"></i>
+                </div>
+                <p class="font-medium text-[#333333] text-[0.95rem]">No employment record on file.</p>
+                <a href="{{ route('alumni.employment') }}"
+                   class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition hover:opacity-90 bg-red-600">
+                    <i class="fas fa-plus text-xs"></i> Add Employment Record
+                </a>
+            </div>
+            @endif
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">ACTIVITY SUMMARY</p>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="rounded-xl border p-3 text-center bg-blue-50 border-blue-200">
+                    <p class="text-2xl font-bold text-blue-700">{{ $upcomingEvents }}</p>
+                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">Upcoming</p>
+                </div>
+                <div class="rounded-xl border p-3 text-center bg-emerald-50 border-emerald-200">
+                    <p class="text-2xl font-bold text-emerald-700">{{ $totalEvents }}</p>
+                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">Events</p>
+                </div>
+                <div class="rounded-xl border p-3 text-center bg-cyan-50 border-cyan-200">
+                    <p class="text-2xl font-bold text-cyan-700">{{ $myRsvps }}</p>
+                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">RSVPs</p>
+                </div>
+                <div class="rounded-xl border p-3 text-center bg-amber-50 border-amber-200">
+                    <p class="text-2xl font-bold text-amber-700">{{ $activeJobs }}</p>
+                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">Jobs</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+            <a href="{{ route('alumni.information') }}"
+               class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
+                <i class="fas fa-pen text-xs"></i> Edit Profile
+            </a>
+            <button wire:click="closeModal"
+                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-[#333333] hover:bg-gray-50 transition bg-white">
+                <i class="fas fa-xmark text-xs"></i> Close
+            </button>
+        </div>
+
+    </div>
+</div>
+@endif
 
 </div>{{-- end root --}}

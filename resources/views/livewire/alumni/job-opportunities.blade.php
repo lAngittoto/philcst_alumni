@@ -20,7 +20,6 @@ new class extends Component {
     public string $filterType     = '';
     public string $filterLevel    = '';
     public string $filterSort     = 'deadline_asc';
-    public string $filterDeadline = '';
 
     public bool $showDetail    = false;
     public ?int $viewingJobId  = null;
@@ -77,15 +76,14 @@ new class extends Component {
         $this->alumniRoomId = $room ? (int) $room->id : 0;
     }
 
-    public function updatingSearch()         { $this->resetPage(); }
-    public function updatingFilterType()     { $this->resetPage(); }
-    public function updatingFilterLevel()    { $this->resetPage(); }
-    public function updatingFilterSort()     { $this->resetPage(); }
-    public function updatingFilterDeadline() { $this->resetPage(); }
+    public function updatingSearch()      { $this->resetPage(); }
+    public function updatingFilterType()  { $this->resetPage(); }
+    public function updatingFilterLevel() { $this->resetPage(); }
+    public function updatingFilterSort()  { $this->resetPage(); }
 
     public function resetFilters(): void
     {
-        $this->search = $this->filterType = $this->filterLevel = $this->filterDeadline = '';
+        $this->search = $this->filterType = $this->filterLevel = '';
         $this->filterSort = 'deadline_asc';
         $this->resetPage();
     }
@@ -95,8 +93,6 @@ new class extends Component {
     {
         $college = $this->alumniCollege;
         $today   = now('Asia/Manila')->toDateString();
-        $week    = now('Asia/Manila')->addDays(7)->toDateString();
-        $twoWeeks = now('Asia/Manila')->addDays(14)->toDateString();
 
         $q = JobPosting::select([
                 'id', 'organizer_id', 'job_title', 'company_name', 'company_type',
@@ -121,14 +117,8 @@ new class extends Component {
             );
         }
 
-        if ($this->filterType !== '')  $q->where('employment_type',  $this->filterType);
+        if ($this->filterType  !== '') $q->where('employment_type',  $this->filterType);
         if ($this->filterLevel !== '') $q->where('experience_level', $this->filterLevel);
-
-        if ($this->filterDeadline === 'week') {
-            $q->whereBetween('deadline', [$today, $week]);
-        } elseif ($this->filterDeadline === 'twoweeks') {
-            $q->whereBetween('deadline', [$today, $twoWeeks]);
-        }
 
         match ($this->filterSort) {
             'deadline_asc'  => $q->orderBy('deadline', 'asc'),
@@ -269,6 +259,9 @@ new class extends Component {
 <div class="flex flex-col" style="min-height: calc(100vh - 120px);">
 
 <style>
+/* ─────────────────────────────────────────────
+   FILTER SELECTS
+───────────────────────────────────────────── */
 select.filter-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
@@ -279,36 +272,27 @@ select.filter-input {
     appearance: none;
 }
 
-.jb-hover-tip {
-    position: fixed;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s ease;
-    z-index: 99999;
-    transform: translate(14px, 14px);
-}
-.jb-hover-tip.visible { opacity: 1; }
-.jb-hover-tip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 10px;
-    border: 4px solid transparent;
-    border-top-color: #111827;
-}
-
+/* ─────────────────────────────────────────────
+   DETAIL PAGE ENTRANCE
+───────────────────────────────────────────── */
 @keyframes detailIn {
     from { opacity: 0; }
     to   { opacity: 1; }
 }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
 
+/* ─────────────────────────────────────────────
+   SHARE SHEET ENTRANCE
+───────────────────────────────────────────── */
 @keyframes panelIn {
     from { opacity: 0; transform: scale(.97) translateY(8px); }
     to   { opacity: 1; transform: none; }
 }
 .share-sheet { animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
+/* ─────────────────────────────────────────────
+   SCROLLBAR
+───────────────────────────────────────────── */
 .scroll-thin::-webkit-scrollbar       { width: 4px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 
@@ -321,8 +305,59 @@ select.filter-input {
     overflow: hidden;
 }
 
-/* Icon-only tooltip pattern reused across detail bar */
-.ic-btn {
+/* ─────────────────────────────────────────────
+   MOUSE-FOLLOWING "VIEW DETAILS" LABEL
+   Rendered as a fixed div positioned by JS
+───────────────────────────────────────────── */
+#jb-cursor-label {
+    position: fixed;
+    z-index: 99999;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #111827;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border-radius: 8px;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,.28);
+    user-select: none;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .1s ease, visibility .1s ease;
+    left: -999px;
+    top: -999px;
+}
+#jb-cursor-label svg {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* ─────────────────────────────────────────────
+   CARD HOVER STATE
+───────────────────────────────────────────── */
+[data-jb-card] {
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+[data-jb-card]:hover {
+    border-color: #c4b5d4 !important;
+    box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
+}
+
+/* Share icon button on card */
+.card-share-btn {
     position: relative;
     display: inline-flex;
     align-items: center;
@@ -330,14 +365,23 @@ select.filter-input {
     width: 2rem;
     height: 2rem;
     border-radius: 0.5rem;
-    transition: all .15s;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
     cursor: pointer;
-    border: 1px solid transparent;
+    transition: background .15s, border-color .15s, transform .1s;
     flex-shrink: 0;
+    z-index: 2;
 }
-.ic-btn .tip {
+.card-share-btn:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+    transform: scale(1.08);
+}
+/* Tooltip ABOVE the share button */
+.card-share-btn .tip {
     position: absolute;
-    top: calc(100% + 6px);
+    bottom: calc(100% + 7px);
     right: 0;
     background: #111827;
     color: #fff;
@@ -351,9 +395,62 @@ select.filter-input {
     pointer-events: none;
     opacity: 0;
     transition: opacity .15s;
-    z-index: 200;
+    z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
 }
-.ic-btn .tip::before {
+/* Arrow pointing DOWN (tooltip is above) */
+.card-share-btn .tip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    right: 10px;
+    border: 4px solid transparent;
+    border-top-color: #111827;
+}
+.card-share-btn:hover .tip { opacity: 1; }
+
+/* ─────────────────────────────────────────────
+   DETAIL HEADER — GLASSY BUTTONS
+   Tooltips BELOW the button
+───────────────────────────────────────────── */
+.detail-top-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    flex-shrink: 0;
+    border: none;
+    outline: none;
+}
+.detail-top-btn:active { transform: scale(.93); }
+
+/* Tooltip BELOW */
+.detail-top-btn .tip {
+    position: absolute;
+    top: calc(100% + 6px);   /* ← below the button */
+    right: 0;
+    background: #111827;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+/* Arrow pointing UP (tooltip is below button) */
+.detail-top-btn .tip::before {
     content: '';
     position: absolute;
     bottom: 100%;
@@ -361,13 +458,74 @@ select.filter-input {
     border: 4px solid transparent;
     border-bottom-color: #111827;
 }
-.ic-btn:hover .tip { opacity: 1; }
+.detail-top-btn:hover .tip { opacity: 1; }
+
+/* Share variant */
+.detail-top-btn.share-btn {
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.2);
+    color: #fff;
+}
+.detail-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
+
+/* Close variant */
+.detail-top-btn.close-btn {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.15);
+}
+.detail-top-btn.close-btn:hover { background: rgba(255,255,255,.22); }
+.detail-top-btn.close-btn svg {
+    width: 13px;
+    height: 13px;
+    stroke: #fff;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+}
+
+/* ─────────────────────────────────────────────
+   SHARE MODAL — Purple close button
+───────────────────────────────────────────── */
+.btn-close-purple {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    background: #7a3f91;
+    border: none;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    flex-shrink: 0;
+}
+.btn-close-purple:hover  { background: #5e2f72; }
+.btn-close-purple:active { transform: scale(.93); }
+.btn-close-purple svg    { width: 14px; height: 14px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
+
+/* ─────────────────────────────────────────────
+   DETAIL PAGE — force sans-serif everywhere
+───────────────────────────────────────────── */
+.detail-page * {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-style: normal !important;
+}
+.detail-header-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.detail-label { font-style: italic; }
 </style>
 
-{{-- Cursor-follow tooltip --}}
-<div id="jb-hover-tip"
-     class="jb-hover-tip bg-gray-900 text-white text-[11px] font-semibold tracking-wide px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap">
-    <i class="fas fa-eye mr-1" style="font-size:.75rem;"></i>View Details
+{{-- Mouse-following cursor label (rendered once, moved by JS) --}}
+<div id="jb-cursor-label">
+    <svg viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
+    View Details
 </div>
 
 {{-- ── FLASH TOAST ── --}}
@@ -423,6 +581,8 @@ select.filter-input {
         {{-- ── FILTER BAR ── --}}
         <div class="bg-gray-100 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
+            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+
             {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
@@ -435,9 +595,7 @@ select.filter-input {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            {{-- FILTERS label --}}
-            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
-
+            {{-- Employment Type --}}
             <select wire:model.live="filterType"
                     class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                            hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
@@ -449,12 +607,20 @@ select.filter-input {
                 <option value="Freelance">Freelance</option>
             </select>
 
-            <select wire:model.live="filterDeadline"
+            {{--
+                Experience Level — values now match exactly what the organizer
+                stores via the JobOption table (same order as $expLevelOrder in
+                the organizer component).
+            --}}
+            <select wire:model.live="filterLevel"
                     class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                            hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
-                <option value="">All Deadlines</option>
-                <option value="week">Within 1 Week</option>
-                <option value="twoweeks">Within 2 Weeks</option>
+                <option value="">All Experience</option>
+                <option value="No Experience Required">No Experience Required</option>
+                <option value="Entry Level (At Least 1 Year)">Entry Level (At Least 1 Year)</option>
+                <option value="Mid Level (2-3 Years)">Mid Level (2-3 Years)</option>
+                <option value="Senior Level (4-5 Years)">Senior Level (4-5 Years)</option>
+                <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
             </select>
 
             <button wire:click="resetFilters"
@@ -481,19 +647,6 @@ select.filter-input {
         {{-- ── CARDS BODY ── --}}
         <div class="bg-gray-100 p-4 relative flex-1 min-h-0">
 
-            {{-- Loading overlay --}}
-            <div wire:loading
-                 wire:target="search,filterType,filterLevel,filterDeadline,filterSort,resetFilters,previousPage,nextPage"
-                 class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none bg-gray-100/70">
-                <div class="flex items-center gap-2.5 px-5 py-3 bg-white rounded-xl shadow border border-gray-200">
-                    <svg class="animate-spin w-4 h-4 text-[#7a3f91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                    <span class="text-xs font-semibold text-gray-700">Loading jobs…</span>
-                </div>
-            </div>
-
             @if($this->jobPostings->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 @foreach($this->jobPostings as $job)
@@ -508,66 +661,73 @@ select.filter-input {
 
                     if ($daysLeft <= 3)       { $dlClass = 'text-red-600 font-bold'; $dlIcon = 'fa-fire'; }
                     elseif ($daysLeft <= 14)  { $dlClass = 'text-orange-700 font-semibold'; $dlIcon = 'fa-clock'; }
-                    else                      { $dlClass = 'text-gray-900 font-medium'; $dlIcon = 'fa-calendar'; }
+                    else                      { $dlClass = 'text-gray-600 font-medium'; $dlIcon = 'fa-calendar'; }
 
-                    $descPreview = $job->description ? Str::limit(strip_tags($job->description), 80) : null;
+                    $descPreview = $job->description ? Str::limit(strip_tags($job->description), 90) : null;
                     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
                 @endphp
 
-                <div class="bg-white border border-gray-200 rounded-xl shadow-sm hover:border-purple-300 hover:shadow-md
-                            transition-all duration-150 overflow-hidden cursor-pointer relative select-none flex flex-col"
+                <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
+                            cursor-pointer relative select-none flex flex-col group"
                      data-jb-card
                      wire:click="viewJob({{ $job->id }})"
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
-                    <div class="flex flex-col flex-1 p-4 gap-2">
+                    <div class="flex flex-col flex-1 p-4 gap-2.5">
 
+                        {{-- Company + Type badge --}}
                         <div class="flex items-start justify-between gap-2">
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs font-normal uppercase tracking-widest mb-1 text-gray-900">{{ $job->company_name }}</p>
-                                <h3 class="font-normal text-base leading-snug line-clamp-2 text-gray-900">{{ $job->job_title }}</h3>
+                                <p class="text-[11px] font-semibold uppercase tracking-widest mb-1" style="color:#333333;">{{ $job->company_name }}</p>
+                                <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{{ $job->job_title }}</h3>
                             </div>
                             @if($displayType)
-                            <span class="inline-flex shrink-0 text-xs font-medium px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 mt-0.5 whitespace-nowrap text-gray-900">
+                            <span class="inline-flex shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 mt-0.5 whitespace-nowrap" style="color:#333333;">
                                 {{ Str::limit($displayType, 14) }}
                             </span>
                             @endif
                         </div>
 
+                        {{-- Tags --}}
                         <div class="flex flex-wrap gap-1.5">
-                            <span class="inline-flex items-center text-sm font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-900">
+                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-purple-50 border border-purple-100 text-purple-700">
                                 {{ $job->employment_type }}
                             </span>
-                            <span class="inline-flex items-center text-sm font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-900">
+                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200" style="color:#333333;">
                                 {{ Str::words($job->experience_level, 3, '') }}
                             </span>
                         </div>
 
                         @if($job->location)
-                        <p class="text-sm truncate text-gray-900">{{ $job->location }}</p>
+                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
+                            <i class="fas fa-location-dot text-[11px]" style="color:#999;"></i>{{ $job->location }}
+                        </p>
                         @endif
 
                         @if($job->salary)
-                        <p class="text-sm font-medium text-emerald-700">{{ $job->salary }}</p>
+                        <p class="text-[13px] font-semibold text-emerald-600 flex items-center gap-1.5">
+                            <i class="fas fa-money-bill-wave text-emerald-400 text-[11px]"></i>{{ $job->salary }}
+                        </p>
                         @else
-                        <p class="text-sm text-gray-500 italic">Salary not disclosed</p>
+                        <p class="text-[13px] italic" style="color:#333333;">Salary not disclosed</p>
                         @endif
 
                         @if($descPreview)
-                        <p class="text-sm line-clamp-2 leading-relaxed text-gray-700">{{ $descPreview }}</p>
+                        <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
                         @endif
 
-                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto">
-                            <span class="text-sm {{ $dlClass }} flex items-center gap-1">
-                                <i class="fas {{ $dlIcon }} text-xs"></i>
+                        {{-- Footer: deadline + share --}}
+                        <div class="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-auto">
+                            <span class="text-[13px] {{ $dlClass }} flex items-center gap-1.5">
+                                <i class="fas {{ $dlIcon }} text-[11px]"></i>
                                 {{ $dlLabel }}
                             </span>
-                            {{-- Share button — icon only, blue, tooltip --}}
+
                             <button type="button"
                                     data-jb-share
                                     wire:click.stop="openShareModal({{ $job->id }})"
-                                    class="ic-btn border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100 z-[2]">
+                                    class="card-share-btn">
                                 <i class="fas fa-share-nodes text-[11px]"></i>
                                 <span class="tip">Share</span>
                             </button>
@@ -584,15 +744,15 @@ select.filter-input {
                 </div>
                 <div>
                     <p class="font-semibold text-base text-gray-700">
-                        @if($search || $filterType || $filterDeadline) No jobs match your filters
+                        @if($search || $filterType || $filterLevel) No jobs match your filters
                         @else No job openings yet @endif
                     </p>
                     <p class="text-sm mt-1 text-gray-500">
-                        @if($search || $filterType || $filterDeadline) Try clearing your filters to see all available jobs.
+                        @if($search || $filterType || $filterLevel) Try clearing your filters to see all available jobs.
                         @else Check back soon — new opportunities will be posted here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>. @endif
                     </p>
                 </div>
-                @if($search || $filterType || $filterDeadline)
+                @if($search || $filterType || $filterLevel)
                 <button wire:click="resetFilters"
                         class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                     Clear Filters
@@ -604,12 +764,12 @@ select.filter-input {
 
         {{-- ══ PAGINATION BAR ══ --}}
         @php
-            $total = $this->jobPostings->total();
-            $pp    = $this->jobPostings->perPage();
-            $cp    = $this->jobPostings->currentPage();
-            $lp    = $this->jobPostings->lastPage();
-            $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
-            $to    = min($cp * $pp, $total);
+            $total   = $this->jobPostings->total();
+            $pp      = $this->jobPostings->perPage();
+            $cp      = $this->jobPostings->currentPage();
+            $lp      = $this->jobPostings->lastPage();
+            $from    = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+            $to      = min($cp * $pp, $total);
             $pgStart = max(1, $cp - 2);
             $pgEnd   = min($lp, $cp + 2);
         @endphp
@@ -701,20 +861,32 @@ select.filter-input {
 <div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-hidden"
      @keydown.escape.window="$wire.closeDetail()">
 
-    {{-- Purple top bar — icon-only buttons with tooltips --}}
+    {{-- Purple top bar --}}
     <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
-        <span class="text-[15px] text-white font-semibold truncate flex-1 min-w-0">{{ $job->job_title }}</span>
+
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-briefcase text-white text-sm"></i>
+            </div>
+            <span class="detail-header-title">Job Details</span>
+        </div>
+
+        {{-- Action buttons — tooltips BELOW --}}
         <div class="flex items-center gap-1.5 flex-shrink-0">
-            {{-- Share — icon only, blue, tooltip --}}
-            <button type="button" wire:click="openShareModal({{ $job->id }})"
-                    class="ic-btn bg-blue-500 hover:bg-blue-400 border-blue-300/40 text-white shadow-sm">
-                <i class="fas fa-share-nodes text-[13px]"></i>
+            <button type="button"
+                    wire:click="openShareModal({{ $job->id }})"
+                    class="detail-top-btn share-btn"
+                    aria-label="Share">
+                <i class="fas fa-share-nodes text-[13px] text-white"></i>
                 <span class="tip">Share</span>
             </button>
-            {{-- Close — icon only, red, tooltip --}}
-            <button type="button" wire:click="closeDetail"
-                    class="ic-btn bg-red-500 hover:bg-red-400 border-red-300/40 text-white shadow-sm">
-                <i class="fas fa-xmark text-[14px]"></i>
+            <button type="button"
+                    wire:click="closeDetail"
+                    class="detail-top-btn close-btn"
+                    aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
                 <span class="tip">Close</span>
             </button>
         </div>
@@ -722,21 +894,22 @@ select.filter-input {
 
     {{-- White hero --}}
     <div class="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0">
-        <p class="text-sm font-semibold uppercase tracking-[.10em] text-gray-900 mb-1">{{ $job->company_name }}</p>
-        <h2 class="text-2xl font-semibold text-gray-900 leading-snug mb-3">{{ $job->job_title }}</h2>
+        <p class="text-[9px] font-bold uppercase tracking-[.16em] mb-1" style="color:#333333;">Job Title</p>
+        <h2 class="text-2xl font-semibold leading-snug mb-2" style="color:#333333;">{{ $job->job_title }}</h2>
+        <p class="text-sm font-semibold uppercase tracking-[.08em] mb-3" style="color:#333333;">{{ $job->company_name }}</p>
         <div class="flex flex-wrap gap-1.5">
             @if($displayType)
-                <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-gray-200 bg-white text-gray-900">{{ $displayType }}</span>
+                <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $displayType }}</span>
             @endif
-            <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-gray-200 bg-white text-gray-900">{{ $job->employment_type }}</span>
-            <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-gray-200 bg-white text-gray-900">{{ $job->experience_level }}</span>
+            <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->employment_type }}</span>
+            <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->experience_level }}</span>
             @if($job->target_college)
                 @foreach(explode(',', $job->target_college) as $col)
-                    <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-gray-200 bg-white text-gray-900">{{ trim($col) }}</span>
+                    <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($col) }}</span>
                 @endforeach
             @endif
             @if($isUrgent)
-                <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-red-200 bg-white text-red-700">
+                <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-red-200 bg-white text-red-700">
                     <i class="fas fa-fire mr-1 text-[10px]"></i>{{ $dlLabel }}
                 </span>
             @endif
@@ -746,26 +919,26 @@ select.filter-input {
     {{-- Info strip --}}
     <div class="bg-white border-b border-gray-200 flex flex-wrap flex-shrink-0">
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Company</span>
-            <span class="text-base font-semibold text-gray-900">{{ $job->company_name }}</span>
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Company</span>
+            <span class="text-base font-semibold" style="color:#333333;">{{ $job->company_name }}</span>
             @if($displayType && $displayType !== $job->company_name)
-                <span class="text-sm text-gray-700">{{ $displayType }}</span>
+                <span class="text-sm" style="color:#333333;">{{ $displayType }}</span>
             @endif
         </div>
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Location</span>
-            <span class="text-base font-semibold text-gray-900">{{ $job->location ?: '—' }}</span>
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Location</span>
+            <span class="text-base font-semibold" style="color:#333333;">{{ $job->location ?: '—' }}</span>
         </div>
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Salary</span>
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Salary</span>
             @if($job->salary)
-                <span class="text-base font-semibold text-gray-900">{{ $job->salary }}</span>
+                <span class="text-base font-semibold text-emerald-600">{{ $job->salary }}</span>
             @else
-                <span class="text-base italic font-normal text-gray-500">Not disclosed</span>
+                <span class="text-base italic font-normal" style="color:#333333;">Not disclosed</span>
             @endif
         </div>
         <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Deadline</span>
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Deadline</span>
             <span class="text-base {{ $dlValueClass }}">{{ $dl->format('M d, Y') }}</span>
             <span class="text-sm {{ $dlValueClass }}">
                 @if($dlIsUrgent)<i class="fas fa-fire mr-0.5 text-xs"></i>@endif
@@ -773,9 +946,9 @@ select.filter-input {
             </span>
         </div>
         <div class="flex-1 min-w-[110px] px-5 py-3 flex flex-col gap-0.5">
-            <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Posted</span>
-            <span class="text-base font-semibold text-gray-900">{{ $createdPH->format('M d, Y') }}</span>
-            <span class="text-sm text-gray-700">{{ $createdPH->diffForHumans() }}</span>
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Posted</span>
+            <span class="text-base font-semibold" style="color:#333333;">{{ $createdPH->format('M d, Y') }}</span>
+            <span class="text-sm" style="color:#333333;">{{ $createdPH->diffForHumans() }}</span>
         </div>
     </div>
 
@@ -793,34 +966,34 @@ select.filter-input {
             @endif
 
             <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div class="px-5 py-3 border-b border-gray-100">
-                    <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Job Description</span>
+                <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                    <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>
                 </div>
-                <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $job->description }}</div>
+                <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->description }}</div>
             </div>
 
             @if($hasQual || $hasInstr)
             <div class="{{ ($hasQual && $hasInstr) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
                 @if($hasQual)
                 <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100">
-                        <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">Qualifications</span>
+                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Qualifications</span>
                     </div>
-                    <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $job->qualifications }}</div>
+                    <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->qualifications }}</div>
                 </div>
                 @endif
                 @if($hasInstr)
                 <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100">
-                        <span class="text-xs font-bold uppercase tracking-[.12em] text-gray-900">How to Apply</span>
+                    <div class="px-5 py-3 border-b border-gray-100 bg-emerald-50">
+                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-emerald-700">How to Apply</span>
                     </div>
-                    <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $job->application_instructions }}</div>
+                    <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->application_instructions }}</div>
                 </div>
                 @endif
             </div>
             @endif
 
-            <p class="text-center text-xs text-gray-500">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+            <p class="text-center text-xs" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
         </div>
     </div>
 
@@ -828,7 +1001,7 @@ select.filter-input {
 @endif
 
 
-{{-- ══ SHARE MODAL — 90VH, NO SCROLL ══ --}}
+{{-- ══ SHARE MODAL ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->jobsBaseUrl();
@@ -906,9 +1079,10 @@ select.filter-input {
             <h2 class="text-sm font-semibold flex items-center gap-2 text-gray-800">
                 <i class="fas fa-share-nodes text-sky-600 text-xs"></i> Share Job Posting
             </h2>
-            <button wire:click="closeShareModal" type="button"
-                    class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100 transition cursor-pointer text-gray-500">
-                <i class="fas fa-xmark text-sm"></i>
+            <button wire:click="closeShareModal" type="button" class="btn-close-purple" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
             </button>
         </div>
 
@@ -916,7 +1090,7 @@ select.filter-input {
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
             {{-- LEFT: Preview --}}
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3">
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Post Preview</p>
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
@@ -951,7 +1125,7 @@ select.filter-input {
             </div>
 
             {{-- RIGHT: Share buttons --}}
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5">
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Share via</p>
 
                 <div x-show="fbCopied" x-cloak x-transition
@@ -984,12 +1158,12 @@ select.filter-input {
                     <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
                             <defs>
-                                <linearGradient id="mgr3" x1="0%" y1="100%" x2="100%" y2="0%">
+                                <linearGradient id="mgr_alumni" x1="0%" y1="100%" x2="100%" y2="0%">
                                     <stop offset="0%" style="stop-color:#0099FF"/>
                                     <stop offset="100%" style="stop-color:#A033FF"/>
                                 </linearGradient>
                             </defs>
-                            <path fill="url(#mgr3)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                            <path fill="url(#mgr_alumni)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
                     <div class="text-left flex-1">
@@ -1008,9 +1182,16 @@ select.filter-input {
 
                 {{-- Batch Chat --}}
                 <button type="button" wire:click="shareToChat"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
+                        wire:loading.attr="disabled"
+                        wire:target="shareToChat"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-60 disabled:cursor-not-allowed">
                     <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/20">
-                        <i class="fas fa-comments text-white text-sm"></i>
+                        <span wire:loading.remove wire:target="shareToChat">
+                            <i class="fas fa-comments text-white text-sm"></i>
+                        </span>
+                        <span wire:loading wire:target="shareToChat">
+                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                        </span>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Post to Batch Chat</p>
@@ -1051,29 +1232,116 @@ select.filter-input {
 
 </div>{{-- end root --}}
 
-{{-- ── JS: cursor-follow tooltip ── --}}
+{{-- ── Mouse-following cursor label logic ── --}}
 <script>
 (function () {
-    var tip = document.getElementById('jb-hover-tip');
-    function bindCards() {
-        document.querySelectorAll('[data-jb-card]').forEach(function (card) {
-            if (card._jbTipBound) return;
-            card._jbTipBound = true;
-            card.addEventListener('mousemove', function (e) {
-                if (!tip) return;
-                var shareBtn = card.querySelector('[data-jb-share]');
-                if (shareBtn && (e.target === shareBtn || shareBtn.contains(e.target))) {
-                    tip.classList.remove('visible'); return;
+    // Wait for DOM to be fully ready
+    function init() {
+        const label = document.getElementById('jb-cursor-label');
+        if (!label) return;
+
+        let activeCard = null;
+        let mouseX = 0;
+        let mouseY = 0;
+
+        function show() {
+            label.style.opacity    = '1';
+            label.style.visibility = 'visible';
+        }
+
+        function hide() {
+            label.style.opacity    = '0';
+            label.style.visibility = 'hidden';
+        }
+
+        function onMouseMove(e) {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            // Offset so label appears slightly below-right of cursor
+            label.style.left = (mouseX + 16) + 'px';
+            label.style.top  = (mouseY + 14) + 'px';
+        }
+
+        function onCardEnter(e) {
+            // Don't show if coming from a child element (bubbling)
+            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+            activeCard = e.currentTarget;
+            document.addEventListener('mousemove', onMouseMove);
+            show();
+        }
+
+        function onCardLeave(e) {
+            // Only hide if truly leaving the card boundary
+            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+            activeCard = null;
+            hide();
+            document.removeEventListener('mousemove', onMouseMove);
+        }
+
+        function onShareEnter() {
+            hide();
+        }
+
+        function onShareLeave() {
+            if (activeCard) show();
+        }
+
+        function attachListeners() {
+            document.querySelectorAll('[data-jb-card]').forEach(card => {
+                if (card._jbBound) return;
+                card._jbBound = true;
+
+                card.addEventListener('mouseenter', onCardEnter);
+                card.addEventListener('mouseleave', onCardLeave);
+
+                const shareBtn = card.querySelector('[data-jb-share]');
+                if (shareBtn) {
+                    shareBtn.addEventListener('mouseenter', onShareEnter);
+                    shareBtn.addEventListener('mouseleave', onShareLeave);
                 }
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.classList.add('visible');
             });
-            card.addEventListener('mouseleave', function () { if (tip) tip.classList.remove('visible'); });
-            card.addEventListener('click',      function () { if (tip) tip.classList.remove('visible'); });
+        }
+
+        attachListeners();
+
+        // Livewire v3 — re-attach after any DOM update
+        document.addEventListener('livewire:navigated', () => {
+            // Reset all bound flags so we re-attach fresh
+            document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
+            attachListeners();
+        });
+
+        if (window.Livewire) {
+            window.Livewire.hook('morph.updated', ({ el }) => {
+                requestAnimationFrame(() => {
+                    document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
+                    attachListeners();
+                });
+            });
+            // Livewire v3 commit hook
+            try {
+                window.Livewire.hook('commit', ({ succeed }) => {
+                    succeed(() => {
+                        requestAnimationFrame(() => {
+                            document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
+                            attachListeners();
+                        });
+                    });
+                });
+            } catch(e) {}
+        }
+
+        // Hide label if modal opens (share or detail)
+        document.addEventListener('livewire:update', () => {
+            hide();
+            activeCard = null;
         });
     }
-    bindCards();
-    document.addEventListener('livewire:updated', bindCards);
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
 </script>

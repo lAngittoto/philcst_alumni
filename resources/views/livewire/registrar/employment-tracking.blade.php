@@ -255,13 +255,11 @@ new class extends Component {
             ->select('course_code')->distinct()->orderBy('course_code')->pluck('course_code');
     }
 
-    // ── Smart batch filter: only batches that have records for the current modal filter ──
     #[Computed]
     public function availableModalBatchesForFilter()
     {
         $filter = $this->modalFilter;
 
-        // no_record: batches that have at least one alumni WITHOUT an employment record
         if ($filter === 'no_record') {
             return DB::table('alumni as a')
                 ->whereNull('a.deleted_at')
@@ -838,7 +836,6 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ── ICON-ONLY PRINT BUTTON (main page) — tooltip BELOW ── --}}
         <button wire:click="openReports"
                 class="group relative w-9 h-9 rounded-xl flex items-center justify-center shadow text-white overflow-visible
                        bg-[#7a3f91] hover:bg-[#5e2f72] transition active:scale-95 cursor-pointer">
@@ -877,7 +874,6 @@ new class extends Component {
         <div wire:click="openModal('{{ $filter }}')"
              class="group relative bg-white rounded-2xl p-2.5 flex items-center gap-2.5
                     shadow-sm cursor-pointer flex-1 min-w-0 overflow-visible stat-card {{ $hoverClass }}">
-            {{-- Tooltip --}}
             <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                          bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                          px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -903,7 +899,6 @@ new class extends Component {
         {{-- Top row: 4 charts --}}
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" style="height:280px;">
 
-            {{-- Status donut --}}
             <div onclick="empOpenModal('','',null)"
                  class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
@@ -917,7 +912,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Location donut --}}
             <div onclick="empOpenModal('','',null)"
                  class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
@@ -931,7 +925,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Relevance donut --}}
             <div onclick="empOpenModal('relevance_all','',null)"
                  class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
@@ -945,7 +938,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Top Courses bar --}}
             <div onclick="empOpenModal('employed_all','',null)"
                  class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                         transition-all cursor-pointer flex flex-col overflow-hidden">
@@ -1152,7 +1144,6 @@ new class extends Component {
                    || ($modalCourse !== '' && !$modalCourseLocked)
                    || $modalSearch !== '';
 
-    // ── Smart batch list: only batches relevant to the current filter ──
     $smartBatches = $this->availableModalBatchesForFilter;
 
     $rTotal    = $records->total();
@@ -1194,70 +1185,68 @@ new class extends Component {
         </button>
     </div>
 
-    {{-- Toolbar --}}
-    <div class="px-6 lg:px-10 pt-2.5 pb-2 bg-white border-b border-gray-200 shrink-0">
-        <div class="flex flex-wrap gap-2 items-center mb-2">
-            <span class="inline-flex items-center gap-1.5 text-[.72rem] font-bold uppercase tracking-wider
-                         text-[#7A3F91] px-2.5 py-1.5 rounded-lg border border-[#E8E0F0] bg-[#F9F7FC] whitespace-nowrap shrink-0">
-                Filters
-            </span>
+    {{-- ── Toolbar ── --}}
+    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
+        <div class="flex flex-wrap gap-2 items-center">
 
-            <div class="relative w-72 shrink-0" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{if(v!==this.q)this.q=v;}); } }">
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
-                       placeholder="Search name, ID, email, company…"
-                       class="w-full pl-4 pr-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-black
-                              focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-purple-100 transition"
-                       autocomplete="off">
-            </div>
+            {{-- FILTERS label --}}
+            <span class="text-[10px] font-bold tracking-widest uppercase text-[#888] shrink-0 mr-1">FILTERS</span>
 
-            <div class="h-5 w-px bg-gray-200 shrink-0"></div>
-
+            {{-- Status pill (locked) --}}
             @if($isRelMode && $modalRelevanceLocked)
                 @php $lockedVal = $modalRelevanceActive[0] ?? 'relevant'; @endphp
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border bg-[#7A3F91] text-white border-transparent">
+                <span class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold text-white border-transparent shadow-sm"
+                      style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                     {{ $relLockedLabels[$lockedVal] ?? 'Relevant' }}
                 </span>
             @elseif($isRelMode)
-                <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-[11px] font-semibold text-black">Relevance:</span>
-                    @foreach($relChips as [$relVal, $relLbl, $relColors])
-                    @php $isRelActive = in_array($relVal, $modalRelevanceActive ?? []); @endphp
-                    <button wire:click="toggleRelevance('{{ $relVal }}')"
-                            class="px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition active:scale-95
-                                   {{ $isRelActive ? 'bg-[#7A3F91] text-white border-transparent shadow-md' : 'bg-white text-black border-gray-200 opacity-65 hover:opacity-100 hover:border-purple-300 hover:text-[#7A3F91] '.$relColors }}">
-                        {{ $relLbl }}
-                        @if($isRelActive) ✓@endif
-                    </button>
-                    @endforeach
-                </div>
+                @foreach($relChips as [$relVal, $relLbl, $relColors])
+                @php $isRelActive = in_array($relVal, $modalRelevanceActive ?? []); @endphp
+                <button wire:click="toggleRelevance('{{ $relVal }}')"
+                        class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold border transition-all duration-150 active:scale-95 cursor-pointer
+                               {{ $isRelActive ? 'text-white border-transparent shadow-sm' : 'bg-white text-[#111111] border-[#E0E0E0] hover:border-[#d4aaeb] hover:text-[#7A3F91] opacity-65 hover:opacity-100' }}"
+                        @if($isRelActive) style="background:linear-gradient(135deg,#7A3F91,#9b59b6);" @endif>
+                    {{ $relLbl }}
+                </button>
+                @endforeach
             @else
-                <div class="flex items-center gap-1.5">
-                    @foreach($visibleStatusTabs as [$tabVal, $tabLbl])
-                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border bg-[#7A3F91] text-white border-transparent">
-                        {{ $tabLbl }}
-                    </span>
-                    @endforeach
-                </div>
+                @foreach($visibleStatusTabs as [$tabVal, $tabLbl])
+                <span class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold text-white border-transparent shadow-sm"
+                      style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    {{ $tabLbl }}
+                </span>
+                @endforeach
             @endif
 
-            <div class="flex-1 min-w-0"></div>
-        </div>
+            {{-- Search --}}
+            <div class="relative" wire:ignore
+                 x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{if(v!==this.q)this.q=v;}); } }">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none">
+                    <i class="fas fa-search" style="font-size:.7rem;"></i>
+                </span>
+                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
+                       placeholder="Search name, ID, email, company…"
+                       class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-black
+                              focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-56"
+                       autocomplete="off">
+            </div>
 
-        <div class="flex flex-wrap gap-2 items-center">
-            {{-- ── Smart Batch Dropdown ── --}}
+            {{-- Smart Batch Dropdown --}}
             @if(!$modalBatchLocked)
             <div class="relative" x-data="{ open:false }" @click.outside="open=false">
                 <button type="button" @click="open=!open"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
-                               {{ $modalBatch !== null ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
+                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.modalBatch !== null }"
+                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
                     @if($modalBatch) Batch {{ $modalBatch }} @else All Batches @endif
-                    <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
+                    <i class="fas fa-chevron-down text-[9px] opacity-50 transition-transform" :class="{'rotate-180':open}"></i>
                 </button>
                 <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                     bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
+                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px] shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1
+                     [scrollbar-width:thin] [scrollbar-color:#d4b8e8_transparent]" style="display:none;">
                     <button type="button" @click="$wire.set('modalBatch',null); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
                                    hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalBatch === null ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">
                         All Batches
                         @if($smartBatches->count() < $this->availableBatches->count())
@@ -1268,8 +1257,8 @@ new class extends Component {
                     @php $hasRecords = $smartBatches->contains($bYear); @endphp
                     <button type="button"
                             @if($hasRecords) @click="$wire.set('modalBatch',{{ $bYear }}); open=false" @endif
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold transition
-                                   {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : 'text-black' }}
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold transition
+                                   {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : 'text-[#111111]' }}
                                    {{ $hasRecords ? 'hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer' : 'batch-option-disabled' }}">
                         Batch {{ $bYear }}
                         @if(!$hasRecords)
@@ -1280,78 +1269,56 @@ new class extends Component {
                 </div>
             </div>
             @else
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]">
+            <span class="inline-flex items-center gap-2 px-3 py-[7px] rounded-full text-xs font-semibold border border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]">
                 Batch {{ $modalBatch }}
             </span>
             @endif
 
+            {{-- Course dropdown --}}
             @if(!$modalCourseLocked)
             <div class="relative" x-data="{ open:false }" @click.outside="open=false">
                 <button type="button" @click="open=!open"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
-                               {{ $modalCourse !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
+                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.modalCourse !== '' }"
+                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
                     @if($modalCourse) {{ $modalCourse }} @else All Courses @endif
-                    <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
+                    <i class="fas fa-chevron-down text-[9px] opacity-50 transition-transform" :class="{'rotate-180':open}"></i>
                 </button>
                 <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                     bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
+                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px] shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1
+                     [scrollbar-width:thin] [scrollbar-color:#d4b8e8_transparent]" style="display:none;">
                     <button type="button" @click="$wire.set('modalCourse',''); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
                                    hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Courses</button>
                     @foreach($this->availableCourses as $cCode)
                     <button type="button" @click="$wire.set('modalCourse','{{ $cCode }}'); open=false"
-                            class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
                                    hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $modalCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $cCode }}</button>
                     @endforeach
                 </div>
             </div>
             @else
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border border-blue-500 bg-blue-50 text-blue-700">
+            <span class="inline-flex items-center gap-2 px-3 py-[7px] rounded-full text-xs font-semibold border border-blue-400 bg-blue-50 text-blue-700">
                 {{ $modalCourse }}
             </span>
             @endif
 
+            {{-- Reset button --}}
             @if($hasSubFilters && $hasChipsToShow)
-            <div class="flex items-center gap-1.5 ml-1">
-                <span class="text-xs text-black">Filtering:</span>
-                @if($modalBatch !== null && !$modalBatchLocked)
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91]">
-                    Batch {{ $modalBatch }}
-                </span>
-                @endif
-                @if($modalCourse !== '' && !$modalCourseLocked)
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91]">
-                    {{ $modalCourse }}
-                </span>
-                @endif
-                @if($modalSearch !== '')
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91]">
-                    "{{ Str::limit($modalSearch,20) }}"
-                </span>
-                @endif
-                <button wire:click="clearModalFilters" wire:loading.attr="disabled"
-                        class="text-xs text-red-500 hover:text-red-700 font-semibold transition ml-1">
-                    <span wire:loading.remove wire:target="clearModalFilters">Clear all</span>
-                    <span wire:loading wire:target="clearModalFilters">Clearing…</span>
-                </button>
-            </div>
+            <button wire:click="clearModalFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-full text-xs font-semibold border
+                           border-[#E0E0E0] bg-white text-[#555555] hover:border-red-300 hover:text-red-500 transition-all duration-150 cursor-pointer">
+                <i class="fas fa-rotate-left text-[10px]"></i>
+                Reset
+            </button>
             @endif
+
         </div>
     </div>
 
     {{-- Table --}}
-    <div class="flex-1 overflow-y-auto min-h-0 relative" style="scrollbar-width:thin;">
-        <div wire:loading wire:target="modalFilter,modalBatch,modalCourse,modalSearch,modalPage,modalPrev,modalNext,clearModalFilters,toggleRelevance"
-             class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none bg-white/60">
-            <div class="flex items-center gap-2.5 px-5 py-3 bg-white rounded-xl shadow-lg border border-[#E8E0F0]">
-                <svg class="animate-spin w-4 h-4 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-                <span class="text-xs font-semibold text-[#7A3F91]">Loading records…</span>
-            </div>
-        </div>
-
+    <div class="flex-1 overflow-y-auto min-h-0" style="scrollbar-width:thin;">
         <table class="w-full border-collapse" style="min-width:{{ $showEmailContactSplit ? '980px' : ($showLocationCol && $showRelevanceCol ? '900px' : '700px') }};">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
@@ -1599,8 +1566,6 @@ new class extends Component {
             </div>
         </div>
         <div class="flex items-center gap-2">
-
-            {{-- ── ICON-ONLY PRINT BUTTON (reports modal) ── --}}
             <button
                 x-data="{ busy: false }"
                 @click="busy = true; $wire.loadPrintData()"
@@ -1631,77 +1596,91 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- Filters bar --}}
-    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0 flex flex-wrap gap-3 items-center">
-        <span class="text-xs font-bold uppercase tracking-wider text-[#7A3F91]">
-            Filter Records:
-        </span>
+    {{-- ── Reports filter bar ── --}}
+    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
+        <div class="flex flex-wrap gap-2 items-center">
 
-        <div class="relative" x-data="{ open:false }" @click.outside="open=false">
-            <button type="button" @click="open=!open"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
-                           {{ $reportBatch !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                @if($reportBatch) Batch {{ $reportBatch }} @else All Batches @endif
-                <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
-            </button>
-            <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                 bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
-                <button type="button" @click="$wire.set('reportBatch',''); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Batches</button>
-                @foreach($this->availableBatches as $bYear)
-                <button type="button" @click="$wire.set('reportBatch','{{ $bYear }}'); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">Batch {{ $bYear }}</button>
-                @endforeach
+            {{-- FILTERS label --}}
+            <span class="text-[10px] font-bold tracking-widest uppercase text-[#888] shrink-0 mr-1">FILTERS</span>
+
+            {{-- Batch dropdown --}}
+            <div class="relative" x-data="{ open:false }" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.reportBatch !== '' }"
+                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
+                    @if($reportBatch) Batch {{ $reportBatch }} @else All Batches @endif
+                    <i class="fas fa-chevron-down text-[9px] opacity-50 transition-transform" :class="{'rotate-180':open}"></i>
+                </button>
+                <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
+                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px] shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1" style="display:none;">
+                    <button type="button" @click="$wire.set('reportBatch',''); open=false"
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
+                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Batches</button>
+                    @foreach($this->availableBatches as $bYear)
+                    <button type="button" @click="$wire.set('reportBatch','{{ $bYear }}'); open=false"
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
+                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">Batch {{ $bYear }}</button>
+                    @endforeach
+                </div>
             </div>
-        </div>
 
-        <div class="relative" x-data="{ open:false }" @click.outside="open=false">
-            <button type="button" @click="open=!open"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
-                           {{ $reportCourse !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                @if($reportCourse) {{ $reportCourse }} @else All Courses @endif
-                <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
-            </button>
-            <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                 bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
-                <button type="button" @click="$wire.set('reportCourse',''); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
-                               hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Courses</button>
-                @foreach($this->availableCourses as $cCode)
-                <button type="button" @click="$wire.set('reportCourse','{{ $cCode }}'); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black
-                               hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $cCode }}</button>
-                @endforeach
+            {{-- Course dropdown --}}
+            <div class="relative" x-data="{ open:false }" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.reportCourse !== '' }"
+                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
+                    @if($reportCourse) {{ $reportCourse }} @else All Courses @endif
+                    <i class="fas fa-chevron-down text-[9px] opacity-50 transition-transform" :class="{'rotate-180':open}"></i>
+                </button>
+                <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
+                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px] shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1" style="display:none;">
+                    <button type="button" @click="$wire.set('reportCourse',''); open=false"
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
+                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">All Courses</button>
+                    @foreach($this->availableCourses as $cCode)
+                    <button type="button" @click="$wire.set('reportCourse','{{ $cCode }}'); open=false"
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
+                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $cCode }}</button>
+                    @endforeach
+                </div>
             </div>
-        </div>
 
-        <div class="relative" x-data="{ open:false }" @click.outside="open=false">
-            <button type="button" @click="open=!open"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold bg-white text-black cursor-pointer transition
-                           {{ $reportStatus !== '' ? 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]' : 'border-gray-200 hover:border-purple-300' }}">
-                @if($reportStatus === 'employed') Employed
-                @elseif($reportStatus === 'self_employed') Self-Employed
-                @elseif($reportStatus === 'unemployed') Unemployed
-                @elseif($reportStatus === 'no_record') No Record
-                @else All Status
-                @endif
-                <i class="fas fa-chevron-down text-[.62rem] opacity-60 transition-transform" :class="{'rotate-180':open}"></i>
-            </button>
-            <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                 bg-white border-[1.5px] border-[#E8E0F0] rounded-xl shadow-xl z-[600] p-1" style="display:none;">
-                @foreach([
-                    ['','All Status'],['employed','Employed'],['self_employed','Self-Employed'],
-                    ['unemployed','Unemployed'],['no_record','No Record']
-                ] as [$val,$lbl])
-                <button type="button" @click="$wire.set('reportStatus','{{ $val }}'); open=false"
-                        class="block w-full px-3 py-1.5 rounded-lg text-left text-xs font-semibold text-black hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportStatus === $val ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $lbl }}</button>
-                @endforeach
+            {{-- Status dropdown --}}
+            <div class="relative" x-data="{ open:false }" @click.outside="open=false">
+                <button type="button" @click="open=!open"
+                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.reportStatus !== '' }"
+                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
+                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
+                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
+                    @if($reportStatus === 'employed') Employed
+                    @elseif($reportStatus === 'self_employed') Self-Employed
+                    @elseif($reportStatus === 'unemployed') Unemployed
+                    @elseif($reportStatus === 'no_record') No Record
+                    @else All Status
+                    @endif
+                    <i class="fas fa-chevron-down text-[9px] opacity-50 transition-transform" :class="{'rotate-180':open}"></i>
+                </button>
+                <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
+                     bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px] shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1" style="display:none;">
+                    @foreach([
+                        ['','All Status'],['employed','Employed'],['self_employed','Self-Employed'],
+                        ['unemployed','Unemployed'],['no_record','No Record']
+                    ] as [$val,$lbl])
+                    <button type="button" @click="$wire.set('reportStatus','{{ $val }}'); open=false"
+                            class="block w-full px-3 py-1.5 rounded-[7px] text-left text-xs font-semibold text-[#111111]
+                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition {{ $reportStatus === $val ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">{{ $lbl }}</button>
+                    @endforeach
+                </div>
             </div>
-        </div>
 
-        <span class="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
-            {{ number_format($rrTotal) }} records
-        </span>
+            <span class="ml-auto text-xs font-semibold px-3 py-[7px] rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
+                {{ number_format($rrTotal) }} records
+            </span>
+        </div>
     </div>
 
     {{-- Summary cards --}}
@@ -1728,89 +1707,77 @@ new class extends Component {
     </div>
 
     {{-- Preview table --}}
-    <div class="flex-1 overflow-y-auto min-h-0 relative" style="scrollbar-width:thin;">
-        <div wire:loading wire:target="reportBatch,reportCourse,reportStatus,reportPage,reportPrev,reportNext"
-             class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none bg-white/60">
-            <div class="flex items-center gap-2.5 px-5 py-3 bg-white rounded-xl shadow-lg border border-[#E8E0F0]">
-                <svg class="animate-spin w-4 h-4 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-                <span class="text-xs font-semibold text-[#7A3F91]">Loading records…</span>
+    <div class="flex-1 overflow-y-auto min-h-0" style="scrollbar-width:thin;">
+        @if($recs->isEmpty())
+        <div class="flex flex-col items-center gap-3 py-20">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#F0E6F8]">
+                <i class="fas fa-file-circle-xmark text-xl" style="color:#c89de0;"></i>
             </div>
+            <p class="text-sm font-semibold text-black">No records match your filters</p>
+            <p class="text-xs text-black">Try adjusting the batch, course, or status filter above</p>
         </div>
-        <div wire:loading.remove wire:target="reportBatch,reportCourse,reportStatus,reportPage,reportPrev,reportNext">
-            @if($recs->isEmpty())
-            <div class="flex flex-col items-center gap-3 py-20">
-                <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#F0E6F8]">
-                    <i class="fas fa-file-circle-xmark text-xl" style="color:#c89de0;"></i>
-                </div>
-                <p class="text-sm font-semibold text-black">No records match your filters</p>
-                <p class="text-xs text-black">Try adjusting the batch, course, or status filter above</p>
-            </div>
-            @else
-            <table class="w-full border-collapse" style="min-width:680px;">
-                <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
-                    <tr class="border-b-2 border-[#E8E0F0]">
-                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">#</th>
-                        <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Name</th>
-                        <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Student ID</th>
-                        <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Course</th>
-                        <th class="px-3 py-2.5 text-center text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Batch</th>
-                        <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Status</th>
-                        <th class="px-3 pr-6 lg:pr-10 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Email Address</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                    @foreach($recs as $i => $r)
-                    @php
-                        $rowN      = ($recs->currentPage() - 1) * $recs->perPage() + $i + 1;
-                        $sLabel    = $empStatusMap[$r->employment_status ?? ''] ?? null;
-                        $fullName  = trim(
-                            strtoupper($r->last_name ?? '').', '.
-                            strtoupper($r->first_name ?? '').
-                            (!empty($r->middle_initial) ? ' '.strtoupper(substr($r->middle_initial,0,1)).'.' : '').
-                            (!empty($r->suffix) ? ' '.strtoupper($r->suffix) : '')
-                        );
-                    @endphp
-                    <tr class="transition-colors {{ $i % 2 === 0 ? 'bg-white' : 'bg-[#F9F7FC]/40' }} hover:bg-[#F5F0FA]">
-                        <td class="pl-6 lg:pl-10 pr-3 py-3">
-                            <span class="text-xs font-semibold text-[#7A3F91]/40">{{ str_pad($rowN,2,'0',STR_PAD_LEFT) }}</span>
-                        </td>
-                        <td class="px-3 py-3">
-                            <p class="font-semibold text-xs uppercase whitespace-nowrap text-black">{{ $fullName }}</p>
-                        </td>
-                        <td class="px-3 py-3">
-                            <p class="font-mono text-xs text-black">{{ $r->student_id ?? '—' }}</p>
-                        </td>
-                        <td class="px-3 py-3">
-                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F9F7FC] text-[#7A3F91]">{{ $r->course_code ?? '—' }}</span>
-                        </td>
-                        <td class="px-3 py-3 text-center">
-                            <span class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[#F9F7FC] text-[#7A3F91]">{{ $r->batch ?? '—' }}</span>
-                        </td>
-                        <td class="px-3 py-3">
-                            @if($sLabel)
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $sLabel[1] }}">
-                                    {{ $sLabel[0] }}
-                                </span>
-                            @else
-                                <span class="text-[10px] font-semibold text-black">No Record</span>
-                            @endif
-                        </td>
-                        <td class="px-3 pr-6 lg:pr-10 py-3">
-                            @if($r->email ?? null)
-                                <span class="text-[11px] text-black">{{ $r->email }}</span>
-                            @else
-                                <span class="text-[10px] text-black">—</span>
-                            @endif
-                        </td>
-                    </tr>
-                    @endforeach
-                </tbody>
-            </table>
-            @endif
-        </div>
+        @else
+        <table class="w-full border-collapse" style="min-width:680px;">
+            <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
+                <tr class="border-b-2 border-[#E8E0F0]">
+                    <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">#</th>
+                    <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Name</th>
+                    <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Student ID</th>
+                    <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Course</th>
+                    <th class="px-3 py-2.5 text-center text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Batch</th>
+                    <th class="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Status</th>
+                    <th class="px-3 pr-6 lg:pr-10 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-[#7A3F91]">Email Address</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                @foreach($recs as $i => $r)
+                @php
+                    $rowN      = ($recs->currentPage() - 1) * $recs->perPage() + $i + 1;
+                    $sLabel    = $empStatusMap[$r->employment_status ?? ''] ?? null;
+                    $fullName  = trim(
+                        strtoupper($r->last_name ?? '').', '.
+                        strtoupper($r->first_name ?? '').
+                        (!empty($r->middle_initial) ? ' '.strtoupper(substr($r->middle_initial,0,1)).'.' : '').
+                        (!empty($r->suffix) ? ' '.strtoupper($r->suffix) : '')
+                    );
+                @endphp
+                <tr class="transition-colors {{ $i % 2 === 0 ? 'bg-white' : 'bg-[#F9F7FC]/40' }} hover:bg-[#F5F0FA]">
+                    <td class="pl-6 lg:pl-10 pr-3 py-3">
+                        <span class="text-xs font-semibold text-[#7A3F91]/40">{{ str_pad($rowN,2,'0',STR_PAD_LEFT) }}</span>
+                    </td>
+                    <td class="px-3 py-3">
+                        <p class="font-semibold text-xs uppercase whitespace-nowrap text-black">{{ $fullName }}</p>
+                    </td>
+                    <td class="px-3 py-3">
+                        <p class="font-mono text-xs text-black">{{ $r->student_id ?? '—' }}</p>
+                    </td>
+                    <td class="px-3 py-3">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#F9F7FC] text-[#7A3F91]">{{ $r->course_code ?? '—' }}</span>
+                    </td>
+                    <td class="px-3 py-3 text-center">
+                        <span class="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[#F9F7FC] text-[#7A3F91]">{{ $r->batch ?? '—' }}</span>
+                    </td>
+                    <td class="px-3 py-3">
+                        @if($sLabel)
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $sLabel[1] }}">
+                                {{ $sLabel[0] }}
+                            </span>
+                        @else
+                            <span class="text-[10px] font-semibold text-black">No Record</span>
+                        @endif
+                    </td>
+                    <td class="px-3 pr-6 lg:pr-10 py-3">
+                        @if($r->email ?? null)
+                            <span class="text-[11px] text-black">{{ $r->email }}</span>
+                        @else
+                            <span class="text-[10px] text-black">—</span>
+                        @endif
+                    </td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
+        @endif
     </div>
 
     {{-- Report pagination footer --}}
@@ -2325,4 +2292,4 @@ new class extends Component {
     });
 
 })();
-</script>
+</script></div>

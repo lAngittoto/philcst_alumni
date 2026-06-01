@@ -71,8 +71,23 @@ new class extends Component {
         $this->page         = 1;
     }
 
-    public function updatingSearch():       void { $this->page = 1; }
-    public function updatingFilterStatus(): void { $this->page = 1; }
+    public function updatingSearch(): void
+    {
+        $this->page = 1;
+        // FIX: close any open modal when filters change to prevent ghost re-opens
+        $this->showViewModal    = false;
+        $this->viewingEventId   = null;
+        $this->viewingEventType = null;
+    }
+
+    public function updatingFilterStatus(): void
+    {
+        $this->page = 1;
+        // FIX: close any open modal when filters change to prevent ghost re-opens
+        $this->showViewModal    = false;
+        $this->viewingEventId   = null;
+        $this->viewingEventType = null;
+    }
 
     public function nextPage(): void
     {
@@ -372,9 +387,12 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="height: calc(100vh - 120px); overflow: hidden;">
+<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
 
 <style>
+/* ─────────────────────────────────────────────
+   FILTER SELECTS
+───────────────────────────────────────────── */
 select.filter-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
@@ -384,37 +402,323 @@ select.filter-input {
     -webkit-appearance: none;
     appearance: none;
 }
-.ev-hover-tip {
-    position: fixed;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s ease;
-    z-index: 99999;
-    transform: translate(14px, 14px);
-}
-.ev-hover-tip.visible { opacity: 1; }
+
+/* ─────────────────────────────────────────────
+   DETAIL PAGE ENTRANCE
+───────────────────────────────────────────── */
 @keyframes detailIn {
     from { opacity: 0; }
     to   { opacity: 1; }
 }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
+
+/* ─────────────────────────────────────────────
+   SHARE SHEET ENTRANCE
+───────────────────────────────────────────── */
 @keyframes panelIn {
     from { opacity: 0; transform: scale(.97) translateY(8px); }
     to   { opacity: 1; transform: none; }
 }
 .share-sheet { animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both; }
+
+/* ─────────────────────────────────────────────
+   SCROLLBAR
+───────────────────────────────────────────── */
 .scroll-thin::-webkit-scrollbar       { width: 4px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+
 .pre-wrap { white-space: pre-wrap; }
-html, body { overflow: hidden !important; height: 100% !important; }
+
+.share-modal-wrapper {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────
+   MOUSE-FOLLOWING "VIEW DETAILS" CURSOR LABEL
+───────────────────────────────────────────── */
+#ev-cursor-label {
+    position: fixed;
+    z-index: 99999;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #111827;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border-radius: 8px;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,.28);
+    user-select: none;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .1s ease, visibility .1s ease;
+    left: -999px;
+    top: -999px;
+}
+#ev-cursor-label svg {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* ─────────────────────────────────────────────
+   CARD HOVER STATE
+───────────────────────────────────────────── */
+[data-ev-card] {
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+[data-ev-card]:hover {
+    border-color: #c4b5d4 !important;
+    box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
+}
+
+/* ─────────────────────────────────────────────
+   CARDS BODY — always 90vh max, scrollable
+───────────────────────────────────────────── */
+.events-cards-body {
+    max-height: 90vh;
+    overflow-y: auto;
+    flex: 1 1 0;
+    min-height: 0;
+}
+.events-cards-body::-webkit-scrollbar       { width: 4px; }
+.events-cards-body::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+
+/* ─────────────────────────────────────────────
+   CARD SHARE BUTTON (bottom-right of card)
+   Tooltip ABOVE
+───────────────────────────────────────────── */
+.card-share-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s;
+    flex-shrink: 0;
+    z-index: 2;
+}
+.card-share-btn:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+    transform: scale(1.08);
+}
+/* Tooltip ABOVE */
+.card-share-btn .tip {
+    position: absolute;
+    bottom: calc(100% + 7px);
+    right: 0;
+    background: #111827;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.card-share-btn .tip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    right: 10px;
+    border: 4px solid transparent;
+    border-top-color: #111827;
+}
+.card-share-btn:hover .tip { opacity: 1; }
+
+/* ─────────────────────────────────────────────
+   STATUS BADGES on cards
+───────────────────────────────────────────── */
+.badge-card-upcoming {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(37,99,235,0.88);
+    color: #fff;
+    backdrop-filter: blur(4px);
+}
+.badge-card-completed {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(21,128,61,0.88);
+    color: #fff;
+    backdrop-filter: blur(4px);
+}
+
+/* ─────────────────────────────────────────────
+   DETAIL PAGE — purple top bar action buttons
+   Tooltips BELOW the button
+───────────────────────────────────────────── */
+.detail-top-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    flex-shrink: 0;
+    border: none;
+    outline: none;
+}
+.detail-top-btn:active { transform: scale(.93); }
+
+/* Tooltip BELOW */
+.detail-top-btn .tip {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: #111827;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+/* Arrow pointing UP (tooltip is below button) */
+.detail-top-btn .tip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    right: 10px;
+    border: 4px solid transparent;
+    border-bottom-color: #111827;
+}
+.detail-top-btn:hover .tip { opacity: 1; }
+
+/* Share variant */
+.detail-top-btn.share-btn {
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.2);
+    color: #fff;
+}
+.detail-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
+
+/* RSVP variant */
+.detail-top-btn.rsvp-btn {
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.2);
+    color: #fff;
+}
+.detail-top-btn.rsvp-btn:hover { background: rgba(255,255,255,.24); }
+
+/* Close variant */
+.detail-top-btn.close-btn {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.15);
+}
+.detail-top-btn.close-btn:hover { background: rgba(255,255,255,.22); }
+.detail-top-btn.close-btn svg {
+    width: 13px;
+    height: 13px;
+    stroke: #fff;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+}
+
+/* ─────────────────────────────────────────────
+   SHARE MODAL — purple close button
+───────────────────────────────────────────── */
+.btn-close-purple {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.25);
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    flex-shrink: 0;
+}
+.btn-close-purple:hover  { background: rgba(255,255,255,0.28); }
+.btn-close-purple:active { transform: scale(.93); }
+.btn-close-purple svg    { width: 13px; height: 13px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
+
+/* ─────────────────────────────────────────────
+   DETAIL PAGE — force sans-serif everywhere
+───────────────────────────────────────────── */
+.detail-page * {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif !important;
+    font-style: normal !important;
+}
+.detail-header-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+    line-height: 1;
+    margin-bottom: 2px;
+    display: block;
+}
+.detail-header-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.detail-label { font-style: italic; }
 </style>
 
-<div id="ev-hover-tip"
-     class="ev-hover-tip bg-gray-900 text-white text-[11px] font-semibold tracking-wide px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap">
-    <i class="fas fa-eye mr-1" style="font-size:.75rem;"></i>View Details
+{{-- Mouse-following cursor label --}}
+<div id="ev-cursor-label">
+    <svg viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
+    View Details
 </div>
 
-{{-- FLASH TOAST --}}
+{{-- ── FLASH TOAST ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show" x-cloak
@@ -440,8 +744,8 @@ html, body { overflow: hidden !important; height: 100% !important; }
     </button>
 </div>
 
-{{-- MAIN LAYOUT --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0 overflow-hidden">
+{{-- ══ MAIN LAYOUT ══ --}}
+<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- PAGE HEADER --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
@@ -453,42 +757,36 @@ html, body { overflow: hidden !important; height: 100% !important; }
                 <h1 class="text-xl font-semibold tracking-tight text-gray-900">Upcoming Events</h1>
                 <p class="text-sm leading-relaxed mt-0.5 text-gray-700">
                     Events available for
-                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-800 border border-gray-200">
-                        <i class="fas fa-building-columns text-[9px]"></i>
+                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
                         {{ $alumniCollege ?: 'your college' }}
                     </span>
                 </p>
             </div>
         </div>
-        <div class="flex items-center gap-2.5 flex-wrap">
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-gray-200 bg-gray-50 text-gray-700 uppercase tracking-wide">
-                <i class="fas fa-calendar-check text-gray-500 text-[10px]"></i>
-                {{ $this->events->count() }} Event{{ $this->events->count() !== 1 ? 's' : '' }}
-            </span>
-        </div>
     </div>
 
-    {{-- CONTENT BLOCK --}}
-    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-gray-200 shadow-sm">
+    {{-- ══ CONTENT BLOCK ══ --}}
+    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
-        {{-- FILTER BAR --}}
-        <div class="bg-gray-100 border-b border-gray-200 px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
+        {{-- ── FILTER BAR ── --}}
+        <div class="bg-gray-100 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
-            {{-- Search --}}
+            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
-                       placeholder="Search title or venue…"
+                <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
+                       placeholder="Title, venue…"
                        class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                              hover:border-gray-300 focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200 transition"
+                              hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
             <select wire:model.live="filterStatus"
                     class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                           hover:border-gray-300 focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200 transition cursor-pointer">
+                           hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                 <option value="">All Events</option>
                 <option value="upcoming">Upcoming</option>
                 <option value="completed">Completed</option>
@@ -505,7 +803,7 @@ html, body { overflow: hidden !important; height: 100% !important; }
                     <i class="fas fa-rotate-left text-xs"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
-                    <svg class="animate-spin w-3.5 h-3.5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg class="animate-spin w-3.5 h-3.5 text-[#7a3f91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
                     </svg>
@@ -515,41 +813,38 @@ html, body { overflow: hidden !important; height: 100% !important; }
 
         </div>
 
-        {{-- CARDS BODY --}}
-        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto scroll-thin">
-
-            <div wire:loading
-                 wire:target="search,filterStatus,resetFilters,nextPage,previousPage"
-                 class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none bg-gray-100/70">
-                <div class="flex items-center gap-2.5 px-5 py-3 bg-white rounded-xl shadow border border-gray-200">
-                    <svg class="animate-spin w-4 h-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                    <span class="text-xs font-semibold text-gray-700">Loading events…</span>
-                </div>
-            </div>
+        {{-- ── CARDS BODY ── --}}
+        <div class="events-cards-body bg-gray-100 p-4 relative">
 
             @if($this->pagedEvents->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 @foreach($this->pagedEvents as $event)
                 @php
-                    $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
-                                   (!$event->event_end_date && $event->event_date <= now('UTC'));
+                    $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
+                                    (!$event->event_end_date && $event->event_date <= now('UTC'));
                     $eventDate    = $event->event_date->setTimezone('Asia/Manila');
                     $eventEndDate = $event->event_end_date?->setTimezone('Asia/Manila');
                     $postedAgo    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila')->diffForHumans();
                     $timeDisplay  = $eventDate->format('g:i A') . ($eventEndDate ? ' – ' . $eventEndDate->format('g:i A') : '');
                     $hasPhoto     = !empty($event->photo_url);
+                    $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 80) : null;
                 @endphp
 
-                <div class="bg-white border border-gray-200 rounded-xl shadow-sm hover:border-gray-400 hover:shadow-md
-                            transition-all duration-150 overflow-hidden cursor-pointer relative select-none flex flex-col"
+                {{--
+                    FIX: Removed wire:click from the outer div entirely.
+                    Only the "View Details" cursor label triggers viewEvent now.
+                    The share button uses wire:click.stop to prevent card-level click.
+                    This eliminates the double-fire that caused the modal auto-open bug.
+                --}}
+                <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
+                            cursor-pointer relative select-none flex flex-col group"
                      data-ev-card
-                     wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')"
+                     data-ev-id="{{ $event->id }}"
+                     data-ev-type="{{ $event->event_source }}"
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
+                    {{-- Photo or gradient banner --}}
                     @if($hasPhoto)
                     <div class="relative w-full flex-shrink-0" style="height:130px;">
                         <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
@@ -558,12 +853,12 @@ html, body { overflow: hidden !important; height: 100% !important; }
                              style="background:linear-gradient(to top,rgba(0,0,0,.45),transparent);"></div>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-700/90 backdrop-blur-sm text-white">
-                                    <i class="fas fa-circle-check text-[8px]"></i> Completed
+                                <span class="badge-card-completed">
+                                    <i class="fas fa-circle-check text-[11px]"></i> Completed
                                 </span>
                             @else
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-600/90 backdrop-blur-sm text-white">
-                                    <i class="fas fa-calendar-check text-[8px]"></i> Upcoming
+                                <span class="badge-card-upcoming">
+                                    <i class="fas fa-calendar-check text-[11px]"></i> Upcoming
                                 </span>
                             @endif
                         </div>
@@ -574,12 +869,12 @@ html, body { overflow: hidden !important; height: 100% !important; }
                         <i class="fas fa-calendar-days text-white/20 text-3xl"></i>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-700/90 text-white">
-                                    <i class="fas fa-circle-check text-[8px]"></i> Completed
+                                <span class="badge-card-completed">
+                                    <i class="fas fa-circle-check text-[11px]"></i> Completed
                                 </span>
                             @else
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-600/90 text-white">
-                                    <i class="fas fa-calendar-check text-[8px]"></i> Upcoming
+                                <span class="badge-card-upcoming">
+                                    <i class="fas fa-calendar-check text-[11px]"></i> Upcoming
                                 </span>
                             @endif
                         </div>
@@ -587,7 +882,8 @@ html, body { overflow: hidden !important; height: 100% !important; }
                     @endif
 
                     <div class="flex flex-col flex-1 p-4 gap-2">
-                        <h3 class="font-semibold text-base leading-snug line-clamp-2 text-gray-900">{{ $event->title }}</h3>
+
+                        <h3 class="font-normal text-base leading-snug line-clamp-2 text-gray-900">{{ $event->title }}</h3>
 
                         <div class="flex flex-wrap gap-1.5">
                             <span class="inline-flex items-center text-sm font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-900">
@@ -612,38 +908,33 @@ html, body { overflow: hidden !important; height: 100% !important; }
                             <i class="fas fa-users text-[10px] mr-1 text-gray-500"></i>{{ Str::limit($event->target_participants, 40) }}
                         </p>
                         @else
-                        <p class="text-sm text-gray-400 italic">No target specified</p>
+                        <p class="text-sm text-gray-500 italic">No target specified</p>
                         @endif
 
-                        @if($event->description)
-                        <p class="text-sm line-clamp-2 leading-relaxed text-gray-700">
-                            {{ Str::limit(strip_tags($event->description), 80) }}
-                        </p>
+                        @if($descPreview)
+                        <p class="text-sm line-clamp-2 leading-relaxed text-gray-700">{{ $descPreview }}</p>
                         @endif
 
-                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto">
-                            <div class="flex flex-col gap-0.5">
+                        {{-- Card footer --}}
+                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto gap-2">
+                            {{-- Left: posted ago + attending count --}}
+                            <div class="flex flex-col gap-0.5 min-w-0">
                                 <span class="text-xs text-gray-500">{{ $postedAgo }}</span>
                                 <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
                                     <i class="fas fa-circle-check text-[9px]"></i>
                                     {{ $event->confirmed_count }} Attending
                                 </span>
                             </div>
-                            <button type="button"
-                                    data-ev-share
-                                    wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
-                                    class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg z-[2] flex-shrink-0 group transition
-                                           {{ $isCompleted
-                                               ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100'
-                                               : 'border border-gray-200 bg-gray-50 text-gray-600 hover:border-gray-300 hover:bg-gray-100' }}">
-                                <span class="absolute bottom-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold
-                                             px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100
-                                             transition shadow-md after:content-[''] after:absolute after:top-full after:right-2
-                                             after:border-4 after:border-transparent after:border-t-gray-900">
-                                    {{ $isCompleted ? 'Highlights' : 'Share' }}
-                                </span>
-                                <i class="fas {{ $isCompleted ? 'fa-trophy' : 'fa-share-nodes' }} text-[11px]"></i>
-                            </button>
+                            {{-- Right: share button only — cursor label handles View Details --}}
+                            <div class="flex items-center gap-1.5 flex-shrink-0 z-[2]">
+                                <button type="button"
+                                        data-ev-share
+                                        wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
+                                        class="card-share-btn">
+                                    <i class="fas fa-share-nodes text-[11px]"></i>
+                                    <span class="tip">Share</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -658,26 +949,24 @@ html, body { overflow: hidden !important; height: 100% !important; }
                 <div>
                     <p class="font-semibold text-base text-gray-700">
                         @if($search || $filterStatus !== '') No events match your filters
-                        @else No events found
-                        @endif
+                        @else No events found @endif
                     </p>
                     <p class="text-sm mt-1 text-gray-500">
                         @if($search || $filterStatus !== '') Try clearing your filters to see all available events.
-                        @else Check back soon — new events will appear here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>.
-                        @endif
+                        @else Check back soon — new events will appear here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>. @endif
                     </p>
                 </div>
                 @if($search || $filterStatus !== '')
                 <button wire:click="resetFilters"
                         class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
+                    Clear Filters
                 </button>
                 @endif
             </div>
             @endif
         </div>
 
-        {{-- PAGINATION BAR --}}
+        {{-- ══ PAGINATION BAR ══ --}}
         @if($filterStatus !== 'upcoming')
         @php
             $total   = $this->events->count();
@@ -689,47 +978,55 @@ html, body { overflow: hidden !important; height: 100% !important; }
         @endphp
         <div class="flex items-center justify-between gap-2 flex-wrap px-5 min-h-[48px]
                     bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0">
+
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
                 of <strong class="text-white font-bold">{{ $total }}</strong>
                 event{{ $total !== 1 ? 's' : '' }}
             </p>
+
             <div class="flex items-center gap-1 flex-wrap">
                 <button wire:click="previousPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                               bg-white/15 border border-white/25 text-white hover:bg-white/28 hover:border-white/50
-                               disabled:opacity-35 disabled:cursor-not-allowed transition"
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if($page <= 1) disabled @endif aria-label="Previous">
                     <i class="fas fa-chevron-left text-[9px]"></i>
                 </button>
+
                 @if($pgStart > 1)
                     <button wire:click="$set('page', 1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
+
                 @for($p = $pgStart; $p <= $pgEnd; $p++)
                     @if($p === $page)
-                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
+                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                     bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
                         <button wire:click="$set('page', {{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
                 @endfor
+
                 @if($pgEnd < $tp)
                     @if($pgEnd < $tp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                     <button wire:click="$set('page', {{ $tp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $tp }}</button>
                 @endif
+
                 <button wire:click="nextPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                               bg-white/15 border border-white/25 text-white hover:bg-white/28 hover:border-white/50
-                               disabled:opacity-35 disabled:cursor-not-allowed transition"
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if($page >= $tp) disabled @endif aria-label="Next">
                     <i class="fas fa-chevron-right text-[9px]"></i>
                 </button>
+
                 <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
                     Page {{ $page }}/{{ $tp }}
                 </span>
@@ -738,12 +1035,10 @@ html, body { overflow: hidden !important; height: 100% !important; }
         @endif
 
     </div>{{-- end content-block --}}
-</div>{{-- end main layout --}}
+</div>
 
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     VIEW EVENT — FULL SCREEN, NO SCROLL, TABLE LAYOUT
-══════════════════════════════════════════════════════════════════════════ --}}
+{{-- ══ FULL-SCREEN EVENT DETAIL ══ --}}
 @if($showViewModal && $this->viewingEvent)
 @php
     $event        = $this->viewingEvent;
@@ -756,230 +1051,180 @@ html, body { overflow: hidden !important; height: 100% !important; }
     $timeDisplay  = $eventDate->format('g:i A') . ($eventEndDate ? ' – ' . $eventEndDate->format('g:i A') : '');
     $createdPH    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila');
     $rsvpLabel    = 'Not responded';
-    $rsvpColor    = 'text-gray-400';
+    $rsvpColor    = 'text-gray-900 font-semibold';
     if ($alumniRsvp) {
         $rsvpLabel = $alumniRsvp->response;
         $rsvpColor = match($alumniRsvp->response) {
-            'CONFIRMED' => 'text-emerald-700', 'DECLINED' => 'text-red-600', 'TENTATIVE' => 'text-amber-600', default => 'text-gray-500'
+            'CONFIRMED' => 'text-emerald-700 font-bold',
+            'DECLINED'  => 'text-red-600 font-bold',
+            'TENTATIVE' => 'text-amber-600 font-bold',
+            default     => 'text-gray-900 font-semibold'
         };
     }
+    $hasDesc    = !empty($event->description);
+    $hasNotes   = !empty($event->notes);
+    $hasContact = $event->contact_person || $event->contact_email || $event->contact_phone;
 @endphp
 
-<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-white overflow-hidden"
+<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-hidden"
      @keydown.escape.window="$wire.closeViewModal()">
 
     {{-- Purple top bar --}}
-    <div class="flex items-center justify-between px-6 h-[54px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
-        <span class="text-base text-white font-semibold truncate flex-1 min-w-0">{{ $event->title }}</span>
+    <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
+
+        <div class="flex flex-col justify-center flex-1 min-w-0">
+            <span class="detail-header-label">Event</span>
+            <span class="detail-header-title">{{ $event->title }}</span>
+        </div>
+
         <div class="flex items-center gap-1.5 flex-shrink-0">
-            <button type="button"
-                    wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
-                    class="group relative w-9 h-9 rounded-lg flex items-center justify-center
-                           bg-white/12 border border-white/22 text-white hover:bg-white/24 transition cursor-pointer">
-                <span class="absolute top-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold uppercase
-                             tracking-wide px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0
-                             group-hover:opacity-100 transition shadow-md z-[200]
-                             before:content-[''] before:absolute before:bottom-full before:right-2.5
-                             before:border-4 before:border-transparent before:border-b-gray-900">
-                    {{ $isCompleted ? 'Highlights' : 'Share' }}
-                </span>
-                <i class="fas {{ $isCompleted ? 'fa-trophy' : 'fa-share-nodes' }} text-[14px]"></i>
+            {{-- Share — tooltip BELOW --}}
+            <button type="button" wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
+                    class="detail-top-btn share-btn"
+                    aria-label="Share">
+                <i class="fas fa-share-nodes text-[13px] text-white"></i>
+                <span class="tip">Share</span>
             </button>
+            {{-- RSVP — tooltip BELOW --}}
             @if(!$isCompleted)
             <button type="button" wire:click="openRsvpModal"
-                    class="group relative w-9 h-9 rounded-lg flex items-center justify-center
-                           bg-white/12 border border-white/22 text-white hover:bg-white/24 transition cursor-pointer">
-                <span class="absolute top-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold uppercase
-                             tracking-wide px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0
-                             group-hover:opacity-100 transition shadow-md z-[200]
-                             before:content-[''] before:absolute before:bottom-full before:right-2.5
-                             before:border-4 before:border-transparent before:border-b-gray-900">
-                    {{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}
-                </span>
-                <i class="fas fa-calendar-plus text-[14px]"></i>
+                    class="detail-top-btn rsvp-btn"
+                    aria-label="{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}">
+                <i class="fas fa-calendar-plus text-[13px] text-white"></i>
+                <span class="tip">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
             </button>
             @endif
+            {{-- Close — tooltip BELOW --}}
             <button type="button" wire:click="closeViewModal"
-                    class="group relative w-9 h-9 rounded-lg flex items-center justify-center
-                           bg-white/12 border border-white/22 text-white hover:bg-white/24 transition cursor-pointer">
-                <span class="absolute top-[calc(100%+6px)] right-0 bg-gray-900 text-white text-[10px] font-bold uppercase
-                             tracking-wide px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0
-                             group-hover:opacity-100 transition shadow-md z-[200]
-                             before:content-[''] before:absolute before:bottom-full before:right-2.5
-                             before:border-4 before:border-transparent before:border-b-gray-900">
-                    Close
-                </span>
-                <i class="fas fa-xmark text-[15px]"></i>
+                    class="detail-top-btn close-btn"
+                    aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <span class="tip">Close</span>
             </button>
         </div>
     </div>
 
-    {{-- Title + status badges row --}}
-    <div class="bg-white border-b border-gray-200 px-6 py-3 flex-shrink-0">
-        <h2 class="text-2xl font-bold text-gray-900 leading-tight mb-2">{{ $event->title }}</h2>
-        <div class="flex flex-wrap gap-2">
+    {{-- White hero --}}
+    <div class="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0">
+        <h2 class="text-2xl font-semibold text-gray-900 leading-snug mb-3">{{ $event->title }}</h2>
+        <div class="flex flex-wrap gap-1.5">
             @if($isCompleted)
-                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-green-50 border border-green-200 text-green-700">
-                    <i class="fas fa-circle-check text-[9px]"></i> Completed
+                <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-green-200 bg-green-50 text-green-700">
+                    <i class="fas fa-circle-check mr-1 text-[10px]"></i>Completed
                 </span>
             @else
-                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700">
-                    <i class="fas fa-calendar-check text-[9px]"></i> Upcoming
+                <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700">
+                    <i class="fas fa-calendar-check mr-1 text-[10px]"></i>Upcoming
                 </span>
             @endif
             @if($event->target_participants)
-                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-gray-100 border border-gray-200 text-gray-700">
-                    <i class="fas fa-users text-[9px]"></i> {{ Str::limit($event->target_participants, 50) }}
-                </span>
+                @foreach(explode(',', $event->target_participants) as $part)
+                    <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-gray-200 bg-white text-gray-900">{{ trim($part) }}</span>
+                @endforeach
             @endif
         </div>
     </div>
 
-    {{-- BODY: two-column grid, NO scroll --}}
-    <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
-
-        {{-- Photo banner --}}
-        @if($hasPhoto)
-        <div class="flex-shrink-0 border-b border-gray-200 bg-gray-50" style="height:170px;">
-            <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                 class="w-full h-full object-cover" style="display:block;">
+    {{-- Info strip --}}
+    <div class="bg-white border-b border-gray-200 flex flex-wrap flex-shrink-0">
+        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Date</span>
+            <span class="text-base font-semibold text-gray-900">{{ $eventDate->format('M d, Y') }}</span>
+            <span class="text-sm text-gray-900">{{ $timeDisplay }}</span>
         </div>
-        @endif
+        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Venue</span>
+            <span class="text-base font-semibold text-gray-900">{{ $event->venue ?: '—' }}</span>
+            @if($event->venue_address)
+                <span class="text-sm text-gray-900">{{ $event->venue_address }}</span>
+            @endif
+        </div>
+        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Open For</span>
+            <span class="text-base font-semibold text-gray-900">{{ $event->target_participants ?: '—' }}</span>
+        </div>
+        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Responses</span>
+            <span class="text-base font-bold text-emerald-600">{{ $event->confirmed_count }} Attending</span>
+            <span class="text-sm text-gray-900">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</span>
+        </div>
+        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Your RSVP</span>
+            <span class="text-base {{ $rsvpColor }}">{{ $rsvpLabel }}</span>
+            @if(!$isCompleted)
+                <button wire:click="openRsvpModal"
+                        class="text-xs font-semibold text-violet-700 hover:underline cursor-pointer text-left">
+                    {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
+                </button>
+            @endif
+        </div>
+        <div class="flex-1 min-w-[110px] px-5 py-3 flex flex-col gap-0.5">
+            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Posted</span>
+            <span class="text-base font-semibold text-gray-900">{{ $createdPH->format('M d, Y') }}</span>
+            <span class="text-sm text-gray-900">{{ $createdPH->diffForHumans() }}</span>
+        </div>
+    </div>
 
-        {{-- Two-column info grid --}}
-        <div class="flex-1 min-h-0 overflow-hidden grid grid-cols-2 divide-x divide-gray-100">
+    {{-- Scrollable content --}}
+    <div class="flex-1 overflow-y-auto bg-gray-100 scroll-thin min-h-0">
+        <div class="max-w-[1100px] mx-auto px-5 py-4 pb-8 flex flex-col gap-4">
 
-            {{-- LEFT: event details --}}
-            <div class="flex flex-col divide-y divide-gray-100 overflow-hidden">
+            @if($hasPhoto)
+            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
+                     class="w-full object-cover" style="max-height:320px;display:block;">
+            </div>
+            @endif
 
-                {{-- Date & Time --}}
-                <div class="flex items-start gap-3 px-5 py-3 flex-shrink-0">
-                    <i class="fas fa-calendar text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-0.5">Date & Time</p>
-                        <p class="text-sm font-semibold text-gray-900">{{ $eventDate->format('F d, Y') }}</p>
-                        <p class="text-sm text-gray-800">{{ $timeDisplay }}</p>
-                    </div>
+            @if($hasDesc)
+            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                    <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">About This Event</span>
                 </div>
+                <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $event->description }}</div>
+            </div>
+            @endif
 
-                {{-- Venue --}}
-                <div class="flex items-start gap-3 px-5 py-3 flex-shrink-0">
-                    <i class="fas fa-location-dot text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-0.5">Venue</p>
-                        <p class="text-sm font-semibold text-gray-900">{{ $event->venue ?: '—' }}</p>
-                        @if($event->venue_address)
-                            <p class="text-xs text-gray-600 mt-0.5">{{ $event->venue_address }}</p>
-                        @endif
+            @if($hasNotes || $hasContact)
+            <div class="{{ ($hasNotes && $hasContact) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
+                @if($hasNotes)
+                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Additional Notes</span>
                     </div>
-                </div>
-
-                {{-- Open For --}}
-                @if($event->target_participants)
-                <div class="flex items-start gap-3 px-5 py-3 flex-shrink-0">
-                    <i class="fas fa-users text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-0.5">Open For</p>
-                        <p class="text-sm text-gray-900">{{ $event->target_participants }}</p>
-                    </div>
+                    <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $event->notes }}</div>
                 </div>
                 @endif
-
-                {{-- Responses + RSVP --}}
-                <div class="flex divide-x divide-gray-100 flex-shrink-0">
-                    <div class="flex-1 flex items-start gap-3 px-5 py-3">
-                        <i class="fas fa-chart-bar text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                        <div>
-                            <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-1">Responses</p>
-                            <div class="flex flex-wrap gap-x-3 gap-y-0.5">
-                                <span class="text-xs font-bold text-emerald-600"><i class="fas fa-check text-[8px] mr-0.5"></i>{{ $event->confirmed_count }} Yes</span>
-                                <span class="text-xs font-bold text-amber-600">{{ $event->tentative_count }} Maybe</span>
-                                <span class="text-xs font-bold text-red-500">{{ $event->declined_count }} No</span>
-                            </div>
-                        </div>
+                @if($hasContact)
+                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Contact Information</span>
                     </div>
-                    <div class="flex-1 flex items-start gap-3 px-5 py-3">
-                        <i class="fas fa-clipboard-check text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                        <div>
-                            <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-0.5">Your RSVP</p>
-                            <p class="text-sm font-bold {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
-                            @if(!$isCompleted)
-                                <button wire:click="openRsvpModal"
-                                        class="text-xs text-gray-500 font-semibold hover:text-gray-800 hover:underline cursor-pointer">
-                                    {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
-                                </button>
-                            @endif
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Posted --}}
-                <div class="flex items-start gap-3 px-5 py-3 flex-shrink-0">
-                    <i class="fas fa-clock text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-0.5">Posted</p>
-                        <p class="text-sm text-gray-900">{{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
-                        <p class="text-xs text-gray-400">{{ $createdPH->diffForHumans() }}</p>
-                    </div>
-                </div>
-
-                {{-- Contact --}}
-                @if($event->contact_person || $event->contact_email || $event->contact_phone)
-                <div class="flex items-start gap-3 px-5 py-3 flex-shrink-0">
-                    <i class="fas fa-address-card text-gray-400 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-1">Contact</p>
+                    <div class="px-5 py-4 flex flex-col gap-2">
                         @if($event->contact_person)
-                            <p class="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                                <i class="fas fa-user text-gray-400 text-[10px]"></i>{{ $event->contact_person }}
+                            <p class="text-base font-semibold text-gray-900 flex items-center gap-2">
+                                <i class="fas fa-user text-gray-400 text-sm"></i>{{ $event->contact_person }}
                             </p>
                         @endif
                         @if($event->contact_email)
-                            <p class="text-sm text-gray-800 flex items-center gap-1.5 mt-0.5">
-                                <i class="fas fa-envelope text-gray-400 text-[10px]"></i>{{ $event->contact_email }}
+                            <p class="text-base text-gray-900 flex items-center gap-2">
+                                <i class="fas fa-envelope text-gray-400 text-sm"></i>{{ $event->contact_email }}
                             </p>
                         @endif
                         @if($event->contact_phone)
-                            <p class="text-sm text-gray-800 flex items-center gap-1.5 mt-0.5">
-                                <i class="fas fa-phone text-gray-400 text-[10px]"></i>{{ $event->contact_phone }}
+                            <p class="text-base text-gray-900 flex items-center gap-2">
+                                <i class="fas fa-phone text-gray-400 text-sm"></i>{{ $event->contact_phone }}
                             </p>
                         @endif
                     </div>
                 </div>
                 @endif
-
             </div>
+            @endif
 
-            {{-- RIGHT: Description + Notes --}}
-            <div class="flex flex-col divide-y divide-gray-100 overflow-hidden">
-
-                @if($event->description)
-                <div class="flex flex-col flex-1 min-h-0 px-5 py-3 overflow-hidden">
-                    <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-2 flex-shrink-0">About This Event</p>
-                    <p class="text-sm text-gray-900 leading-relaxed overflow-hidden"
-                       style="display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;">{{ trim($event->description) }}</p>
-                </div>
-                @endif
-
-                @if($event->notes)
-                <div class="flex-shrink-0 px-5 py-3 bg-amber-50/40">
-                    <p class="text-[10px] font-bold uppercase tracking-[.1em] text-gray-400 mb-2">Additional Notes</p>
-                    <p class="text-sm text-gray-900 leading-relaxed overflow-hidden"
-                       style="display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;">{{ trim($event->notes) }}</p>
-                </div>
-                @endif
-
-                @if(!$event->description && !$event->notes)
-                <div class="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6 py-8">
-                    <div class="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center">
-                        <i class="fas fa-file-circle-question text-lg text-gray-300"></i>
-                    </div>
-                    <p class="text-sm font-medium text-gray-500">No additional details provided.</p>
-                </div>
-                @endif
-
-            </div>
-
+            <p class="text-center text-xs text-gray-500">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
         </div>
     </div>
 
@@ -987,22 +1232,24 @@ html, body { overflow: hidden !important; height: 100% !important; }
 @endif
 
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     RSVP MODAL
-══════════════════════════════════════════════════════════════════════════ --}}
+{{-- ══ RSVP MODAL ══ --}}
 @if($showRsvpModal)
 <div class="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeRsvpModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden relative"
          style="animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both;">
-        <button wire:click="closeRsvpModal" type="button"
-                class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition text-white z-10 cursor-pointer">
-            <i class="fas fa-xmark text-base"></i>
-        </button>
         <div class="px-6 py-5 border-b border-white/10" style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-            <h2 class="text-lg font-semibold text-white flex items-center gap-2">
-                <i class="fas fa-clipboard-check text-white/80"></i> Confirm Your RSVP
-            </h2>
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                    <i class="fas fa-calendar-plus text-white/80"></i> Confirm Your RSVP
+                </h2>
+                <button wire:click="closeRsvpModal" type="button"
+                        class="detail-top-btn close-btn" aria-label="Close">
+                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2L12 12M12 2L2 12"/>
+                    </svg>
+                </button>
+            </div>
             <p class="text-sm text-white/70 mt-0.5">Let us know if you're attending this event</p>
         </div>
         <div class="px-6 py-5 space-y-3">
@@ -1045,7 +1292,7 @@ html, body { overflow: hidden !important; height: 100% !important; }
                 </label>
                 <textarea wire:model="rsvpMessage" rows="2"
                           placeholder="Add a personal note or question…"
-                          class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 transition resize-none text-gray-900"
+                          class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-none text-gray-900"
                           maxlength="200"></textarea>
                 <p class="text-xs mt-1 text-gray-400">{{ strlen($rsvpMessage) }}/200</p>
             </div>
@@ -1061,18 +1308,18 @@ html, body { overflow: hidden !important; height: 100% !important; }
 @endif
 
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     SHARE / HIGHLIGHTS MODAL
-══════════════════════════════════════════════════════════════════════════ --}}
+{{-- ══ SHARE MODAL ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->eventsBaseUrl();
-    $shareDescPreview = mb_strlen($shareDescription) > 160
-        ? mb_substr($shareDescription, 0, 160) . '…'
+    $shareHost        = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+    $shTimeStr        = $shareTime . ($shareEndTime ? ' – ' . $shareEndTime : '');
+    $isCompleted      = $shareIsCompleted;
+
+    $descLimit        = 160;
+    $shareDescPreview = mb_strlen($shareDescription) > $descLimit
+        ? mb_substr($shareDescription, 0, $descLimit) . '…'
         : $shareDescription;
-    $shTimeStr   = $shareTime . ($shareEndTime ? ' – ' . $shareEndTime : '');
-    $shareHost   = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
-    $isCompleted = $shareIsCompleted;
 
     $fbLines = [];
     if ($isCompleted) {
@@ -1094,214 +1341,189 @@ html, body { overflow: hidden !important; height: 100% !important; }
     }
     $fbLines[]  = $shareBaseUrl;
     $fbPostText = implode("\n", $fbLines);
-    $fbShareUrl = 'https://www.facebook.com/sharer/sharer.php?u=' . urlencode($shareBaseUrl);
 
     $hasRealPhoto = $sharePhotoUrl
         && !str_contains($sharePhotoUrl, 'default')
         && str_contains($sharePhotoUrl, '/storage/');
 @endphp
 
-<div wire:ignore
-     class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm"
+<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm"
      x-data="{
-         copied: false, fbCopied: false, messengerCopied: false,
-         showFallback: false, fallbackText: '',
-         fbText:   {{ json_encode($fbPostText) }},
-         baseUrl:  {{ json_encode($shareBaseUrl) }},
-         fbUrl:    {{ json_encode($fbShareUrl) }},
-         photoUrl: {{ json_encode($sharePhotoUrl) }},
-         hasPhoto: {{ $hasRealPhoto ? 'true' : 'false' }},
-         async copyPlainText(text) {
+         copied:false, fbCopied:false, messengerCopied:false,
+         fbText:  {{ json_encode($fbPostText) }},
+         baseUrl: {{ json_encode($shareBaseUrl) }},
+         photoUrl:{{ json_encode($sharePhotoUrl) }},
+         hasPhoto:{{ $hasRealPhoto ? 'true' : 'false' }},
+         async copyText(text) {
              try {
                  if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); }
                  else {
                      const ta = document.createElement('textarea');
-                     ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+                     ta.value = text; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
                      document.body.appendChild(ta); ta.focus(); ta.select();
-                     const ok = document.execCommand('copy'); document.body.removeChild(ta);
-                     if(!ok) throw new Error('execCommand failed');
+                     document.execCommand('copy'); document.body.removeChild(ta);
                  }
-                 return true;
-             } catch(e) { this.fallbackText=text; this.showFallback=true; return false; }
-         },
-         async copyWithImage(text, imageUrl) {
-             try {
-                 if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write && imageUrl && this.hasPhoto) {
-                     const htmlContent = '<img src=\''+imageUrl+'\' style=\'max-width:600px;display:block;margin-bottom:12px;\'><pre style=\'font-family:inherit;white-space:pre-wrap;\'>'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>';
-                     const htmlBlob = new Blob([htmlContent], {type:'text/html'});
-                     const textBlob = new Blob([text], {type:'text/plain'});
-                     await navigator.clipboard.write([new ClipboardItem({'text/html':htmlBlob,'text/plain':textBlob})]);
-                     return true;
-                 }
-             } catch(e) { console.warn('Rich copy failed:', e); }
-             return await this.copyPlainText(text);
+             } catch(e) { console.warn('Copy failed', e); }
          },
          async shareOnFacebook() {
-             await this.copyWithImage(this.fbText, this.photoUrl); this.fbCopied = true;
-             setTimeout(() => {
-                 const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-                 const popup = window.open(this.fbUrl,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-                 if(!popup||popup.closed) window.open(this.fbUrl,'_blank');
-             }, 150);
+             await this.copyText(this.fbText); this.fbCopied = true;
+             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             window.open('https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(this.baseUrl),'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
              setTimeout(() => this.fbCopied = false, 7000);
          },
          async shareOnMessenger() {
-             await this.copyWithImage(this.fbText, this.photoUrl); this.messengerCopied = true;
+             await this.copyText(this.fbText); this.messengerCopied = true;
              const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-             if (isMobile) { window.location.href='fb-messenger://share/?link='+encodeURIComponent(this.baseUrl); setTimeout(()=>window.open('https://www.messenger.com/','_blank'),1500); }
-             else { window.open('https://www.messenger.com/','_blank'); }
+             if (isMobile) {
+                 window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
+                 setTimeout(() => window.open('https://www.messenger.com/new','_blank','noopener'), 1500);
+             } else {
+                 window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
+             }
              setTimeout(() => this.messengerCopied = false, 7000);
          },
-         async copyLinkFn() {
-             const ok = await this.copyPlainText(this.baseUrl);
-             if(ok) { this.copied=true; setTimeout(()=>this.copied=false,2500); }
-         }
+         async copyLinkFn() { await this.copyText(this.baseUrl); this.copied = true; setTimeout(() => this.copied = false, 2500); }
      }"
      x-transition:enter="transition ease-out duration-200"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="$wire.closeShareModal()">
 
-    <div class="share-sheet bg-white rounded-2xl w-full max-w-[900px] max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-2xl share-modal-wrapper">
 
-        <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0">
-            <h2 class="text-sm font-semibold flex items-center gap-2.5 text-gray-800">
+        {{-- Share modal header --}}
+        <div class="flex items-center justify-between px-5 py-3 border-b border-white/10 flex-shrink-0"
+             style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+            <h2 class="text-sm font-semibold flex items-center gap-2 text-white">
                 @if($isCompleted)
-                    <i class="fas fa-trophy text-amber-500 text-xs"></i> Share Event Highlights
+                    <i class="fas fa-share-nodes text-sky-300 text-xs"></i> Share Event
                 @else
-                    <i class="fas fa-share-nodes text-gray-600 text-xs"></i> Share Event
+                    <i class="fas fa-share-nodes text-sky-300 text-xs"></i> Share Event
                 @endif
             </h2>
-            <button wire:click="closeShareModal" type="button"
-                    class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100 transition cursor-pointer text-gray-500">
-                <i class="fas fa-xmark text-sm"></i>
+            <button wire:click="closeShareModal" type="button" class="btn-close-purple" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
             </button>
         </div>
 
-        <div x-show="showFallback" x-cloak class="px-6 py-3 border-b border-amber-200 bg-amber-50 flex-shrink-0">
-            <p class="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
-                <i class="fas fa-triangle-exclamation"></i> Auto-copy blocked. Copy manually:
-            </p>
-            <textarea x-ref="fallbackArea" x-text="fallbackText" rows="3"
-                      class="w-full px-3 py-2 text-xs border border-amber-300 rounded-lg bg-white resize-none focus:outline-none"
-                      readonly @click="$refs.fallbackArea.select()"></textarea>
-            <button @click="showFallback=false" class="mt-1 text-xs text-amber-700 font-semibold hover:underline">Dismiss</button>
-        </div>
-
-        <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+        {{-- Body --}}
+        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
             {{-- LEFT: Preview --}}
-            <div class="flex-1 px-6 py-5 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-4 overflow-y-auto scroll-thin">
-                <p class="text-xs font-bold uppercase tracking-widest text-gray-500 flex-shrink-0">Post Preview</p>
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Post Preview</p>
+
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
                     @if($sharePhotoUrl)
-                    <div class="w-full bg-gray-100 flex items-center justify-center px-3 pt-3">
+                    <div class="w-full bg-gray-100">
                         <img src="{{ $sharePhotoUrl }}" alt="{{ $shareEventTitle }}"
-                             class="w-full rounded-lg object-contain" style="max-height:180px;display:block;">
+                             class="w-full object-cover" style="max-height:160px;display:block;">
                     </div>
                     @endif
-                    <div class="border-b border-gray-100 px-5 py-4 {{ $isCompleted ? 'bg-amber-50/50' : 'bg-gray-50' }}">
-                        <p class="font-semibold text-sm text-gray-900">{{ $shareEventTitle }}</p>
-                        <p class="text-xs mt-0.5 font-medium text-gray-500">{{ $shareOrganizer }}</p>
-                        <div class="flex flex-wrap gap-1.5 mt-2">
-                            @if($shareDate)        <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">{{ $shareDate }}@if($shTimeStr) · {{ $shTimeStr }}@endif</span> @endif
-                            @if($shareVenue)       <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">{{ $shareVenue }}</span> @endif
-                            @if($shareTargetParts) <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700">{{ Str::limit($shareTargetParts, 30) }}</span> @endif
+                    <div class="border-b border-gray-100 px-4 py-3 {{ $isCompleted ? 'bg-amber-50/50' : 'bg-gray-50' }}">
+                        <p class="font-semibold text-gray-900 leading-tight" style="font-size:clamp(12px,1.2vw,14px);">{{ $shareEventTitle }}</p>
+                        <p class="font-medium text-gray-500 mt-0.5" style="font-size:clamp(10px,1vw,12px);">{{ $shareOrganizer }}</p>
+                        <div class="flex flex-wrap gap-1 mt-1.5">
+                            @if($shareDate)        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareDate }}@if($shTimeStr) · {{ $shTimeStr }}@endif</span> @endif
+                            @if($shareVenue)       <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareVenue }}</span> @endif
+                            @if($shareTargetParts) <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ Str::limit($shareTargetParts, 30) }}</span> @endif
                         </div>
                     </div>
                     @if($shareDescPreview)
-                    <div class="px-5 py-3 border-b border-gray-100">
-                        <p class="text-xs leading-relaxed text-gray-600">{{ $shareDescPreview }}</p>
+                    <div class="px-4 py-2 border-b border-gray-100">
+                        <p class="leading-relaxed text-gray-600" style="font-size:clamp(10px,0.9vw,12px);">{{ $shareDescPreview }}</p>
                     </div>
                     @endif
-                    <div class="px-5 py-2 bg-gray-50">
-                        <span class="text-xs uppercase tracking-wider font-semibold text-gray-500">{{ strtoupper($shareHost) }}</span>
+                    <div class="px-4 py-2 bg-gray-50">
+                        <span class="uppercase tracking-wider font-semibold text-gray-400" style="font-size:clamp(9px,0.8vw,11px);">{{ strtoupper($shareHost) }}</span>
                     </div>
                 </div>
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+
+                <div class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-blue-500 text-xs flex-shrink-0 mt-0.5"></i>
                     <p class="text-xs text-blue-700 leading-relaxed">
-                        Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the
-                        {{ $isCompleted ? 'highlights' : 'event' }} text and opens the platform.
-                        Press <kbd class="bg-blue-100 px-1 rounded font-mono">Ctrl+V</kbd> to paste.
+                        Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the caption and opens the platform.
+                        Press <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd> (or <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">⌘V</kbd>) to paste it.
                     </p>
                 </div>
             </div>
 
             {{-- RIGHT: Share buttons --}}
-            <div class="w-full md:w-72 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto scroll-thin">
-                <p class="text-xs font-bold uppercase tracking-widest text-gray-500">Share via</p>
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Share via</p>
 
                 <div x-show="fbCopied" x-cloak x-transition
-                     class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-start gap-2">
+                     class="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-start gap-2">
                     <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-emerald-800">Opened! Press Ctrl+V to paste.</p>
+                    <p class="text-xs font-semibold text-emerald-800">Caption copied! Paste it on Facebook.</p>
                 </div>
                 <div x-show="messengerCopied" x-cloak x-transition
-                     class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-2">
+                     class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-start gap-2">
                     <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-blue-800">Opened! Press Ctrl+V to paste.</p>
+                    <p class="text-xs font-semibold text-blue-800">Caption copied! Pick a contact in Messenger and paste.</p>
                 </div>
 
                 <button type="button" @click="shareOnFacebook()"
                         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm transition cursor-pointer">
                     <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2">
-                            <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
-                        </svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Caption copied automatically</p>
+                        <p class="text-[10px] text-white/60 mt-0.5">Caption auto-copied · paste to post</p>
                     </div>
                 </button>
 
                 <button type="button" @click="shareOnMessenger()"
                         class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer"
-                        style="background:linear-gradient(to right,#00B2FF,#006AFF);">
+                        style="background:linear-gradient(135deg,#0099FF,#A033FF);">
                     <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
-                            <defs><linearGradient id="mgr_ev" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
-                            <path fill="url(#mgr_ev)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                            <defs>
+                                <linearGradient id="mgr_ev2" x1="0%" y1="100%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#0099FF"/>
+                                    <stop offset="100%" style="stop-color:#A033FF"/>
+                                </linearGradient>
+                            </defs>
+                            <path fill="url(#mgr_ev2)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Caption copied automatically</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Pick a contact · paste caption</p>
                     </div>
+                    <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
-                <div class="relative my-1">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white text-gray-400">or post directly</span>
-                    </div>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start gap-2">
+                    <i class="fas fa-lightbulb text-amber-500 text-[10px] flex-shrink-0 mt-0.5"></i>
+                    <p class="text-[10px] text-gray-500 leading-relaxed">
+                        Messenger will open. Search a contact, start a conversation, then press <span class="font-semibold text-gray-700">Ctrl+V</span> to paste the event details.
+                    </p>
                 </div>
 
-                <button type="button"
-                        wire:click="postToBatchChat"
+                <button type="button" wire:click="postToBatchChat"
                         wire:loading.attr="disabled"
                         wire:target="postToBatchChat"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer
-                               border-2 border-[#d4aaeb] hover:border-[#7a3f91] hover:bg-[#ede4f5] disabled:opacity-60 disabled:cursor-not-allowed"
-                        style="color:#5e2f72; background-color:#f5eef9;">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#7a3f91;">
-                        <i class="fas fa-users text-white text-sm"></i>
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-60 disabled:cursor-not-allowed">
+                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/20">
+                        <span wire:loading.remove wire:target="postToBatchChat">
+                            <i class="fas fa-comments text-white text-sm"></i>
+                        </span>
+                        <span wire:loading wire:target="postToBatchChat">
+                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                        </span>
                     </span>
                     <div class="text-left flex-1">
-                        <span wire:loading.remove wire:target="postToBatchChat" class="block text-xs font-semibold">
-                            {{ $isCompleted ? 'Post Highlights to Batch Chat' : 'Post to Batch Chat' }}
-                        </span>
-                        <span wire:loading wire:target="postToBatchChat" class="block text-xs font-semibold">
-                            <i class="fas fa-spinner fa-spin mr-1"></i> Posting…
-                        </span>
-                        <span class="block text-[10px] mt-0.5" style="color:#7a3f91;">
-                            {{ $isCompleted ? 'Sends highlights to your batchmates' : 'Sends directly to your batch chat room' }}
-                        </span>
+                        <p class="text-xs font-semibold">Post to Batch Chat</p>
+                        <p class="text-[10px] text-white/60 mt-0.5">Notify all your batchmates</p>
                     </div>
                 </button>
 
-                <div class="relative my-1">
+                <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
                         <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white text-gray-400">or copy link</span>
@@ -1315,16 +1537,16 @@ html, body { overflow: hidden !important; height: 100% !important; }
                         <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-sm"></i>
                     </span>
                     <div class="flex-1 text-left min-w-0">
-                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : 'text-gray-700'"
-                           x-text="copied ? 'Link copied!' : 'Copy Events Page Link'"></p>
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : 'text-gray-700'" x-text="copied ? 'Link copied!' : 'Copy Link'"></p>
                         <p class="text-[10px] font-mono text-gray-400 truncate">{{ $shareBaseUrl }}</p>
                     </div>
                 </button>
 
                 <button type="button" wire:click="closeShareModal"
-                        class="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer mt-1">
+                        class="w-full px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer">
                     Close
                 </button>
+                <p class="text-[10px] text-center text-gray-400">Sharing highlights is available even after the event.</p>
             </div>
         </div>
     </div>
@@ -1333,28 +1555,113 @@ html, body { overflow: hidden !important; height: 100% !important; }
 
 </div>{{-- end root --}}
 
+{{-- ── Mouse-following cursor label + card click logic ── --}}
 <script>
 (function () {
-    var tip = document.getElementById('ev-hover-tip');
-    function bindCards() {
-        document.querySelectorAll('[data-ev-card]').forEach(function (card) {
-            if (card._evTipBound) return;
-            card._evTipBound = true;
-            card.addEventListener('mousemove', function (e) {
-                if (!tip) return;
-                var shareBtn = card.querySelector('[data-ev-share]');
-                if (shareBtn && (e.target === shareBtn || shareBtn.contains(e.target))) {
-                    tip.classList.remove('visible'); return;
+    function init() {
+        const label = document.getElementById('ev-cursor-label');
+        if (!label) return;
+
+        let activeCard = null;
+        let mouseX = 0;
+        let mouseY = 0;
+
+        function show() {
+            label.style.opacity    = '1';
+            label.style.visibility = 'visible';
+        }
+
+        function hide() {
+            label.style.opacity    = '0';
+            label.style.visibility = 'hidden';
+        }
+
+        function onMouseMove(e) {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            label.style.left = (mouseX + 16) + 'px';
+            label.style.top  = (mouseY + 14) + 'px';
+        }
+
+        function onCardEnter(e) {
+            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+            activeCard = e.currentTarget;
+            document.addEventListener('mousemove', onMouseMove);
+            show();
+        }
+
+        function onCardLeave(e) {
+            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+            activeCard = null;
+            hide();
+            document.removeEventListener('mousemove', onMouseMove);
+        }
+
+        function onShareEnter() { hide(); }
+        function onShareLeave() { if (activeCard) show(); }
+
+        // Click the card → call Livewire viewEvent
+        function onCardClick(e) {
+            const card = e.currentTarget;
+            const id   = parseInt(card.dataset.evId, 10);
+            const type = card.dataset.evType;
+            if (id && type) {
+                window.Livewire.find(
+                    card.closest('[wire\\:id]')?.getAttribute('wire:id') ||
+                    document.querySelector('[wire\\:id]')?.getAttribute('wire:id')
+                )?.call('viewEvent', id, type);
+            }
+        }
+
+        function attachListeners() {
+            document.querySelectorAll('[data-ev-card]').forEach(card => {
+                if (card._evBound) return;
+                card._evBound = true;
+
+                card.addEventListener('mouseenter', onCardEnter);
+                card.addEventListener('mouseleave', onCardLeave);
+                card.addEventListener('click', onCardClick);
+
+                const shareBtn = card.querySelector('[data-ev-share]');
+                if (shareBtn) {
+                    shareBtn.addEventListener('mouseenter', onShareEnter);
+                    shareBtn.addEventListener('mouseleave', onShareLeave);
                 }
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.classList.add('visible');
             });
-            card.addEventListener('mouseleave', function () { if (tip) tip.classList.remove('visible'); });
-            card.addEventListener('click',      function () { if (tip) tip.classList.remove('visible'); });
+        }
+
+        attachListeners();
+
+        // Re-attach after Livewire DOM updates
+        document.addEventListener('livewire:navigated', () => {
+            document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
+            attachListeners();
+        });
+
+        if (window.Livewire) {
+            try {
+                window.Livewire.hook('commit', ({ succeed }) => {
+                    succeed(() => {
+                        requestAnimationFrame(() => {
+                            document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
+                            attachListeners();
+                        });
+                    });
+                });
+            } catch(e) {}
+        }
+
+        // Hide label when any modal opens
+        document.addEventListener('livewire:update', () => {
+            hide();
+            activeCard = null;
         });
     }
-    bindCards();
-    document.addEventListener('livewire:updated', bindCards);
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
 </script>
