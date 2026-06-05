@@ -40,6 +40,10 @@ new class extends Component {
     // ── Course GC flag ────────────────────────────────────────────────────
     public bool $isCourseRoom = false;
 
+    // ── College-wide room flag (course_code='', batch=0) ─────────────────
+    // TRUE when the selected room is the alumni-side college room
+    public bool $isCollegeRoom = false;
+
     // ── Member search ─────────────────────────────────────────────────────
     public string $memberSearch = '';
 
@@ -93,6 +97,15 @@ new class extends Component {
             return asset('storage/' . $path);
         }
         return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Helper: is this room the alumni-side college-wide room?
+    // Identified by course_code='' AND batch=0 (created by alumni messenger)
+    // ─────────────────────────────────────────────────────────────────────
+    private function roomIsCollegeWide($row): bool
+    {
+        return ($row->course_code ?? '') === '' && (int)($row->batch ?? 0) === 0;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -310,13 +323,10 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // ★ FIX: Write alumni notifications to DB server-side
-    //   Called after every message the organizer/coordinator sends.
-    //   Alumni poll GET /alumni/notifications every 10 s — they will see it.
+    // Write alumni notifications to DB (coordinator sends a message)
     // ─────────────────────────────────────────────────────────────────────
     private function notifyAlumniInRoom(string $body): void
     {
-        // Staff-only room — no alumni to notify
         if ($this->isStaffRoom || ! $this->room) return;
 
         try {
@@ -324,9 +334,11 @@ new class extends Component {
             $courseCode  = $this->room['course_code'] ?? '';
             $batch       = (int) ($this->room['batch'] ?? 0);
 
-            $roomLabel = $this->isCourseRoom
-                ? strtoupper($courseCode) . ' All Batches GC'
-                : ($this->room['name'] ?? 'Group Chat');
+            $roomLabel = $this->isCollegeRoom
+                ? ($this->department . ' · All Courses & Batches')
+                : ($this->isCourseRoom
+                    ? strtoupper($courseCode) . ' All Batches GC'
+                    : ($this->room['name'] ?? 'Group Chat'));
 
             $bodySnip = mb_substr($body, 0, 80);
             $preview  = $bodySnip . (mb_strlen($body) > 80 ? '…' : '');
@@ -335,24 +347,29 @@ new class extends Component {
             $message = $senderName . ' messaged in ' . $roomLabel
                        . ($preview !== '' ? ': "' . $preview . '"' : '.');
 
-            // Deduplicate per coordinator × room × minute so rapid typing
-            // doesn't spam the notification table.
             $dedupKey = 'coord-msg::' . $this->coordinatorId . '::' . $this->roomId
                         . '::' . floor(time() / 60);
 
-            // Collect alumni IDs in this room
-            $alumniQuery = DB::table('alumni')
-                ->whereNull('deleted_at')
-                ->where('course_code', $courseCode);
-
-            if (! $this->isCourseRoom && $batch > 0) {
-                $alumniQuery->where('batch', $batch);
+            // ── FIX: use deptCourseCodes for college-wide room ────────────
+            if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
+                $alumniRows = DB::table('alumni')
+                    ->whereNull('deleted_at')
+                    ->whereIn('course_code', $this->deptCourseCodes)
+                    ->get(['id']);
+            } elseif ($this->isCourseRoom) {
+                $alumniRows = DB::table('alumni')
+                    ->whereNull('deleted_at')
+                    ->where('course_code', $courseCode)
+                    ->get(['id']);
+            } else {
+                $alumniRows = DB::table('alumni')
+                    ->whereNull('deleted_at')
+                    ->where('course_code', $courseCode)
+                    ->where('batch', $batch)
+                    ->get(['id']);
             }
 
-            $alumniRows = $alumniQuery->get(['id']);
-
             foreach ($alumniRows as $alumnus) {
-                // Skip if a notification with this dedup key already exists
                 $alreadyExists = DB::table('alumni_notifications')
                     ->where('alumni_id', (int) $alumnus->id)
                     ->where('dedup_key', $dedupKey)
@@ -373,9 +390,7 @@ new class extends Component {
                     'updated_at' => now(),
                 ]);
             }
-        } catch (\Throwable) {
-            // Silently fail — notifications are non-critical
-        }
+        } catch (\Throwable) {}
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -432,14 +447,84 @@ new class extends Component {
                 'is_active'     => $staffRoomRow->id === $this->roomId,
                 'is_staff'      => true,
                 'is_course_gc'  => false,
+                'is_college_gc' => false,
                 'type'          => 'staff',
             ];
         }
 
-        // ── 2. Course GC rooms (batch = 0, course_code != __director__) ─
+        // ── 2. College-wide room (course_code='', batch=0) ────────────
+        // Created by the alumni messenger for the whole college/department
+        $collegeRoomRow = null;
+        $collegeItem    = null;
+        if ($this->department) {
+            $collegeRoomRow = DB::table('chat_rooms')
+                ->where('department', $this->department)
+                ->where('course_code', '')
+                ->where('batch', 0)
+                ->first();
+        }
+        if ($collegeRoomRow) {
+            $latest = DB::table('chat_messages as m')
+                ->where('m.room_id', $collegeRoomRow->id)
+                ->whereNull('m.deleted_at')
+                ->orderByDesc('m.created_at')
+                ->first(['m.body', 'm.sender_type', 'm.sender_id', 'm.created_at']);
+
+            $latestBody = $latestSender = $latestTime = null;
+            $latestTs   = null;
+
+            if ($latest) {
+                $latestBody = $latest->body;
+                $latestTs   = Carbon::parse($latest->created_at);
+                $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
+                if ($latest->sender_type === 'alumni') {
+                    $a = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
+                    $latestSender = $a ?? 'Alumni';
+                } elseif ($latest->sender_type === 'director') {
+                    $d = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
+                    $latestSender = ($d ?? 'Director') . ' (Director)';
+                } else {
+                    $o = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
+                    $latestSender = $o ?? 'Coordinator';
+                }
+            }
+
+            // Count all alumni across all courses in this department
+            $collegeCourses = $this->deptCourseCodes;
+            if (! empty($collegeCourses)) {
+                $baseQ       = DB::table('alumni')->whereIn('course_code', $collegeCourses)->whereNull('deleted_at');
+                $totalCount  = (clone $baseQ)->count();
+                $onlineCount = (clone $baseQ)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+            } else {
+                $totalCount = $onlineCount = 0;
+            }
+
+            $collegeItem = [
+                'id'            => $collegeRoomRow->id,
+                'name'          => $this->department . ' · All Courses & Batches',
+                'course_code'   => '',
+                'course_name'   => $this->department,
+                'batch'         => 0,
+                'department'    => $collegeRoomRow->department,
+                'latest_body'   => $latestBody,
+                'latest_sender' => $latestSender,
+                'latest_time'   => $latestTime,
+                'latest_ts'     => $latestTs ? $latestTs->timestamp : 0,
+                'online_count'  => $onlineCount,
+                'total_count'   => $totalCount,
+                'is_active'     => $collegeRoomRow->id === $this->roomId,
+                'is_staff'      => false,
+                'is_course_gc'  => false,
+                'is_college_gc' => true,
+                'type'          => 'college',
+            ];
+        }
+
+        // ── 3. Course GC rooms (batch=0, course_code != '' != __director__) ─
         $courseGcRows = DB::table('chat_rooms as r')
             ->where('r.batch', 0)
             ->where('r.course_code', '!=', '__director__')
+            ->where('r.course_code', '!=', '')
             ->where(function ($q) {
                 $q->where('r.department', $this->department);
                 if (! empty($this->deptCourseCodes)) {
@@ -496,6 +581,7 @@ new class extends Component {
                 'is_active'     => $r->id === $this->roomId,
                 'is_staff'      => false,
                 'is_course_gc'  => true,
+                'is_college_gc' => false,
                 'type'          => 'course',
             ];
         })->sortBy('course_code');
@@ -506,9 +592,10 @@ new class extends Component {
             );
         }
 
-        // ── 3. Batch rooms (batch > 0) ────────────────────────────────
+        // ── 4. Batch rooms (batch > 0) ────────────────────────────────
         $rows = DB::table('chat_rooms as r')
             ->where('r.course_code', '!=', '__director__')
+            ->where('r.course_code', '!=', '')
             ->where('r.batch', '>', 0)
             ->where(function ($q) {
                 $q->where('r.department', $this->department);
@@ -565,6 +652,7 @@ new class extends Component {
                 'is_active'     => $r->id === $this->roomId,
                 'is_staff'      => false,
                 'is_course_gc'  => false,
+                'is_college_gc' => false,
                 'type'          => 'batch',
             ];
         });
@@ -592,6 +680,9 @@ new class extends Component {
         if ($this->roomTypeFilter === '' || $this->roomTypeFilter === 'staff') {
             if ($staffItem) $combined->push($staffItem);
         }
+        if ($this->roomTypeFilter === '' || $this->roomTypeFilter === 'college') {
+            if ($collegeItem) $combined->push($collegeItem);
+        }
         if ($this->roomTypeFilter === '' || $this->roomTypeFilter === 'course') {
             $combined = $combined->merge($courseGcRooms->values());
         }
@@ -612,16 +703,20 @@ new class extends Component {
         $row = DB::table('chat_rooms')->find($id);
         if (! $row) return;
 
-        $isStaff  = $row->course_code === '__director__';
-        $isCourse = ! $isStaff && (int) $row->batch === 0;
+        $isStaff     = $row->course_code === '__director__';
+        $isCollegeWide = ! $isStaff && $this->roomIsCollegeWide($row);
+        $isCourse    = ! $isStaff && ! $isCollegeWide && (int) $row->batch === 0;
 
         if (! $isStaff) {
             $inDeptByColumn = $row->department === $this->department;
+            // For college-wide room, department column matches; also allow by deptCourseCodes
             $inDeptByCourse = in_array($row->course_code, $this->deptCourseCodes, true);
-            if (! $inDeptByColumn && ! $inDeptByCourse) return;
+            $inDeptCollege  = $isCollegeWide && $row->department === $this->department;
+            if (! $inDeptByColumn && ! $inDeptByCourse && ! $inDeptCollege) return;
         }
 
         $this->isStaffRoom           = $isStaff;
+        $this->isCollegeRoom         = $isCollegeWide;
         $this->isCourseRoom          = $isCourse;
         $this->roomId                = $row->id;
         $this->room                  = (array) $row;
@@ -685,6 +780,15 @@ new class extends Component {
                         ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
                 $this->totalCount = DB::table('director')->whereNull('deleted_at')->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
+            } elseif ($this->isCollegeRoom) {
+                // ── FIX: college room has course_code='', use deptCourseCodes ──
+                if (! empty($this->deptCourseCodes)) {
+                    $base = DB::table('alumni')->whereIn('course_code', $this->deptCourseCodes)->whereNull('deleted_at');
+                    $this->totalCount  = (clone $base)->count();
+                    $this->onlineCount = (clone $base)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                } else {
+                    $this->totalCount = $this->onlineCount = 0;
+                }
             } elseif ($this->isCourseRoom) {
                 $base = DB::table('alumni')->where('course_code', $this->room['course_code'])->whereNull('deleted_at');
                 $this->totalCount  = (clone $base)->count();
@@ -775,7 +879,7 @@ new class extends Component {
         $oIds = collect($rows)->where('sender_type', 'organizer')->pluck('sender_id')->unique();
         $dIds = collect($rows)->where('sender_type', 'director')->pluck('sender_id')->unique();
 
-        $aMap = DB::table('alumni')->whereIn('id', $aIds)->get(['id','first_name','last_name','profile_photo'])->keyBy(fn($a)=>(int)$a->id);
+        $aMap = DB::table('alumni')->whereIn('id', $aIds)->get(['id','first_name','last_name','profile_photo','course_code','batch'])->keyBy(fn($a)=>(int)$a->id);
         $oMap = DB::table('organizer')->whereIn('id', $oIds)->get(['id','first_name','last_name','profile_photo'])->keyBy(fn($o)=>(int)$o->id);
         $dMap = DB::table('director')->whereIn('id', $dIds)->get(['id','first_name','last_name','profile_photo'])->keyBy(fn($d)=>(int)$d->id);
 
@@ -824,6 +928,9 @@ new class extends Component {
                 'sender_id'      => $m->sender_id,
                 'sender_name'    => $sName,
                 'sender_photo'   => $photoUrl,
+                // Show course+batch labels in college-wide room
+                'sender_course'  => (! $isDir && ! $isCoord && $s) ? ($s->course_code ?? '') : '',
+                'sender_batch'   => (! $isDir && ! $isCoord && $s) ? (string)($s->batch ?? '') : '',
                 'body'           => $m->body,
                 'edited'         => ! is_null($m->edited_at),
                 'is_mine'        => $isMe,
@@ -867,11 +974,18 @@ new class extends Component {
                 }
 
                 if (! $this->isStaffRoom && $this->room) {
-                    $alumniQ = DB::table('alumni')
-                        ->where('course_code', $this->room['course_code'])
-                        ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%");
-                    if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
-                    $foundAlumni = $alumniQ->value('id');
+                    if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
+                        $foundAlumni = DB::table('alumni')
+                            ->whereIn('course_code', $this->deptCourseCodes)
+                            ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")
+                            ->value('id');
+                    } else {
+                        $alumniQ = DB::table('alumni')
+                            ->where('course_code', $this->room['course_code'])
+                            ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%");
+                        if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
+                        $foundAlumni = $alumniQ->value('id');
+                    }
                     if ($foundAlumni) {
                         DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'alumni','mentioned_id'=>$foundAlumni,'created_at'=>now(),'updated_at'=>now()]);
                     }
@@ -888,9 +1002,6 @@ new class extends Component {
         }
 
         $this->lastSeenMessageIds[$this->roomId] = (int) $msgId;
-
-        // ★ FIX: Write alumni notification records directly to DB so
-        //   the alumni's notification panel picks them up on next poll.
         $this->notifyAlumniInRoom($body);
 
         $this->body = ''; $this->replyTo = null; $this->showMentions = false;
@@ -1023,19 +1134,33 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Alumni — handles Batch GC and Course GC
+    // Alumni members — FIX: handles college-wide, Course GC, and Batch GC
     // ─────────────────────────────────────────────────────────────────────
     public function loadAlumni(): void
     {
         if (! $this->room || $this->isStaffRoom) return;
         $q = trim($this->memberSearch);
 
-        $query = DB::table('alumni')
-            ->where('course_code', $this->room['course_code'])
-            ->whereNull('deleted_at');
-
-        if (! $this->isCourseRoom) {
-            $query->where('batch', $this->room['batch']);
+        // ── FIX: college-wide room (course_code='') uses deptCourseCodes ──
+        if ($this->isCollegeRoom) {
+            if (empty($this->deptCourseCodes)) {
+                $this->alumni = [];
+                return;
+            }
+            $query = DB::table('alumni')
+                ->whereIn('course_code', $this->deptCourseCodes)
+                ->whereNull('deleted_at');
+        } elseif ($this->isCourseRoom) {
+            // Course GC: all alumni for this course across all batches
+            $query = DB::table('alumni')
+                ->where('course_code', $this->room['course_code'])
+                ->whereNull('deleted_at');
+        } else {
+            // Batch GC: specific course + batch
+            $query = DB::table('alumni')
+                ->where('course_code', $this->room['course_code'])
+                ->where('batch', $this->room['batch'])
+                ->whereNull('deleted_at');
         }
 
         if ($q !== '') {
@@ -1048,14 +1173,15 @@ new class extends Component {
 
         $self = $this;
         $this->alumni = $query
-            ->orderBy('batch')->orderBy('first_name')
-            ->get(['id','first_name','last_name','profile_photo','last_seen_at','batch'])
+            ->orderBy('course_code')->orderBy('batch')->orderBy('first_name')
+            ->get(['id','first_name','last_name','profile_photo','last_seen_at','batch','course_code'])
             ->map(fn ($a) => [
-                'id'        => $a->id,
-                'name'      => trim($a->first_name . ' ' . $a->last_name),
-                'photo'     => $self->resolvePhotoUrl($a->profile_photo ?? null),
-                'batch'     => $a->batch,
-                'is_online' => isset($a->last_seen_at) && Carbon::parse($a->last_seen_at)->gte(now()->subMinutes(5)),
+                'id'          => $a->id,
+                'name'        => trim($a->first_name . ' ' . $a->last_name),
+                'photo'       => $self->resolvePhotoUrl($a->profile_photo ?? null),
+                'batch'       => $a->batch,
+                'course_code' => $a->course_code,
+                'is_online'   => isset($a->last_seen_at) && Carbon::parse($a->last_seen_at)->gte(now()->subMinutes(5)),
             ])->toArray();
     }
 
@@ -1126,9 +1252,18 @@ new class extends Component {
             $suggestions = [['id'=>0,'name'=>'everyone','type'=>'everyone']];
 
             if (! $this->isStaffRoom && $this->room) {
-                $alumniQ = DB::table('alumni')->where('course_code',$this->room['course_code'])->whereNull('deleted_at')
-                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"));
-                if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
+                if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
+                    $alumniQ = DB::table('alumni')
+                        ->whereIn('course_code', $this->deptCourseCodes)
+                        ->whereNull('deleted_at')
+                        ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"));
+                } else {
+                    $alumniQ = DB::table('alumni')
+                        ->where('course_code', $this->room['course_code'])
+                        ->whereNull('deleted_at')
+                        ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"));
+                    if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
+                }
                 $alumni = $alumniQ->limit(5)->get(['id','first_name','last_name'])
                     ->map(fn($a)=>['id'=>$a->id,'name'=>trim($a->first_name.' '.$a->last_name),'type'=>'alumni'])->toArray();
                 $suggestions = array_merge($suggestions, $alumni);
@@ -1201,10 +1336,11 @@ new class extends Component {
                 </label>
                 <div class="grid grid-cols-2 gap-1.5">
                     @foreach([
-                        ''       => ['fa-border-all',       'All'],
-                        'staff'  => ['fa-shield-halved',    'Staff'],
-                        'course' => ['fa-layer-group',      'Course GC'],
-                        'batch'  => ['fa-users',            'Batch GC'],
+                        ''        => ['fa-border-all',       'All'],
+                        'staff'   => ['fa-shield-halved',    'Staff'],
+                        'college' => ['fa-school',           'College GC'],
+                        'course'  => ['fa-layer-group',      'Course GC'],
+                        'batch'   => ['fa-users',            'Batch GC'],
                     ] as $val => [$icon, $label])
                     <button wire:click="$set('roomTypeFilter', '{{ $val }}')"
                             class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-semibold transition-all
@@ -1217,7 +1353,7 @@ new class extends Component {
                 </div>
             </div>
 
-            @if($roomTypeFilter !== 'staff' && count($availableCourses) > 0)
+            @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'college' && count($availableCourses) > 0)
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
                     <i class="fa-solid fa-book-open mr-1"></i>Course
@@ -1239,7 +1375,7 @@ new class extends Component {
             </div>
             @endif
 
-            @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'course' && count($availableBatches) > 0)
+            @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'college' && $roomTypeFilter !== 'course' && count($availableBatches) > 0)
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
                     <i class="fa-solid fa-graduation-cap mr-1"></i>Batch Year
@@ -1257,7 +1393,7 @@ new class extends Component {
             </div>
             @endif
 
-            @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'course')
+            @if($roomTypeFilter !== 'staff' && $roomTypeFilter !== 'college' && $roomTypeFilter !== 'course')
             <div>
                 <label class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest block mb-1.5">
                     <i class="fa-solid fa-arrow-up-wide-short mr-1"></i>Sort
@@ -1301,6 +1437,7 @@ new class extends Component {
                 <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest">
                     <i class="fa-solid fa-comments mr-1"></i>
                     @if($roomTypeFilter === 'staff') Staff Chat
+                    @elseif($roomTypeFilter === 'college') College GC
                     @elseif($roomTypeFilter === 'course') Course GCs
                     @elseif($roomTypeFilter === 'batch') Batch Chats
                     @else All Chats
@@ -1318,7 +1455,15 @@ new class extends Component {
                 @php $thisType = $r['type']; @endphp
 
                 @if($roomTypeFilter === '' && $prevType !== null && $prevType !== $thisType)
-                    @if($thisType === 'course')
+                    @if($thisType === 'college')
+                    <div class="flex items-center gap-2 px-1 py-2">
+                        <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                        <span class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1">
+                            <i class="fa-solid fa-school text-[9px]"></i>College GC
+                        </span>
+                        <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                    </div>
+                    @elseif($thisType === 'course')
                     <div class="flex items-center gap-2 px-1 py-2">
                         <div class="flex-1 h-px bg-[#ddd3e8]"></div>
                         <span class="text-[10px] font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1">
@@ -1339,6 +1484,7 @@ new class extends Component {
                 @php $prevType = $thisType; @endphp
 
                 @if($r['type'] === 'staff')
+                {{-- Staff Chat --}}
                 <button wire:click="selectRoom({{ $r['id'] }})"
                         class="w-full text-left rounded-xl px-3 py-3 transition-all border
                                {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
@@ -1375,7 +1521,49 @@ new class extends Component {
                     </div>
                 </button>
 
+                @elseif($r['type'] === 'college')
+                {{-- College-wide GC (alumni messenger college room) --}}
+                <button wire:click="selectRoom({{ $r['id'] }})"
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all border
+                               {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
+                    <div class="flex items-start gap-2.5">
+                        <div class="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center text-white text-sm"
+                             style="{{ $r['is_active'] ? 'background:#6b2490;' : 'background:#8b35b8;' }}">
+                            <i class="fa-solid fa-school"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-1">
+                                <p class="text-sm font-semibold leading-tight truncate {{ $r['is_active'] ? 'text-[#6b2490]' : 'text-[#333333]' }}">
+                                    {{ $department }}
+                                </p>
+                                @if($r['latest_time'])<span class="text-xs text-[#999999] font-semibold flex-shrink-0 mt-0.5">{{ $r['latest_time'] }}</span>@endif
+                            </div>
+                            <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Courses & Batches</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} alumni</span>
+                            </div>
+                            @if($r['latest_body'])
+                            <p class="text-xs text-[#666666] truncate mt-0.5 leading-tight">
+                                @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span>@endif
+                                {{ Str::limit($r['latest_body'], 38) }}
+                            </p>
+                            @else
+                            <p class="text-xs text-[#999999] italic mt-0.5">No messages yet</p>
+                            @endif
+                            @if($r['online_count'] > 0)
+                            <div class="flex items-center gap-1 mt-1">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                <span class="text-xs font-semibold text-emerald-600">{{ $r['online_count'] }}/{{ $r['total_count'] }} online</span>
+                            </div>
+                            @else
+                            <p class="text-xs text-[#999999] mt-1">{{ $r['total_count'] }} total alumni</p>
+                            @endif
+                        </div>
+                    </div>
+                </button>
+
                 @elseif($r['type'] === 'course')
+                {{-- Course GC --}}
                 <button wire:click="selectRoom({{ $r['id'] }})"
                         class="w-full text-left rounded-xl px-3 py-3 transition-all border
                                {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
@@ -1414,6 +1602,7 @@ new class extends Component {
                 </button>
 
                 @else
+                {{-- Batch GC --}}
                 <button wire:click="selectRoom({{ $r['id'] }})"
                         class="w-full text-left rounded-xl px-3 py-3 transition-all border
                                {{ $r['is_active'] ? 'border-[#c49bdb] bg-[#f2e8f9]' : 'border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa]' }}">
@@ -1480,11 +1669,12 @@ new class extends Component {
         {{-- Chat header --}}
         <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778]" style="background:#6b2490;">
             <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/30">
-                <i class="fa-solid {{ $isStaffRoom ? 'fa-shield-halved' : ($isCourseRoom ? 'fa-layer-group' : 'fa-users') }} text-white text-sm"></i>
+                <i class="fa-solid {{ $isStaffRoom ? 'fa-shield-halved' : ($isCollegeRoom ? 'fa-school' : ($isCourseRoom ? 'fa-layer-group' : 'fa-users')) }} text-white text-sm"></i>
             </div>
             <div class="flex-1 min-w-0">
                 <p class="text-white font-semibold text-sm leading-tight truncate uppercase tracking-wide">
                     @if($isStaffRoom) Staff Chat
+                    @elseif($isCollegeRoom) {{ $department }} · All Courses & Batches
                     @elseif($isCourseRoom) {{ strtoupper($room['course_code']) }} · All Batches GC
                     @else {{ $room['name'] ?? 'Group Chat' }}
                     @endif
@@ -1499,6 +1689,8 @@ new class extends Component {
                     @endif
                     @if($isStaffRoom)
                     <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators</span>
+                    @elseif($isCollegeRoom)
+                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-school text-[10px]"></i>All Courses & Batches · {{ $totalCount }} alumni total</span>
                     @elseif($isCourseRoom)
                     <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-users-between-lines text-[10px]"></i>All Batch Years · {{ $totalCount }} alumni total</span>
                     @else
@@ -1592,6 +1784,18 @@ new class extends Component {
                                         <span class="ml-1 text-[10px] font-semibold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded"><i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director</span>
                                     @elseif($msg['is_coordinator'])
                                         <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">Coordinator</span>
+                                    @elseif($isCollegeRoom)
+                                        {{-- Show course+batch for alumni in college-wide room --}}
+                                        @if($msg['sender_course'])
+                                            <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">{{ strtoupper($msg['sender_course']) }}</span>
+                                        @endif
+                                        @if($msg['sender_batch'])
+                                            <span class="ml-1 text-[10px] font-semibold bg-[#ede0f5] text-[#5c2d7a] px-1.5 py-0.5 rounded">Batch {{ $msg['sender_batch'] }}</span>
+                                        @endif
+                                    @elseif($isCourseRoom)
+                                        @if($msg['sender_batch'])
+                                            <span class="ml-1 text-[10px] font-semibold bg-[#ede0f5] text-[#5c2d7a] px-1.5 py-0.5 rounded">Batch {{ $msg['sender_batch'] }}</span>
+                                        @endif
                                     @endif
                                 </p>
                                 @endif
@@ -1741,11 +1945,12 @@ new class extends Component {
                     @empty
                         <div class="flex flex-col items-center justify-center h-full py-20 text-[#999999] select-none">
                             <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 bg-[#f2e8f9]">
-                                <i class="fa-solid {{ $isStaffRoom ? 'fa-shield-halved' : ($isCourseRoom ? 'fa-layer-group' : 'fa-comments') }} text-4xl text-[#6b2490]"></i>
+                                <i class="fa-solid {{ $isStaffRoom ? 'fa-shield-halved' : ($isCollegeRoom ? 'fa-school' : ($isCourseRoom ? 'fa-layer-group' : 'fa-comments')) }} text-4xl text-[#6b2490]"></i>
                             </div>
                             <p class="text-base font-semibold text-[#666666]">No messages yet</p>
                             <p class="text-sm text-[#999999] mt-1">
                                 @if($isStaffRoom) Start the internal staff conversation! 👋
+                                @elseif($isCollegeRoom) Start the {{ $department }} college-wide conversation! 👋
                                 @elseif($isCourseRoom) Start the {{ strtoupper($room['course_code']) }} all-batches conversation! 👋
                                 @else Start the conversation with this batch! 👋
                                 @endif
@@ -1817,7 +2022,7 @@ new class extends Component {
                             <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
-                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCourseRoom ? strtoupper($room['course_code']).' All Batches GC' : ($room['name']??'group')) }}… (@ to mention)"
+                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? strtoupper($room['course_code']).' All Batches GC' : ($room['name']??'group'))) }}… (@ to mention)"
                                 rows="1"
                                 @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
                                 @focus-input.window="$el.focus()"
@@ -1849,6 +2054,9 @@ new class extends Component {
                     @elseif($isStaffRoom)
                         <i class="fa-solid fa-shield-halved text-[#6b2490]"></i>
                         <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Staff Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($staffDirectors)+count($staffCoords) }})</span></p>
+                    @elseif($isCollegeRoom)
+                        <i class="fa-solid fa-school text-[#6b2490]"></i>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Alumni <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @elseif($isCourseRoom)
                         <i class="fa-solid fa-layer-group text-[#6b2490]"></i>
                         <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
@@ -1925,6 +2133,14 @@ new class extends Component {
                         </div>
 
                     @elseif($showMembers && ! $isStaffRoom)
+                        {{-- College / Course / Batch member panel --}}
+                        @if($isCollegeRoom)
+                        <div class="px-4 py-2 bg-[#f2e8f9] border-b border-[#ddd3e8] flex-shrink-0">
+                            <p class="text-xs font-semibold text-[#6b2490] flex items-center gap-1.5">
+                                <i class="fa-solid fa-school text-xs"></i>All courses & batches — {{ $department }}
+                            </p>
+                        </div>
+                        @endif
                         @if(! empty($coordinators) && $memberSearch === '')
                         <div class="px-3 pt-3 pb-1 flex-shrink-0">
                             <p class="text-xs font-semibold text-[#6b2490] uppercase tracking-widest mb-2 px-1"><i class="fa-solid fa-shield-halved text-xs mr-1"></i>Coordinators</p>
@@ -1946,7 +2162,8 @@ new class extends Component {
                         <div class="px-3 pb-1 flex-shrink-0">
                             <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-1 px-1">
                                 <i class="fa-solid fa-users text-xs mr-1"></i>Alumni
-                                @if($isCourseRoom)<span class="text-[#6b2490] ml-1">· All Batches</span>@endif
+                                @if($isCollegeRoom)<span class="text-[#6b2490] ml-1">· All Courses & Batches</span>
+                                @elseif($isCourseRoom)<span class="text-[#6b2490] ml-1">· All Batches</span>@endif
                             </p>
                         </div>
                         @endif
@@ -1954,7 +2171,7 @@ new class extends Component {
                             <div class="relative">
                                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
                                 <input wire:model.live.debounce.300ms="memberSearch" type="text"
-                                       placeholder="{{ $isCourseRoom?'Search all alumni…':'Search alumni…' }}"
+                                       placeholder="{{ $isCollegeRoom ? 'Search all alumni…' : ($isCourseRoom?'Search all alumni…':'Search alumni…') }}"
                                        class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
                             </div>
                         </div>
@@ -1972,7 +2189,13 @@ new class extends Component {
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-[#333333] truncate">{{ $al['name'] }}</p>
-                                    <p class="text-xs font-medium text-emerald-600">Online @if($isCourseRoom && $al['batch'])· <span class="text-[#6b2490]">Batch {{ $al['batch'] }}</span>@endif</p>
+                                    <p class="text-xs font-medium text-emerald-600">
+                                        Online
+                                        @if($isCollegeRoom || $isCourseRoom)
+                                            @if($al['course_code'])<span class="text-[#6b2490] ml-1">· {{ strtoupper($al['course_code']) }}</span>@endif
+                                            @if($al['batch'])<span class="text-[#999999] ml-1">Batch {{ $al['batch'] }}</span>@endif
+                                        @endif
+                                    </p>
                                 </div>
                             </div>
                             @endforeach
@@ -1989,7 +2212,13 @@ new class extends Component {
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-[#666666] truncate">{{ $al['name'] }}</p>
-                                    <p class="text-xs font-medium text-[#999999]">Offline @if($isCourseRoom && $al['batch'])· <span class="text-[#999999]">Batch {{ $al['batch'] }}</span>@endif</p>
+                                    <p class="text-xs font-medium text-[#999999]">
+                                        Offline
+                                        @if($isCollegeRoom || $isCourseRoom)
+                                            @if($al['course_code'])<span class="ml-1">· {{ strtoupper($al['course_code']) }}</span>@endif
+                                            @if($al['batch'])<span class="ml-1">Batch {{ $al['batch'] }}</span>@endif
+                                        @endif
+                                    </p>
                                 </div>
                             </div>
                             @endforeach

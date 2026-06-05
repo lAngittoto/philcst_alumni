@@ -13,7 +13,6 @@ new class extends Component {
 
     public string $search          = '';
     public string $filterStatus    = '';
-    public string $filterLocation  = '';
     public string $filterRelevance = '';
     public string $filterBatch     = '';
     public string $filterCourse    = '';
@@ -37,7 +36,6 @@ new class extends Component {
     protected $queryString = [
         'search'          => ['except' => ''],
         'filterStatus'    => ['except' => ''],
-        'filterLocation'  => ['except' => ''],
         'filterRelevance' => ['except' => ''],
         'filterBatch'     => ['except' => ''],
         'filterCourse'    => ['except' => ''],
@@ -113,19 +111,6 @@ new class extends Component {
         return $q;
     }
 
-    private function getAlumniPhotoUrl(?string $path): string
-    {
-        if (!$path || str_contains($path, 'default.png')) {
-            return asset('storage/alumni-photos/default.png');
-        }
-        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/')) {
-            return Storage::disk('public')->exists($path)
-                ? asset('storage/' . $path)
-                : asset('storage/alumni-photos/default.png');
-        }
-        return asset('storage/alumni-photos/default.png');
-    }
-
     public function with(): array
     {
         $q = DB::table('alumni as a')
@@ -137,6 +122,7 @@ new class extends Component {
                 'a.id',
                 'a.student_id',
                 'a.profile_photo',
+                'a.email',
                 DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
                 'a.course_code',
                 'a.course_name',
@@ -166,6 +152,7 @@ new class extends Component {
             $q->where(function ($w) use ($s) {
                 $w->where(DB::raw("CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))"), 'like', $s)
                   ->orWhere('a.student_id', 'like', $s)
+                  ->orWhere('a.email', 'like', $s)
                   ->orWhere('et.company_name', 'like', $s)
                   ->orWhere('et.job_title', 'like', $s);
             });
@@ -176,7 +163,6 @@ new class extends Component {
                 ? $q->whereNull('et.employment_status')
                 : $q->where('et.employment_status', $this->filterStatus);
         }
-        if ($this->filterLocation)  $q->where('et.work_location',    $this->filterLocation);
         if ($this->filterRelevance) $q->where('et.course_relevance', $this->filterRelevance);
         if ($this->filterBatch)     $q->where('a.batch',             $this->filterBatch);
         if ($this->filterCourse)    $q->where('a.course_code',       $this->filterCourse);
@@ -211,14 +197,13 @@ new class extends Component {
 
     public function updatingSearch(): void          { $this->resetPage(); }
     public function updatingFilterStatus(): void    { $this->resetPage(); }
-    public function updatingFilterLocation(): void  { $this->resetPage(); }
     public function updatingFilterRelevance(): void { $this->resetPage(); }
     public function updatingFilterBatch(): void     { $this->resetPage(); }
     public function updatingFilterCourse(): void    { $this->resetPage(); }
 
     public function clearFilters(): void
     {
-        $this->search = $this->filterStatus = $this->filterLocation =
+        $this->search = $this->filterStatus =
         $this->filterRelevance = $this->filterBatch = $this->filterCourse = '';
         $this->resetPage();
     }
@@ -234,6 +219,11 @@ new class extends Component {
             ->select([
                 'a.student_id',
                 'a.profile_photo',
+                'a.email',
+                'a.address_street',
+                'a.address_barangay',
+                'a.address_municipality',
+                'a.address_province',
                 DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.middle_initial,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
                 'a.suffix', 'a.course_name', 'a.course_code', 'a.batch',
                 'a.gender', 'a.civil_status', 'a.contact_number',
@@ -259,9 +249,152 @@ new class extends Component {
 
 }; ?>
 
-<div>
+<div class="flex flex-col" style="height:90vh; overflow:hidden;">
 
-{{-- ══ FLASH TOAST ══ --}}
+<style>
+/* ── Hover tooltip (cursor-following) ── */
+.ae-hover-tip {
+    position: fixed;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    padding: 6px 12px;
+    border-radius: 7px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 99999;
+    box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    transform: translate(12px, -110%);
+}
+.ae-hover-tip.visible { opacity: 1; }
+.ae-hover-tip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 14px;
+    border: 5px solid transparent;
+    border-top-color: #1a1a1a;
+}
+
+/* ── Table row hover ── */
+.ae-tbl-row {
+    background-color: #ffffff;
+    cursor: pointer;
+    transition: background-color .15s ease;
+}
+.ae-tbl-row:hover { background-color: #f5f0fa !important; }
+
+/* ── Filter inputs — black text ── */
+.ae-filter-input {
+    border: 1px solid #E8E0F0;
+    transition: border-color .15s, box-shadow .15s;
+    color: #333333;
+    background: #ffffff;
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+}
+.ae-filter-input::placeholder { color: #999999; font-weight: 400; }
+.ae-filter-input:hover  { border-color: #c4b5d4; }
+.ae-filter-input:focus  { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+select.ae-filter-input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 0.6rem center;
+    background-repeat: no-repeat;
+    background-size: 1.25em 1.25em;
+    padding-right: 2.25rem;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+select.ae-filter-input option { color: #333333; font-weight: 500; }
+
+/* ── Table block ── */
+.ae-table-block {
+    display: flex;
+    flex-direction: column;
+    border-radius: 1rem;
+    overflow: hidden;
+    border: 1px solid #E8E0F0;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    flex: 1;
+    min-height: 0;
+}
+.ae-table-block-filter {
+    background: #F5F5F5;
+    border-bottom: 1px solid #E8E0F0;
+    padding: 0.6rem 0.875rem;
+    flex-shrink: 0;
+}
+.ae-table-block-pagination {
+    flex-shrink: 0;
+    background: linear-gradient(to right, #7a3f91, #9b59b6);
+    padding: 0 1rem;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(122,63,145,.3);
+}
+.scroll-c::-webkit-scrollbar { width: 5px; }
+.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ── Close button tooltip (appears BELOW) ── */
+.ae-close-tooltip {
+    position: relative;
+}
+.ae-close-tooltip::after {
+    content: 'Close';
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    padding: 4px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 99999;
+}
+.ae-close-tooltip::before {
+    content: '';
+    position: absolute;
+    top: calc(100% + 1px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-bottom-color: #1a1a1a;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 99999;
+}
+.ae-close-tooltip:hover::after,
+.ae-close-tooltip:hover::before { opacity: 1; }
+</style>
+
+{{-- Cursor-following hover tooltip --}}
+<div id="ae-hover-tip" class="ae-hover-tip">
+    <i class="fas fa-eye mr-1.5"></i>View Details
+</div>
+
+{{-- ── FLASH TOAST ── --}}
 <div
     x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
     @flash-message.window="display($event.detail.type,$event.detail.message)"
@@ -286,28 +419,28 @@ new class extends Component {
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-{{-- ══ PAGE WRAPPER — 90VH FLEX COLUMN ══ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-2 max-w-screen-2xl mx-auto" style="height:90vh;">
+{{-- ══ MAIN LAYOUT ══ --}}
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
 
     {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex items-center gap-3 mb-4 shrink-0">
-        <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-             style="background:#7A3F91;">
-            <i class="fas fa-chart-line text-white text-base"></i>
+    <div class="flex items-center gap-4 flex-shrink-0">
+        <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
+             style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+            <i class="fas fa-chart-line text-white text-lg"></i>
         </div>
         <div>
-            <h1 class="text-3xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
-            <p class="text-sm text-[#666666] font-normal mt-0.5 flex flex-wrap items-center gap-2">
+            <h1 class="text-xl font-semibold tracking-tight" style="color:#333333;">Employment Tracking</h1>
+            <p class="text-xs leading-relaxed mt-0.5 flex flex-wrap items-center gap-1.5" style="color:#555555;">
                 Track employment status of your assigned alumni.
                 @if($organizerDepartment)
-                    <span class="inline-flex items-center gap-1 font-semibold text-[#7A3F91]">
-                        <i class="fa-solid fa-building-columns text-xs"></i>
+                    <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                        <i class="fas fa-building-columns text-[9px]"></i>
                         {{ $organizerDepartment }}
                     </span>
                 @endif
                 @if($organizerBatch)
-                    <span class="inline-flex items-center gap-1 font-semibold text-[#7A3F91]">
-                        <i class="fa-solid fa-calendar text-xs"></i>
+                    <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                        <i class="fas fa-calendar text-[9px]"></i>
                         Batch {{ $organizerBatch }}
                     </span>
                 @endif
@@ -315,14 +448,12 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ══ STAT CARDS — 7 cards ══ --}}
-    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4 shrink-0">
+    {{-- ══ STAT CARDS ══ --}}
+    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0">
 
-        {{-- Total --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                     style="background:#7A3F91;">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow" style="background:#7A3F91;">
                     <i class="fa-solid fa-users text-white text-base"></i>
                 </div>
                 <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">All</span>
@@ -331,8 +462,7 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Total Alumni</p>
         </div>
 
-        {{-- Employed --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-briefcase text-white text-base"></i>
@@ -343,14 +473,12 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Employed</p>
             @if($totalAlumni > 0)
                 <div class="mt-2 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-emerald-500 rounded-full"
-                         style="width:{{ min(($totalEmployed / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                    <div class="h-full bg-emerald-500 rounded-full" style="width:{{ min(($totalEmployed/max($totalAlumni,1))*100,100) }}%;"></div>
                 </div>
             @endif
         </div>
 
-        {{-- Self-Employed --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-store text-white text-base"></i>
@@ -361,14 +489,12 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Self-Employed</p>
             @if($totalAlumni > 0)
                 <div class="mt-2 h-1.5 bg-blue-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-blue-500 rounded-full"
-                         style="width:{{ min(($totalSelf / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                    <div class="h-full bg-blue-500 rounded-full" style="width:{{ min(($totalSelf/max($totalAlumni,1))*100,100) }}%;"></div>
                 </div>
             @endif
         </div>
 
-        {{-- Unemployed --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
                     <i class="fa-solid fa-circle-pause text-white text-base"></i>
@@ -379,14 +505,12 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Unemployed</p>
             @if($totalAlumni > 0)
                 <div class="mt-2 h-1.5 bg-amber-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-amber-400 rounded-full"
-                         style="width:{{ min(($totalUnemployed / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                    <div class="h-full bg-amber-400 rounded-full" style="width:{{ min(($totalUnemployed/max($totalAlumni,1))*100,100) }}%;"></div>
                 </div>
             @endif
         </div>
 
-        {{-- Not Filled --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
                     <i class="fa-solid fa-circle-question text-white text-base"></i>
@@ -397,14 +521,12 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Not Filled</p>
             @if($totalAlumni > 0)
                 <div class="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div class="h-full bg-gray-400 rounded-full"
-                         style="width:{{ min(($totalNotFilled / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                    <div class="h-full bg-gray-400 rounded-full" style="width:{{ min(($totalNotFilled/max($totalAlumni,1))*100,100) }}%;"></div>
                 </div>
             @endif
         </div>
 
-        {{-- Local --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-house text-white text-base"></i>
@@ -415,14 +537,12 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Local</p>
             @if($totalAlumni > 0)
                 <div class="mt-2 h-1.5 bg-teal-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-teal-500 rounded-full"
-                         style="width:{{ min(($totalLocal / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                    <div class="h-full bg-teal-500 rounded-full" style="width:{{ min(($totalLocal/max($totalAlumni,1))*100,100) }}%;"></div>
                 </div>
             @endif
         </div>
 
-        {{-- OFW --}}
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 relative overflow-hidden hover:shadow-md transition-shadow">
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-plane-departure text-white text-base"></i>
@@ -433,34 +553,38 @@ new class extends Component {
             <p class="text-sm text-[#666666] mt-1 font-normal">Abroad (OFW)</p>
             @if($totalAlumni > 0)
                 <div class="mt-2 h-1.5 bg-orange-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-orange-500 rounded-full"
-                         style="width:{{ min(($totalOFW / max($totalAlumni,1)) * 100, 100) }}%;"></div>
+                    <div class="h-full bg-orange-500 rounded-full" style="width:{{ min(($totalOFW/max($totalAlumni,1))*100,100) }}%;"></div>
                 </div>
             @endif
         </div>
 
     </div>
 
-    {{-- ══ TABLE CARD — fills remaining height ══ --}}
-    <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm flex flex-col overflow-hidden flex-1 min-h-0">
+    {{-- ══ UNIFIED BLOCK — filter + table + pagination ══ --}}
+    <div class="ae-table-block min-h-0">
 
-        {{-- ── Filter Bar ── --}}
-        <div class="px-4 sm:px-5 py-3 border-b border-[#E8E0F0] flex flex-wrap gap-2 items-center bg-[#F9F7FC] shrink-0">
+        {{-- ── FILTER BAR (PURPLE) ── --}}
+        <div class="ae-table-block-filter flex flex-wrap gap-2 items-center">
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                 style="color:#7a3f91;">
+                Filters
+            </div>
 
             {{-- Search --}}
-            <div class="relative flex-1 min-w-[160px] sm:min-w-[200px] max-w-sm"
+            <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#555555; z-index:1;"></i>
                 <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
-                       placeholder="Search name, ID, company or job…"
-                       class="w-full pl-9 pr-4 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100"
-                       autocomplete="off">
+                       placeholder="Search name, ID, email or job…"
+                       class="ae-filter-input w-full"
+                       style="padding-left: 2.25rem; padding-right: 1rem;"
+                       autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
             {{-- Status --}}
-            <select wire:model.live="filterStatus"
-                    class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
+            <select wire:model.live="filterStatus" class="ae-filter-input">
                 <option value="">All Statuses</option>
                 <option value="employed">Employed</option>
                 <option value="self_employed">Self-Employed</option>
@@ -468,17 +592,8 @@ new class extends Component {
                 <option value="not_filled">Not Filled</option>
             </select>
 
-            {{-- Location --}}
-            <select wire:model.live="filterLocation"
-                    class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
-                <option value="">All Locations</option>
-                <option value="local">Local</option>
-                <option value="abroad">Abroad (OFW)</option>
-            </select>
-
-            {{-- Course Relevance --}}
-            <select wire:model.live="filterRelevance"
-                    class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
+            {{-- Relevance --}}
+            <select wire:model.live="filterRelevance" class="ae-filter-input">
                 <option value="">All Relevance</option>
                 <option value="yes">Related to Course</option>
                 <option value="partially">Partially Related</option>
@@ -487,8 +602,7 @@ new class extends Component {
 
             {{-- Course --}}
             @if($courses->isNotEmpty())
-                <select wire:model.live="filterCourse"
-                        class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
+                <select wire:model.live="filterCourse" class="ae-filter-input">
                     <option value="">All Courses</option>
                     @foreach($courses as $c)
                         <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -498,8 +612,7 @@ new class extends Component {
 
             {{-- Batch --}}
             @if($batches->isNotEmpty())
-                <select wire:model.live="filterBatch"
-                        class="px-3 py-2 border border-[#E8E0F0] rounded-xl text-sm bg-white text-[#333333] focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-purple-100 transition">
+                <select wire:model.live="filterBatch" class="ae-filter-input">
                     <option value="">All Batches</option>
                     @foreach($batches as $b)
                         <option value="{{ $b }}">Batch {{ $b }}</option>
@@ -508,47 +621,47 @@ new class extends Component {
             @endif
 
             {{-- Reset --}}
-            @if($search || $filterStatus || $filterLocation || $filterBatch || $filterCourse || $filterRelevance)
-                <button wire:click="clearFilters"
-                        class="px-3 py-2 rounded-xl border border-[#E8E0F0] bg-white text-sm font-semibold text-[#666666] hover:bg-[#F9F7FC] transition flex items-center gap-1.5">
-                    <i class="fas fa-rotate-left text-sm"></i>
-                    <span class="hidden sm:inline">Reset</span>
-                </button>
-            @endif
-
+            <button wire:click="clearFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="clearFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
+                    style="color:#333333;">
+                <i class="fas fa-rotate-left text-sm"></i>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
         </div>
 
-        {{-- ── Table ── --}}
-        <div class="relative flex-1 min-h-0">
-            <div class="h-full overflow-y-auto overflow-x-auto"
-                 style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9f7fc;"
+        {{-- ── TABLE WRAPPER ── --}}
+        <div class="relative flex-1 min-h-0 flex flex-col">
+
+            @if($rows->count() > 0)
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff;"
                  wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="search,filterStatus,filterLocation,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
-                <table class="w-full border-collapse min-w-[820px]">
-                    <thead>
-                        <tr class="border-b border-[#E8E0F0] sticky top-0 z-10 bg-[#F9F7FC]">
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Alumni</th>
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Course</th>
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden md:table-cell">Batch</th>
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider">Job Title</th>
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden lg:table-cell">Location</th>
-                            <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider">Status</th>
-                            <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider hidden xl:table-cell">
-                                Course Relevance
-                            </th>
-                            <th class="px-5 py-3.5 text-left text-xs font-semibold text-[#666666] uppercase tracking-wider hidden lg:table-cell">Last Updated</th>
-                            <th class="px-5 py-3.5 text-center text-xs font-semibold text-[#666666] uppercase tracking-wider">Actions</th>
+                 wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
+                <table class="w-full bg-white border-collapse">
+                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10" style="color:#555555;">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Alumni</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Course</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#555555;">Batch</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Job Title</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#555555;">Email Address</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Status</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#555555;">Relevance</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-[#F9F7FC]">
+                    <tbody class="divide-y divide-[#F5F5F5]">
 
-                        @forelse($rows as $row)
+                        @foreach($rows as $index => $row)
                         @php
                             $statusClass = match($row->employment_status) {
-                                'employed'      => 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-                                'self_employed' => 'bg-blue-50 text-blue-700 border border-blue-200',
-                                'unemployed'    => 'bg-amber-50 text-amber-700 border border-amber-200',
-                                default         => 'bg-[#F9F7FC] text-[#999999] border border-[#E8E0F0]',
+                                'employed'      => 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                                'self_employed' => 'border-blue-200 bg-blue-50 text-blue-700',
+                                'unemployed'    => 'border-amber-200 bg-amber-50 text-amber-700',
+                                default         => 'border-[#E8E0F0] bg-[#F9F7FC] text-[#999999]',
                             };
                             $statusLabel = match($row->employment_status) {
                                 'employed'      => 'Employed',
@@ -565,13 +678,12 @@ new class extends Component {
                             $isWorking = in_array($row->employment_status, ['employed', 'self_employed']);
 
                             $relConfig = match($row->course_relevance ?? '') {
-                                'yes'       => ['Related',          'fa-check-circle',  'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
-                                'no'        => ['Not Related',      'fa-times-circle',  'text-red-600',     'bg-red-50 border-red-200'],
-                                'partially' => ['Partially',        'fa-adjust',        'text-amber-700',   'bg-amber-50 border-amber-200'],
+                                'yes'       => ['Related',    'fa-check-circle', 'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
+                                'no'        => ['Not Related','fa-times-circle', 'text-red-600',     'bg-red-50 border-red-200'],
+                                'partially' => ['Partially',  'fa-adjust',       'text-amber-700',   'bg-amber-50 border-amber-200'],
                                 default     => null,
                             };
 
-                            // Photo URL
                             $photoPath = $row->profile_photo ?? null;
                             $photoUrl  = (!$photoPath || str_contains($photoPath, 'default.png'))
                                 ? asset('storage/alumni-photos/default.png')
@@ -580,172 +692,199 @@ new class extends Component {
                                     ? asset('storage/' . $photoPath)
                                     : asset('storage/alumni-photos/default.png')
                                 );
+
+                            $rowNum = ($rows->currentPage() - 1) * $rows->perPage() + $index + 1;
                         @endphp
 
-                        <tr class="bg-white hover:bg-[#faf7ff] transition-colors duration-100">
+                        <tr class="ae-tbl-row"
+                            wire:click="viewDetail({{ $row->id }})"
+                            wire:key="ae-row-{{ $row->id }}"
+                            data-ae-row>
 
-                            {{-- Alumni --}}
-                            <td class="px-5 py-3.5">
+                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
+                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
+                            </td>
+
+                            <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-3">
                                     <img src="{{ $photoUrl }}"
                                          alt="{{ $row->full_name }}"
                                          class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                     <div class="min-w-0">
-                                        <p class="font-semibold text-[#333333] text-sm leading-snug truncate uppercase">{{ $row->full_name }}</p>
-                                        <p class="text-xs text-[#999999] font-mono mt-0.5">{{ $row->student_id }}</p>
+                                        <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#333333;">{{ $row->full_name }}</p>
+                                        <p class="text-xs font-mono mt-0.5" style="color:#999999;">{{ $row->student_id }}</p>
                                     </div>
                                 </div>
                             </td>
 
-                            {{-- Course --}}
-                            <td class="px-5 py-3.5">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">
+                            <td class="px-4 py-3.5">
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100 uppercase">
                                     {{ $row->course_code ?? '—' }}
                                 </span>
                             </td>
 
-                            {{-- Batch --}}
-                            <td class="px-5 py-3.5 text-sm font-semibold text-[#333333] hidden md:table-cell">
+                            <td class="px-4 py-3.5 text-sm font-semibold hidden md:table-cell" style="color:#333333;">
                                 {{ $row->batch ?? '—' }}
                             </td>
 
-                            {{-- Job Title Only --}}
-                            <td class="px-5 py-3.5">
+                            <td class="px-4 py-3.5">
                                 @if($row->job_title)
-                                    <p class="font-semibold text-[#333333] text-sm leading-snug uppercase">{{ $row->job_title }}</p>
-                                    {{-- Relevance badge inline (shown on smaller screens where xl column is hidden) --}}
+                                    <p class="font-semibold text-sm leading-snug uppercase" style="color:#333333;">{{ $row->job_title }}</p>
                                     @if($relConfig)
                                         <span class="xl:hidden inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $relConfig[2] }} {{ $relConfig[3] }}">
-                                            <i class="fa-solid {{ $relConfig[1] }} text-[9px]"></i>
-                                            {{ $relConfig[0] }}
+                                            <i class="fa-solid {{ $relConfig[1] }} text-[9px]"></i>{{ $relConfig[0] }}
                                         </span>
                                     @endif
                                 @elseif($row->employment_status === 'unemployed')
-                                    <span class="text-sm text-[#999999] italic">
+                                    <span class="text-sm italic" style="color:#999999;">
                                         {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
                                     </span>
                                 @else
-                                    <span class="text-sm italic" style="color:#CCCCCC;">No data yet</span>
+                                    <span class="text-sm italic" style="color:#cccccc;">No data yet</span>
                                 @endif
                             </td>
 
-                            {{-- Location --}}
-                            <td class="px-5 py-3.5 hidden lg:table-cell">
-                                @if($row->work_location === 'abroad')
-                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-orange-600">
-                                        <i class="fa-solid fa-plane-departure text-xs"></i> Abroad (OFW)
-                                    </span>
-                                @elseif($row->work_location === 'local')
-                                    <span class="inline-flex items-center gap-1 text-xs font-semibold text-teal-600">
-                                        <i class="fa-solid fa-house text-xs"></i> Local
-                                    </span>
+                            <td class="px-4 py-3.5 hidden lg:table-cell">
+                                @if($row->email ?? null)
+                                    <p class="text-sm font-medium truncate max-w-[200px]" style="color:#333333;" title="{{ $row->email }}">
+                                        {{ $row->email }}
+                                    </p>
                                 @else
-                                    <span class="text-sm" style="color:#CCCCCC;">—</span>
+                                    <span class="text-sm" style="color:#cccccc;">—</span>
                                 @endif
                             </td>
 
-                            {{-- Status --}}
-                            <td class="px-5 py-3.5 text-center">
-                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold {{ $statusClass }}">
-                                    <i class="fa-solid {{ $statusIcon }} text-xs"></i>
+                            <td class="px-4 py-3.5 text-center">
+                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border {{ $statusClass }} whitespace-nowrap">
+                                    <i class="fa-solid {{ $statusIcon }} text-[9px]"></i>
                                     {{ $statusLabel }}
                                 </span>
                             </td>
 
-                            {{-- Course Relevance (xl+) --}}
-                            <td class="px-5 py-3.5 text-center hidden xl:table-cell">
+                            <td class="px-4 py-3.5 text-center hidden xl:table-cell">
                                 @if($isWorking && $relConfig)
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold border {{ $relConfig[2] }} {{ $relConfig[3] }}">
                                         <i class="fa-solid {{ $relConfig[1] }} text-xs"></i>
                                         {{ $relConfig[0] }}
                                     </span>
                                 @elseif($isWorking)
-                                    <span class="text-xs text-[#CCCCCC]">—</span>
+                                    <span class="text-xs" style="color:#cccccc;">—</span>
                                 @else
-                                    <span class="text-xs text-[#CCCCCC]">N/A</span>
+                                    <span class="text-xs" style="color:#cccccc;">N/A</span>
                                 @endif
                             </td>
 
-                            {{-- Last Updated --}}
-                            <td class="px-5 py-3.5 text-xs text-[#999999] hidden lg:table-cell">
-                                @if($row->emp_updated_at)
-                                    {{ \Carbon\Carbon::parse($row->emp_updated_at)->diffForHumans() }}
-                                @else
-                                    <span style="color:#CCCCCC;">—</span>
-                                @endif
-                            </td>
-
-                            {{-- Actions --}}
-                            <td class="px-5 py-3.5 text-center">
-                                <button wire:click="viewDetail({{ $row->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl text-white shadow transition hover:opacity-90 active:scale-[.98]"
-                                        style="background:#7A3F91;">
-                                    <i class="fa-solid fa-eye text-xs"></i>
-                                    <span class="hidden sm:inline">View</span>
-                                </button>
-                            </td>
-
                         </tr>
-                        @empty
-                        <tr>
-                            <td colspan="9" class="py-16 text-center">
-                                <div class="flex flex-col items-center gap-3">
-                                    <div class="w-14 h-14 rounded-2xl flex items-center justify-center"
-                                         style="background:#F9F7FC;">
-                                        <i class="fas fa-users-slash text-3xl" style="color:#d9c9e8;"></i>
-                                    </div>
-                                    <p class="font-semibold text-[#999999] text-sm">No alumni found.</p>
-                                    <p class="text-xs text-[#CCCCCC]">Try adjusting your search or filters.</p>
-                                    <button wire:click="clearFilters"
-                                            class="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold border border-[#E8E0F0] text-[#666666] hover:bg-[#F9F7FC] transition">
-                                        <i class="fas fa-rotate-left"></i> Reset Filters
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                        @endforelse
+                        @endforeach
 
                     </tbody>
                 </table>
             </div>
+
+            @else
+            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
+                    <i class="fas fa-users-slash text-xl text-gray-400"></i>
+                </div>
+                <div>
+                    <p class="font-semibold text-base" style="color:#333333;">
+                        @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
+                            No alumni match your filters
+                        @else
+                            No alumni found
+                        @endif
+                    </p>
+                    <p class="text-sm mt-1" style="color:#555555;">
+                        @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
+                            Try clearing your filters to see all alumni.
+                        @else
+                            No verified alumni are registered under your college yet.
+                        @endif
+                    </p>
+                </div>
+                @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
+                    <button wire:click="clearFilters"
+                            class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer"
+                            style="background-color:#7a3f91;">
+                        <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
+                    </button>
+                @endif
+            </div>
+            @endif
         </div>
 
-        {{-- ── PAGINATION BAR ── --}}
-        <div class="px-4 sm:px-5 py-3.5 border-t border-[#E8E0F0] shrink-0 rounded-b-2xl"
-             style="background:#7A3F91;">
-            @php
-                $total = $rows->total();
-                $pp    = $rows->perPage();
-                $cp    = $rows->currentPage();
-                $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
-                $to    = min($cp * $pp, $total);
-            @endphp
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <p class="text-white text-sm font-normal">
-                    Showing
-                    <span class="font-semibold">{{ $from }}–{{ $to }}</span>
-                    of
-                    <span class="font-semibold">{{ $total }}</span>
-                    alumni
-                </p>
-                <div class="flex items-center gap-1.5">
-                    @if($rows->onFirstPage())
-                        <button disabled class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white/40 cursor-not-allowed">← Prev</button>
+        {{-- ── PAGINATION ── --}}
+        @php
+            $total   = $rows->total();
+            $pp      = $rows->perPage();
+            $cp      = $rows->currentPage();
+            $lp      = $rows->lastPage();
+            $from    = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+            $to      = min($cp * $pp, $total);
+            $pgStart = max(1, $cp - 2);
+            $pgEnd   = min($lp, $cp + 2);
+        @endphp
+        <div class="ae-table-block-pagination">
+            <p class="text-white/80 text-xs font-normal whitespace-nowrap">
+                Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
+                of <strong class="text-white font-bold">{{ $total }}</strong>
+                alumni
+                @if($filterStatus || $filterBatch || $filterCourse || $filterRelevance || $search)
+                    <span class="text-white/50 text-xs ml-1">(filtered)</span>
+                @endif
+            </p>
+
+            <div class="flex items-center gap-1 flex-wrap py-2">
+                <button wire:click="previousPage"
+                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        @if($rows->onFirstPage()) disabled @endif aria-label="Previous">
+                    <i class="fas fa-chevron-left text-[9px]"></i>
+                </button>
+
+                @if($pgStart > 1)
+                    <button wire:click="$set('page', 1)"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                    @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                @endif
+
+                @for($p = $pgStart; $p <= $pgEnd; $p++)
+                    @if($p === $cp)
+                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                     bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="previousPage" class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white hover:bg-white/30 transition active:scale-[.98]">← Prev</button>
+                        <button wire:click="$set('page', {{ $p }})"
+                                class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
-                    <span class="px-4 py-2 bg-white rounded-xl text-sm font-semibold shadow" style="color:#7A3F91;">{{ $cp }} / {{ $rows->lastPage() }}</span>
-                    @if($rows->hasMorePages())
-                        <button wire:click="nextPage" class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white hover:bg-white/30 transition active:scale-[.98]">Next →</button>
-                    @else
-                        <button disabled class="px-4 py-2 rounded-xl text-sm font-semibold bg-white/20 text-white/40 cursor-not-allowed">Next →</button>
-                    @endif
-                </div>
+                @endfor
+
+                @if($pgEnd < $lp)
+                    @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                    <button wire:click="$set('page', {{ $lp }})"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                @endif
+
+                <button wire:click="nextPage"
+                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        @if(!$rows->hasMorePages()) disabled @endif aria-label="Next">
+                    <i class="fas fa-chevron-right text-[9px]"></i>
+                </button>
+
+                <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
+                    Page {{ $cp }}/{{ $lp }}
+                </span>
             </div>
         </div>
 
-    </div>{{-- /table card --}}
-</div>{{-- /page wrapper --}}
+    </div>{{-- /ae-table-block --}}
+
+</div>{{-- /main layout --}}
 
 
 {{-- ══════════════════════════════════════════════════════ DETAIL MODAL ══ --}}
@@ -780,13 +919,21 @@ new class extends Component {
         'industry_professional' => ['fa-user-tie',        'Industry Professional'],
     ];
     $relModalMap = [
-        'yes'       => ['Related to Course',   'fa-check-circle',   'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
-        'no'        => ['Not Related',          'fa-times-circle',   'text-red-600',     'bg-red-50 border-red-200'],
-        'partially' => ['Partially Related',   'fa-adjust',         'text-amber-700',   'bg-amber-50 border-amber-200'],
+        'yes'       => ['Related to Course', 'fa-check-circle', 'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
+        'no'        => ['Not Related',        'fa-times-circle', 'text-red-600',     'bg-red-50 border-red-200'],
+        'partially' => ['Partially Related', 'fa-adjust',       'text-amber-700',   'bg-amber-50 border-amber-200'],
     ];
     $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
 
-    // Modal profile photo
+    // Build full address string
+    $addressParts = array_filter([
+        $md['address_street']       ?? '',
+        $md['address_barangay']     ?? '',
+        $md['address_municipality'] ?? '',
+        $md['address_province']     ?? '',
+    ]);
+    $fullAddress = !empty($addressParts) ? implode(', ', $addressParts) : null;
+
     $modalPhotoPath = $md['profile_photo'] ?? null;
     $modalPhotoUrl  = (!$modalPhotoPath || str_contains($modalPhotoPath, 'default.png'))
         ? asset('storage/alumni-photos/default.png')
@@ -819,7 +966,7 @@ new class extends Component {
                 </div>
             </div>
             <button wire:click="closeModal"
-                    class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                    class="ae-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
                 <i class="fa-solid fa-xmark text-base"></i>
             </button>
         </div>
@@ -830,10 +977,10 @@ new class extends Component {
 
             {{-- Student Info --}}
             <div>
-                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <i class="fa-solid fa-user-graduate" style="color:#7A3F91;"></i> Student Information
+                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">
+                    Student Information
                 </p>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
                     @foreach([
                         'Course'  => $md['course_code']    ?? '—',
                         'Batch'   => $md['batch']          ?? '—',
@@ -841,17 +988,37 @@ new class extends Component {
                         'Contact' => $md['contact_number'] ?? '—',
                     ] as $label => $value)
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">{{ $label }}</p>
-                            <p class="text-sm font-semibold text-[#333333]">{{ $value }}</p>
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $label }}</p>
+                            <p class="text-sm font-semibold text-[#333333]">{{ $value ?: '—' }}</p>
                         </div>
                     @endforeach
+                </div>
+
+                {{-- Email Address --}}
+                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] mb-2">
+                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">
+                        Email Address
+                    </p>
+                    <p class="text-sm font-semibold text-[#333333] break-all">{{ $md['email'] ?? '—' }}</p>
+                </div>
+
+                {{-- Full Address --}}
+                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">
+                        Full Address
+                    </p>
+                    @if($fullAddress)
+                        <p class="text-sm font-semibold text-[#333333] uppercase">{{ $fullAddress }}</p>
+                    @else
+                        <p class="text-sm text-[#999999]">— Not provided</p>
+                    @endif
                 </div>
             </div>
 
             {{-- Employment Info --}}
             <div class="border-t border-[#E8E0F0] pt-4">
-                <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <i class="fa-solid fa-briefcase" style="color:#7A3F91;"></i> Employment Information
+                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">
+                    Employment Information
                 </p>
 
                 <div class="flex items-center gap-2 mb-4 flex-wrap">
@@ -877,36 +1044,31 @@ new class extends Component {
                             ['Education',  $eduMap[$md['education_status'] ?? ''] ?? '—'],
                         ] as [$lbl, $val])
                             <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                                <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">{{ $lbl }}</p>
+                                <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $lbl }}</p>
                                 <p class="text-sm font-semibold text-[#333333]">{{ $val }}</p>
                             </div>
                         @endforeach
 
                         {{-- Course Relevance --}}
-                        <div class="bg-gray-50 rounded-xl px-3 py-2.5 border {{ $relModal ? $relModal[3] : 'border-[#E8E0F0]' }} sm:col-span-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-1.5">
-                                <i class="fa-solid fa-graduation-cap mr-1" style="color:#7A3F91;"></i>
+                        <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] sm:col-span-3">
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-1.5">
                                 Job Related to Course?
                             </p>
                             @if($relModal)
-                                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-bold border {{ $relModal[2] }} {{ $relModal[3] }}">
-                                    <i class="fa-solid {{ $relModal[1] }} text-xs"></i>
-                                    {{ $relModal[0] }}
-                                </span>
+                                <p class="text-sm font-semibold text-[#333333]">{{ $relModal[0] }}</p>
                             @else
-                                <span class="text-sm text-[#999999]">— Not specified</span>
+                                <p class="text-sm text-[#999999]">— Not specified</p>
                             @endif
                         </div>
                     </div>
 
                     @if(!empty($md['career_path_arr']))
                         <div class="mt-4">
-                            <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest mb-2">Career Path</p>
+                            <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-2">Career Path</p>
                             <div class="flex flex-wrap gap-2">
                                 @foreach($md['career_path_arr'] as $cp)
                                     @if(isset($careerLabels[$cp]))
-                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
-                                            <i class="fa-solid {{ $careerLabels[$cp][0] }} text-xs"></i>
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold bg-gray-50 text-[#333333] border border-[#E8E0F0]">
                                             {{ $careerLabels[$cp][1] }}
                                         </span>
                                     @endif
@@ -917,22 +1079,19 @@ new class extends Component {
 
                 @elseif(($md['employment_status'] ?? '') === 'unemployed')
                     <div class="space-y-3">
-                        <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">Unemployment Status</p>
+                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Unemployment Status</p>
                             <p class="text-sm font-semibold text-[#333333]">
                                 {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
                             </p>
                         </div>
                         <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#999999] mb-0.5">Education Status</p>
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Education Status</p>
                             <p class="text-sm font-semibold text-[#333333]">{{ $eduMap[$md['education_status'] ?? ''] ?? '—' }}</p>
                         </div>
                     </div>
                 @else
                     <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-8 text-center">
-                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:#F9F7FC;">
-                            <i class="fa-solid fa-circle-question text-3xl" style="color:#d9c9e8;"></i>
-                        </div>
                         <p class="text-sm font-semibold text-[#999999]">No employment record yet.</p>
                         <p class="text-xs text-[#CCCCCC] mt-1">This alumni has not filled in their employment information.</p>
                     </div>
@@ -941,16 +1100,43 @@ new class extends Component {
 
         </div>
 
-        {{-- Modal Footer --}}
-        <div class="px-5 py-4 border-t border-[#E8E0F0] flex justify-end flex-shrink-0 bg-[#F9F7FC]">
-            <button wire:click="closeModal"
-                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-[#E8E0F0] text-[#666666] hover:bg-white transition">
-                <i class="fa-solid fa-xmark"></i> Close
-            </button>
-        </div>
+        {{-- Modal Footer (empty — close via X button in header) --}}
+        <div class="flex-shrink-0" style="height:0;"></div>
 
     </div>
 </div>
 @endif
+
+{{-- ── Cursor-following tooltip JS ── --}}
+<script>
+(function () {
+    var tip = document.getElementById('ae-hover-tip');
+
+    function bindRows() {
+        document.querySelectorAll('[data-ae-row]').forEach(function (row) {
+            if (row._aeTipBound) return;
+            row._aeTipBound = true;
+
+            row.addEventListener('mousemove', function (e) {
+                if (!tip) return;
+                tip.style.left = e.clientX + 'px';
+                tip.style.top  = e.clientY + 'px';
+                tip.classList.add('visible');
+            });
+
+            row.addEventListener('mouseleave', function () {
+                if (tip) tip.classList.remove('visible');
+            });
+
+            row.addEventListener('click', function () {
+                if (tip) tip.classList.remove('visible');
+            });
+        });
+    }
+
+    bindRows();
+    document.addEventListener('livewire:updated', bindRows);
+})();
+</script>
 
 </div>

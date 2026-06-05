@@ -57,10 +57,11 @@ new class extends Component {
     public array $lastSeenMessageIds = [];
 
     // ── Tracks last NOTIFIED message IDs per room (for bell notifications) ───
-    // Completely separate from lastSeenMessageIds.
-    // Only advanced by: sendMessage() and checkAndDispatchNewMessageNotifications().
-    // NOT advanced by selectRoom() — so notifications fire even for the active room.
     public array $lastNotifiedMessageIds = [];
+
+    // ── Tracks which rooms have unread messages (red dot) ────────────────────
+    // Key = room ID (int), value = true. Removed when room is opened.
+    public array $unreadRoomIds = [];
 
     private function lastReadCacheKey(int $roomId): string
     {
@@ -156,14 +157,15 @@ new class extends Component {
 
     private function seedLastSeenMessageIds(): void
     {
+        // Reset unread dots on first load — nothing is "unread" yet
+        $this->unreadRoomIds = [];
+
         foreach ($this->rooms as $r) {
             $maxId = DB::table('chat_messages')
                 ->where('room_id', $r['id'])
                 ->whereNull('deleted_at')
                 ->max('id') ?? 0;
             $this->lastSeenMessageIds[$r['id']]     = (int) $maxId;
-            // Initialize lastNotifiedMessageIds to current max so we only
-            // notify about messages that arrive AFTER the page loads.
             $this->lastNotifiedMessageIds[$r['id']] = (int) $maxId;
         }
     }
@@ -277,7 +279,7 @@ new class extends Component {
                 'is_active'     => $r->id === $self->roomId,
             ];
         })
-        ->sortByDesc(fn ($r) => $r['type'] === 'college' ? 1 : 0)
+        ->sortBy(fn ($r) => $r['type'] === 'college' ? 1 : 0)
         ->values()->toArray();
     }
 
@@ -315,10 +317,11 @@ new class extends Component {
             ->whereNull('deleted_at')
             ->max('id') ?? 0;
 
-        // Only advance lastSeenMessageIds (for unread badge UI).
-        // Do NOT touch lastNotifiedMessageIds here — that would suppress
-        // bell notifications for messages arriving while in this room.
+        // Advance lastSeenMessageIds (unread badge UI) but NOT lastNotifiedMessageIds.
         $this->lastSeenMessageIds[$id] = (int) $maxId;
+
+        // ── Clear the red dot for this room now that the user has opened it ──
+        unset($this->unreadRoomIds[(string) $id]);
 
         $this->markRoomAsRead($id);
         $this->refreshOnlineCount();
@@ -355,24 +358,11 @@ new class extends Component {
         $this->checkAndDispatchNewMessageNotifications();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // BUG FIX: Check ALL rooms INCLUDING the currently active room for new
-    // messages from others, then dispatch bell notifications.
-    //
-    // Key changes vs original:
-    //   1. We do NOT skip the active room — coordinator messages in your
-    //      current chat should still trigger the bell.
-    //   2. lastNotifiedMessageIds is NEVER reset by selectRoom(), so the
-    //      pointer only moves forward here and in sendMessage().
-    //   3. lastSeenMessageIds for the active room is still advanced (no
-    //      unread badge), but that does not affect notifications.
-    // ─────────────────────────────────────────────────────────────────────────
     private function checkAndDispatchNewMessageNotifications(): void
     {
         foreach ($this->rooms as $room) {
             $roomId = (int) $room['id'];
 
-            // Ensure the notification pointer is initialized for this room.
             if (! isset($this->lastNotifiedMessageIds[$roomId])) {
                 $this->lastNotifiedMessageIds[$roomId] = (int) (
                     DB::table('chat_messages')
@@ -380,20 +370,16 @@ new class extends Component {
                         ->whereNull('deleted_at')
                         ->max('id') ?? 0
                 );
-                // Nothing new to notify on first initialization.
                 continue;
             }
 
             $lastKnown = (int) $this->lastNotifiedMessageIds[$roomId];
 
-            // Fetch new messages from others that arrived after our last check.
-            // This runs for ALL rooms, including the currently open one.
             $newMessages = DB::table('chat_messages as m')
                 ->where('m.room_id', $roomId)
                 ->whereNull('m.deleted_at')
                 ->where('m.id', '>', $lastKnown)
                 ->where(function ($q) {
-                    // Exclude messages sent by this alumni themselves.
                     $q->where('m.sender_type', '!=', 'alumni')
                       ->orWhere('m.sender_id', '!=', $this->alumniId);
                 })
@@ -403,15 +389,15 @@ new class extends Component {
 
             if (empty($newMessages)) continue;
 
-            // Advance the notification pointer BEFORE dispatching so a second
-            // rapid poll doesn't re-fire the same notification.
             $newMaxId = max(array_column($newMessages, 'id'));
             $this->lastNotifiedMessageIds[$roomId] = (int) $newMaxId;
 
-            // Also advance lastSeenMessageIds for the CURRENT active room
-            // (user is looking at it, so mark as seen too).
+            // Advance lastSeenMessageIds for the CURRENT active room (user is looking at it).
             if ($roomId === $this->roomId) {
                 $this->lastSeenMessageIds[$roomId] = (int) $newMaxId;
+            } else {
+                // ── Mark this room as having unread messages (show red dot) ──
+                $this->unreadRoomIds[(string) $roomId] = true;
             }
 
             $latest     = end($newMessages);
@@ -429,8 +415,6 @@ new class extends Component {
             $bodySnip = mb_substr($latest->body ?? '', 0, 60);
             $count    = count($newMessages);
 
-            // Dispatch with named params → Livewire v3 puts them directly in
-            // e.detail (plain object), not wrapped in an array.
             $this->dispatch('message-received',
                 sender: $senderName,
                 room:   $roomName,
@@ -637,8 +621,7 @@ new class extends Component {
         $this->stopTyping();
         $this->markRoomAsRead($this->roomId);
 
-        // Advance BOTH pointers for the alumni's own sent message so we
-        // never generate a "New Message" notification for our own sends.
+        // Advance BOTH pointers for own sent message — never notify yourself.
         $this->lastSeenMessageIds[$this->roomId]     = (int) $msgId;
         $this->lastNotifiedMessageIds[$this->roomId] = (int) $msgId;
 
@@ -901,25 +884,40 @@ new class extends Component {
 
         <div class="flex-1 overflow-y-auto px-2 py-2 space-y-1 bg-white">
             @forelse($rooms as $r)
+            @php $hasUnread = isset($unreadRoomIds[(string)$r['id']]); @endphp
             <button wire:click="selectRoom({{ $r['id'] }})"
                     class="w-full text-left rounded-xl px-3 py-3 transition-all border
-                           {{ $r['is_active']
-                               ? 'border-[#d9c9e8] bg-[#f3eef8]'
-                               : 'border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]' }}">
+                           @if($r['is_active']) border-[#d9c9e8] bg-[#f3eef8]
+                           @elseif($hasUnread) border-[#e0d0ed] bg-[#F0EBF5] hover:bg-[#e8dff2]
+                           @else border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa] @endif">
                 <div class="flex items-start gap-2.5">
-                    <div class="w-10 h-10 flex-shrink-0 rounded-xl flex items-center justify-center text-white text-sm
-                                {{ $r['type']==='college' ? 'bg-[#7a3f91]' : ($r['is_active'] ? 'bg-[#7a3f91]' : 'bg-[#c4a8d4]') }}">
-                        <i class="fa-solid {{ $r['type']==='college' ? 'fa-school' : 'fa-users' }}"></i>
+                    {{-- Icon --}}
+                    <div class="relative flex-shrink-0">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm
+                                    {{ ($r['type']==='college' || $r['is_active'] || $hasUnread) ? 'bg-[#7a3f91]' : 'bg-[#c4a8d4]' }}">
+                            <i class="fa-solid {{ $r['type']==='college' ? 'fa-school' : 'fa-users' }}"></i>
+                        </div>
+                        {{-- RED DOT badge on the icon --}}
+                        @if($hasUnread)
+                        <span class="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 border-2 border-white flex-shrink-0 z-10"></span>
+                        @endif
                     </div>
                     <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-1">
+                        <div class="flex items-center justify-between gap-1">
                             <p class="text-sm leading-tight truncate
-                                      {{ $r['is_active'] ? 'font-semibold text-[#7a3f91]' : 'font-semibold text-[#333333]' }}">
+                                      @if($r['is_active']) font-semibold text-[#7a3f91]
+                                      @elseif($hasUnread) font-bold text-[#1a1a1a]
+                                      @else font-semibold text-[#333333] @endif">
                                 {{ $r['type']==='college' ? $r['department'] : $r['name'] }}
                             </p>
-                            @if($r['latest_time'])
-                            <span class="text-xs flex-shrink-0 mt-0.5 font-semibold text-[#999999]">{{ $r['latest_time'] }}</span>
-                            @endif
+                            <div class="flex items-center gap-1 flex-shrink-0 ml-1">
+                                @if($r['latest_time'])
+                                <span class="text-[11px] font-semibold whitespace-nowrap
+                                             {{ $hasUnread ? 'text-red-500' : 'text-[#999999]' }}">
+                                    {{ $r['latest_time'] }}
+                                </span>
+                                @endif
+                            </div>
                         </div>
                         <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
                             @if($r['type']==='college')
@@ -931,7 +929,8 @@ new class extends Component {
                             @endif
                         </div>
                         @if($r['latest_body'])
-                        <p class="text-xs truncate leading-tight text-[#666666]">
+                        <p class="text-xs truncate leading-tight
+                                  {{ $hasUnread ? 'text-[#222222] font-semibold' : 'text-[#666666]' }}">
                             @if($r['latest_sender'])<span class="font-semibold">{{ $r['latest_sender'] }}:</span> @endif
                             {{ Str::limit($r['latest_body'], 34) }}
                         </p>

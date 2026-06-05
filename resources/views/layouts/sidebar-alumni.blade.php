@@ -92,6 +92,19 @@
 
     <script>
     // ─────────────────────────────────────────────────────────────────────────
+    //  ROUTE MAP — centralized so both notif-click and sidebar use the same map
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__alumniRouteMap = {
+        'alumni.dashboard':   '/alumni/dashboard',
+        'alumni.information': '/alumni/information',
+        'job.opportunities':  '/job/opportunities',
+        'upcoming.events':    '/upcoming/events',
+        'alumni.employment':  '/alumni/employment',
+        'alumni.messenger':   '/alumni/messenger',
+        'alumni.yearbook':    '/alumni/yearbook',
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY — fresh object every call, no shared-reference bugs
     // ─────────────────────────────────────────────────────────────────────────
     window.__makeAlumniNotifsStore = function () {
@@ -123,7 +136,7 @@
                 } catch (e) { /* silently fail */ }
             },
 
-            // ─── GROUP-BY-DAY (same logic as Registrar) ───────────────────
+            // ─── GROUP-BY-DAY ─────────────────────────────────────────────
             _groupByDay(rows) {
                 var map = new Map();
                 Array.from(rows)
@@ -136,7 +149,6 @@
                             : 'unknown';
                         var rawDedup = n.dedup_key || '';
 
-                        // ── Employment events: group all into one per day ──
                         var isEmpEvent = (
                             rawDedup.startsWith('employment_update') ||
                             rawDedup.startsWith('employment::')      ||
@@ -146,20 +158,14 @@
                             n.title === 'New Employment Record'      ||
                             n.icon  === 'chart-line'
                         );
-
-                        // ── Message events: group all messages per day ──
                         var isMsgEvent = (
                             rawDedup.startsWith('message-received::') ||
                             n.icon  === 'comments'
                         );
-
-                        // ── Job events: group all jobs per day ──
                         var isJobEvent = (
                             rawDedup.startsWith('job-posted::') ||
                             n.icon  === 'briefcase'
                         );
-
-                        // ── Event/calendar events: group all events per day ──
                         var isCalEvent = (
                             rawDedup.startsWith('event-announced::') ||
                             n.icon  === 'calendar'
@@ -175,7 +181,6 @@
                         } else if (isCalEvent) {
                             groupKey = 'calendar_day::' + day;
                         } else {
-                            // Everything else: group by title + dedup_key + day
                             groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
                         }
 
@@ -185,7 +190,6 @@
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
 
-                            // Update message based on group type
                             if (isEmpEvent) {
                                 g.message = g.count + ' employment update(s) today.';
                                 g.title   = 'Employment Status Updated';
@@ -226,6 +230,7 @@
             toggle() { this.open = !this.open; },
             close()  { this.open = false; },
 
+            // ── Mark a single grouped notif read (all its _ids) ───────────────
             async markRead(item) {
                 if (item.read) return;
                 item.read = true;
@@ -244,6 +249,7 @@
                 }
             },
 
+            // ── Mark ALL notifs read ──────────────────────────────────────────
             async markAllRead() {
                 this.items.forEach(function (n) { n.read = true; });
                 try {
@@ -255,6 +261,32 @@
                         }
                     });
                 } catch (e) { /* ignore */ }
+            },
+
+            // ── Mark only notifs that match a given link_route as read ────────
+            //    Called when a sidebar link is clicked so the red dot for that
+            //    section disappears without wiping unrelated notifications.
+            async markReadByRoute(routeName) {
+                var matched = this.items.filter(function (n) {
+                    return n.link_route === routeName && !n.read;
+                });
+                if (matched.length === 0) return;
+                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                for (var i = 0; i < matched.length; i++) {
+                    matched[i].read = true;
+                    var ids = matched[i]._ids || [matched[i].id];
+                    for (var j = 0; j < ids.length; j++) {
+                        try {
+                            await window.fetch('/alumni/notifications/' + ids[j] + '/read', {
+                                method: 'PATCH',
+                                headers: {
+                                    'X-CSRF-TOKEN':     csrf,
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                }
+                            });
+                        } catch (e) { /* ignore */ }
+                    }
+                }
             },
         };
     };
@@ -321,7 +353,7 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open  = false;
-                s.items = [];
+                // NOTE: do NOT clear s.items here — we want notif history to persist
                 s.init();
             } else {
                 Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
@@ -394,6 +426,29 @@
         label.style.left = (e.clientX + 14) + 'px';
         label.style.top  = (e.clientY + 14) + 'px';
     });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SIDEBAR SMART MARK-READ
+    //  When user clicks a sidebar link, mark as read only the notifs whose
+    //  link_route matches what they're navigating to.
+    //  Mirrors the exact same pattern as the Registrar sidebar.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__alumniSidebarNotifsMarkRead = function (routeName) {
+        var s = window.__safeAlumniNotifsStore();
+        if (!s) return;
+
+        var routesToMark = [routeName];
+
+        // Messenger and dashboard — mark their own routes
+        // Employment page clears employment notifs
+        // Job opportunities clears job notifs
+        // Events page clears event notifs
+        // (Add cross-clearing rules here if needed in the future)
+
+        routesToMark.forEach(function (r) {
+            s.markReadByRoute(r);
+        });
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     //  NOTIFICATION EVENT LISTENERS
@@ -638,8 +693,14 @@
 
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->is($link['pattern']); @endphp
+                {{--
+                    FIX: On click, call __alumniSidebarNotifsMarkRead(routeName) BEFORE navigating.
+                    This marks matching notifs as read (removes red dot) but keeps the
+                    notification text/history intact in the DB and panel.
+                --}}
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
+                   @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}')"
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
                           {{ $isActive
                               ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
@@ -801,16 +862,7 @@
                         $store.alumniNotifs.markRead(notif);
                         $store.alumniNotifs.close();
                         if (notif.link_route) {
-                            const routeMap = {
-                                'alumni.dashboard':   '/alumni/dashboard',
-                                'alumni.information': '/alumni/information',
-                                'job.opportunities':  '/job/opportunities',
-                                'upcoming.events':    '/upcoming/events',
-                                'alumni.employment':  '/alumni/employment',
-                                'alumni.messenger':   '/alumni/messenger',
-                                'alumni.yearbook':    '/alumni/yearbook',
-                            };
-                            const url = routeMap[notif.link_route] || '/alumni/dashboard';
+                            const url = window.__alumniRouteMap[notif.link_route] || '/alumni/dashboard';
                             window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                         }
                     ">

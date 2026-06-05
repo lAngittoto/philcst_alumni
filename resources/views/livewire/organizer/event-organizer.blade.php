@@ -23,7 +23,6 @@ new class extends Component {
 
     public string $search       = '';
     public string $filterStatus = '';
-    public string $filterSort   = 'recent';
 
     public bool   $showFormModal  = false;
     public bool   $isEditing      = false;
@@ -55,8 +54,6 @@ new class extends Component {
 
     public bool $showNoAlumniModal = false;
 
-    public bool   $showResubmitConfirmModal = false;
-    public ?int   $pendingEditId            = null;
     public bool   $isResubmitting           = false;
     public string $resubmitEventTitle       = '';
     public string $resubmitEventRemarks     = '';
@@ -81,6 +78,12 @@ new class extends Component {
         $user = Auth::user();
         if (!$user || !$user->organizer) {
             abort(403, 'Access denied.');
+        }
+
+        // ── Read session filter set by dashboard cards ──
+        $sessionFilter = session()->pull('organizer_events_filter', null);
+        if ($sessionFilter !== null) {
+            $this->filterStatus = $sessionFilter;
         }
 
         $orgId = $user->organizer->id;
@@ -133,7 +136,6 @@ new class extends Component {
 
     public function updatingSearch(): void       { $this->resetPage(); }
     public function updatingFilterStatus(): void { $this->resetPage(); }
-    public function updatingFilterSort(): void   { $this->resetPage(); }
 
     #[Computed]
     public function organizerDepartment(): string
@@ -214,7 +216,7 @@ new class extends Component {
             $q->where('status', $this->filterStatus);
         }
 
-        $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
+        $q->orderBy('created_at', 'desc');
         return $q->paginate(15);
     }
 
@@ -234,7 +236,6 @@ new class extends Component {
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = '';
-        $this->filterSort = 'recent';
         $this->resetPage();
     }
 
@@ -290,10 +291,12 @@ new class extends Component {
         $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
 
         if ($event->status === 'REJECTED') {
-            $this->pendingEditId          = $id;
-            $this->resubmitEventTitle     = $event->title;
-            $this->resubmitEventRemarks   = $event->review_remarks ?? '';
-            $this->showResubmitConfirmModal = true;
+            $this->isResubmitting = true;
+            $this->resubmitEventTitle   = $event->title;
+            $this->resubmitEventRemarks = $event->review_remarks ?? '';
+            $this->populateEditForm($event);
+            $this->showFormModal = true;
+            $this->showViewModal = false;
             return;
         }
 
@@ -303,29 +306,31 @@ new class extends Component {
         $this->showViewModal = false;
     }
 
-    public function confirmResubmit(): void
+    public function viewEvent(int $id): void
     {
-        $this->showResubmitConfirmModal = false;
+        $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
 
-        if (!$this->pendingEditId) return;
+        if ($event->status === 'PENDING') {
+            $this->isResubmitting = false;
+            $this->populateEditForm($event);
+            $this->showFormModal = true;
+            $this->showViewModal = false;
+            return;
+        }
 
-        $event = OrganizerEvent::where('id', $this->pendingEditId)
-            ->where('organizer_id', $this->organizerId)->firstOrFail();
+        if ($event->status === 'REJECTED') {
+            $this->isResubmitting = true;
+            $this->resubmitEventTitle   = $event->title;
+            $this->resubmitEventRemarks = $event->review_remarks ?? '';
+            $this->populateEditForm($event);
+            $this->showFormModal = true;
+            $this->showViewModal = false;
+            return;
+        }
 
-        $this->isResubmitting = true;
-        $this->populateEditForm($event);
-        $this->pendingEditId = null;
-        $this->showFormModal = true;
-        $this->showViewModal = false;
-    }
-
-    public function cancelResubmit(): void
-    {
-        $this->showResubmitConfirmModal = false;
-        $this->pendingEditId            = null;
-        $this->resubmitEventTitle       = '';
-        $this->resubmitEventRemarks     = '';
-        $this->isResubmitting           = false;
+        // APPROVED or COMPLETED → show view modal
+        $this->viewingEventId = $id;
+        $this->showViewModal  = true;
     }
 
     public function resetForm(): void
@@ -400,7 +405,6 @@ new class extends Component {
             $errors['end_time'] = 'End time is required.';
         }
 
-        // Check same time
         if (
             !isset($errors['end_time'])
             && !isset($errors['start_time'])
@@ -412,7 +416,6 @@ new class extends Component {
             $errors['start_time'] = 'Start time cannot be the same as end time.';
         }
 
-        // Check end time before start time
         if (
             !isset($errors['end_time'])
             && !isset($errors['start_time'])
@@ -636,13 +639,6 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    public function viewEvent(int $id): void
-    {
-        if (!OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->exists()) abort(403);
-        $this->viewingEventId = $id;
-        $this->showViewModal  = true;
-    }
-
     public function closeViewModal(): void { $this->showViewModal = false; $this->viewingEventId = null; }
 
     public function openShareModal(int $id): void
@@ -814,7 +810,8 @@ new class extends Component {
         $this->editingEventId = null;
         $this->isEditing      = false;
         $this->isResubmitting = false;
-        $this->pendingEditId  = null;
+        $this->resubmitEventTitle   = '';
+        $this->resubmitEventRemarks = '';
     }
 };
 ?>
@@ -846,6 +843,110 @@ new class extends Component {
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
+/* ── Table Row ── */
+.tbl-row {
+    background-color: #ffffff;
+    cursor: pointer;
+    transition: background-color .15s ease;
+}
+.tbl-row:hover {
+    background-color: #f5f0fa !important;
+}
+
+/* ── Action button tooltip (ABOVE the button) ── */
+.action-btn-wrap {
+    position: relative;
+    display: inline-flex;
+}
+.action-tooltip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 9999;
+}
+.action-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #1a1a1a;
+}
+.action-btn-wrap:hover .action-tooltip { opacity: 1; }
+
+/* ── Submit Event button — icon-only + tooltip ABOVE ── */
+.submit-event-btn-wrap {
+    position: relative;
+    display: inline-flex;
+}
+.submit-event-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .2s ease;
+    z-index: 50;
+}
+.submit-event-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: #1a1a1a;
+}
+.submit-event-btn-wrap:hover .submit-event-tooltip { opacity: 1; }
+
+/* ── Hover tooltip for rows (cursor-following) ── */
+.eo-hover-tip {
+    position: fixed;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    padding: 6px 12px;
+    border-radius: 7px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 99999;
+    box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    transform: translate(12px, -110%);
+}
+.eo-hover-tip.visible { opacity: 1; }
+.eo-hover-tip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 14px;
+    border: 5px solid transparent;
+    border-top-color: #1a1a1a;
+}
+
 /* ── Filter inputs ── */
 .filter-input {
     border: 1px solid #E8E0F0;
@@ -855,6 +956,11 @@ new class extends Component {
     font-size: 0.875rem;
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
+    font-weight: 600;
+}
+.filter-input::placeholder {
+    color: #a78bbd;
+    font-weight: 500;
 }
 .filter-input:hover  { border-color: #c4b5d4; }
 .filter-input:focus  { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
@@ -868,10 +974,12 @@ select.filter-input {
     -moz-appearance: none;
     appearance: none;
     cursor: pointer;
+    color: #333333;
 }
-/* ── Table rows ── */
-.tbl-row { background-color: #ffffff; }
-.tbl-row:hover { background-color: #FAFAFA !important; cursor: default; }
+select.filter-input option {
+    color: #333333;
+    font-weight: 500;
+}
 
 /* ── Form labels ── */
 .form-label {
@@ -993,9 +1101,17 @@ select.filter-input {
 }
 .table-block-pagination {
     flex-shrink: 0;
-    background: #7a3f91;
-    padding: 0.6rem 1rem;
+    background: linear-gradient(to right, #7a3f91, #9b59b6);
+    padding: 0 1rem;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(122,63,145,.3);
 }
+
 /* ── View modal meta row ── */
 .meta-row-icon {
     width: 2.25rem;
@@ -1025,7 +1141,109 @@ select.filter-input {
     color: #333333;
     margin-top: 0.15rem;
 }
+
+/* ── Completed view ── */
+.completed-view-body * {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+}
+.completed-section-title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #333333;
+    margin-bottom: 0.5rem;
+}
+
+/* ════════════════════════════════════════════════
+   MODAL HEADER ICON-ONLY BUTTONS
+════════════════════════════════════════════════ */
+.modal-top-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    flex-shrink: 0;
+    border: none;
+    outline: none;
+}
+.modal-top-btn:active { transform: scale(.93); }
+
+/* Tooltip BELOW */
+.modal-top-btn .mtip {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #111827;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+/* Arrow pointing UP (tooltip below button) */
+.modal-top-btn .mtip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-bottom-color: #111827;
+}
+.modal-top-btn:hover .mtip { opacity: 1; }
+
+/* Close variant */
+.modal-top-btn.close-btn {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.15);
+}
+.modal-top-btn.close-btn:hover { background: rgba(255,255,255,.22); }
+
+/* Reset variant */
+.modal-top-btn.reset-btn {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.15);
+}
+.modal-top-btn.reset-btn:hover { background: rgba(255,255,255,.22); }
+
+/* Share variant */
+.modal-top-btn.share-btn {
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.20);
+}
+.modal-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
+
+/* ── Active filter pill shown in filter bar ── */
+.active-filter-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.65rem 0.25rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1.5px solid;
+}
 </style>
+
+<div id="eo-hover-tip" class="eo-hover-tip">
+    <i class="fas fa-eye mr-1.5"></i>View Details
+</div>
 
 {{-- ── FLASH TOAST ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
@@ -1077,13 +1295,19 @@ select.filter-input {
                 <i class="fas fa-calendar-days text-purple-600 text-[10px]"></i>
                 {{ $this->events->total() }} {{ $this->events->total() !== 1 ? 'Events' : 'Event' }}
             </span>
-            <button wire:click="openCreateModal"
-                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm text-white shadow-md transition cursor-pointer {{ !$this->hasAlumni ? 'opacity-60 cursor-not-allowed' : '' }}"
-                    style="background-color:#7a3f91;"
-                    onmouseover="this.style.backgroundColor='#5e2f72'"
-                    onmouseout="this.style.backgroundColor='#7a3f91'">
-                <i class="fas fa-plus text-xs"></i> Submit Event
-            </button>
+
+            <div class="submit-event-btn-wrap">
+                <button wire:click="openCreateModal"
+                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer {{ !$this->hasAlumni ? 'opacity-60 cursor-not-allowed' : '' }}"
+                        style="background-color:#7a3f91;"
+                        onmouseover="if(!this.classList.contains('opacity-60'))this.style.backgroundColor='#5e2f72'"
+                        onmouseout="if(!this.classList.contains('opacity-60'))this.style.backgroundColor='#7a3f91'">
+                    <i class="fas fa-plus text-sm"></i>
+                </button>
+                <div class="submit-event-tooltip">
+                    <i class="fas fa-plus text-[9px] mr-1"></i>Submit Event
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1104,16 +1328,15 @@ select.filter-input {
         {{-- ── FILTER BAR ── --}}
         <div class="table-block-filter flex flex-wrap gap-2 items-center">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 text-white font-semibold text-sm"
-                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-sliders text-white text-sm"></i>
-                <span class="hidden sm:inline">Filters</span>
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                 style="color:#333333;">
+                Filters
             </div>
 
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#7a3f91; z-index:1;"></i>
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#333333; z-index:1;"></i>
                 <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
                        placeholder="Search title or venue…"
                        class="filter-input w-full"
@@ -1121,18 +1344,36 @@ select.filter-input {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            <select wire:model.live="filterStatus" class="filter-input" style="color:#333333;">
-                <option value="">All Statuses</option>
-                <option value="PENDING">Pending</option>
-                <option value="APPROVED">Approved</option>
-                <option value="REJECTED">Rejected</option>
-                <option value="COMPLETED">Completed</option>
+            <select wire:model.live="filterStatus" class="filter-input">
+                <option value="" style="color:#333333;">All Statuses</option>
+                <option value="PENDING" style="color:#333333;">Pending</option>
+                <option value="APPROVED" style="color:#333333;">Approved</option>
+                <option value="REJECTED" style="color:#333333;">Rejected</option>
+                <option value="COMPLETED" style="color:#333333;">Completed</option>
             </select>
 
-            <select wire:model.live="filterSort" class="filter-input hidden sm:block" style="color:#333333;">
-                <option value="recent">Newest First</option>
-                <option value="oldest">Oldest First</option>
-            </select>
+            {{-- Active filter pill — shows when a status filter is active --}}
+            @if($filterStatus)
+            @php
+                $pillMap = [
+                    'PENDING'   => ['label' => 'Pending',   'cls' => 'bg-yellow-50 border-yellow-300 text-yellow-800'],
+                    'APPROVED'  => ['label' => 'Approved',  'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
+                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-red-50 border-red-300 text-red-800'],
+                    'COMPLETED' => ['label' => 'Completed', 'cls' => 'bg-green-50 border-green-300 text-green-800'],
+                ];
+                $pill = $pillMap[$filterStatus] ?? null;
+            @endphp
+            @if($pill)
+            <span class="active-filter-pill {{ $pill['cls'] }}">
+                <i class="fas fa-filter text-[9px]"></i>
+                {{ $pill['label'] }}
+                <button wire:click="$set('filterStatus', '')" type="button"
+                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                    <i class="fas fa-xmark text-[10px]"></i>
+                </button>
+            </span>
+            @endif
+            @endif
 
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
@@ -1141,53 +1382,26 @@ select.filter-input {
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
                            bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
                     style="color:#333333;">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <svg class="animate-spin w-4 h-4" style="color:#7a3f91;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
+                <i class="fas fa-rotate-left text-sm" style="color:#333333;"></i>
+                <span class="hidden sm:inline" style="color:#333333;">Reset</span>
             </button>
-
-            <select wire:model.live="filterSort" class="filter-input flex-1 sm:hidden" style="color:#333333;">
-                <option value="recent">Newest First</option>
-                <option value="oldest">Oldest First</option>
-            </select>
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
         <div class="relative flex-1 min-h-0 flex flex-col">
 
-            <div wire:loading
-                 wire:target="search,filterStatus,filterSort,resetFilters,previousPage,nextPage"
-                 class="absolute inset-0 z-30 flex items-center justify-center pointer-events-none"
-                 style="background:rgba(255,255,255,.65);">
-                <div class="flex items-center gap-2.5 px-5 py-3 bg-white rounded-xl shadow-lg border border-[#E8E0F0]">
-                    <svg class="animate-spin w-4 h-4" style="color:#7a3f91;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                    <span class="text-xs font-semibold" style="color:#7a3f91;">Loading events…</span>
-                </div>
-            </div>
-
             @if($this->events->count() > 0)
 
-            <div class="flex-1 min-h-0 overflow-x-auto overflow-y-auto scroll-c" style="background:#fff;">
-                <table class="w-full min-w-[700px] bg-white border-collapse">
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff;">
+                <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10" style="color:#555555;">#</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Event Title</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#555555;">Date &amp; Time</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#555555;">Venue</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#555555;">Course</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Actions</th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest w-16" style="color:#555555;"></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -1197,7 +1411,6 @@ select.filter-input {
                             $isApproved  = $event->status === 'APPROVED';
                             $isPending   = $event->status === 'PENDING';
                             $isRejected  = $event->status === 'REJECTED';
-                            $canEdit     = !$isCompleted && !$isApproved;
 
                             $tp          = $event->target_participants ?? '';
                             $tpParts     = explode(' · Batch ', $tp, 2);
@@ -1207,7 +1420,11 @@ select.filter-input {
                             $eventDate  = $event->event_date->setTimezone('Asia/Manila');
                             $rowNum     = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
                         @endphp
-                        <tr class="tbl-row transition-colors duration-100">
+
+                        <tr class="tbl-row transition-colors duration-100"
+                            wire:click="viewEvent({{ $event->id }})"
+                            wire:key="event-row-{{ $event->id }}"
+                            data-eo-row>
 
                             <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
                                 {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
@@ -1228,10 +1445,6 @@ select.filter-input {
                                         &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}
                                     @endif
                                 </p>
-                            </td>
-
-                            <td class="px-4 py-3.5 hidden lg:table-cell">
-                                <p class="text-sm max-w-[160px] truncate" style="color:#333333;">{{ $event->venue ?: '—' }}</p>
                             </td>
 
                             <td class="px-4 py-3.5 hidden xl:table-cell">
@@ -1268,35 +1481,19 @@ select.filter-input {
                             </td>
 
                             <td class="px-4 py-3.5">
-                                <div class="flex items-center justify-end gap-1.5 flex-wrap">
+                                <div class="flex items-center justify-end gap-1.5">
 
-                                    <button wire:click="viewEvent({{ $event->id }})"
-                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90 cursor-pointer whitespace-nowrap"
-                                            style="background-color:#7a3f91;">
-                                        <i class="fas fa-eye text-xs"></i>
-                                        <span class="hidden xl:inline">View</span>
-                                    </button>
-
-                                    @if($isApproved)
-                                        <button type="button" wire:click.stop="openShareModal({{ $event->id }})"
-                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400 transition cursor-pointer whitespace-nowrap">
-                                            <i class="fas fa-share-nodes text-xs"></i>
-                                            <span class="hidden xl:inline">Share</span>
-                                        </button>
-                                    @elseif($isCompleted)
-                                        <button type="button" wire:click.stop="openShareModal({{ $event->id }})"
-                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400 transition cursor-pointer whitespace-nowrap">
-                                            <i class="fas fa-trophy text-xs"></i>
-                                            <span class="hidden xl:inline">Highlights</span>
-                                        </button>
-                                    @endif
-
-                                    @if($canEdit)
-                                        <button type="button" wire:click.stop="openEditModal({{ $event->id }})"
-                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-300 hover:bg-white hover:border-blue-500 transition cursor-pointer whitespace-nowrap">
-                                            <i class="fas fa-pen-to-square text-xs"></i>
-                                            <span class="hidden xl:inline">Edit</span>
-                                        </button>
+                                    @if($isApproved || $isCompleted)
+                                        <div class="action-btn-wrap" @click.stop data-eo-share>
+                                            <button type="button"
+                                                    wire:click.stop="openShareModal({{ $event->id }})"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
+                                                           {{ $isApproved ? 'bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400' : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400' }}
+                                                           transition cursor-pointer">
+                                                <i class="fas fa-share-nodes"></i>
+                                            </button>
+                                            <div class="action-tooltip">Share</div>
+                                        </div>
                                     @endif
 
                                 </div>
@@ -1320,7 +1517,7 @@ select.filter-input {
                     </p>
                     <p class="text-sm mt-1" style="color:#555555;">
                         @if($search || $filterStatus) Try clearing your filters to see all events.
-                        @else Click <strong>Submit Event</strong> to submit your first event for Alumni Director review.
+                        @else Click the <strong>+</strong> button to submit your first event for Alumni Director review.
                         @endif
                     </p>
                 </div>
@@ -1338,51 +1535,72 @@ select.filter-input {
 
         {{-- ── PAGINATION ── --}}
         @php
-            $total = $this->events->total();
-            $pp    = $this->events->perPage();
-            $cp    = $this->events->currentPage();
-            $from  = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
-            $to    = min($cp * $pp, $total);
+            $total    = $this->events->total();
+            $pp       = $this->events->perPage();
+            $cp       = $this->events->currentPage();
+            $lp       = $this->events->lastPage();
+            $from     = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+            $to       = min($cp * $pp, $total);
+            $pgStart  = max(1, $cp - 2);
+            $pgEnd    = min($lp, $cp + 2);
         @endphp
-        <div class="table-block-pagination flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <p class="text-sm font-normal" style="color:rgba(255,255,255,.75);">
-                Showing
-                <span class="font-semibold text-white">{{ $from }}&ndash;{{ $to }}</span>
-                of
-                <span class="font-semibold text-white">{{ $total }}</span>
+        <div class="table-block-pagination">
+            <p class="text-white/80 text-xs font-normal whitespace-nowrap">
+                Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
+                of <strong class="text-white font-bold">{{ $total }}</strong>
                 event{{ $total !== 1 ? 's' : '' }}
                 @if($filterStatus || $search)
                     <span class="text-white/50 text-xs ml-1">(filtered)</span>
                 @endif
             </p>
-            <div class="flex items-center gap-1.5">
-                @if($this->events->onFirstPage())
-                    <button disabled class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold cursor-not-allowed"
-                            style="color:rgba(255,255,255,.3);background:rgba(255,255,255,.08);">
-                        &larr; Prev
-                    </button>
-                @else
-                    <button wire:click="previousPage"
-                            class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition cursor-pointer hover:opacity-80"
-                            style="background:rgba(255,255,255,.15);">
-                        &larr; Prev
-                    </button>
+
+            <div class="flex items-center gap-1 flex-wrap py-2">
+                <button wire:click="previousPage"
+                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        @if($this->events->onFirstPage()) disabled @endif
+                        aria-label="Previous">
+                    <i class="fas fa-chevron-left text-[9px]"></i>
+                </button>
+
+                @if($pgStart > 1)
+                    <button wire:click="$set('page', 1)"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                    @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
-                <span class="px-3 py-1.5 text-sm font-semibold rounded-lg" style="background:#fff;color:#7a3f91;">
-                    {{ $cp }} / {{ $this->events->lastPage() }}
+
+                @for($p = $pgStart; $p <= $pgEnd; $p++)
+                    @if($p === $cp)
+                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                     bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
+                    @else
+                        <button wire:click="$set('page', {{ $p }})"
+                                class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                    @endif
+                @endfor
+
+                @if($pgEnd < $lp)
+                    @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                    <button wire:click="$set('page', {{ $lp }})"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                @endif
+
+                <button wire:click="nextPage"
+                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        @if(!$this->events->hasMorePages()) disabled @endif
+                        aria-label="Next">
+                    <i class="fas fa-chevron-right text-[9px]"></i>
+                </button>
+
+                <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
+                    Page {{ $cp }}/{{ $lp }}
                 </span>
-                @if($this->events->hasMorePages())
-                    <button wire:click="nextPage"
-                            class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition cursor-pointer hover:opacity-80"
-                            style="background:rgba(255,255,255,.15);">
-                        Next &rarr;
-                    </button>
-                @else
-                    <button disabled class="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-semibold cursor-not-allowed"
-                            style="color:rgba(255,255,255,.3);background:rgba(255,255,255,.08);">
-                        Next &rarr;
-                    </button>
-                @endif
             </div>
         </div>
 
@@ -1424,77 +1642,11 @@ select.filter-input {
 
 
 {{-- ══════════════════════════════════════════════════════════════════════════
-     RESUBMIT CONFIRMATION MODAL
-══════════════════════════════════════════════════════════════════════════ --}}
-@if($showResubmitConfirmModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-     wire:keydown.escape.window="cancelResubmit">
-    <div class="rounded-2xl shadow-2xl w-full max-w-md overflow-hidden m-in bg-white">
-
-        <div class="px-6 py-4 border-b border-gray-100"
-             style="background: linear-gradient(135deg,#f5eef9,#ede4f5);">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background:#7a3f91;">
-                    <i class="fas fa-rotate-right text-white text-sm"></i>
-                </div>
-                <div>
-                    <h2 class="text-base font-semibold" style="color:#333333;">Resubmit Event for Review?</h2>
-                    <p class="text-xs mt-0.5" style="color:#555555;">This event was previously rejected.</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="p-5 space-y-3 bg-white">
-            <div class="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-1" style="color:#555555;">Event</p>
-                <p class="font-semibold text-sm" style="color:#333333;">{{ $resubmitEventTitle }}</p>
-            </div>
-
-            @if($resubmitEventRemarks)
-            <div class="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
-                <i class="fas fa-circle-xmark text-red-400 text-sm flex-shrink-0 mt-0.5"></i>
-                <div>
-                    <p class="text-xs font-semibold uppercase tracking-wide text-red-700 mb-0.5">Rejection Reason</p>
-                    <p class="text-sm text-red-700">{{ $resubmitEventRemarks }}</p>
-                </div>
-            </div>
-            @endif
-
-            <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-2.5">
-                <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
-                <p class="text-sm text-blue-700">
-                    You can <strong>edit the event details</strong> and once you save, it will be
-                    <strong>resubmitted for Alumni Director review</strong> and set back to
-                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-yellow-100 text-yellow-700 text-xs font-semibold">Pending</span>.
-                </p>
-            </div>
-
-            <div class="flex gap-3 pt-1">
-                <button wire:click="cancelResubmit" type="button"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition cursor-pointer bg-white" style="color:#333333;">
-                    Cancel
-                </button>
-                <button wire:click="confirmResubmit" type="button"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md transition cursor-pointer"
-                        style="background-color:#7a3f91;"
-                        onmouseover="this.style.backgroundColor='#5e2f72'"
-                        onmouseout="this.style.backgroundColor='#7a3f91'">
-                    <i class="fas fa-pen-to-square mr-1.5 text-xs"></i> Edit &amp; Resubmit
-                </button>
-            </div>
-        </div>
-
-    </div>
-</div>
-@endif
-
-
-{{-- ══════════════════════════════════════════════════════════════════════════
      CREATE / EDIT — FULL SCREEN (3-column)
 ══════════════════════════════════════════════════════════════════════════ --}}
 @if($showFormModal)
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in"
+<div class="fixed inset-0 z-50 flex flex-col fs-in"
+     style="background:#f3f4f6;"
      @keydown.escape.window="$wire.closeFormModal()">
 
     {{-- ── Top Bar ── --}}
@@ -1524,33 +1676,45 @@ select.filter-input {
                 </p>
             </div>
         </div>
-        <div class="flex items-center gap-2">
+
+        <div class="flex items-center gap-1.5">
             @if(!$isEditing && !$isResubmitting)
             <button wire:click="resetForm" type="button"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-semibold transition cursor-pointer">
-                <i class="fas fa-rotate-left text-xs"></i>
-                <span class="hidden sm:inline text-sm">Reset</span>
+                    class="modal-top-btn reset-btn"
+                    aria-label="Reset form">
+                <i class="fas fa-rotate-left text-white text-sm"></i>
+                <span class="mtip">Reset</span>
             </button>
             @endif
             <button wire:click="closeFormModal" type="button"
-                    class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-semibold transition cursor-pointer">
-                <i class="fas fa-xmark text-sm"></i><span class="hidden sm:inline text-sm">Close</span>
+                    class="modal-top-btn close-btn"
+                    aria-label="Close">
+                <i class="fas fa-xmark text-white text-sm"></i>
+                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
 
     {{-- ── Resubmit Banner ── --}}
     @if($isResubmitting)
-    <div class="bg-amber-50 border-b border-amber-200 px-6 lg:px-10 py-2 shrink-0 flex items-center gap-3">
-        <i class="fas fa-rotate-right text-amber-500 flex-shrink-0 text-xs"></i>
-        <p class="text-sm" style="color:#333333;">
-            <strong>Resubmitting:</strong> Edit the details and click <strong>Save &amp; Resubmit</strong> to send back for Alumni Director approval.
-        </p>
+    <div class="bg-amber-50 border-b border-amber-200 px-6 lg:px-10 py-2 shrink-0 flex items-start gap-3">
+        <i class="fas fa-rotate-right text-amber-500 flex-shrink-0 text-xs mt-1"></i>
+        <div class="flex-1 min-w-0">
+            <p class="text-sm" style="color:#333333;">
+                <strong>Resubmitting:</strong> Edit the details and click <strong>Save &amp; Resubmit</strong> to send back for Alumni Director approval.
+            </p>
+            @if($resubmitEventRemarks)
+            <p class="text-xs mt-1 text-red-700 flex items-center gap-1.5">
+                <i class="fas fa-circle-xmark text-red-400 text-[10px] flex-shrink-0"></i>
+                <strong>Rejection reason:</strong> {{ $resubmitEventRemarks }}
+            </p>
+            @endif
+        </div>
     </div>
     @endif
 
-    {{-- ── 3-COLUMN BODY ── --}}
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row gap-0 overflow-hidden">
+    {{-- ── 3-COLUMN BODY — fills remaining full-screen height ── --}}
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- ═══ LEFT COLUMN: Photo + Courses ═══ --}}
         <div class="w-full lg:w-[300px] xl:w-[320px] shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white"
@@ -1714,12 +1878,13 @@ select.filter-input {
                             @if(isset($formErrors['title']))<p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['title'] }}</p>@endif
                         </div>
 
-                        {{-- Description --}}
+                        {{-- Description — taller textarea --}}
                         <div>
                             <label class="form-label">Description <span class="text-red-500">*</span></label>
-                            <textarea wire:model.defer="description" rows="5"
+                            <textarea wire:model.defer="description" rows="10"
                                       placeholder="Describe the event, agenda, highlights…" maxlength="5000"
-                                      class="form-input resize-none {{ isset($formErrors['description']) ? 'error' : '' }}"></textarea>
+                                      class="form-input resize-y {{ isset($formErrors['description']) ? 'error' : '' }}"
+                                      style="min-height: 220px;"></textarea>
                             @if(isset($formErrors['description']))<p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['description'] }}</p>@endif
                         </div>
 
@@ -1896,16 +2061,17 @@ select.filter-input {
                     </div>
                 </div>
 
-                {{-- Notes / Requirements --}}
+                {{-- Notes / Requirements — taller textarea --}}
                 <div class="card-section">
                     <div class="card-section-hd">
                         <i class="fas fa-list-check text-[9px]"></i> Notes / Requirements
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1" style="color:#777777;">— optional</span>
                     </div>
                     <div class="card-section-body">
-                        <textarea wire:model.defer="notes" rows="4"
+                        <textarea wire:model.defer="notes" rows="8"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
-                                  class="form-input resize-none"></textarea>
+                                  class="form-input resize-y"
+                                  style="min-height: 180px;"></textarea>
                         <p class="text-xs mt-1.5 flex items-center gap-1" style="color:#777777;">
                             <i class="fas fa-circle-info text-[10px]"></i>
                             Visible to alumni on the event page. Keep it clear and concise.
@@ -1984,19 +2150,24 @@ select.filter-input {
                         wire:loading.attr="disabled" wire:target="saveEvent"
                         class="w-full px-5 py-3.5 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         style="background-color: {{ $isResubmitting ? '#d97706' : '#7a3f91' }};"
-                        onmouseover="this.style.backgroundColor='{{ $isResubmitting ? '#b45309' : '#5e2f72' }}'"
-                        onmouseout="this.style.backgroundColor='{{ $isResubmitting ? '#d97706' : '#7a3f91' }}'">
+                        onmouseover="if(!this.disabled)this.style.backgroundColor='{{ $isResubmitting ? '#b45309' : '#5e2f72' }}'"
+                        onmouseout="if(!this.disabled)this.style.backgroundColor='{{ $isResubmitting ? '#d97706' : '#7a3f91' }}'">
                     <span wire:loading wire:target="saveEvent">
                         <i class="fas fa-spinner animate-spin text-sm"></i>
-                        @if($isResubmitting) Resubmitting… @elseif($isEditing) Saving… @else Submitting… @endif
                     </span>
                     <span wire:loading.remove wire:target="saveEvent">
                         @if($isResubmitting)
-                            <i class="fas fa-rotate-right text-sm"></i> Save &amp; Resubmit
+                            <i class="fas fa-rotate-right text-sm"></i>
                         @elseif($isEditing)
-                            <i class="fas fa-floppy-disk text-sm"></i> Save Changes
+                            <i class="fas fa-floppy-disk text-sm"></i>
                         @else
-                            <i class="fas fa-paper-plane text-sm"></i> Submit Event
+                            <i class="fas fa-paper-plane text-sm"></i>
+                        @endif
+                    </span>
+                    <span wire:loading.remove wire:target="saveEvent">
+                        @if($isResubmitting) Save &amp; Resubmit
+                        @elseif($isEditing) Save Changes
+                        @else Submit Event
                         @endif
                     </span>
                 </button>
@@ -2013,7 +2184,7 @@ select.filter-input {
 
 
 {{-- ══════════════════════════════════════════════════════════════════════════
-     VIEW EVENT — FULL SCREEN
+     VIEW EVENT — FULL SCREEN (APPROVED / COMPLETED)
 ══════════════════════════════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingEvent)
 @php
@@ -2021,8 +2192,6 @@ select.filter-input {
     $totalRsvp   = $ev->confirmed_count + $ev->declined_count + $ev->tentative_count;
     $isCompleted = $ev->status === 'COMPLETED';
     $isApproved  = $ev->status === 'APPROVED';
-    $isPending   = $ev->status === 'PENDING';
-    $isRejected  = $ev->status === 'REJECTED';
     $eventDatePH = $ev->event_date->setTimezone('Asia/Manila');
     $eventEndPH  = $ev->event_end_date?->setTimezone('Asia/Manila');
     $timeDisplay = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
@@ -2030,45 +2199,32 @@ select.filter-input {
     $hasPhoto    = !empty($ev->photo_url);
 @endphp
 
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in"
+<div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in completed-view-body"
      @keydown.escape.window="$wire.closeViewModal()">
 
     {{-- ── Header Bar ── --}}
-    <div class="flex items-center justify-between px-5 py-3 shrink-0 shadow-md"
+    <div class="flex items-center justify-between px-6 py-3 shrink-0 shadow-md"
          style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
         <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-calendar-days text-white text-sm"></i>
-            </div>
-            <div class="min-w-0">
+            <div>
                 <p class="text-white/60 text-xs font-semibold uppercase tracking-widest">Event Details</p>
                 <h2 class="text-white font-semibold text-base leading-tight truncate">{{ $ev->title }}</h2>
             </div>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0 ml-3">
-            @if($isApproved)
+        <div class="flex items-center gap-1.5 flex-shrink-0 ml-3">
+            @if($isApproved || $isCompleted)
                 <button type="button" wire:click="openShareModal({{ $ev->id }})"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 border border-white/20 text-white transition cursor-pointer">
-                    <i class="fas fa-share-nodes text-xs"></i>
-                    <span class="hidden sm:inline">Share</span>
-                </button>
-            @elseif($isCompleted)
-                <button type="button" wire:click="openShareModal({{ $ev->id }})"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 text-white transition cursor-pointer">
-                    <i class="fas fa-trophy text-xs"></i>
-                    <span class="hidden sm:inline">Highlights</span>
-                </button>
-            @endif
-            @if(!$isCompleted && !$isApproved)
-                <button wire:click="openEditModal({{ $ev->id }})" type="button"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 border border-white/20 text-white transition cursor-pointer">
-                    <i class="fas fa-pen-to-square text-xs"></i>
-                    <span class="hidden sm:inline">Edit</span>
+                        class="modal-top-btn share-btn"
+                        aria-label="Share event">
+                    <i class="fas fa-share-nodes text-white text-sm"></i>
+                    <span class="mtip">Share</span>
                 </button>
             @endif
             <button wire:click="closeViewModal" type="button"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition cursor-pointer">
-                <i class="fa-solid fa-xmark text-sm"></i><span class="hidden sm:inline">Close</span>
+                    class="modal-top-btn close-btn"
+                    aria-label="Close">
+                <i class="fas fa-xmark text-white text-sm"></i>
+                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
@@ -2077,129 +2233,91 @@ select.filter-input {
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- ═══ LEFT: Photo + Meta Details ═══ --}}
-        <div class="w-full lg:w-[360px] flex flex-col shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c"
+        <div class="w-full lg:w-[380px] flex flex-col shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c"
              style="scrollbar-width:thin;">
 
             @if($hasPhoto)
-            <div class="w-full px-4 pt-4 pb-2 shrink-0 flex items-center justify-center relative">
+            <div class="w-full px-5 pt-5 pb-3 shrink-0">
                 <div class="relative w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
                     <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
                          class="w-full object-contain"
-                         style="max-height: 190px; display:block;">
-                    <div class="absolute top-2 right-2">
+                         style="max-height: 200px; display:block;">
+                    <div class="absolute top-3 right-3">
                         @if($isCompleted)
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-700/90 backdrop-blur-sm text-white text-xs font-semibold"><i class="fas fa-circle-check text-[9px]"></i> Completed</span>
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Completed</span>
                         @elseif($isApproved)
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-600/90 backdrop-blur-sm text-white text-xs font-semibold"><i class="fas fa-circle-check text-[9px]"></i> Approved</span>
-                        @elseif($isPending)
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-600/90 backdrop-blur-sm text-white text-xs font-semibold"><i class="fas fa-hourglass-half text-[9px]"></i> Pending</span>
-                        @else
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-700/90 backdrop-blur-sm text-white text-xs font-semibold"><i class="fas fa-circle-xmark text-[9px]"></i> Rejected</span>
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Approved</span>
                         @endif
                     </div>
                 </div>
             </div>
             @else
-            <div class="relative mx-4 mt-4 mb-2 shrink-0 rounded-xl overflow-hidden flex items-center justify-center" style="height:90px; background: linear-gradient(135deg, #7A3F91 0%, #4a1f6a 100%);">
-                <i class="fas fa-calendar-days text-white/20 text-4xl"></i>
+            <div class="relative mx-5 mt-5 mb-3 shrink-0 rounded-xl overflow-hidden flex items-center justify-center" style="height:80px; background: linear-gradient(135deg, #7A3F91 0%, #4a1f6a 100%);">
                 <div class="absolute top-2 right-2">
                     @if($isCompleted)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-700/90 text-white text-xs font-semibold">Completed</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 text-white text-xs font-bold">Completed</span>
                     @elseif($isApproved)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-600/90 text-white text-xs font-semibold">Approved</span>
-                    @elseif($isPending)
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-600/90 text-white text-xs font-semibold">Pending</span>
-                    @else
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-700/90 text-white text-xs font-semibold">Rejected</span>
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 text-white text-xs font-bold">Approved</span>
                     @endif
                 </div>
             </div>
             @endif
 
-            <div class="flex flex-col gap-2.5 px-4 pb-4">
+            <div class="flex flex-col gap-3 px-5 pb-5">
 
-                <div class="flex items-center gap-3 p-3.5 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="meta-row-icon bg-violet-100">
-                        <i class="fas fa-calendar text-violet-600 text-base"></i>
-                    </span>
-                    <div>
-                        <p class="meta-label">Date &amp; Time</p>
-                        <p class="meta-value">{{ $eventDatePH->format('F d, Y') }}</p>
-                        <p class="meta-sub">{{ $timeDisplay }}</p>
-                    </div>
+                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
+                    <p class="text-xs font-bold uppercase tracking-widest mb-1" style="color:#333333;">Date &amp; Time</p>
+                    <p class="text-lg font-bold" style="color:#333333;">{{ $eventDatePH->format('F d, Y') }}</p>
+                    <p class="text-base font-semibold mt-0.5" style="color:#333333;">{{ $timeDisplay }}</p>
                 </div>
 
                 @if($ev->venue)
-                <div class="flex items-center gap-3 p-3.5 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="meta-row-icon bg-rose-100">
-                        <i class="fas fa-location-dot text-rose-600 text-base"></i>
-                    </span>
-                    <div class="min-w-0">
-                        <p class="meta-label">Venue</p>
-                        <p class="meta-value truncate">{{ $ev->venue }}</p>
-                        @if($ev->venue_address)
-                            <p class="meta-sub truncate">{{ $ev->venue_address }}</p>
-                        @endif
-                    </div>
+                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
+                    <p class="text-xs font-bold uppercase tracking-widest mb-1" style="color:#333333;">Venue</p>
+                    <p class="text-base font-bold" style="color:#333333;">{{ $ev->venue }}</p>
+                    @if($ev->venue_address)
+                        <p class="text-sm font-medium mt-0.5" style="color:#333333;">{{ $ev->venue_address }}</p>
+                    @endif
                 </div>
                 @endif
 
                 @if($ev->target_participants)
-                <div class="flex items-center gap-3 p-3.5 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="meta-row-icon bg-purple-100">
-                        <i class="fas fa-users text-purple-600 text-base"></i>
-                    </span>
-                    <div class="min-w-0">
-                        <p class="meta-label">Open For</p>
-                        <p class="meta-value line-clamp-2">{{ $ev->target_participants }}</p>
-                    </div>
+                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
+                    <p class="text-xs font-bold uppercase tracking-widest mb-1" style="color:#333333;">Open For</p>
+                    <p class="text-base font-bold" style="color:#333333;">{{ $ev->target_participants }}</p>
                 </div>
                 @endif
 
                 @if($ev->contact_person || $ev->contact_email || $ev->contact_phone)
-                <div class="p-3.5 rounded-xl bg-gray-50 border border-gray-100">
-                    <p class="meta-label mb-2">Contact</p>
-                    <div class="flex flex-col gap-2">
+                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
+                    <p class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#333333;">Contact</p>
+                    <div class="flex flex-col gap-1.5">
                         @if($ev->contact_person)
-                        <div class="flex items-center gap-2.5">
-                            <i class="fas fa-user text-purple-500 text-sm w-4"></i>
-                            <span class="text-sm font-semibold" style="color:#333333;">{{ $ev->contact_person }}</span>
-                        </div>
+                        <p class="text-base font-bold" style="color:#333333;">{{ $ev->contact_person }}</p>
                         @endif
                         @if($ev->contact_email)
-                        <div class="flex items-center gap-2.5">
-                            <i class="fas fa-envelope text-sky-500 text-sm w-4"></i>
-                            <span class="text-sm truncate" style="color:#333333;">{{ $ev->contact_email }}</span>
-                        </div>
+                        <p class="text-sm font-medium" style="color:#333333;">{{ $ev->contact_email }}</p>
                         @endif
                         @if($ev->contact_phone)
-                        <div class="flex items-center gap-2.5">
-                            <i class="fas fa-phone text-emerald-500 text-sm w-4"></i>
-                            <span class="text-sm" style="color:#333333;">{{ $ev->contact_phone }}</span>
-                        </div>
+                        <p class="text-sm font-medium" style="color:#333333;">{{ $ev->contact_phone }}</p>
                         @endif
                     </div>
                 </div>
                 @endif
 
-                <div class="p-3.5 rounded-xl border {{ $isCompleted ? 'bg-green-50 border-green-200' : ($isApproved ? 'bg-emerald-50 border-emerald-200' : ($isPending ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200')) }}">
+                <div class="p-4 rounded-xl border {{ $isCompleted ? 'bg-green-50 border-green-200' : 'bg-emerald-50 border-emerald-200' }}">
                     @if($isCompleted)
-                        <p class="text-sm font-bold flex items-center gap-1.5 text-green-800"><i class="fas fa-circle-check text-green-500 text-sm"></i> Completed</p>
-                        <p class="text-sm text-green-800 mt-0.5">This event has already taken place.</p>
+                        <p class="text-base font-bold" style="color:#333333;">Completed</p>
+                        <p class="text-sm font-medium mt-0.5" style="color:#333333;">This event has already taken place.</p>
                     @elseif($isApproved)
-                        <p class="text-sm font-bold flex items-center gap-1.5 text-emerald-800"><i class="fas fa-circle-check text-emerald-500 text-sm"></i> Approved — Now Live</p>
-                        @if($ev->reviewed_at)<p class="text-sm text-emerald-800 mt-0.5">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>@endif
-                    @elseif($isPending)
-                        <p class="text-sm font-bold flex items-center gap-1.5 text-amber-800"><i class="fas fa-hourglass-half text-amber-500 text-sm"></i> Awaiting Alumni Director Review</p>
-                        <p class="text-sm text-amber-800 mt-0.5">You'll be notified once reviewed.</p>
-                    @else
-                        <p class="text-sm font-bold flex items-center gap-1.5 text-red-800"><i class="fas fa-circle-xmark text-red-500 text-sm"></i> Rejected</p>
-                        @if($ev->review_remarks)<p class="text-sm text-red-800 mt-0.5"><strong>Reason:</strong> {{ $ev->review_remarks }}</p>@endif
-                        <p class="text-sm text-red-800 mt-1 font-semibold">You may edit and resubmit.</p>
+                        <p class="text-base font-bold" style="color:#333333;">Approved — Now Live</p>
+                        @if($ev->reviewed_at)
+                        <p class="text-sm font-medium mt-0.5" style="color:#333333;">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>
+                        @endif
                     @endif
                 </div>
 
-                <p class="text-xs text-center" style="color:#777777;">
+                <p class="text-sm text-center font-medium" style="color:#333333;">
                     Posted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}
                 </p>
 
@@ -2209,61 +2327,55 @@ select.filter-input {
         {{-- ═══ RIGHT: RSVP Stats + Description + Notes ═══ --}}
         <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
 
-            <div class="shrink-0 px-5 py-3 bg-white border-b border-gray-200">
-                <div class="flex items-center gap-2.5 flex-wrap">
-                    <p class="text-xs font-bold uppercase tracking-widest shrink-0" style="color:#333333;">Responses</p>
-                    @if($totalRsvp === 0)
-                        <span class="text-sm italic" style="color:#555555;">No responses yet.</span>
-                    @else
-                        <div class="flex items-center gap-1.5 flex-wrap">
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
-                                <i class="fas fa-circle-check text-[9px]"></i> {{ $ev->confirmed_count }} Confirmed
-                            </span>
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700">
-                                <i class="fas fa-circle-question text-[9px]"></i> {{ $ev->tentative_count }} Maybe
-                            </span>
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
-                                <i class="fas fa-circle-xmark text-[9px]"></i> {{ $ev->declined_count }} Declined
-                            </span>
+            <div class="shrink-0 px-6 py-4 bg-white border-b border-gray-200">
+                <p class="text-xs font-bold uppercase tracking-widest mb-2" style="color:#333333;">Responses</p>
+                @if($totalRsvp === 0)
+                    <p class="text-base font-medium" style="color:#333333;">No responses yet.</p>
+                @else
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <div class="flex flex-col items-center px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl min-w-[80px]">
+                            <span class="text-2xl font-bold text-emerald-700">{{ $ev->confirmed_count }}</span>
+                            <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Confirmed</span>
                         </div>
-                    @endif
-                </div>
+                        <div class="flex flex-col items-center px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl min-w-[80px]">
+                            <span class="text-2xl font-bold text-amber-700">{{ $ev->tentative_count }}</span>
+                            <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Maybe</span>
+                        </div>
+                        <div class="flex flex-col items-center px-4 py-2 bg-red-50 border border-red-200 rounded-xl min-w-[80px]">
+                            <span class="text-2xl font-bold text-red-700">{{ $ev->declined_count }}</span>
+                            <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Declined</span>
+                        </div>
+                    </div>
+                @endif
             </div>
 
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c px-5 py-4 flex flex-col gap-4">
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
 
                 @if($ev->description)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-5 h-5 rounded-md flex items-center justify-center bg-blue-50">
-                            <i class="fas fa-file-lines text-blue-500 text-[10px]"></i>
-                        </span>
-                        About This Event
-                    </h3>
-                    <div class="text-sm leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-lg p-4 border border-gray-100" style="line-height:1.75; color:#333333;">{{ trim($ev->description) }}</div>
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">About This Event</p>
+                    </div>
+                    <div class="px-5 py-4">
+                        <p class="text-base leading-relaxed whitespace-pre-wrap font-medium" style="color:#333333; line-height:1.8;">{{ trim($ev->description) }}</p>
+                    </div>
                 </div>
                 @endif
 
                 @if($ev->notes)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-                    <h3 class="text-xs font-bold mb-3 flex items-center gap-2 uppercase tracking-widest" style="color:#333333;">
-                        <span class="w-5 h-5 rounded-md flex items-center justify-center bg-amber-50">
-                            <i class="fas fa-list-check text-amber-500 text-[10px]"></i>
-                        </span>
-                        Additional Notes
-                    </h3>
-                    <div class="text-sm leading-relaxed whitespace-pre-wrap bg-amber-50/50 rounded-lg p-4 border border-amber-100" style="line-height:1.75; color:#333333;">{{ trim($ev->notes) }}</div>
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="px-5 py-3 border-b border-gray-100 bg-amber-50">
+                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Additional Notes</p>
+                    </div>
+                    <div class="px-5 py-4">
+                        <p class="text-base leading-relaxed whitespace-pre-wrap font-medium" style="color:#333333; line-height:1.8;">{{ trim($ev->notes) }}</p>
+                    </div>
                 </div>
                 @endif
 
                 @if(!$ev->description && !$ev->notes)
                 <div class="flex-1 flex items-center justify-center py-10">
-                    <div class="text-center">
-                        <div class="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
-                            <i class="fas fa-file-circle-question text-lg text-gray-300"></i>
-                        </div>
-                        <p class="text-sm font-medium" style="color:#555555;">No additional details provided.</p>
-                    </div>
+                    <p class="text-base font-medium" style="color:#333333;">No additional details provided.</p>
                 </div>
                 @endif
 
@@ -2277,7 +2389,7 @@ select.filter-input {
 
 
 {{-- ══════════════════════════════════════════════════════════════════════════
-     SHARE / HIGHLIGHTS — CENTERED MODAL
+     SHARE MODAL
 ══════════════════════════════════════════════════════════════════════════ --}}
 @if($showShareModal)
 @php
@@ -2364,19 +2476,13 @@ select.filter-input {
              window.open('https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(target), '_blank', 'width=626,height=436,noopener,noreferrer');
              setTimeout(() => { this.fbCopied = false; this.fbCopyFailed = false; }, 8000);
          },
-
-         {{-- ══ FIXED: shareOnMessenger — opens native send-to-friend picker ══ --}}
          async shareOnMessenger() {
              await this.copyWithImage(this.fbText, this.photoUrl);
              this.messengerCopied = true;
-
              const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
              const encodedUrl = encodeURIComponent(this.baseUrl);
-
              if (isMobile) {
-                 {{-- Deep-link: opens Messenger app with conversation picker --}}
                  window.location.href = 'fb-messenger://share/?link=' + encodedUrl + '&app_id=';
-                 {{-- Fallback after 1.5s if app not installed --}}
                  setTimeout(() => {
                      window.open(
                          'https://www.facebook.com/dialog/send?link=' + encodedUrl
@@ -2385,7 +2491,6 @@ select.filter-input {
                      );
                  }, 1500);
              } else {
-                 {{-- Desktop: opens FB send dialog (conversation picker popup) --}}
                  window.open(
                      'https://www.facebook.com/dialog/send?link=' + encodedUrl
                      + '&app_id=291494419107518&redirect_uri=' + encodedUrl,
@@ -2394,7 +2499,6 @@ select.filter-input {
              }
              setTimeout(() => { this.messengerCopied = false; }, 8000);
          },
-
          async copyLinkFn() {
              await this.copyPlainText(this.baseUrl);
              this.copied = true;
@@ -2427,13 +2531,8 @@ select.filter-input {
         {{-- Header --}}
         <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0 bg-white">
             <h2 class="text-base font-semibold flex items-center gap-2.5" style="color:#333333;">
-                @if($isCompleted)
-                    <i class="fas fa-trophy text-amber-500 text-sm"></i>
-                    <span>Share Event Highlights</span>
-                @else
-                    <i class="fas fa-share-nodes text-sky-600 text-sm"></i>
-                    <span>Share Event</span>
-                @endif
+                <i class="fas fa-share-nodes text-sky-600 text-sm"></i>
+                <span>Share Event</span>
             </h2>
             <button @click="close()" type="button"
                     class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100 transition cursor-pointer" style="color:#333333;">
@@ -2551,6 +2650,7 @@ select.filter-input {
                     </div>
                 </div>
 
+                {{-- Facebook --}}
                 <button type="button" @click="shareOnFacebook()"
                         class="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
                     <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
@@ -2565,13 +2665,19 @@ select.filter-input {
                     <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
                 </button>
 
-                {{-- ══ FIXED: Messenger button — correct icon + forward/picker share ══ --}}
                 <button type="button" @click="shareOnMessenger()"
                         class="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group"
                         style="background: linear-gradient(135deg, #0084FF 0%, #0050D0 100%);">
                     <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
-                        {{-- FIXED: Use FontAwesome Brands messenger icon — no broken SVG path --}}
-                        <i class="fab fa-facebook-messenger text-xl" style="background: linear-gradient(135deg,#0084FF,#0050D0); -webkit-background-clip:text; -webkit-text-fill-color:transparent;"></i>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
+                            <defs>
+                                <linearGradient id="msg_eo_grad" x1="0%" y1="100%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#0099FF"/>
+                                    <stop offset="100%" style="stop-color:#A033FF"/>
+                                </linearGradient>
+                            </defs>
+                            <path fill="url(#msg_eo_grad)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
                     </span>
                     <span class="flex-1 text-left">
                         <span class="block font-semibold text-sm">Send via Messenger</span>
@@ -2599,7 +2705,7 @@ select.filter-input {
                     </span>
                     <span class="flex-1 text-left">
                         <span wire:loading.remove wire:target="postToBatchChat" class="block font-semibold text-sm">
-                            {{ $isCompleted ? 'Post Highlights to Batch Chats' : 'Post to Batch Chats' }}
+                            Post to Batch Chats
                         </span>
                         <span wire:loading wire:target="postToBatchChat" class="block font-semibold text-sm">
                             <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
@@ -2642,5 +2748,51 @@ select.filter-input {
     </div>
 </div>
 @endif
+
+</div>
+
+<script>
+(function () {
+    var tip = document.getElementById('eo-hover-tip');
+
+    function bindRows() {
+        document.querySelectorAll('[data-eo-row]').forEach(function (row) {
+            if (row._eoTipBound) return;
+            row._eoTipBound = true;
+
+            row.addEventListener('mousemove', function (e) {
+                if (!tip) return;
+                var shareWrap = e.target.closest('[data-eo-share]');
+                if (shareWrap) {
+                    tip.classList.remove('visible');
+                    return;
+                }
+                tip.style.left = e.clientX + 'px';
+                tip.style.top  = e.clientY + 'px';
+                tip.classList.add('visible');
+            });
+
+            row.addEventListener('mouseleave', function () {
+                if (tip) tip.classList.remove('visible');
+            });
+
+            row.addEventListener('click', function () {
+                if (tip) tip.classList.remove('visible');
+            });
+        });
+
+        document.querySelectorAll('[data-eo-share]').forEach(function (sw) {
+            if (sw._eoShareBound) return;
+            sw._eoShareBound = true;
+            sw.addEventListener('mouseenter', function () {
+                if (tip) tip.classList.remove('visible');
+            });
+        });
+    }
+
+    bindRows();
+    document.addEventListener('livewire:updated', bindRows);
+})();
+</script>
 
 </div>

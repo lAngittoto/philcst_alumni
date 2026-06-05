@@ -62,6 +62,14 @@ new class extends Component {
             ->where('batch', $alumni->batch)
             ->first();
         $this->alumniRoomId = $room ? (int) $room->id : 0;
+
+        // Read filter flashed from dashboard navigation
+        $filter = session()->pull('events_filter');
+        if ($filter === 'upcoming') {
+            $this->filterStatus = 'upcoming';
+        } elseif ($filter === 'all') {
+            $this->filterStatus = '';
+        }
     }
 
     public function resetFilters(): void
@@ -74,7 +82,6 @@ new class extends Component {
     public function updatingSearch(): void
     {
         $this->page = 1;
-        // FIX: close any open modal when filters change to prevent ghost re-opens
         $this->showViewModal    = false;
         $this->viewingEventId   = null;
         $this->viewingEventType = null;
@@ -83,7 +90,6 @@ new class extends Component {
     public function updatingFilterStatus(): void
     {
         $this->page = 1;
-        // FIX: close any open modal when filters change to prevent ghost re-opens
         $this->showViewModal    = false;
         $this->viewingEventId   = null;
         $this->viewingEventType = null;
@@ -830,12 +836,6 @@ select.filter-input {
                     $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 80) : null;
                 @endphp
 
-                {{--
-                    FIX: Removed wire:click from the outer div entirely.
-                    Only the "View Details" cursor label triggers viewEvent now.
-                    The share button uses wire:click.stop to prevent card-level click.
-                    This eliminates the double-fire that caused the modal auto-open bug.
-                --}}
                 <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
                             cursor-pointer relative select-none flex flex-col group"
                      data-ev-card
@@ -917,7 +917,6 @@ select.filter-input {
 
                         {{-- Card footer --}}
                         <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto gap-2">
-                            {{-- Left: posted ago + attending count --}}
                             <div class="flex flex-col gap-0.5 min-w-0">
                                 <span class="text-xs text-gray-500">{{ $postedAgo }}</span>
                                 <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
@@ -925,7 +924,6 @@ select.filter-input {
                                     {{ $event->confirmed_count }} Attending
                                 </span>
                             </div>
-                            {{-- Right: share button only — cursor label handles View Details --}}
                             <div class="flex items-center gap-1.5 flex-shrink-0 z-[2]">
                                 <button type="button"
                                         data-ev-share
@@ -1396,11 +1394,7 @@ select.filter-input {
         <div class="flex items-center justify-between px-5 py-3 border-b border-white/10 flex-shrink-0"
              style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
             <h2 class="text-sm font-semibold flex items-center gap-2 text-white">
-                @if($isCompleted)
-                    <i class="fas fa-share-nodes text-sky-300 text-xs"></i> Share Event
-                @else
-                    <i class="fas fa-share-nodes text-sky-300 text-xs"></i> Share Event
-                @endif
+                <i class="fas fa-share-nodes text-sky-300 text-xs"></i> Share Event
             </h2>
             <button wire:click="closeShareModal" type="button" class="btn-close-purple" aria-label="Close">
                 <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -88,6 +88,16 @@
     </style>
     <script>
     // ─────────────────────────────────────────────────────────────────────────
+    //  ROUTE MAP — centralized so both notif-click and sidebar use the same map
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__registrarRouteMap = {
+        'registrar.alumni':              '/registrar/alumni',
+        'registrar.dashboard':           '/registrar/dashboard',
+        'registrar.employment.tracking': '/registrar/employment/tracking',
+        'registrar.alumni.register':     '/registrar/alumni/register',
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY — fresh object every call, no shared-reference bugs
     // ─────────────────────────────────────────────────────────────────────────
     window.__makeNotifsStore = function () {
@@ -130,25 +140,43 @@
                             rawDedup.startsWith('employment::') ||
                             rawDedup.startsWith('recorded::')   ||
                             rawDedup.startsWith('updated::')    ||
+                            rawDedup === 'employment_update'    ||
                             n.title === 'Employment Status Updated' ||
                             n.title === 'New Employment Record'
                         );
-                        var groupKey = isEmpEvent
-                            ? 'employment_day::' + day
-                            : (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
+                        var isChatMsg = rawDedup.startsWith('chat_msg::');
+
+                        var groupKey;
+                        if (isEmpEvent) {
+                            groupKey = 'employment_day::' + day;
+                        } else if (isChatMsg) {
+                            groupKey = rawDedup + '::' + day;
+                        } else {
+                            groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
+                        }
+
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
                             g.count = (g.count || 1) + (n.count || 1);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
-                            g.message = g.count + ' employment status update(s) today.';
-                            g.title   = 'Employment Status Updated';
+                            if (isEmpEvent) {
+                                g.message = g.count + ' employment status update(s) today.';
+                                g.title   = 'Employment Status Updated';
+                            } else if (isChatMsg) {
+                                g.message = g.count + ' new message(s) in ' + (g._roomName || 'group chat') + '.';
+                            }
                         } else {
                             map.set(groupKey, Object.assign({}, n, {
-                                count: n.count || 1,
-                                _ids:  [n.id],
-                                title:   isEmpEvent ? 'Employment Status Updated' : n.title,
-                                icon:    isEmpEvent ? 'arrow-rotate-right'        : (n.icon || 'bell'),
+                                count:      n.count || 1,
+                                _ids:       [n.id],
+                                _roomName:  n._roomName || '',
+                                title:      isEmpEvent ? 'Employment Status Updated'
+                                          : isChatMsg  ? (n.title || 'New Chat Message')
+                                          : n.title,
+                                icon:       isEmpEvent ? 'arrow-rotate-right'
+                                          : isChatMsg  ? 'comment-dots'
+                                          : (n.icon || 'bell'),
                             }));
                         }
                     });
@@ -159,6 +187,8 @@
             },
             toggle() { this.open = !this.open; },
             close()  { this.open = false; },
+
+            // ── Mark a single grouped notif read (all its _ids) ───────────────
             async markRead(item) {
                 if (item.read) return;
                 item.read = true;
@@ -176,6 +206,9 @@
                     } catch (e) { /* ignore */ }
                 }
             },
+
+            // ── Mark ALL notifs read — used by bell panel "Mark all read" btn
+            //    AND by sidebar navigation clicks ──────────────────────────────
             async markAllRead() {
                 this.items.forEach(function (n) { n.read = true; });
                 try {
@@ -188,8 +221,35 @@
                     });
                 } catch (e) { /* ignore */ }
             },
+
+            // ── Mark only notifs that match a given link_route as read ────────
+            //    Called when a sidebar link is clicked so the red dot for that
+            //    section disappears without wiping unrelated notifications.
+            async markReadByRoute(routeName) {
+                var matched = this.items.filter(function (n) {
+                    return n.link_route === routeName && !n.read;
+                });
+                if (matched.length === 0) return;
+                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                for (var i = 0; i < matched.length; i++) {
+                    matched[i].read = true;
+                    var ids = matched[i]._ids || [matched[i].id];
+                    for (var j = 0; j < ids.length; j++) {
+                        try {
+                            await window.fetch('/registrar/notifications/' + ids[j] + '/read', {
+                                method: 'PATCH',
+                                headers: {
+                                    'X-CSRF-TOKEN':     csrf,
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                }
+                            });
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+            },
         };
     };
+
     // ─────────────────────────────────────────────────────────────────────────
     //  SAFE ACCESSOR
     // ─────────────────────────────────────────────────────────────────────────
@@ -202,6 +262,7 @@
         } catch (e) { /* ignore */ }
         return null;
     };
+
     // ─────────────────────────────────────────────────────────────────────────
     //  INTERNAL BOOT HELPER
     // ─────────────────────────────────────────────────────────────────────────
@@ -216,12 +277,14 @@
             s.init();
         }
     };
+
     // ─────────────────────────────────────────────────────────────────────────
     //  PATH A — alpine:init
     // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:init', function () {
         Alpine.store('notifs', window.__makeNotifsStore());
     });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  PATH B — alpine:initialized
     // ─────────────────────────────────────────────────────────────────────────
@@ -231,6 +294,7 @@
             if (s && !s._pollTimer) s.init();
         }, 0);
     });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  PATH C — window load
     // ─────────────────────────────────────────────────────────────────────────
@@ -242,6 +306,7 @@
             window.__bootNotifsStore();
         }
     });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  PATH D — livewire:navigated (wire:navigate SPA page swaps)
     // ─────────────────────────────────────────────────────────────────────────
@@ -253,7 +318,7 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open  = false;
-                s.items = [];
+                // NOTE: do NOT clear s.items here — we want notif history to persist
                 s.init();
             } else {
                 Alpine.store('notifs', window.__makeNotifsStore());
@@ -262,6 +327,7 @@
             }
         }, 150);
     });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  PATH E — IIFE IMMEDIATE BOOT
     // ─────────────────────────────────────────────────────────────────────────
@@ -276,6 +342,7 @@
             setTimeout(function () { s.init(); }, 100);
         }
     })();
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Re-fetch on tab focus
     // ─────────────────────────────────────────────────────────────────────────
@@ -285,6 +352,7 @@
             if (s) s._fetch();
         }
     });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  PANEL POSITIONING
     // ─────────────────────────────────────────────────────────────────────────
@@ -310,6 +378,7 @@
         var s = window.__safeNotifsStore();
         if (s && s.open) positionPanel();
     });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  CURSOR-FOLLOWING TOOLTIP
     // ─────────────────────────────────────────────────────────────────────────
@@ -323,6 +392,35 @@
         label.style.left = (e.clientX + 14) + 'px';
         label.style.top  = (e.clientY + 14) + 'px';
     });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SIDEBAR SMART MARK-READ
+    //  When user clicks a sidebar link, mark as read only the notifs whose
+    //  link_route matches what they're navigating to.
+    //  Also handles "Alumni Records" covering both alumni + alumni.register.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__sidebarNotifsMarkRead = function (routeName) {
+        var s = window.__safeNotifsStore();
+        if (!s) return;
+
+        // Employment Tracking page clears employment notifs
+        // Alumni Records / Register Alumni page clears alumni notifs
+        var routesToMark = [routeName];
+
+        // If going to alumni, also clear alumni.register notifs (same section)
+        if (routeName === 'registrar.alumni') {
+            routesToMark.push('registrar.alumni.register');
+        }
+        // If going to alumni register, also clear alumni notifs
+        if (routeName === 'registrar.alumni.register') {
+            routesToMark.push('registrar.alumni');
+        }
+
+        routesToMark.forEach(function (r) {
+            s.markReadByRoute(r);
+        });
+    };
+
     // ─────────────────────────────────────────────────────────────────────────
     //  LIVEWIRE → DB BRIDGE
     // ─────────────────────────────────────────────────────────────────────────
@@ -357,6 +455,7 @@
                 }, 600);
             } catch (e) { /* ignore */ }
         }
+
         window.addEventListener('alumni-registered', function (e) {
             var d = _detail(e);
             _saveNotif({
@@ -404,11 +503,30 @@
                 dedup_key:  'employment_update',
             });
         });
+        window.addEventListener('message-received', function (e) {
+            var d = _detail(e);
+            var sender   = d.sender  || 'Someone';
+            var roomName = d.room    || 'Group Chat';
+            var bodySnip = d.body    || '';
+            var count    = d.count   || 1;
+            if (bodySnip.length > 60) bodySnip = bodySnip.substring(0, 57) + '…';
+            var message = count > 1
+                ? sender + ' and others sent ' + count + ' new message(s) in ' + roomName + '.'
+                : sender + ': ' + bodySnip;
+            _saveNotif({
+                icon:       'comment-dots',
+                title:      'New Message — ' + roomName,
+                message:    message,
+                link_route: 'registrar.alumni',
+                link_label: 'View',
+                dedup_key:  'chat_msg::' + roomName,
+                _roomName:  roomName,
+            });
+        });
     }
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-{{-- ✅ TANGGAL NA ang @click close dito sa body --}}
 <body class="antialiased" x-data="{ sidebarOpen: false }">
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
     {{-- Mobile overlay --}}
@@ -422,6 +540,7 @@
          @click="sidebarOpen = false"
          class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
+
     {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
     <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
            class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
@@ -429,6 +548,7 @@
                   lg:translate-x-0 lg:static lg:inset-0
                   flex flex-col h-full text-[#333333] shrink-0"
            style="background:#FFFFFF; border-right:1px solid #E8E0F0;">
+
         {{-- Sidebar Header --}}
         <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
             {{-- Branding --}}
@@ -440,6 +560,7 @@
                     Records Management
                 </p>
             </div>
+
             {{-- Bell Button --}}
             <button
                 id="bell-btn"
@@ -468,12 +589,14 @@
                                 : ($store.notifs ? $store.notifs.unread : 0)">
                 </span>
             </button>
+
             {{-- Mobile close --}}
             <button @click="sidebarOpen = false"
                     class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
                 <i class="fa-solid fa-circle-xmark text-xl"></i>
             </button>
         </div>
+
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
             @php
@@ -486,8 +609,14 @@
             @endphp
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->routeIs($link['route']); @endphp
+                {{--
+                    FIX: On click, call __sidebarNotifsMarkRead(routeName) BEFORE navigating.
+                    This marks matching notifs as read (removes red dot) but keeps the
+                    notification text/history intact in the DB and panel.
+                --}}
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
+                   @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}')"
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
                           {{ $isActive
                               ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
@@ -507,6 +636,7 @@
                 </a>
             @endforeach
         </nav>
+
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST" action="{{ route('logout') }}">
@@ -520,6 +650,7 @@
             </form>
         </div>
     </aside>
+
     {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         {{-- Mobile top bar --}}
@@ -539,6 +670,7 @@
             <h2 class="text-lg font-bold text-[#333333]">Registrar Portal</h2>
             <div class="w-10"></div>
         </header>
+
         {{-- Page content --}}
         <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8">
             <div class="container mx-auto">
@@ -547,6 +679,7 @@
         </div>
     </main>
 </div>
+
 {{-- ══════════════════════════════════════════════════════════════════════════
      NOTIFICATION PANEL
 ════════════════════════════════════════════════════════════════════════════ --}}
@@ -574,6 +707,7 @@
         box-shadow: 0 24px 60px -8px rgba(122,63,145,0.30),
                     0 6px 24px rgba(0,0,0,0.10);
     ">
+
     {{-- Panel Header --}}
     <div class="flex items-center justify-between px-5 py-4 shrink-0"
          style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
@@ -610,6 +744,7 @@
             </div>
         </div>
     </div>
+
     {{-- Scrollable notification list --}}
     <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
         <template x-if="$store.notifs && $store.notifs.items.length === 0">
@@ -620,10 +755,11 @@
                 </div>
                 <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
                 <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
-                    Alumni registrations, imports, and<br>employment updates will appear here.
+                    Alumni registrations, imports, employment updates,<br>and chat messages will appear here.
                 </p>
             </div>
         </template>
+
         {{-- Notification items --}}
         <template x-if="$store.notifs">
             <template x-for="notif in $store.notifs.items" :key="notif.id">
@@ -636,12 +772,7 @@
                         $store.notifs.markRead(notif);
                         $store.notifs.close();
                         if (notif.link_route) {
-                            const routeMap = {
-                                'registrar.alumni':              '/registrar/alumni',
-                                'registrar.dashboard':           '/registrar/dashboard',
-                                'registrar.employment.tracking': '/registrar/employment-tracking',
-                            };
-                            const url = routeMap[notif.link_route] || '/registrar/alumni';
+                            const url = window.__registrarRouteMap[notif.link_route] || '/registrar/alumni';
                             window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                         }
                     ">
@@ -652,6 +783,7 @@
                            :class="'fa-' + (notif.icon || 'bell')"
                            style="font-size:15px;"></i>
                     </div>
+
                     {{-- Content --}}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-start justify-between gap-2">
@@ -673,6 +805,7 @@
                             <span x-show="!notif.read" x-cloak
                                   class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1"></span>
                         </div>
+
                         {{-- Message --}}
                         <p class="text-[#666666] mt-1 leading-relaxed"
                            style="font-size:12px;
@@ -701,6 +834,7 @@
             </template>
         </template>
     </div>
+
     {{-- Panel Footer --}}
     <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
         <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
@@ -708,8 +842,10 @@
         </p>
     </div>
 </div>
+
 @livewireScripts
-{{-- ✅ CLOSE ON OUTSIDE CLICK — narito na sa baba, after ng lahat ng elements --}}
+
+{{-- ✅ CLOSE ON OUTSIDE CLICK --}}
 <div
     x-data
     x-show="$store.notifs && $store.notifs.open"

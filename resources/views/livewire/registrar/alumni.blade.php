@@ -33,13 +33,11 @@ new class extends Component {
 
     public function mount(): void
     {
-        // ── Auto-apply profile filter when coming from dashboard cards ──
         $filter = request()->query('profile_filter', 'all');
         if (in_array($filter, ['all', 'complete', 'incomplete'])) {
             $this->alumniProfileFilter = $filter;
         }
 
-        // ── Auto-apply batch filter when coming from dashboard batch chart ──
         $batch = request()->query('batch', '');
         if ($batch !== '') {
             $this->alumniBatch = (string) intval($batch);
@@ -81,7 +79,6 @@ new class extends Component {
         if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
         if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
 
-        // ── Profile completion filter ──
         if ($this->alumniProfileFilter === 'complete')
             $q->where('profile_completed', 1);
         elseif ($this->alumniProfileFilter === 'incomplete')
@@ -160,14 +157,7 @@ new class extends Component {
 
     public function uploadAlumniPhoto(): void
     {
-        $this->validate([
-            'newAlumniPhoto' => 'required|image|max:2048|mimes:jpg,jpeg,png,webp',
-        ], [
-            'newAlumniPhoto.max'   => 'Photo must not exceed 2MB.',
-            'newAlumniPhoto.mimes' => 'Only JPG, PNG, or WebP images are allowed.',
-        ]);
-
-        if (!$this->viewingProfileId) return;
+        if (!$this->viewingProfileId || !$this->newAlumniPhoto) return;
 
         try {
             $alumni = Alumni::findOrFail($this->viewingProfileId);
@@ -185,8 +175,32 @@ new class extends Component {
             $this->newAlumniPhoto = null;
 
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
+            $this->dispatch('photo-saved');
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
+        }
+    }
+
+    public function resetAlumniPhoto(): void
+    {
+        if (!$this->viewingProfileId) return;
+
+        try {
+            $alumni = Alumni::findOrFail($this->viewingProfileId);
+
+            if ($alumni->profile_photo
+                && !str_contains($alumni->profile_photo, 'default.png')
+                && Storage::disk('public')->exists($alumni->profile_photo)) {
+                Storage::disk('public')->delete($alumni->profile_photo);
+            }
+
+            $alumni->update(['profile_photo' => null]);
+            $this->viewingProfile['profile_photo'] = null;
+
+            $this->dispatch('flash-message', type: 'success', message: 'Profile photo reset to default.');
+            $this->dispatch('photo-saved');
+        } catch (\Exception $e) {
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to reset photo.');
         }
     }
 
@@ -344,7 +358,7 @@ new class extends Component {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: .06em;
-        color: #555555;
+        color: #333333;
         margin-bottom: 1px;
     }
     .ar-field-value {
@@ -371,7 +385,7 @@ new class extends Component {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: .07em;
-        color: #444444;
+        color: #1a1a1a;
         margin: 0;
     }
     .ar-cell {
@@ -388,23 +402,114 @@ new class extends Component {
     }
     .ar-panel { animation: arPanelIn .18s cubic-bezier(.4,0,.2,1) both; }
 
-    /* ── Profile fullscreen layout — no scroll ───────────────────── */
-    .ar-profile-body {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        grid-template-rows: auto auto auto auto auto;
-        gap: 6px;
-        padding: 10px 14px;
-        height: 100%;
-        box-sizing: border-box;
+    /* ── Photo avatar action buttons — icon only ────────────────── */
+    .ar-photo-action-btn {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+        border: 1.5px solid #E0E0E0;
+        background: #fff;
+        cursor: pointer;
+        transition: all .15s;
+        font-size: 12px;
+        flex-shrink: 0;
+    }
+
+    /* ── Reset button tooltip — positioned BELOW the icon ────────── */
+    .ar-photo-action-btn .ar-photo-action-tip {
+        position: absolute;
+        top: calc(100% + 7px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1a1a1a;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: .05em;
+        padding: 4px 9px;
+        border-radius: 6px;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity .15s ease;
+        z-index: 9999;
+        box-shadow: 0 4px 12px rgba(0,0,0,.28);
+    }
+    /* Arrow pointing UP (tooltip is below the button) */
+    .ar-photo-action-btn .ar-photo-action-tip::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-bottom-color: #1a1a1a;
+    }
+    .ar-photo-action-btn:hover .ar-photo-action-tip { opacity: 1; }
+    .ar-photo-save-btn { background: #7A3F91; border-color: #7A3F91; color: #fff; }
+    .ar-photo-save-btn:hover { background: #6a3280; border-color: #6a3280; }
+    .ar-photo-save-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .ar-photo-cancel-btn { color: #555555; }
+    .ar-photo-cancel-btn:hover { background: #FEF2F2; border-color: #FECACA; color: #DC2626; }
+    .ar-photo-default-btn { color: #555555; }
+    .ar-photo-default-btn:hover { background: #F5F5F5; border-color: #BBBBBB; color: #333333; }
+
+    /* ── Upload progress shimmer ─────────────────────────────────── */
+    @keyframes arShimmer {
+        0%   { background-position: -200% 0; }
+        100% { background-position:  200% 0; }
+    }
+    .ar-uploading-overlay {
+        position: absolute;
+        inset: 0;
+        border-radius: 12px;
+        background: linear-gradient(90deg,rgba(122,63,145,.15) 25%,rgba(122,63,145,.35) 50%,rgba(122,63,145,.15) 75%);
+        background-size: 200% 100%;
+        animation: arShimmer 1.2s infinite linear;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* ── Avatar strip layout ─────────────────────────────────────── */
+    .ar-avatar-strip {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        background: #fff;
+        border: 1.5px solid #E4E4E4;
+        border-radius: 10px;
         overflow: hidden;
     }
 
-    /* Avatar strip spans full width */
-    .ar-avatar-strip { grid-column: 1 / -1; }
+    /* ── Large photo column ──────────────────────────────────────── */
+    .ar-photo-col {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 10px 12px;
+        border-right: 1.5px solid #EEEEEE;
+        background: #FAFAFA;
+        gap: 5px;
+        min-width: 160px;
+    }
 
-    /* Employment spans full width at bottom */
-    .ar-emp-block { grid-column: 1 / -1; }
+    /* ── Info column next to photo ───────────────────────────────── */
+    .ar-info-col {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 10px 14px;
+        gap: 5px;
+    }
 </style>
 
 <div id="ar-hover-tip" class="ar-hover-tip">
@@ -464,19 +569,16 @@ new class extends Component {
 
             {{-- ── Profile Status Pill Tabs (All / Complete / Pending) ── --}}
             <div class="flex items-center gap-1.5 shrink-0">
-                {{-- All --}}
                 <button type="button"
                         wire:click="$set('alumniProfileFilter','all')"
                         class="ar-status-pill {{ $alumniProfileFilter === 'all' ? 'active-all' : '' }}">
                     All
                 </button>
-                {{-- Complete --}}
                 <button type="button"
                         wire:click="$set('alumniProfileFilter','complete')"
                         class="ar-status-pill {{ $alumniProfileFilter === 'complete' ? 'active-complete' : '' }}">
                     Complete
                 </button>
-                {{-- Pending --}}
                 <button type="button"
                         wire:click="$set('alumniProfileFilter','incomplete')"
                         class="ar-status-pill {{ $alumniProfileFilter === 'incomplete' ? 'active-incomplete' : '' }}">
@@ -741,14 +843,16 @@ new class extends Component {
     $dob = !empty($viewingProfile['date_of_birth'])
         ? strtoupper(\Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y'))
         : '—';
+
+    $hasCustomPhoto = !empty($viewingProfile['profile_photo'])
+        && !str_contains($viewingProfile['profile_photo'], 'default.png');
 @endphp
 
-{{-- Fullscreen overlay — fixed, covers entire viewport --}}
+{{-- Fullscreen overlay --}}
 <div class="fixed inset-0 z-50"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);"
      @keydown.escape.window="$wire.closeModal()">
 
-    {{-- Panel — fills entire screen, no overflow --}}
     <div class="w-full h-full flex flex-col bg-[#F0F0F0] ar-panel overflow-hidden">
 
         {{-- ── Sticky Header ── --}}
@@ -782,59 +886,254 @@ new class extends Component {
                 box-sizing:border-box;
             ">
 
-                {{-- ── Row 1: Avatar strip (full width) ── --}}
-                <div style="grid-column:1/-1;" class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[#DEDEDE] bg-white">
-                    <div class="shrink-0 flex flex-col items-center gap-0.5">
-                        <div class="relative group" style="width:56px;height:56px;">
-                            @if($newAlumniPhoto)
-                                <img src="{{ $newAlumniPhoto->temporaryUrl() }}" alt="Preview"
-                                     class="w-full h-full rounded-lg object-cover shadow ring-2 ring-[#BBBBBB]">
-                            @else
-                                <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
+                {{-- ══ Row 1: Avatar strip — full width ══ --}}
+                {{--
+                    x-data manages:
+                      previewSrc       — shown in <img> (FileReader preview or saved URL)
+                      originalSrc      — the alumni's saved photo URL (restored on cancel)
+                      defaultSrc       — the system default photo URL
+                      pendingFile      — File object picked by user
+                      hasFile          — true once any change is staged
+                      saving           — true while Livewire is processing
+                      isDefaultPending — true when user staged a reset-to-default
+                --}}
+                <div style="grid-column:1/-1;"
+                     x-data="{
+                         previewSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
+                         originalSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
+                         defaultSrc: '{{ asset('storage/alumni-photos/default.png') }}',
+                         pendingFile: null,
+                         hasFile: false,
+                         saving: false,
+                         isDefaultPending: false,
+
+                         get isShowingDefault() {
+                             return this.previewSrc === this.defaultSrc;
+                         },
+
+                         init() {
+                             $wire.$on('photo-saved', () => {
+                                 this.pendingFile      = null;
+                                 this.hasFile          = false;
+                                 this.saving           = false;
+                                 this.isDefaultPending = false;
+                                 this.originalSrc      = this.previewSrc;
+                             });
+                         },
+
+                         onFileChange(event) {
+                             const file = event.target.files[0];
+                             if (!file) return;
+                             this.pendingFile      = file;
+                             this.hasFile          = true;
+                             this.isDefaultPending = false;
+                             const reader = new FileReader();
+                             reader.onload = (e) => { this.previewSrc = e.target.result; };
+                             reader.readAsDataURL(file);
+                         },
+
+                         setDefault() {
+                             this.pendingFile      = null;
+                             this.hasFile          = true;
+                             this.isDefaultPending = true;
+                             this.previewSrc       = this.defaultSrc;
+                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                         },
+
+                         savePhoto() {
+                             if (this.saving) return;
+                             this.saving = true;
+                             if (this.isDefaultPending) {
+                                 $wire.resetAlumniPhoto();
+                             } else if (this.pendingFile) {
+                                 $wire.upload(
+                                     'newAlumniPhoto',
+                                     this.pendingFile,
+                                     () => { $wire.uploadAlumniPhoto(); },
+                                     () => {
+                                         this.saving           = false;
+                                         this.hasFile          = false;
+                                         this.isDefaultPending = false;
+                                         this.pendingFile      = null;
+                                         this.previewSrc       = this.originalSrc;
+                                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                     },
+                                     () => {}
+                                 );
+                             } else {
+                                 this.saving = false;
+                             }
+                         },
+
+                         cancelPhoto() {
+                             this.pendingFile      = null;
+                             this.hasFile          = false;
+                             this.isDefaultPending = false;
+                             this.previewSrc       = this.originalSrc;
+                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                         }
+                     }"
+                     class="ar-avatar-strip">
+
+                    {{-- ── LEFT: Large 2×2 photo column ── --}}
+                    <div class="ar-photo-col">
+
+                        {{-- Photo + right-side reset button together --}}
+                        <div class="flex items-start gap-2">
+
+                            {{-- Photo container — large passport-style --}}
+                            <div class="relative group" style="width:108px;height:108px;flex-shrink:0;">
+                                <img :src="previewSrc"
                                      alt="{{ $viewingProfile['first_name'] ?? '' }}"
-                                     class="w-full h-full rounded-lg object-cover shadow ring-2 ring-[#DDDDDD]">
-                            @endif
-                            <label class="absolute inset-0 rounded-lg flex flex-col items-center justify-center gap-0.5 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                                <i class="fas fa-camera text-white text-sm"></i>
-                                <input type="file" wire:model="newAlumniPhoto" class="hidden" accept="image/jpeg,image/png,image/webp">
-                            </label>
-                            @if($newAlumniPhoto)
-                                <span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#7A3F91] border-2 border-white"></span>
-                            @endif
-                        </div>
-                        @if(!$newAlumniPhoto)
-                            <p class="text-center leading-tight" style="font-size:12px;color:#333333;white-space:nowrap;">Hover to<br>change</p>
-                        @endif
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-base font-bold text-[#1a1a1a] uppercase leading-tight truncate">
+                                     class="w-full h-full object-cover shadow-md transition-all"
+                                     style="border-radius:12px;"
+                                     :class="hasFile ? 'ring-2 ring-[#7A3F91] ring-offset-2' : 'ring-2 ring-[#E0E0E0]'">
+
+                                {{-- Shimmer overlay while saving --}}
+                                <div x-show="saving" class="ar-uploading-overlay">
+                                    <i class="fas fa-spinner fa-spin text-[#7A3F91] text-base"></i>
+                                </div>
+
+                                {{-- Camera hover overlay --}}
+                                <label x-show="!saving"
+                                       class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                       style="border-radius:12px;">
+                                    <i class="fas fa-camera text-white" style="font-size:16px;"></i>
+                                    <input type="file"
+                                           x-ref="photoInput"
+                                           class="hidden"
+                                           accept="image/jpeg,image/png,image/webp"
+                                           @change="onFileChange($event)">
+                                </label>
+
+                                {{-- Purple pending-change dot --}}
+                                <span x-show="hasFile && !saving"
+                                      class="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#7A3F91] border-2 border-white shadow"
+                                      style="display:none;"></span>
+                            </div>
+
+                            {{-- ── RIGHT of photo: Reset to default + Save/Cancel stacked ── --}}
+                            <div class="flex flex-col gap-1.5" x-show="!saving" style="padding-top:2px;">
+
+                                {{-- ↺ Reset to default — RIGHT SIDE, tooltip to the right --}}
+                                <div class="relative group/rst">
+                                    <button type="button"
+                                            class="ar-photo-action-btn ar-photo-default-btn"
+                                            x-show="!hasFile && !isShowingDefault"
+                                            @click="setDefault()"
+                                            style="display:none;">
+                                        <i class="fas fa-rotate-left"></i>
+                                    </button>
+                                    {{-- Tooltip to the RIGHT --}}
+                                    <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none
+                                                bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg
+                                                opacity-0 group-hover/rst:opacity-100 transition-opacity duration-150 z-[9999]"
+                                         style="font-size:10px;padding:4px 9px;border-radius:6px;letter-spacing:.04em;">
+                                        Back to default photo
+                                        <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
+                                    </div>
+                                </div>
+
+                                {{-- ✓ Save — RIGHT SIDE --}}
+                                <div class="relative group/sav">
+                                    <button type="button"
+                                            class="ar-photo-action-btn ar-photo-save-btn"
+                                            x-show="hasFile"
+                                            @click="savePhoto()"
+                                            style="display:none;">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none
+                                                bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg
+                                                opacity-0 group-hover/sav:opacity-100 transition-opacity duration-150 z-[9999]"
+                                         style="font-size:10px;padding:4px 9px;border-radius:6px;letter-spacing:.04em;">
+                                        Save photo
+                                        <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
+                                    </div>
+                                </div>
+
+                                {{-- ✕ Cancel — RIGHT SIDE --}}
+                                <div class="relative group/can">
+                                    <button type="button"
+                                            class="ar-photo-action-btn ar-photo-cancel-btn"
+                                            x-show="hasFile"
+                                            @click="cancelPhoto()"
+                                            style="display:none;">
+                                        <i class="fas fa-xmark"></i>
+                                    </button>
+                                    <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none
+                                                bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg
+                                                opacity-0 group-hover/can:opacity-100 transition-opacity duration-150 z-[9999]"
+                                         style="font-size:10px;padding:4px 9px;border-radius:6px;letter-spacing:.04em;">
+                                        Cancel
+                                        <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
+                                    </div>
+                                </div>
+
+                            </div>{{-- end right-of-photo buttons --}}
+
+                            {{-- Saving label (shown instead of buttons) --}}
+                            <span x-show="saving"
+                                  class="inline-flex items-center gap-1.5 font-semibold self-start"
+                                  style="font-size:.72rem;color:#7A3F91;display:none;padding-top:6px;">
+                                <i class="fas fa-spinner fa-spin" style="font-size:10px;"></i> Saving…
+                            </span>
+
+                        </div>{{-- end photo+buttons row --}}
+
+                        {{-- ── "Hover photo to change" hint ── --}}
+                        <p x-show="!hasFile && !saving"
+                           class="text-center font-semibold leading-tight select-none"
+                           style="font-size:.68rem;color:#1a1a1a;max-width:108px;display:block;">
+                            Hover photo to change
+                        </p>
+
+                    </div>{{-- end photo col --}}
+
+                    {{-- ── RIGHT: Name + ID + badges ── --}}
+                    <div class="ar-info-col">
+
+                        {{-- Name --}}
+                        <p class="font-bold uppercase leading-tight" style="font-size:1.05rem;color:#1a1a1a;">
                             {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
                         </p>
-                        <p class="text-xs text-[#777777] font-mono">{{ $viewingProfile['student_id'] ?? '—' }}</p>
-                        <div class="flex flex-wrap gap-1 mt-1">
-                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">{{ $viewingProfile['course_code'] ?? '—' }}</span>
-                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">BATCH {{ $viewingProfile['batch'] ?? '—' }}</span>
-                            <span class="px-2 py-0.5 rounded-full text-xs font-semibold uppercase bg-[#F0F0F0] text-[#333333] border border-[#DEDEDE]">{{ !empty($viewingProfile['profile_completed']) ? 'COMPLETE' : 'INCOMPLETE' }}</span>
+
+                        {{-- Student ID --}}
+                        <p class="font-mono" style="font-size:.73rem;color:#1a1a1a;letter-spacing:.03em;">
+                            {{ $viewingProfile['student_id'] ?? '—' }}
+                        </p>
+
+                        {{-- Badges row — divider-separated ── --}}
+                        <div class="flex flex-wrap items-center" style="gap:0;">
+                            <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
+                                {{ $viewingProfile['course_code'] ?? '—' }}
+                            </span>
+                            <span style="color:#AAAAAA;margin:0 6px;font-size:.7rem;">|</span>
+                            <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
+                                Batch {{ $viewingProfile['batch'] ?? '—' }}
+                            </span>
+                            <span style="color:#AAAAAA;margin:0 6px;font-size:.7rem;">|</span>
+                            @if(!empty($viewingProfile['profile_completed']))
+                                <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
+                                    Complete
+                                </span>
+                            @else
+                                <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
+                                    Incomplete Information
+                                </span>
+                            @endif
                         </div>
-                    </div>
-                    @if($newAlumniPhoto)
-                        <div class="flex items-center gap-2 shrink-0">
-                            <button wire:click="uploadAlumniPhoto" wire:loading.attr="disabled" wire:target="uploadAlumniPhoto"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition active:scale-95 disabled:opacity-60"
-                                    style="background:#7A3F91;">
-                                <span wire:loading.remove wire:target="uploadAlumniPhoto"><i class="fas fa-upload text-xs mr-1"></i>Save</span>
-                                <span wire:loading wire:target="uploadAlumniPhoto"><i class="fas fa-spinner fa-spin text-xs mr-1"></i>…</span>
-                            </button>
-                            <button wire:click="$set('newAlumniPhoto',null)"
-                                    class="inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-[#DDDDDD] text-[#666666] hover:bg-[#F5F5F5] transition">
-                                <i class="fas fa-xmark text-xs"></i>
-                            </button>
-                        </div>
-                    @endif
-                </div>
+
+                        {{-- Email --}}
+                        <p style="font-size:.72rem;color:#1a1a1a;font-weight:500;">
+                            {{ strtolower($viewingProfile['email'] ?? '—') }}
+                        </p>
+
+                    </div>{{-- end info col --}}
+
+                </div>{{-- end avatar strip --}}
 
                 {{-- ── Row 2: Student ID | Student Name (4 cells) ── --}}
-                {{-- Student ID --}}
                 <div class="ar-card" style="grid-column:1/2;">
                     <div class="ar-card-header"><p>Student ID</p></div>
                     <div class="p-2">
@@ -845,7 +1144,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Student Name --}}
                 <div class="ar-card" style="grid-column:2/-1;">
                     <div class="ar-card-header"><p>Student's Name</p></div>
                     <div class="p-2 grid grid-cols-4 gap-1.5">
@@ -950,7 +1248,7 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 5: DSWD | Disability | Contact | Email (full width) ── --}}
+                {{-- ── Row 5: DSWD | Disability | Contact | Email ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
                     <div class="p-2 grid grid-cols-4 gap-1.5">
                         <div class="ar-cell">
@@ -972,23 +1270,22 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 6: Employment Status (full width, flex remaining space) ── --}}
-                <div class="ar-card" style="grid-column:1/-1; min-height:0;">
+                {{-- ── Row 6: Employment Status ── --}}
+                <div class="ar-card" style="grid-column:1/-1; min-height:0; margin-bottom:4px;">
                     <div class="ar-card-header flex items-center justify-between">
                         <p>Employment Status</p>
                         @if($emp && $submittedAt)
-                            <span class="text-xs text-[#888888] font-semibold normal-case tracking-normal">Updated {{ $submittedAt }}</span>
+                            <span class="text-xs text-[#1a1a1a] font-semibold normal-case tracking-normal">Updated {{ $submittedAt }}</span>
                         @endif
                     </div>
 
                     @if(!$emp)
                         <div class="p-3 text-center">
-                            <p class="text-xs font-semibold text-[#555555]">No employment record submitted yet.</p>
-                            <p class="text-xs text-[#777777] mt-0.5 font-normal">The alumni has not filled in their employment information.</p>
+                            <p class="text-xs font-semibold text-[#1a1a1a]">No employment record submitted yet.</p>
+                            <p class="text-xs text-[#1a1a1a] mt-0.5 font-normal">The alumni has not filled in their employment information.</p>
                         </div>
                     @else
                         <div class="p-2 flex flex-wrap gap-x-4 gap-y-2 items-start">
-                            {{-- Status badges --}}
                             <div class="flex flex-wrap gap-1.5 items-center">
                                 @if($empStatus && isset($empStatusMap[$empStatus]))
                                     <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#1a1a1a] border border-[#DEDEDE]">
@@ -1006,7 +1303,6 @@ new class extends Component {
                                 @endif
                             </div>
 
-                            {{-- Company / Job --}}
                             @if($isWorking && (!empty($emp['company_name']) || !empty($emp['job_title'])))
                                 <div class="flex gap-1.5 flex-wrap">
                                     @if(!empty($emp['company_name']))
@@ -1036,7 +1332,6 @@ new class extends Component {
                                 </div>
                             @endif
 
-                            {{-- Career Path --}}
                             @if($isWorking && count($careerPath))
                                 <div class="flex flex-wrap gap-1 items-center">
                                     <span class="ar-field-label mr-1">Career Path:</span>
@@ -1048,7 +1343,6 @@ new class extends Component {
                                 </div>
                             @endif
 
-                            {{-- Further Education --}}
                             @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none')
                                 @php $eduMap = ['pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate']; @endphp
                                 @if(isset($eduMap[$emp['education_status']]))
