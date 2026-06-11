@@ -5,7 +5,9 @@ use App\Http\Controllers\AlumniInformationController;
 use App\Http\Controllers\AlumniNotificationController;
 use App\Http\Controllers\AlumniPasswordChangeController;
 use App\Http\Controllers\AuditLogsController;
+use App\Http\Controllers\CoordinatorNotificationController;
 use App\Http\Controllers\CourseController;
+use App\Http\Controllers\DirectorNotificationController;
 use App\Http\Controllers\MessengerController;
 use App\Http\Controllers\OrganizerController;
 use App\Http\Controllers\RegistrarNotificationController;
@@ -56,7 +58,13 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
     Route::view('/organizer/alumni/employment','organizer.alumni-employment-wrapper') ->name('organizer.alumni/employment');
     Route::view('/organizer/reports',          'organizer.reports')                   ->name('organizer.reports');
     Route::view('/organizer/chat/alumni',      'organizer.chat-alumni-wrapper')       ->name('organizer.chat/alumni');
-    Route::view('/organizer/yearbook',         'organizer.yearbook-wrapper')       ->name('organizer.yearbook');
+    Route::view('/organizer/yearbook',         'organizer.yearbook-wrapper')          ->name('organizer.yearbook');
+
+    // ── Coordinator Notification API ──────────────────────────────────────
+    Route::get('/coordinator/notifications',                [CoordinatorNotificationController::class, 'index']);
+    Route::post('/coordinator/notifications',               [CoordinatorNotificationController::class, 'store']);
+    Route::patch('/coordinator/notifications/read-all',     [CoordinatorNotificationController::class, 'markAllRead']);
+    Route::patch('/coordinator/notifications/{n}/read',     [CoordinatorNotificationController::class, 'markRead']);
 });
 
 // ===================================
@@ -86,10 +94,10 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
     Route::post('/messenger/ping',           [MessengerController::class, 'ping'])        ->name('messenger.ping');
     Route::get('/messenger/{roomId}/online', [MessengerController::class, 'onlineCount']) ->name('messenger.online');
 
-    Route::get('/alumni/notifications',                    [AlumniNotificationController::class, 'index']);
-Route::post('/alumni/notifications',                   [AlumniNotificationController::class, 'store']);
-Route::patch('/alumni/notifications/{n}/read',         [AlumniNotificationController::class, 'markRead']);
-Route::patch('/alumni/notifications/read-all',         [AlumniNotificationController::class, 'markAllRead']);
+    Route::get('/alumni/notifications',              [AlumniNotificationController::class, 'index']);
+    Route::post('/alumni/notifications',             [AlumniNotificationController::class, 'store']);
+    Route::patch('/alumni/notifications/read-all',   [AlumniNotificationController::class, 'markAllRead']);
+    Route::patch('/alumni/notifications/{n}/read',   [AlumniNotificationController::class, 'markRead']);
 });
 
 // ===================================
@@ -103,13 +111,12 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
     Route::view('/alumni/import',          'registrar.import-wrapper')                 ->name('alumni.import');
     Route::view('/information-management', 'registrar.information-management-wrapper') ->name('information-management');
     Route::view('/courses',                'registrar.courses-wrapper')                ->name('courses');
-    Route::view('/employment/tracking',     'registrar.employment-tracking-wrapper')   ->name('employment.tracking');
-    // Notification API (used by Alpine store via fetch)
-Route::get('/notifications',              [RegistrarNotificationController::class, 'index'])      ->name('notifications.index');
-Route::post('/notifications',             [RegistrarNotificationController::class, 'store'])      ->name('notifications.store');
-Route::patch('/notifications/{notification}/read', [RegistrarNotificationController::class, 'markRead'])   ->name('notifications.read');
-Route::patch('/notifications/read-all',   [RegistrarNotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::view('/employment/tracking',    'registrar.employment-tracking-wrapper')    ->name('employment.tracking');
 
+    Route::get('/notifications',                      [RegistrarNotificationController::class, 'index'])      ->name('notifications.index');
+    Route::post('/notifications',                     [RegistrarNotificationController::class, 'store'])      ->name('notifications.store');
+    Route::patch('/notifications/read-all',           [RegistrarNotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::patch('/notifications/{notification}/read',[RegistrarNotificationController::class, 'markRead'])   ->name('notifications.read');
 });
 
 // ===================================
@@ -130,6 +137,13 @@ Route::middleware(['auth', 'director', 'director.password.ensure'])->prefix('dir
     Route::view('/job/management',         'director.manage-job-wrapper')         ->name('job/management');
     Route::view('/messenger',              'director.director-messenger-wrapper') ->name('director/messenger');
     Route::view('/manage/employment',      'director.manage-employment-wrapper')  ->name('manage/employment');
+
+    // ── Director Notification API ─────────────────────────────────────────
+    Route::get('/notifications',                         [DirectorNotificationController::class, 'index'])      ->name('notifications.index');
+    Route::post('/notifications',                        [DirectorNotificationController::class, 'store'])      ->name('notifications.store');
+    Route::patch('/notifications/read-all',              [DirectorNotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::patch('/notifications/{notification}/read',   [DirectorNotificationController::class, 'markRead'])   ->name('notifications.read');
+    Route::delete('/notifications/{notification}',       [DirectorNotificationController::class, 'destroy'])    ->name('notifications.destroy');
 });
 
 // ===================================
@@ -152,7 +166,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::post('/alumni/import', [AlumniController::class, 'import'])->name('alumni.import');
 
-    Route::view('/course',                'admin.course-wrapper')                ->name('course');
+    Route::view('/course', 'admin.course-wrapper')->name('course');
 
     Route::get('/courses',             [CourseController::class, 'index'])  ->name('courses.index');
     Route::post('/courses',            [CourseController::class, 'store'])  ->name('courses.store');

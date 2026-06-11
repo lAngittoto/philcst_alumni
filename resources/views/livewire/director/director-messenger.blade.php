@@ -5,6 +5,7 @@
 use Livewire\Volt\Component;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Carbon\Carbon;
 
 new class extends Component {
@@ -54,6 +55,17 @@ new class extends Component {
     // ── View Reactions popup ──────────────────────────────────────────────
     public ?int  $reactionsPopupMsgId = null;
     public array $reactionsPopupData  = [];
+
+    // ── Unread / watermark tracking ───────────────────────────────────────
+    public int $lastNotifiedMessageId = 0;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Cache key helpers
+    // ─────────────────────────────────────────────────────────────────────
+    private function lastNotifiedCacheKey(): string
+    {
+        return "chat_notified.director.{$this->directorId}.room.{$this->roomId}";
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // Photo URL resolver
@@ -105,12 +117,39 @@ new class extends Component {
         $this->ensureRoomExists();
         $this->pingPresence();
         $this->loadRoom();
+
+        // Seed the watermark AFTER loadRoom() so roomId is set
+        $this->seedNotifiedPointer();
+
         $this->loadMessages();
         $this->loadMembers();
         $this->refreshOnlineCount();
         $this->loadTypingIndicators();
 
         $this->dispatch('chat-scroll-bottom');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Seed notification pointer on mount
+    // ─────────────────────────────────────────────────────────────────────
+    private function seedNotifiedPointer(): void
+    {
+        if (! $this->roomId) return;
+
+        $maxId = (int) (DB::table('chat_messages')
+            ->where('room_id', $this->roomId)
+            ->whereNull('deleted_at')
+            ->max('id') ?? 0);
+
+        $cached = Cache::get($this->lastNotifiedCacheKey());
+
+        if ($cached === null) {
+            // First visit — set pointer to current max so we don't flood old msgs
+            $this->lastNotifiedMessageId = $maxId;
+            Cache::put($this->lastNotifiedCacheKey(), $maxId, now()->addDays(30));
+        } else {
+            $this->lastNotifiedMessageId = (int) $cached;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -154,6 +193,7 @@ new class extends Component {
     public function refreshAll(): void
     {
         $this->pingPresence();
+        $this->checkAndDispatchNewMessageNotifications(); // ← FIX: check for new msgs
         $this->loadMessages();
         $this->loadTypingIndicators();
         $this->refreshOnlineCount();
@@ -162,6 +202,62 @@ new class extends Component {
     public function refreshTyping(): void
     {
         $this->loadTypingIndicators();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Detect new messages → dispatch dir-message-received to layout
+    // ─────────────────────────────────────────────────────────────────────
+    private function checkAndDispatchNewMessageNotifications(): void
+    {
+        if (! $this->roomId) return;
+
+        // Make sure watermark is initialized
+        if ($this->lastNotifiedMessageId === 0) {
+            $this->seedNotifiedPointer();
+            return;
+        }
+
+        $lastKnown = $this->lastNotifiedMessageId;
+
+        // Only look at messages NOT sent by this director
+        $newMessages = DB::table('chat_messages as m')
+            ->where('m.room_id', $this->roomId)
+            ->whereNull('m.deleted_at')
+            ->where('m.id', '>', $lastKnown)
+            ->where(function ($q) {
+                $q->where('m.sender_type', '!=', 'director')
+                  ->orWhere('m.sender_id', '!=', $this->directorId);
+            })
+            ->orderBy('m.id')
+            ->get(['m.id', 'm.sender_type', 'm.sender_id', 'm.body'])
+            ->toArray();
+
+        if (empty($newMessages)) return;
+
+        // Advance watermark
+        $newMaxId = (int) max(array_column($newMessages, 'id'));
+        $this->lastNotifiedMessageId = $newMaxId;
+        Cache::put($this->lastNotifiedCacheKey(), $newMaxId, now()->addDays(30));
+
+        // Build notification payload from the latest message
+        $latest     = end($newMessages);
+        $senderName = 'Someone';
+
+        if (in_array($latest->sender_type, ['coordinator', 'organizer'])) {
+            $firstName  = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
+            $senderName = ($firstName ?? 'Coordinator') . ' (Coordinator)';
+        } elseif ($latest->sender_type === 'director') {
+            $firstName  = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
+            $senderName = ($firstName ?? 'Director') . ' (Director)';
+        }
+
+        // ── Dispatch to director layout listener ──
+        $this->dispatch('dir-message-received', [
+            'sender' => $senderName,
+            'room'   => 'Internal Staff Chat',
+            'body'   => mb_substr($latest->body ?? '', 0, 60),
+            'count'  => count($newMessages),
+        ]);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -276,15 +372,11 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Load
-    // FIX: Include deleted messages (show unsent placeholder)
-    // FIX: Handle both 'coordinator' and 'organizer' sender_type
     // ─────────────────────────────────────────────────────────────────────
     public function loadMessages(): void
     {
         if (! $this->roomId) return;
 
-        // FIX: removed whereNull('m.deleted_at') — we load ALL messages
-        // including deleted ones so we can show the "unsent" placeholder
         $rows = DB::table('chat_messages as m')
             ->where('m.room_id', $this->roomId)
             ->orderBy('m.created_at')
@@ -296,7 +388,6 @@ new class extends Component {
 
         $dIds = collect($rows)->where('sender_type', 'director')->pluck('sender_id')->unique();
 
-        // FIX: collect coordinator IDs from BOTH 'coordinator' and 'organizer' sender_type
         $oIds = collect($rows)
             ->filter(fn($r) => in_array($r->sender_type, ['coordinator', 'organizer']))
             ->pluck('sender_id')
@@ -336,7 +427,6 @@ new class extends Component {
         $this->messages = collect($rows)->map(function ($m) use ($dMap, $oMap, $rxns, $pins, $rplyMap, $self) {
 
             $isDir   = $m->sender_type === 'director';
-            // FIX: treat both 'coordinator' and 'organizer' as coordinator
             $isCoord = in_array($m->sender_type, ['coordinator', 'organizer']);
             $s       = $isDir ? $dMap->get($m->sender_id) : $oMap->get($m->sender_id);
             $sName   = $s ? trim(($s->first_name ?? '') . ' ' . ($s->last_name ?? '')) : 'Unknown';
@@ -357,7 +447,6 @@ new class extends Component {
                     ? $dMap->get($r->sender_id)
                     : $oMap->get($r->sender_id);
 
-                // FIX: if reply was deleted, show placeholder text
                 $replyBody = !is_null($r->deleted_at)
                     ? '🚫 This message was unsent.'
                     : $r->body;
@@ -461,6 +550,10 @@ new class extends Component {
             }
         }
 
+        // Advance watermark so we don't notify ourselves
+        $this->lastNotifiedMessageId = (int) $msgId;
+        Cache::put($this->lastNotifiedCacheKey(), (int) $msgId, now()->addDays(30));
+
         $this->body         = '';
         $this->replyTo      = null;
         $this->showMentions = false;
@@ -519,10 +612,7 @@ new class extends Component {
             ->where('sender_id', $this->directorId)
             ->update(['deleted_at' => now()]);
 
-        // Remove from pins (pinned unsent messages make no sense)
         DB::table('chat_pins')->where('message_id', $id)->delete();
-
-        // Remove reactions on the deleted message
         DB::table('chat_reactions')->where('message_id', $id)->delete();
 
         $this->loadMessages();
@@ -536,7 +626,6 @@ new class extends Component {
     {
         if (! in_array($reaction, ['heart', 'purple', 'like', 'dislike'], true)) return;
 
-        // Don't react to deleted messages
         $msg = collect($this->messages)->firstWhere('id', $msgId);
         if (! $msg || $msg['deleted']) return;
 
@@ -644,7 +733,6 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function togglePin(int $msgId): void
     {
-        // Don't pin deleted messages
         $msg = collect($this->messages)->firstWhere('id', $msgId);
         if (! $msg || $msg['deleted']) return;
 
@@ -1034,7 +1122,6 @@ new class extends Component {
                                             <i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director
                                         </span>
                                     @elseif($msg['is_coordinator'])
-                                        {{-- FIX: Coordinator badge also purple --}}
                                         <span class="ml-1 text-[10px] font-semibold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
                                             <i class="fa-solid fa-users text-[9px] mr-0.5"></i>Coordinator
                                         </span>
@@ -1104,25 +1191,18 @@ new class extends Component {
                                 @else
                                 @php
                                     $safe         = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
-                                    $mentionClass = $msg['is_mine']
-                                        ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
-                                        : 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded';
+                                    $mentionClass = 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded';
                                     $formatted    = preg_replace(
                                         '/@(everyone|\w+(?:\s\w+)?)/u',
                                         '<span class="' . $mentionClass . '">@$1</span>',
                                         $safe
                                     );
                                 @endphp
-                                {{-- FIX: All bubbles (director + coordinator) are purple --}}
                                 <div @click.stop="open = !open; confirmUnsend = false"
                                      class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
                                             shadow-sm cursor-pointer select-none transition-opacity active:opacity-80
-                                            {{ $msg['is_mine']
-                                                ? 'text-white rounded-br-none'
-                                                : 'text-white rounded-bl-none' }}"
-                                     style="{{ $msg['is_mine']
-                                         ? 'background:#7a3f91;'
-                                         : 'background:#9333ea;' }}">
+                                            {{ $msg['is_mine'] ? 'text-white rounded-br-none' : 'text-white rounded-bl-none' }}"
+                                     style="{{ $msg['is_mine'] ? 'background:#7a3f91;' : 'background:#9333ea;' }}">
                                     {!! $formatted !!}
                                     @if($msg['edited'])
                                         <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
@@ -1168,7 +1248,6 @@ new class extends Component {
                                         <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
                                     </button>
 
-                                    {{-- View Reactions button --}}
                                     @if(! empty($msg['reactions']))
                                     <button wire:click="openReactionsPopup({{ $msg['id'] }})"
                                             @click.stop
@@ -1220,7 +1299,6 @@ new class extends Component {
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
                                 <div class="mt-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-xl z-20 w-64 overflow-hidden"
                                      @click.stop>
-
                                     <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#fafafa]">
                                         <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
                                             <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
@@ -1231,7 +1309,6 @@ new class extends Component {
                                             <i class="fa-solid fa-xmark text-xs"></i>
                                         </button>
                                     </div>
-
                                     <div class="max-h-52 overflow-y-auto">
                                         @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
                                         @foreach($reactionsPopupData as $rKey => $rGroup)
@@ -1276,7 +1353,7 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- Reaction pills (only for non-deleted) --}}
+                                {{-- Reaction pills --}}
                                 @if(! empty($msg['reactions']) && !$msg['deleted'])
                                 <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk => $cnt)
@@ -1375,7 +1452,6 @@ new class extends Component {
                 {{-- Input area --}}
                 <div class="px-4 py-3 border-t border-[#E8E0F0] bg-white flex-shrink-0" x-data>
 
-                    {{-- @mention dropdown --}}
                     @if($showMentions && ! empty($mentionSuggestions))
                     <div class="mb-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-md overflow-hidden">
                         @foreach($mentionSuggestions as $sug)
@@ -1479,7 +1555,6 @@ new class extends Component {
 
                     @if($showMembers)
 
-                        {{-- ── Directors section ────────────────────────────── --}}
                         @if(! empty($directors))
                         <div class="px-3 pt-3 pb-1 flex-shrink-0">
                             <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest mb-2 px-1">
@@ -1528,15 +1603,12 @@ new class extends Component {
                         </div>
                         @endif
 
-                        {{-- ── Coordinators header ──────────────────────────── --}}
                         <div class="px-3 pt-2 pb-1 flex-shrink-0 border-t border-[#E8E0F0] mt-1">
                             <div class="flex items-center justify-between mb-2 px-1">
                                 <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest">
                                     <i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($coordinators) }}
                                 </p>
-                                @php
-                                    $onlineCoordCount = collect($coordinators)->where('is_online', true)->count();
-                                @endphp
+                                @php $onlineCoordCount = collect($coordinators)->where('is_online', true)->count(); @endphp
                                 @if($onlineCoordCount > 0)
                                 <span class="text-xs font-semibold text-emerald-600 flex items-center gap-1">
                                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
@@ -1546,7 +1618,6 @@ new class extends Component {
                             </div>
                         </div>
 
-                        {{-- Member search --}}
                         <div class="px-3 pb-2.5 flex-shrink-0">
                             <div class="relative">
                                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2
@@ -1560,7 +1631,6 @@ new class extends Component {
                             </div>
                         </div>
 
-                        {{-- Coordinator list --}}
                         <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
                             @php
                                 $onlineCoords  = collect($coordinators)->where('is_online', true)->values();
@@ -1701,9 +1771,6 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ══════════════════════════════════════════════════════════════════
-         FALLBACK — room not found
-         ══════════════════════════════════════════════════════════════════ --}}
     @else
     <div class="flex flex-1 items-center justify-center bg-[#fafafa]">
         <div class="flex flex-col items-center text-center px-8">

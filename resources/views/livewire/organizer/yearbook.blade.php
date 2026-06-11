@@ -653,21 +653,21 @@ new class extends Component {
                                     </div>
                                 </div>
 
-                                {{-- Card body --}}
-                                <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
-                                    <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
-                                       style="color:#111111;">
-                                        {{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}
-                                    </p>
-                                    <span class="yb-batch-badge mb-2.5">
-                                        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
-                                        Class of {{ $alumni->batch ?? '—' }}
-                                    </span>
-                                    <p class="text-xs font-semibold uppercase leading-snug"
-                                       style="color:#111111; letter-spacing:0.02em;">
-                                        {{ $group['courseName'] }}
-                                    </p>
-                                </div>
+                               {{-- Card body --}}
+<div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
+    <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
+       style="color:#111111;">
+        {{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}
+    </p>
+    <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
+       style="color:#111111; letter-spacing:0.02em;">
+        {{ $group['courseName'] }}
+    </p>
+    <span class="yb-batch-badge">
+        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
+        Class of {{ $alumni->batch ?? '—' }}
+    </span>
+</div>
                             </div>
                             @endforeach
                         </div>

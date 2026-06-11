@@ -8,6 +8,7 @@ use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 new class extends Component {
     public string $activeModal     = '';
@@ -42,6 +43,58 @@ new class extends Component {
     #[Computed] public function organizerId(): ?int          { return Auth::user()?->organizer?->id; }
     #[Computed] public function organizerTeacherId(): string { return Auth::user()?->organizer?->id_number ?? '—'; }
     #[Computed] public function organizerBatch(): string     { return Auth::user()?->organizer?->batch ?? ''; }
+
+    /**
+     * FIX: Properly resolve the organizer's profile photo URL.
+     * Supports paths like:
+     *   - "organizers/organizer-uuid.jpg"   → storage/organizers/...
+     *   - "alumni-photos/xxx.jpg"           → storage/alumni-photos/...
+     *   - full http URLs                    → used as-is
+     *   - null / empty                      → null (shows initials fallback)
+     */
+    #[Computed]
+    public function organizerProfilePhoto(): ?string
+    {
+        // Try organizer model first, then fall back to user
+        $organizer = Auth::user()?->organizer;
+        $photo = $organizer?->profile_photo ?? Auth::user()?->profile_photo ?? null;
+
+        if (!$photo || trim($photo) === '' || str_contains($photo, 'default.png') || $photo === 'null') {
+            return null;
+        }
+
+        // Already a full URL
+        if (str_starts_with($photo, 'http://') || str_starts_with($photo, 'https://')) {
+            return $photo;
+        }
+
+        // Path like "organizers/organizer-uuid.jpg" or "alumni-photos/xxx.jpg"
+        if (str_starts_with($photo, 'organizers/') || str_starts_with($photo, 'alumni-photos/')) {
+            if (Storage::disk('public')->exists($photo)) {
+                return asset('storage/' . $photo);
+            }
+            return null;
+        }
+
+        // Bare filename — check both directories
+        if (!str_contains($photo, '/')) {
+            if (Storage::disk('public')->exists('organizers/' . $photo)) {
+                return asset('storage/organizers/' . $photo);
+            }
+            if (Storage::disk('public')->exists('alumni-photos/' . $photo)) {
+                return asset('storage/alumni-photos/' . $photo);
+            }
+            return null;
+        }
+
+        // Generic fallback: treat as relative storage path
+        if (Storage::disk('public')->exists($photo)) {
+            return asset('storage/' . $photo);
+        }
+
+        return null;
+    }
+
     #[Computed]
     public function allowedCourseCodes(): array
     {
@@ -118,10 +171,8 @@ new class extends Component {
     }
     #[Computed] public function modalAlumniCourses(): array { return $this->allowedCourseCodes; }
 
-    // ── Navigation helpers (same pattern as alumni dashboard) ──
     public function goToEvents(): void
     {
-        // Empty = show all events (clear any previous filter)
         session()->put('organizer_events_filter', '');
         $this->redirect(route('organizer.event/organizer'));
     }
@@ -132,18 +183,16 @@ new class extends Component {
     }
     public function goToJobs(): void
     {
-        // Empty = show all jobs (clear any previous filter)
         session()->put('organizer_jobs_filter', '');
         $this->redirect(route('organizer.job/management'));
     }
     public function goToEmployment(string $filter = ''): void
     {
-        // Map dashboard filter keys to employment page filterStatus values
         $mapped = match($filter) {
             'employed'      => 'employed',
             'self_employed' => 'self_employed',
             'unemployed'    => 'unemployed',
-            'no_record'     => 'not_filled',   // dashboard says no_record, page uses not_filled
+            'no_record'     => 'not_filled',
             default         => '',
         };
         session()->put('organizer_employment_filter', $mapped);
@@ -269,6 +318,11 @@ new class extends Component {
     background: rgba(255,255,255,0.22); border: 2px solid rgba(255,255,255,0.5);
     display: flex; align-items: center; justify-content: center;
     font-size: 1.15rem; font-weight: 700; color: #ffffff; flex-shrink: 0; letter-spacing: 0.04em;
+    overflow: hidden;
+}
+.org-avatar img {
+    width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+    display: block;
 }
 
 /* ── Modal close button ── */
@@ -338,13 +392,35 @@ new class extends Component {
             <div class="org-account-card rounded-2xl overflow-hidden shadow-md border border-[#E8E0F0] bg-white">
 
                 {{-- Header with avatar --}}
+                @php
+                    $initials = collect(explode(' ', $this->organizerName))
+                        ->filter()->take(2)->map(fn($w) => strtoupper($w[0]))->implode('');
+                    $profilePhoto = $this->organizerProfilePhoto;
+                @endphp
                 <div class="px-4 py-4 shrink-0 flex items-center gap-3"
                      style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                    @php
-                        $initials = collect(explode(' ', $this->organizerName))
-                            ->filter()->take(2)->map(fn($w) => strtoupper($w[0]))->implode('');
-                    @endphp
-                    <div class="org-avatar">{{ $initials ?: 'OR' }}</div>
+
+                    {{--
+                        FIX: Always render the <img> tag when we have a photo URL.
+                        Use onerror to fall back to the initials span gracefully.
+                        The img has display:block inside .org-avatar so it fills properly.
+                    --}}
+                    <div class="org-avatar">
+                        @if($profilePhoto)
+                            <img src="{{ $profilePhoto }}"
+                                 alt="{{ $this->organizerName }}"
+                                 loading="eager"
+                                 decoding="async"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            {{-- Hidden initials fallback (shown by onerror) --}}
+                            <span style="display:none; width:100%; height:100%; align-items:center; justify-content:center; font-size:1.15rem; font-weight:700; color:#fff;">
+                                {{ $initials ?: 'OR' }}
+                            </span>
+                        @else
+                            {{ $initials ?: 'OR' }}
+                        @endif
+                    </div>
+
                     <div class="min-w-0">
                         <p class="text-[0.60rem] font-bold uppercase tracking-[0.14em] text-white/60 leading-none mb-0.5">ORGANIZER ACCOUNT</p>
                         <p class="text-[0.95rem] font-bold text-white leading-snug truncate">{{ $this->organizerName }}</p>
@@ -357,12 +433,7 @@ new class extends Component {
 
                     <div class="org-info-row">
                         <span class="org-info-label">Name</span>
-                        <div class="group/tip relative">
-                            <span class="org-info-value cursor-default">{{ $this->organizerName }}</span>
-                            <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100 absolute bottom-[125%] right-0 bg-[#1a1a1a] text-white rounded-xl px-3 py-2 z-[9990] whitespace-nowrap text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
-                                {{ $this->organizerName }}
-                            </div>
-                        </div>
+                        <span class="org-info-value">{{ $this->organizerName }}</span>
                     </div>
 
                     <div class="org-info-row">
@@ -372,22 +443,12 @@ new class extends Component {
 
                     <div class="org-info-row" style="align-items:flex-start;">
                         <span class="org-info-label" style="margin-top:2px;">Email</span>
-                        <div class="group/tip relative">
-                            <span class="org-info-value-sm cursor-default">{{ $this->organizerEmail }}</span>
-                            <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100 absolute bottom-[125%] right-0 bg-[#1a1a1a] text-white rounded-xl px-3 py-2 z-[9990] whitespace-nowrap text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
-                                {{ $this->organizerEmail }}
-                            </div>
-                        </div>
+                        <span class="org-info-value-sm">{{ $this->organizerEmail }}</span>
                     </div>
 
                     <div class="org-info-row">
                         <span class="org-info-label">College</span>
-                        <div class="group/tip relative">
-                            <span class="org-info-value cursor-default">{{ $this->organizerDepartment }}</span>
-                            <div class="invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100 absolute bottom-[125%] right-0 bg-[#1a1a1a] text-white rounded-xl px-3 py-2 z-[9990] whitespace-nowrap text-xs font-semibold transition-all duration-200 shadow-2xl pointer-events-none">
-                                {{ $this->organizerDepartment }}
-                            </div>
-                        </div>
+                        <span class="org-info-value">{{ $this->organizerDepartment }}</span>
                     </div>
 
                     @if($this->organizerBatch)
@@ -418,12 +479,12 @@ new class extends Component {
             @php $ec = $this->empCounts; @endphp
             <div class="org-stat-grid">
 
-                {{-- Total Alumni — untouched, still opens modal --}}
+                {{-- Total Alumni --}}
                 <button wire:click="openTotalAlumniModal"
                         class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
                                hover:shadow-lg hover:border-[#7A3F91]/40 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="stat-tooltip"><i class="fas fa-arrow-right mr-1.5"></i>View All Alumni</span>
+                    <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View All Alumni</span>
                     <div class="flex items-start justify-between mb-4">
                         <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow"
                              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -436,12 +497,12 @@ new class extends Component {
                     <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Total Alumni</p>
                 </button>
 
-                {{-- Total Events — redirect to event management --}}
+                {{-- Total Events --}}
                 <button wire:click="goToEvents"
                         class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
                                hover:shadow-lg hover:border-emerald-300 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="stat-tooltip"><i class="fas fa-arrow-right mr-1.5"></i>View All Events</span>
+                    <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View All Events</span>
                     <div class="flex items-start justify-between mb-4">
                         <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
                             <i class="fas fa-calendar-days text-white text-lg"></i>
@@ -458,12 +519,12 @@ new class extends Component {
                     @endif
                 </button>
 
-                {{-- Pending Events — redirect to event management with filter --}}
+                {{-- Pending Events --}}
                 <button wire:click="goToPendingEvents"
                         class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
                                hover:shadow-lg hover:border-amber-300 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="stat-tooltip"><i class="fas fa-arrow-right mr-1.5"></i>View Pending Events</span>
+                    <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Pending Events</span>
                     <div class="flex items-start justify-between mb-4">
                         <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
                             <i class="fas fa-hourglass-end text-white text-lg"></i>
@@ -482,12 +543,12 @@ new class extends Component {
                     @endif
                 </button>
 
-                {{-- Job Postings — redirect to job management --}}
+                {{-- Job Postings --}}
                 <button wire:click="goToJobs"
                         class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
                                hover:shadow-lg hover:border-blue-300 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="stat-tooltip"><i class="fas fa-arrow-right mr-1.5"></i>View All Job Postings</span>
+                    <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View All Job Postings</span>
                     <div class="flex items-start justify-between mb-4">
                         <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
                             <i class="fas fa-briefcase text-white text-lg"></i>
@@ -528,17 +589,16 @@ new class extends Component {
                     </div>
                     <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
                        class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
-                        View All <i class="fas fa-arrow-right text-xs"></i>
+                        View All <i class="fas fa-eye text-xs"></i>
                     </a>
                 </div>
 
                 <div class="p-4">
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
                         @foreach($empRows as $row)
-                        {{-- Redirect to employment page with filter via session --}}
                         <div wire:click="goToEmployment('{{ $row['filter'] }}')"
                              class="org-emp-card rounded-xl border p-3 {{ $row['cardCls'] }}">
-                            <span class="emp-tooltip"><i class="fas fa-arrow-right mr-1"></i>{{ $row['ctip'] }}</span>
+                            <span class="emp-tooltip"><i class="fas fa-eye mr-1"></i>{{ $row['ctip'] }}</span>
                             <div class="flex items-center gap-1.5 mb-2">
                                 <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 {{ $row['iconCls'] }}">
                                     <i class="fas {{ $row['icon'] }} text-xs"></i>
@@ -615,7 +675,7 @@ new class extends Component {
 </div>
 
 
-{{-- ═══ MODAL: TOTAL ALUMNI (untouched) ═══ --}}
+{{-- ═══ MODAL: TOTAL ALUMNI ═══ --}}
 @if($activeModal === 'alumni')
 @php
     $statusLabels = [

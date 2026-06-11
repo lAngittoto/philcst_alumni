@@ -5,7 +5,6 @@
 use Livewire\Volt\Component;
 use Livewire\WithPagination;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
 
@@ -32,6 +31,9 @@ new class extends Component {
 
     public bool  $showModal = false;
     public array $modalData = [];
+
+    // ── NEW: tracks the last seen emp update timestamp so we only notify once ──
+    public string $lastSeenEmpAt = '';
 
     protected $queryString = [
         'search'          => ['except' => ''],
@@ -66,6 +68,16 @@ new class extends Component {
                 ->toArray();
         }
 
+        // Auto-apply filter from dashboard card click
+        $sessionFilter = session()->pull('organizer_employment_filter', null);
+        if ($sessionFilter !== null && $sessionFilter !== '') {
+            $this->filterStatus = $sessionFilter;
+        }
+
+        // Seed the last-seen timestamp to "now" on first load
+        // so we don't flood notifications for old records
+        $this->lastSeenEmpAt = now()->toDateTimeString();
+
         $this->computeStats();
     }
 
@@ -95,6 +107,66 @@ new class extends Component {
             ->whereIn('et.employment_status', ['employed', 'self_employed'])
             ->where('et.work_location', 'abroad')
             ->count();
+    }
+
+    // ── NEW: called by JS polling every 15s to check for new emp updates ──────
+    public function checkEmploymentUpdates(): void
+    {
+        $q = DB::table('employment_trackings as et')
+            ->join('alumni as a', 'a.id', '=', 'et.alumni_id')
+            ->whereNull('et.deleted_at')
+            ->whereNull('a.deleted_at')
+            ->where('et.updated_at', '>', $this->lastSeenEmpAt)
+            ->select([
+                'a.id',
+                DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
+                'et.employment_status',
+                'et.job_title',
+                'et.company_name',
+                'et.updated_at',
+            ]);
+
+        if ($this->organizerBatch) {
+            $q->where('a.batch', $this->organizerBatch);
+        }
+        if (!empty($this->allowedCourseCodes)) {
+            $q->whereIn('a.course_code', $this->allowedCourseCodes);
+        }
+
+        $newUpdates = $q->orderBy('et.updated_at', 'desc')->get();
+
+        if ($newUpdates->isEmpty()) {
+            return;
+        }
+
+        // Advance the watermark
+        $this->lastSeenEmpAt = now()->toDateTimeString();
+
+        // Refresh stats so the cards stay current
+        $this->computeStats();
+
+        // Fire one browser event per updated alumni so the layout listener
+        // saves a coordinator notification for each one.
+        foreach ($newUpdates as $row) {
+            $statusLabel = match($row->employment_status) {
+                'employed'      => 'Employed',
+                'self_employed' => 'Self-Employed',
+                'unemployed'    => 'Unemployed',
+                default         => 'Updated',
+            };
+
+            $detail = $row->job_title
+                ? "{$row->full_name} is now {$statusLabel} as {$row->job_title}"
+                    . ($row->company_name ? " at {$row->company_name}." : '.')
+                : "{$row->full_name} updated their employment status to {$statusLabel}.";
+
+            $this->dispatch('employment-updated', [
+                'id'     => $row->id,
+                'alumni' => trim($row->full_name) ?: 'An alumni',
+                'status' => $statusLabel,
+                'detail' => $detail,
+            ]);
+        }
     }
 
     private function baseAlumniQuery(): \Illuminate\Database\Query\Builder
@@ -252,7 +324,6 @@ new class extends Component {
 <div class="flex flex-col" style="height:90vh; overflow:hidden;">
 
 <style>
-/* ── Hover tooltip (cursor-following) ── */
 .ae-hover-tip {
     position: fixed;
     background: #1a1a1a;
@@ -280,7 +351,6 @@ new class extends Component {
     border-top-color: #1a1a1a;
 }
 
-/* ── Table row hover ── */
 .ae-tbl-row {
     background-color: #ffffff;
     cursor: pointer;
@@ -288,7 +358,6 @@ new class extends Component {
 }
 .ae-tbl-row:hover { background-color: #f5f0fa !important; }
 
-/* ── Filter inputs — black text ── */
 .ae-filter-input {
     border: 1px solid #E8E0F0;
     transition: border-color .15s, box-shadow .15s;
@@ -314,8 +383,25 @@ select.ae-filter-input {
     cursor: pointer;
 }
 select.ae-filter-input option { color: #333333; font-weight: 500; }
+select.ae-filter-input.ae-active {
+    border-color: #7a3f91;
+    background-color: #f5f0fa;
+    color: #7a3f91;
+    font-weight: 600;
+}
 
-/* ── Table block ── */
+.ae-stat-card {
+    background: #fff;
+    border-radius: 1rem;
+    border: 1px solid #E8E0F0;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    padding: 1rem;
+    text-align: left;
+    width: 100%;
+    cursor: default;
+    user-select: none;
+}
+
 .ae-table-block {
     display: flex;
     flex-direction: column;
@@ -349,10 +435,7 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Close button tooltip (appears BELOW) ── */
-.ae-close-tooltip {
-    position: relative;
-}
+.ae-close-tooltip { position: relative; }
 .ae-close-tooltip::after {
     content: 'Close';
     position: absolute;
@@ -389,12 +472,11 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
 .ae-close-tooltip:hover::before { opacity: 1; }
 </style>
 
-{{-- Cursor-following hover tooltip --}}
 <div id="ae-hover-tip" class="ae-hover-tip">
     <i class="fas fa-eye mr-1.5"></i>View Details
 </div>
 
-{{-- ── FLASH TOAST ── --}}
+{{-- FLASH TOAST --}}
 <div
     x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
     @flash-message.window="display($event.detail.type,$event.detail.message)"
@@ -419,10 +501,10 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
     <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
 </div>
 
-{{-- ══ MAIN LAYOUT ══ --}}
+{{-- MAIN LAYOUT --}}
 <div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
 
-    {{-- ══ PAGE HEADER ══ --}}
+    {{-- PAGE HEADER --}}
     <div class="flex items-center gap-4 flex-shrink-0">
         <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
              style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
@@ -434,24 +516,30 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
                 Track employment status of your assigned alumni.
                 @if($organizerDepartment)
                     <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                        <i class="fas fa-building-columns text-[9px]"></i>
-                        {{ $organizerDepartment }}
+                        <i class="fas fa-building-columns text-[9px]"></i>{{ $organizerDepartment }}
                     </span>
                 @endif
                 @if($organizerBatch)
                     <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                        <i class="fas fa-calendar text-[9px]"></i>
-                        Batch {{ $organizerBatch }}
+                        <i class="fas fa-calendar text-[9px]"></i>Batch {{ $organizerBatch }}
                     </span>
                 @endif
             </p>
         </div>
+
+        {{-- Live polling indicator --}}
+        <div class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-100"
+             title="Auto-checking for employment updates every 15 seconds">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-xs font-semibold text-emerald-700 hidden sm:inline">Live</span>
+        </div>
     </div>
 
-    {{-- ══ STAT CARDS ══ --}}
+    {{-- STAT CARDS --}}
     <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0">
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- Total Alumni --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow" style="background:#7A3F91;">
                     <i class="fa-solid fa-users text-white text-base"></i>
@@ -462,7 +550,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             <p class="text-sm text-[#666666] mt-1 font-normal">Total Alumni</p>
         </div>
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- Employed --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-briefcase text-white text-base"></i>
@@ -478,7 +567,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             @endif
         </div>
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- Self-Employed --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-store text-white text-base"></i>
@@ -494,7 +584,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             @endif
         </div>
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- Unemployed --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
                     <i class="fa-solid fa-circle-pause text-white text-base"></i>
@@ -510,7 +601,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             @endif
         </div>
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- Not Filled --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
                     <i class="fa-solid fa-circle-question text-white text-base"></i>
@@ -526,7 +618,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             @endif
         </div>
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- Local --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-house text-white text-base"></i>
@@ -542,7 +635,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             @endif
         </div>
 
-        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 hover:shadow-md transition-shadow">
+        {{-- OFW --}}
+        <div class="ae-stat-card">
             <div class="flex items-start justify-between mb-3">
                 <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
                     <i class="fa-solid fa-plane-departure text-white text-base"></i>
@@ -560,10 +654,10 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
 
     </div>
 
-    {{-- ══ UNIFIED BLOCK — filter + table + pagination ══ --}}
+    {{-- UNIFIED BLOCK --}}
     <div class="ae-table-block min-h-0">
 
-        {{-- ── FILTER BAR (PURPLE) ── --}}
+        {{-- FILTER BAR --}}
         <div class="ae-table-block-filter flex flex-wrap gap-2 items-center">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
@@ -584,7 +678,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             </div>
 
             {{-- Status --}}
-            <select wire:model.live="filterStatus" class="ae-filter-input">
+            <select wire:model.live="filterStatus"
+                    class="ae-filter-input {{ $filterStatus ? 'ae-active' : '' }}">
                 <option value="">All Statuses</option>
                 <option value="employed">Employed</option>
                 <option value="self_employed">Self-Employed</option>
@@ -593,7 +688,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             </select>
 
             {{-- Relevance --}}
-            <select wire:model.live="filterRelevance" class="ae-filter-input">
+            <select wire:model.live="filterRelevance"
+                    class="ae-filter-input {{ $filterRelevance ? 'ae-active' : '' }}">
                 <option value="">All Relevance</option>
                 <option value="yes">Related to Course</option>
                 <option value="partially">Partially Related</option>
@@ -602,7 +698,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
 
             {{-- Course --}}
             @if($courses->isNotEmpty())
-                <select wire:model.live="filterCourse" class="ae-filter-input">
+                <select wire:model.live="filterCourse"
+                        class="ae-filter-input {{ $filterCourse ? 'ae-active' : '' }}">
                     <option value="">All Courses</option>
                     @foreach($courses as $c)
                         <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -612,12 +709,45 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
 
             {{-- Batch --}}
             @if($batches->isNotEmpty())
-                <select wire:model.live="filterBatch" class="ae-filter-input">
-                    <option value="">All Batches</option>
-                    @foreach($batches as $b)
-                        <option value="{{ $b }}">Batch {{ $b }}</option>
-                    @endforeach
-                </select>
+                <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+                    <button type="button"
+                            @click="open = !open"
+                            class="ae-filter-input inline-flex items-center gap-2 min-w-[130px] justify-between
+                                   {{ $filterBatch ? 'ae-active' : '' }}">
+                        <span class="truncate text-sm">
+                            {{ $filterBatch ? 'Batch ' . $filterBatch : 'All Batches' }}
+                        </span>
+                        <i class="fas fa-chevron-down text-xs flex-shrink-0 transition-transform duration-150"
+                           :class="open ? 'rotate-180' : ''"></i>
+                    </button>
+                    <div x-show="open"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                         x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden"
+                         style="min-width:150px; max-height:180px; overflow-y:auto;
+                                scrollbar-width:thin; scrollbar-color:#c4b5d4 #f5f0fa;">
+                        <div class="py-1">
+                            <button type="button"
+                                    @click="$wire.set('filterBatch', ''); open = false"
+                                    class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                           {{ !$filterBatch ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
+                                All Batches
+                            </button>
+                            @foreach($batches as $b)
+                                <button type="button"
+                                        @click="$wire.set('filterBatch', '{{ $b }}'); open = false"
+                                        class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                               {{ $filterBatch == $b ? 'bg-purple-100 text-purple-800 font-semibold' : 'text-[#333333]' }}">
+                                    Batch {{ $b }}
+                                </button>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
             @endif
 
             {{-- Reset --}}
@@ -633,7 +763,7 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             </button>
         </div>
 
-        {{-- ── TABLE WRAPPER ── --}}
+        {{-- TABLE WRAPPER --}}
         <div class="relative flex-1 min-h-0 flex flex-col">
 
             @if($rows->count() > 0)
@@ -813,7 +943,7 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             @endif
         </div>
 
-        {{-- ── PAGINATION ── --}}
+        {{-- PAGINATION --}}
         @php
             $total   = $rows->total();
             $pp      = $rows->perPage();
@@ -887,7 +1017,7 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
 </div>{{-- /main layout --}}
 
 
-{{-- ══════════════════════════════════════════════════════ DETAIL MODAL ══ --}}
+{{-- DETAIL MODAL --}}
 @if($showModal && !empty($modalData))
 @php
     $md        = $modalData;
@@ -921,11 +1051,9 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
     $relModalMap = [
         'yes'       => ['Related to Course', 'fa-check-circle', 'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
         'no'        => ['Not Related',        'fa-times-circle', 'text-red-600',     'bg-red-50 border-red-200'],
-        'partially' => ['Partially Related', 'fa-adjust',       'text-amber-700',   'bg-amber-50 border-amber-200'],
+        'partially' => ['Partially Related',  'fa-adjust',       'text-amber-700',   'bg-amber-50 border-amber-200'],
     ];
     $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
-
-    // Build full address string
     $addressParts = array_filter([
         $md['address_street']       ?? '',
         $md['address_barangay']     ?? '',
@@ -933,7 +1061,6 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
         $md['address_province']     ?? '',
     ]);
     $fullAddress = !empty($addressParts) ? implode(', ', $addressParts) : null;
-
     $modalPhotoPath = $md['profile_photo'] ?? null;
     $modalPhotoUrl  = (!$modalPhotoPath || str_contains($modalPhotoPath, 'default.png'))
         ? asset('storage/alumni-photos/default.png')
@@ -950,7 +1077,6 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
          x-transition:enter-end="opacity-100 scale-100 translate-y-0">
 
-        {{-- Modal Header --}}
         <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0"
              style="background:#7A3F91;">
             <div class="flex items-center gap-3">
@@ -971,15 +1097,11 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             </button>
         </div>
 
-        {{-- Modal Body --}}
         <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-5"
              style="scrollbar-width:thin;scrollbar-color:#d9c9e8 #F9F7FC;">
 
-            {{-- Student Info --}}
             <div>
-                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">
-                    Student Information
-                </p>
+                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
                     @foreach([
                         'Course'  => $md['course_code']    ?? '—',
@@ -993,20 +1115,12 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
                         </div>
                     @endforeach
                 </div>
-
-                {{-- Email Address --}}
                 <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] mb-2">
-                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">
-                        Email Address
-                    </p>
+                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Email Address</p>
                     <p class="text-sm font-semibold text-[#333333] break-all">{{ $md['email'] ?? '—' }}</p>
                 </div>
-
-                {{-- Full Address --}}
                 <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">
-                        Full Address
-                    </p>
+                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Full Address</p>
                     @if($fullAddress)
                         <p class="text-sm font-semibold text-[#333333] uppercase">{{ $fullAddress }}</p>
                     @else
@@ -1015,12 +1129,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
                 </div>
             </div>
 
-            {{-- Employment Info --}}
             <div class="border-t border-[#E8E0F0] pt-4">
-                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">
-                    Employment Information
-                </p>
-
+                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Employment Information</p>
                 <div class="flex items-center gap-2 mb-4 flex-wrap">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold {{ $statusCls }}">
                         {{ $statusLbl }}
@@ -1048,12 +1158,8 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
                                 <p class="text-sm font-semibold text-[#333333]">{{ $val }}</p>
                             </div>
                         @endforeach
-
-                        {{-- Course Relevance --}}
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] sm:col-span-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-1.5">
-                                Job Related to Course?
-                            </p>
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-1.5">Job Related to Course?</p>
                             @if($relModal)
                                 <p class="text-sm font-semibold text-[#333333]">{{ $relModal[0] }}</p>
                             @else
@@ -1061,7 +1167,6 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
                             @endif
                         </div>
                     </div>
-
                     @if(!empty($md['career_path_arr']))
                         <div class="mt-4">
                             <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-2">Career Path</p>
@@ -1076,7 +1181,6 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
                             </div>
                         </div>
                     @endif
-
                 @elseif(($md['employment_status'] ?? '') === 'unemployed')
                     <div class="space-y-3">
                         <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
@@ -1099,43 +1203,87 @@ select.ae-filter-input option { color: #333333; font-weight: 500; }
             </div>
 
         </div>
-
-        {{-- Modal Footer (empty — close via X button in header) --}}
         <div class="flex-shrink-0" style="height:0;"></div>
-
     </div>
 </div>
 @endif
 
-{{-- ── Cursor-following tooltip JS ── --}}
 <script>
 (function () {
+    // ── Row hover tooltip ──────────────────────────────────────────────────
     var tip = document.getElementById('ae-hover-tip');
-
     function bindRows() {
         document.querySelectorAll('[data-ae-row]').forEach(function (row) {
             if (row._aeTipBound) return;
             row._aeTipBound = true;
-
             row.addEventListener('mousemove', function (e) {
                 if (!tip) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
                 tip.classList.add('visible');
             });
-
             row.addEventListener('mouseleave', function () {
                 if (tip) tip.classList.remove('visible');
             });
-
             row.addEventListener('click', function () {
                 if (tip) tip.classList.remove('visible');
             });
         });
     }
-
     bindRows();
     document.addEventListener('livewire:updated', bindRows);
+
+    // ── Employment update polling — every 15 seconds ───────────────────────
+    // Calls the Livewire method checkEmploymentUpdates() which:
+    //   1. Queries DB for records newer than lastSeenEmpAt
+    //   2. Dispatches `employment-updated` browser event for each one
+    //   3. The layout's existing `employment-updated` listener saves the notif
+    var _empPollTimer = null;
+
+    function startEmpPolling() {
+        if (_empPollTimer) clearInterval(_empPollTimer);
+        _empPollTimer = setInterval(function () {
+            if (typeof Livewire !== 'undefined') {
+                // Find this component and call its method
+                var comp = Livewire.find(
+                    document.querySelector('[wire\\:id]') &&
+                    document.querySelector('[wire\\:id]').getAttribute('wire:id')
+                );
+                if (comp) {
+                    comp.call('checkEmploymentUpdates');
+                } else {
+                    // Fallback: call on first Livewire component found
+                    Livewire.all().forEach(function(c) {
+                        if (c.__instance && c.__instance.effects) {
+                            try { c.call('checkEmploymentUpdates'); } catch(e) {}
+                        }
+                    });
+                }
+            }
+        }, 15000); // poll every 15 seconds
+    }
+
+    // Start polling after Livewire is ready
+    document.addEventListener('livewire:initialized', function () {
+        startEmpPolling();
+    });
+    // Also restart after navigation
+    document.addEventListener('livewire:navigated', function () {
+        startEmpPolling();
+    });
+    // Immediate start if Livewire already loaded
+    if (typeof Livewire !== 'undefined') {
+        setTimeout(startEmpPolling, 500);
+    }
+
+    // Stop polling when page is hidden to save resources
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') {
+            if (_empPollTimer) clearInterval(_empPollTimer);
+        } else {
+            startEmpPolling();
+        }
+    });
 })();
 </script>
 
