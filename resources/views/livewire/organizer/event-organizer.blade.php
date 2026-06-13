@@ -61,6 +61,15 @@ new class extends Component {
     public bool   $isRestoring        = false;
     public string $restoreEventTitle  = '';
 
+    // ── Confirm modals ──
+    public bool   $showDeleteModal   = false;
+    public ?int   $pendingDeleteId   = null;
+    public string $pendingDeleteTitle = '';
+
+    public bool   $showRestoreModal   = false;
+    public ?int   $pendingRestoreId   = null;
+    public string $pendingRestoreTitle = '';
+
     public bool   $showShareModal        = false;
     public ?int   $shareEventId          = null;
     public string $shareEventTitle       = '';
@@ -105,6 +114,13 @@ new class extends Component {
 
         $now = \Carbon\Carbon::now('UTC');
 
+        $affected = OrganizerEvent::where('organizer_id', $orgId)
+            ->where('status', 'PENDING')
+            ->where('event_date', '<=', $now)
+            ->get(['id', 'title']);
+
+        if ($affected->isEmpty()) return;
+
         OrganizerEvent::where('organizer_id', $orgId)
             ->where('status', 'PENDING')
             ->where('event_date', '<=', $now)
@@ -112,6 +128,10 @@ new class extends Component {
                 'status'         => 'REJECTED',
                 'review_remarks' => 'Auto-rejected: event date has already passed without Alumni Director approval.',
             ]);
+
+        foreach ($affected as $e) {
+            $this->dispatch('event-management-updated', id: $e->id, title: $e->title, action: 'rejected');
+        }
     }
 
     private function autoCompleteExpiredEvents(): void
@@ -121,7 +141,7 @@ new class extends Component {
 
         $now = \Carbon\Carbon::now('UTC');
 
-        OrganizerEvent::where('organizer_id', $orgId)
+        $query = fn() => OrganizerEvent::where('organizer_id', $orgId)
             ->where('status', 'APPROVED')
             ->where(function ($q) use ($now) {
                 $q->where(function ($sub) use ($now) {
@@ -132,8 +152,17 @@ new class extends Component {
                     $sub->whereNull('event_end_date')
                         ->where('event_date', '<=', $now);
                 });
-            })
-            ->update(['status' => 'COMPLETED']);
+            });
+
+        $affected = $query()->get(['id', 'title']);
+
+        if ($affected->isEmpty()) return;
+
+        $query()->update(['status' => 'COMPLETED']);
+
+        foreach ($affected as $e) {
+            $this->dispatch('event-management-updated', id: $e->id, title: $e->title, action: 'completed');
+        }
     }
 
     public function updatingSearch(): void       { $this->resetPage(); }
@@ -354,14 +383,37 @@ new class extends Component {
         $this->showViewModal  = true;
     }
 
-    public function deleteEvent(int $id): void
+    // ── Delete: open confirm modal ──
+    public function confirmDelete(int $id): void
     {
         $event = OrganizerEvent::where('id', $id)
             ->where('organizer_id', $this->organizerId)
             ->where('status', 'PENDING')
             ->firstOrFail();
 
-        $event->update(['status' => 'DELETED']);
+        $this->pendingDeleteId    = $id;
+        $this->pendingDeleteTitle = $event->title;
+        $this->showDeleteModal    = true;
+    }
+
+    public function cancelDelete(): void
+    {
+        $this->showDeleteModal    = false;
+        $this->pendingDeleteId    = null;
+        $this->pendingDeleteTitle = '';
+    }
+
+    public function deleteEvent(): void
+    {
+        if (!$this->pendingDeleteId) return;
+
+        $event = OrganizerEvent::where('id', $this->pendingDeleteId)
+            ->where('organizer_id', $this->organizerId)
+            ->where('status', 'PENDING')
+            ->firstOrFail();
+
+        $event->status = 'DELETED';
+        $event->save();
 
         try {
             AuditLog::create([
@@ -371,7 +423,7 @@ new class extends Component {
                 'user_role'     => 'organizer',
                 'action'        => 'deleted',
                 'module'        => 'event',
-                'subject_id'    => $id,
+                'subject_id'    => $this->pendingDeleteId,
                 'subject_label' => $event->title,
                 'description'   => "Organizer deleted pending event: '{$event->title}'.",
                 'ip_address'    => request()->ip(),
@@ -380,14 +432,44 @@ new class extends Component {
             ]);
         } catch (\Throwable) {}
 
-        // ── Dispatch notification ──
-        $this->dispatch('event-management-updated', [
-            'id'     => $id,
-            'title'  => $event->title,
-            'action' => 'deleted',
-        ]);
-
+        $this->dispatch('event-management-updated', id: $this->pendingDeleteId, title: $event->title, action: 'deleted');
         $this->dispatch('flash-message', type: 'success', message: 'Event deleted. You can restore it anytime from the Deleted filter.');
+
+        $this->showDeleteModal    = false;
+        $this->pendingDeleteId    = null;
+        $this->pendingDeleteTitle = '';
+    }
+
+    // ── Restore: open confirm modal ──
+    public function confirmRestore(int $id): void
+    {
+        $event = OrganizerEvent::where('id', $id)
+            ->where('organizer_id', $this->organizerId)
+            ->where('status', 'DELETED')
+            ->firstOrFail();
+
+        $this->pendingRestoreId    = $id;
+        $this->pendingRestoreTitle = $event->title;
+        $this->showRestoreModal    = true;
+    }
+
+    public function cancelRestore(): void
+    {
+        $this->showRestoreModal    = false;
+        $this->pendingRestoreId    = null;
+        $this->pendingRestoreTitle = '';
+    }
+
+    public function proceedRestore(): void
+    {
+        if (!$this->pendingRestoreId) return;
+
+        $this->showRestoreModal = false;
+        $id = $this->pendingRestoreId;
+        $this->pendingRestoreId    = null;
+        $this->pendingRestoreTitle = '';
+
+        $this->viewEvent($id);
     }
 
     public function resetForm(): void
@@ -601,7 +683,6 @@ new class extends Component {
         $ctrl  = app(OrganizerEventController::class);
         $photo = $this->photo;
 
-        // ── Capture action type before saving ──
         $notifAction = $this->isRestoring
             ? 'restored'
             : ($this->isResubmitting
@@ -726,13 +807,8 @@ new class extends Component {
             $this->dispatch('flash-message', type: 'success', message: 'Event submitted for Alumni Director review!');
         }
 
-        // ── Fire coordinator notification after save ──
         $savedEventId = $this->isEditing ? $this->editingEventId : null;
-        $this->dispatch('event-management-updated', [
-            'id'     => $savedEventId,
-            'title'  => trim($this->title),
-            'action' => $notifAction,
-        ]);
+        $this->dispatch('event-management-updated', id: $savedEventId, title: trim($this->title), action: $notifAction);
 
         Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->showFormModal = false;
@@ -1049,8 +1125,8 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex-1 min-h-0 flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
+    {{-- ══ UNIFIED TABLE BLOCK — FIX #1: reduced to 75vh so it fits within screen ══ --}}
+    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 75vh; max-height: 75vh; overflow: hidden;">
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
@@ -1115,11 +1191,12 @@ select.tw-select-arrow {
             </button>
         </div>
 
-        {{-- ── TABLE WRAPPER ── --}}
-        <div class="relative flex-1 min-h-0 flex flex-col">
+        {{-- ── TABLE WRAPPER — scrollable body, fixed header/pagination ── --}}
+        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
 
             @if($this->events->count() > 0)
 
+            {{-- Scrollable table area only --}}
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
                 <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
@@ -1221,7 +1298,7 @@ select.tw-select-arrow {
                                             <button type="button"
                                                     wire:click.stop="openShareModal({{ $event->id }})"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           {{ $isApproved ? 'bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400' : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400' }}">
+                                                           bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
                                                 <i class="fas fa-share-nodes"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
@@ -1232,37 +1309,16 @@ select.tw-select-arrow {
                                     @endif
 
                                     @if($isPending)
-                                        <div x-data="{ confirmDelete: false }"
-                                             class="relative inline-flex items-center gap-1"
-                                             data-eo-share>
-                                            <div x-show="!confirmDelete">
-                                                <div class="relative group/dtip">
-                                                    <button type="button"
-                                                            @click.stop="confirmDelete = true"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                                   bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400">
-                                                        <i class="fas fa-trash-can"></i>
-                                                    </button>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover/dtip:opacity-100 transition-opacity z-[9999]">
-                                                        Delete
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div x-show="confirmDelete"
-                                                 x-cloak
-                                                 class="flex items-center gap-1 bg-white border border-red-200 rounded-lg px-2 py-1 shadow-md">
-                                                <span class="text-[11px] text-red-600 font-semibold whitespace-nowrap">Delete?</span>
-                                                <button type="button"
-                                                        wire:click.stop="deleteEvent({{ $event->id }})"
-                                                        class="text-[11px] px-2 py-0.5 rounded-md bg-red-500 text-white font-semibold hover:bg-red-600 transition">
-                                                    Yes
-                                                </button>
-                                                <button type="button"
-                                                        @click.stop="confirmDelete = false"
-                                                        class="text-[11px] px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 font-semibold hover:bg-gray-200 transition">
-                                                    No
-                                                </button>
+                                        <div class="relative inline-flex group" data-eo-share>
+                                            <button type="button"
+                                                    wire:click.stop="confirmDelete({{ $event->id }})"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400">
+                                                <i class="fas fa-trash-can"></i>
+                                            </button>
+                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                                Delete
+                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                             </div>
                                         </div>
                                     @endif
@@ -1270,7 +1326,7 @@ select.tw-select-arrow {
                                     @if($isDeleted)
                                         <div class="relative inline-flex group" data-eo-share>
                                             <button type="button"
-                                                    wire:click.stop="viewEvent({{ $event->id }})"
+                                                    wire:click.stop="confirmRestore({{ $event->id }})"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
                                                            bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
                                                 <i class="fas fa-rotate-left"></i>
@@ -1393,6 +1449,90 @@ select.tw-select-arrow {
     </div>
 
 </div>
+
+
+{{-- ══ DELETE CONFIRM MODAL ══ --}}
+@if($showDeleteModal)
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+     wire:keydown.escape.window="cancelDelete">
+    <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
+        <div class="px-6 py-4 border-b border-red-100 bg-red-50">
+            <h2 class="text-base font-semibold text-red-800 flex items-center gap-2.5">
+                <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-trash-can text-red-500 text-sm"></i>
+                </div>
+                Delete Event
+            </h2>
+        </div>
+        <div class="p-5 bg-white">
+            <p class="text-sm text-[#555555] mb-1">Are you sure you want to delete:</p>
+            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+                {{ $pendingDeleteTitle }}
+            </p>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
+                <span class="text-xs text-amber-800">The event will be moved to <strong>Deleted</strong> status. You can restore it anytime from the Deleted filter.</span>
+            </div>
+            <div class="flex gap-2">
+                <button wire:click="cancelDelete"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                    <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                </button>
+                <button wire:click="deleteEvent"
+                        wire:loading.attr="disabled"
+                        wire:target="deleteEvent"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60">
+                    <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
+                    <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-xs"></i></span>
+                    Yes, Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+@endif
+
+
+{{-- ══ RESTORE CONFIRM MODAL ══ --}}
+@if($showRestoreModal)
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+     wire:keydown.escape.window="cancelRestore">
+    <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
+        <div class="px-6 py-4 border-b border-emerald-100 bg-emerald-50">
+            <h2 class="text-base font-semibold text-emerald-800 flex items-center gap-2.5">
+                <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-rotate-left text-emerald-600 text-sm"></i>
+                </div>
+                Restore Event
+            </h2>
+        </div>
+        <div class="p-5 bg-white">
+            <p class="text-sm text-[#555555] mb-1">You are about to restore:</p>
+            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+                {{ $pendingRestoreTitle }}
+            </p>
+            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-circle-info text-blue-500 mt-0.5 flex-shrink-0 text-xs"></i>
+                <span class="text-xs text-blue-800">You'll be taken to the edit form. <strong>Update the date to a future date</strong>, then save to resubmit the event for Alumni Director review.</span>
+            </div>
+            <div class="flex gap-2">
+                <button wire:click="cancelRestore"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                    <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                </button>
+                <button wire:click="proceedRestore"
+                        wire:loading.attr="disabled"
+                        wire:target="proceedRestore"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition cursor-pointer disabled:opacity-60">
+                    <span wire:loading wire:target="proceedRestore"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
+                    <span wire:loading.remove wire:target="proceedRestore"><i class="fas fa-rotate-left mr-1 text-xs"></i></span>
+                    Yes, Restore
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+@endif
 
 
 {{-- ══ NO ALUMNI MODAL ══ --}}
@@ -1529,6 +1669,7 @@ select.tw-select-arrow {
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
+                {{-- Event Photo --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
                         <i class="fas fa-image text-[9px]"></i> Event Photo
@@ -1581,11 +1722,11 @@ select.tw-select-arrow {
                 <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
                         <i class="fas fa-book text-[9px]"></i>
-                        Courses / Programs
+                        Courses
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
-                            <span class="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-purple-200 text-purple-800 text-[10px] font-semibold">
-                                {{ count($selectedCourses) }} selected
+                            <span class="ml-auto inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-200 text-purple-800 text-[10px] font-bold">
+                                {{ count($selectedCourses) }}
                             </span>
                         @else
                             <span class="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-semibold">
@@ -1643,18 +1784,63 @@ select.tw-select-arrow {
                             </div>
                         @endif
 
-                        <div class="pt-2 border-t border-gray-100">
+                        <div class="pt-2 border-t border-gray-100"
+                             x-data="{
+                                 val: '{{ $batchYear ?: now()->year }}',
+                                 init() {
+                                     if (!$wire.batchYear) {
+                                         $wire.set('batchYear', String(new Date().getFullYear()));
+                                         this.val = String(new Date().getFullYear());
+                                     }
+                                 },
+                                 validate(v) {
+                                     if (!v) return true;
+                                     return /^\d{4}$/.test(v) && parseInt(v) >= 1995 && parseInt(v) <= 3030;
+                                 },
+                                 onInput(e) {
+                                     let raw = e.target.value.replace(/\D/g,'').substring(0,4);
+                                     this.val = raw;
+                                     $wire.set('batchYear', raw);
+                                 },
+                                 onBlur(e) {
+                                     let n = parseInt(this.val);
+                                     if (this.val.length === 4 && !isNaN(n)) {
+                                         if (n < 1995) { this.val = '1995'; $wire.set('batchYear','1995'); }
+                                         if (n > 3030) { this.val = '3030'; $wire.set('batchYear','3030'); }
+                                     }
+                                 }
+                             }">
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                 Batch Year <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                             </label>
-                            <input wire:model.defer="batchYear"
-                                   type="number" min="1990" max="{{ now()->year + 5 }}" step="1"
-                                   placeholder="e.g. {{ now()->year - 2 }}"
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['batch_year']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                            <div class="relative">
+                                <input
+                                    type="text"
+                                    inputmode="numeric"
+                                    maxlength="4"
+                                    placeholder="e.g. {{ now()->year }}"
+                                    x-model="val"
+                                    @input="onInput($event)"
+                                    @blur="onBlur($event)"
+                                    class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['batch_year']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                    :class="val && !validate(val) && val.length === 4 ? 'border-red-400 bg-red-50' : ''">
+                                <div class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col gap-0">
+                                    <button type="button"
+                                            @click="let n=parseInt(val)||{{ now()->year }}; if(n<3030){val=String(n+1);$wire.set('batchYear',val);}"
+                                            class="w-5 h-4 flex items-center justify-center text-[#555] hover:text-[#7a3f91] transition">
+                                        <i class="fas fa-chevron-up text-[8px]"></i>
+                                    </button>
+                                    <button type="button"
+                                            @click="let n=parseInt(val)||{{ now()->year }}; if(n>1995){val=String(n-1);$wire.set('batchYear',val);}"
+                                            class="w-5 h-4 flex items-center justify-center text-[#555] hover:text-[#7a3f91] transition">
+                                        <i class="fas fa-chevron-down text-[8px]"></i>
+                                    </button>
+                                </div>
+                            </div>
                             @if(isset($formErrors['batch_year']))
                                 <p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['batch_year'] }}</p>
                             @else
-                                <p class="text-[10px] mt-1 text-[#777777]">Leave blank to target all batches.</p>
+                                <p class="text-[10px] mt-1 text-[#777777]">Leave blank to target all batches. Range: 1995–3030.</p>
                             @endif
                         </div>
                     </div>
@@ -1667,7 +1853,7 @@ select.tw-select-arrow {
         <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="flex-1 min-h-0 overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
-                <div class="flex flex-col flex-1 min-h-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         <i class="fas fa-circle-info text-[9px]"></i> Event Details
                     </div>
@@ -1683,13 +1869,15 @@ select.tw-select-arrow {
                             @if(isset($formErrors['title']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['title'] }}</p>@endif
                         </div>
 
-                        <div class="flex flex-col flex-1 min-h-0">
+                        {{-- FIX #2a: Description min-height reduced from 120px to 80px --}}
+                        <div class="flex flex-col" style="flex: 1; min-height: 80px;">
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1 flex-shrink-0">
                                 Description <span class="text-red-500">*</span>
                             </label>
                             <textarea wire:model.defer="description"
                                       placeholder="Describe the event, agenda, highlights…" maxlength="5000"
-                                      class="flex-1 min-h-0 w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
+                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                      style="min-height: 80px;"></textarea>
                             @if(isset($formErrors['description']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['description'] }}</p>@endif
                         </div>
 
@@ -1832,6 +2020,7 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
+                {{-- FIX #2b: Notes textarea height increased from 150px to 200px --}}
                 <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
                         <i class="fas fa-list-check text-[9px]"></i> Notes / Requirements
@@ -1840,7 +2029,8 @@ select.tw-select-arrow {
                     <div class="p-2.5">
                         <textarea wire:model.defer="notes"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
-                                  class="w-full h-[110px] px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"></textarea>
+                                  class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
+                                  style="height: 200px;"></textarea>
                         <p class="text-[10px] mt-1.5 flex items-center gap-1 text-[#777777]">
                             <i class="fas fa-circle-info text-[9px]"></i>
                             Visible to alumni on the event page.
@@ -2299,7 +2489,7 @@ select.tw-select-arrow {
 
         <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0 bg-white">
             <h2 class="text-base font-semibold flex items-center gap-2.5 text-[#333333]">
-                <i class="fas fa-share-nodes text-sky-600 text-sm"></i>
+                <i class="fas fa-share-nodes text-blue-500 text-sm"></i>
                 <span>Share Event</span>
             </h2>
             <button @click="close()" type="button"
@@ -2321,7 +2511,7 @@ select.tw-select-arrow {
                              class="w-full rounded-lg object-contain" style="max-height:180px; display:block;">
                     </div>
                     @endif
-                    <div class="border-b border-gray-200 px-5 py-4 {{ $isCompleted ? 'bg-amber-50' : 'bg-[#f9f7fc]' }}">
+                    <div class="border-b border-gray-200 px-5 py-4 {{ $isCompleted ? 'bg-amber-50' : 'bg-[#f0f7ff]' }}">
                         <p class="font-semibold text-base leading-tight text-[#333333]">{{ $shareEventTitle }}</p>
                         <p class="text-sm mt-1 font-semibold text-[#333333]">
                             {{ $shareEventDate }}@if($shTimeDisplay) · {{ $shTimeDisplay }}@endif
@@ -2333,7 +2523,7 @@ select.tw-select-arrow {
                             </span>
                             @endif
                             @if($shareEventTarget)
-                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-purple-100 text-purple-700">
+                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-blue-100 text-blue-700">
                                 <i class="fas fa-users text-[10px]"></i>{{ Str::limit($shareEventTarget, 30) }}
                             </span>
                             @endif
@@ -2344,9 +2534,9 @@ select.tw-select-arrow {
                         <p class="text-sm leading-relaxed text-[#333333]">{{ $shDescPreview }}</p>
                     </div>
                     @endif
-                    <div class="px-5 py-2 flex items-center gap-2 bg-[#f9f7fc]">
-                        <i class="fas fa-globe text-xs text-[#555555]"></i>
-                        <span class="text-xs uppercase tracking-wider font-semibold text-[#333333]">{{ strtoupper($shareHost) }}</span>
+                    <div class="px-5 py-2 flex items-center gap-2 bg-[#f0f7ff]">
+                        <i class="fas fa-globe text-xs text-blue-400"></i>
+                        <span class="text-xs uppercase tracking-wider font-semibold text-blue-600">{{ strtoupper($shareHost) }}</span>
                     </div>
                 </div>
 
@@ -2362,16 +2552,16 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                <div class="bg-[#f5eef9] border border-[#d4aaeb] rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-users text-[#7a3f91] text-sm flex-shrink-0 mt-0.5"></i>
+                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
+                    <i class="fas fa-users text-blue-600 text-sm flex-shrink-0 mt-0.5"></i>
                     <div>
-                        <p class="text-sm font-semibold flex items-center gap-2 text-[#5e2f72]">
+                        <p class="text-sm font-semibold flex items-center gap-2 text-blue-800">
                             Post to Batch Chats
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-700 text-white text-[10px] font-semibold tracking-wide">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-semibold tracking-wide">
                                 <i class="fas fa-at text-[9px]"></i>everyone tagged
                             </span>
                         </p>
-                        <p class="text-sm mt-0.5 text-purple-700">
+                        <p class="text-sm mt-0.5 text-blue-700">
                             Sends the event caption with <strong>@everyone</strong> directly to all target batch chat rooms for
                             <strong>{{ $shareEventTarget ?: ($this->organizerDepartment ?: 'your college') }}</strong>.
                         </p>
@@ -2459,8 +2649,8 @@ select.tw-select-arrow {
                         wire:click="postToBatchChat"
                         wire:loading.attr="disabled"
                         wire:target="postToBatchChat"
-                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-[#d4aaeb] hover:border-[#7a3f91] hover:bg-[#ede4f5] disabled:opacity-60 disabled:cursor-not-allowed bg-[#f5eef9] text-[#5e2f72]">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-[#7a3f91]">
+                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed bg-blue-50 text-blue-700">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-blue-600">
                         <i class="fas fa-users text-white text-sm"></i>
                     </span>
                     <span class="flex-1 text-left">
@@ -2470,14 +2660,14 @@ select.tw-select-arrow {
                         <span wire:loading wire:target="postToBatchChat" class="block font-semibold text-sm">
                             <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
                         </span>
-                        <span class="flex items-center gap-1.5 text-xs mt-0.5 text-[#7a3f91]">
+                        <span class="flex items-center gap-1.5 text-xs mt-0.5 text-blue-600">
                             Sends to all target batch rooms
-                            · <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#7a3f91] text-white text-[9px] font-semibold">
+                            · <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-semibold">
                                 <i class="fas fa-at text-[8px]"></i>everyone
                             </span>
                         </span>
                     </span>
-                    <i class="fas fa-paper-plane text-sm text-[#7a3f91]"></i>
+                    <i class="fas fa-paper-plane text-sm text-blue-500"></i>
                 </button>
 
                 <div class="relative my-0.5">
@@ -2488,12 +2678,12 @@ select.tw-select-arrow {
                 </div>
 
                 <button type="button" @click="copyLinkFn()"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 font-semibold text-sm transition cursor-pointer group bg-white text-[#333333]">
-                    <span class="w-9 h-9 bg-gray-100 group-hover:bg-gray-200 rounded-xl flex items-center justify-center flex-shrink-0 transition">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-[#555555]'" class="text-base"></i>
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50 font-semibold text-sm transition cursor-pointer group bg-white text-[#333333]">
+                    <span class="w-9 h-9 bg-gray-100 group-hover:bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0 transition">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-blue-500'" class="text-base"></i>
                     </span>
                     <div class="flex-1 text-left min-w-0">
-                        <p class="font-semibold text-sm" :class="copied ? 'text-emerald-600' : ''"
+                        <p class="font-semibold text-sm" :class="copied ? 'text-emerald-600' : 'text-blue-600'"
                            x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
                         <p class="text-xs font-mono mt-0.5 truncate text-[#555555]">{{ $shareBaseUrl }}</p>
                     </div>

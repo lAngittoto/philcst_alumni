@@ -121,6 +121,7 @@ new class extends \Livewire\Volt\Component {
         return $default;
     }
 
+    // ── UPDATED: 1-minute online threshold ────────────────────────────────
     private function formatLastSeen(?string $lastSeenAt): string
     {
         if (! $lastSeenAt) return 'Offline';
@@ -135,10 +136,11 @@ new class extends \Livewire\Volt\Component {
         return 'Active ' . $ts->format('M d');
     }
 
+    // ── UPDATED: 1-minute online threshold ────────────────────────────────
     private function isOnline(?string $lastSeenAt): bool
     {
         if (! $lastSeenAt) return false;
-        return Carbon::parse($lastSeenAt)->gte(Carbon::now()->subMinutes(5));
+        return Carbon::parse($lastSeenAt)->gte(Carbon::now()->subMinutes(1));
     }
 
     public function mount(): void
@@ -223,15 +225,6 @@ new class extends \Livewire\Volt\Component {
         return ($row->course_code ?? '') === '' && (int)($row->batch ?? 0) === 0;
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  FIX: loadRooms() now computes has_unread by comparing the latest
-    //  message timestamp directly against the lastReadCacheKey timestamp.
-    //  This means:
-    //    • On page load  → red dot appears IMMEDIATELY, no poll needed
-    //    • Real-time     → red dot appears on the next poll tick (~1.5s)
-    //  Previously it relied on getUnreadRoomIds() which is an empty cache
-    //  on first load, causing the "wala pang red dot" bug.
-    // ─────────────────────────────────────────────────────────────────────
     public function loadRooms(): void
     {
         $college = $this->alumniCollege;
@@ -297,16 +290,13 @@ new class extends \Livewire\Volt\Component {
             $totalCoord   = (clone $coordBase)->count();
             $total        = $totalAlumni + $totalCoord;
 
-            $onlineAlumni = (clone $alumniBase)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
-            $onlineCoord  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+            // ── UPDATED: 1-minute online threshold ────────────────────────
+            $onlineAlumni = (clone $alumniBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
+            $onlineCoord  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
             $online       = $onlineAlumni + $onlineCoord;
 
             $isCurrentRoom = ($r->id === $self->roomId);
 
-            // ── FIXED: Direct lastReadCacheKey comparison ─────────────────
-            // Works correctly on page load (no poll needed) AND in real-time.
-            // $lastReadAt is null  → room was never opened → show red dot if messages exist
-            // $lastReadAt is set   → compare against latest message created_at (both UTC)
             $lastReadAt = Cache::get($self->lastReadCacheKey($r->id));
             $hasUnread  = ! $isCurrentRoom
                 && $latest !== null
@@ -420,15 +410,27 @@ new class extends \Livewire\Volt\Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  SINGLE POLL — wire:poll.1500ms (down from 3000ms)
+    //  SINGLE POLL — wire:poll.1500ms
     //
-    //  Tick schedule (1.5s base):
-    //    Every tick  (~1.5s): unread check + room list + typing indicators
-    //    Every 2nd   (~3s)  : load messages + mark room read
-    //    Every 4th   (~6s)  : ping presence + refresh online count
+    //  "This page has expired" ROOT CAUSE & FIX:
+    //    The error is a 419 from Laravel's CSRF middleware. It happens when:
+    //      a) The Laravel session lifetime expires (default: 120 min) while
+    //         the page is open — the session cookie becomes invalid.
+    //      b) session()->regenerateToken() is called mid-session — this
+    //         changes the token in the session but Livewire still holds the
+    //         OLD token in its component snapshot, causing every subsequent
+    //         request to fail with a 419 immediately.
     //
-    //  The red dot now appears within 1.5s in real-time because loadRooms()
-    //  uses lastReadCacheKey comparison (not the old unreadRoomIds cache).
+    //    The PHP-side fix is simple: DO NOTHING. Do NOT call regenerateToken()
+    //    inside a poll. Let the session live its natural lifetime.
+    //
+    //    The JS-side fix (in the template below) intercepts the 419 via
+    //    Livewire's request hook and does a silent window.location.reload()
+    //    so the user just sees a brief page refresh instead of an error modal.
+    //
+    //    Additionally, SESSION_LIFETIME in config/session.php should be set
+    //    to a high value (e.g. 480 = 8 hours) for chat pages. But even if it
+    //    expires, the JS intercept ensures a seamless auto-reload.
     // ─────────────────────────────────────────────────────────────────────
     public function unifiedPoll(): void
     {
@@ -493,12 +495,9 @@ new class extends \Livewire\Volt\Component {
             Cache::put($this->lastNotifiedCacheKey($roomId), $newMaxId, now()->addDays(30));
 
             if ($roomId === $this->roomId) {
-                // Currently viewing this room — just update the notified pointer,
-                // markRoomAsRead() will be called on the next even tick
                 continue;
             }
 
-            // Not in this room — fire the bell notification
             $latest     = end($newMessages);
             $senderName = 'Someone';
             if (in_array($latest->sender_type, ['organizer', 'coordinator'], true)) {
@@ -548,8 +547,9 @@ new class extends \Livewire\Volt\Component {
             $totalCoord   = (clone $coordBase)->count();
             $this->totalCount = $totalAlumni + $totalCoord;
 
-            $onlineAlumni = (clone $alumniBase)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
-            $onlineCoord  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+            // ── UPDATED: 1-minute online threshold ────────────────────────
+            $onlineAlumni = (clone $alumniBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
+            $onlineCoord  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
             $this->onlineCount = $onlineAlumni + $onlineCoord;
 
         } catch (\Throwable) {
@@ -869,6 +869,7 @@ new class extends \Livewire\Volt\Component {
                 'batch'         => $a->batch,
                 'course_code'   => $a->course_code,
                 'is_me'         => $a->id === $self->alumniId,
+                // ── UPDATED: 1-minute online threshold ────────────────────
                 'is_online'     => $self->isOnline($a->last_seen_at ?? null),
                 'last_seen_at'  => $a->last_seen_at ?? null,
                 'last_seen_fmt' => $self->formatLastSeen($a->last_seen_at ?? null),
@@ -890,6 +891,7 @@ new class extends \Livewire\Volt\Component {
                 'name'          => trim($o->first_name.' '.$o->last_name),
                 'photo'         => $self->resolvePhotoUrl($o->profile_photo??null),
                 'dept'          => $o->department,
+                // ── UPDATED: 1-minute online threshold ────────────────────
                 'is_online'     => $self->isOnline($o->last_seen_at ?? null),
                 'last_seen_fmt' => $self->formatLastSeen($o->last_seen_at ?? null),
             ])
@@ -958,11 +960,115 @@ new class extends \Livewire\Volt\Component {
 }; ?>
 
 {{-- ══════════════════════════════════════════════════════════════════════════
-     TEMPLATE  — wire:poll.1500ms (down from 3000ms for faster red-dot)
+     TEMPLATE
+     FIX "This page has expired" (419) — DEFINITIVE APPROACH
+     ─────────────────────────────────────────────────────────────────────────
+     ROOT CAUSE:
+       Laravel's CSRF middleware rejects any request whose X-CSRF-TOKEN does
+       not match the token stored in the active session. This happens when:
+         1. The session lifetime expires (config/session.php SESSION_LIFETIME,
+            default 120 min) — the session cookie becomes invalid.
+         2. A session()->regenerateToken() call mid-session changes the stored
+            token so every subsequent Livewire request immediately fails.
+
+     FIXES APPLIED (3 layers):
+       Layer 1 — PHP: unifiedPoll() no longer calls regenerateToken(). The
+         session token stays consistent for the full session lifetime.
+
+       Layer 2 — JS: Livewire.hook / document.addEventListener intercept
+         every 419 response BEFORE Livewire can display the error modal, then
+         silently call window.location.reload(). The user sees a brief page
+         refresh instead of a broken "This page has expired" dialog.
+
+       Layer 3 — JS: visibilitychange guard. When the tab has been hidden for
+         longer than SESSION_LIFETIME (we use 110 min as a safe margin), a
+         reload is triggered as soon as the user returns to the tab — before
+         the next poll even fires, so there is never a 419 in that case.
+
+     ALSO RECOMMENDED (do once in your project):
+       In config/session.php set: 'lifetime' => 480   (8 hours)
+       In .env add:               SESSION_LIFETIME=480
+       This gives alumni plenty of time without any reloads at all.
 ════════════════════════════════════════════════════════════════════════════ --}}
 <div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
      style="height: calc(100vh - 90px);"
      wire:poll.1500ms="unifiedPoll">
+
+    {{-- ══ 419 intercept + session-expiry reload guard ══ --}}
+    <script>
+    (function () {
+        'use strict';
+
+        var reloading = false;
+
+        function safeReload() {
+            if (reloading) return;
+            reloading = true;
+            window.location.reload();
+        }
+
+        // ── Layer 2: Intercept 419 from Livewire v3 ───────────────────────
+        // Livewire v3 exposes a global hook system. We listen for any commit
+        // that fails, inspect the HTTP status, and reload silently on 419.
+        if (window.Livewire) {
+            try {
+                Livewire.hook('commit', function (payload) {
+                    // payload.fail is called when the network request fails
+                    if (typeof payload.fail === 'function') {
+                        var origFail = payload.fail;
+                        payload.fail = function (data) {
+                            var status = data && (data.status || (data.response && data.response.status));
+                            if (status === 419) { safeReload(); return; }
+                            origFail(data);
+                        };
+                    }
+                });
+            } catch (e) {}
+        }
+
+        // ── Layer 2b: Intercept 419 via fetch / XHR monkey-patch ─────────
+        // Belt-and-suspenders: also intercept at the fetch level in case
+        // the Livewire hook fires after the modal is already shown.
+        var _originalFetch = window.fetch;
+        window.fetch = function () {
+            return _originalFetch.apply(this, arguments).then(function (response) {
+                if (response.status === 419) {
+                    // Clone so the body can be read by Livewire too (if it
+                    // gets that far), but schedule the reload immediately.
+                    setTimeout(safeReload, 0);
+                }
+                return response;
+            });
+        };
+
+        // Also patch XMLHttpRequest for older Livewire v2 compatibility.
+        var _XHROpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function () {
+            this.addEventListener('load', function () {
+                if (this.status === 419) { safeReload(); }
+            });
+            _XHROpen.apply(this, arguments);
+        };
+
+        // ── Layer 3: visibilitychange session-expiry guard ────────────────
+        // If the tab was hidden for >= 110 minutes, the 120-min session is
+        // likely expired. Reload before the next poll fires a 419.
+        var hiddenAt        = null;
+        var SESSION_MARGIN  = 110 * 60 * 1000; // 110 minutes in ms
+
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                hiddenAt = Date.now();
+            } else {
+                if (hiddenAt !== null && (Date.now() - hiddenAt) >= SESSION_MARGIN) {
+                    safeReload();
+                }
+                hiddenAt = null;
+            }
+        });
+
+    })();
+    </script>
 
     @php $defaultAv = asset('storage/alumni-photos/default.png'); @endphp
 

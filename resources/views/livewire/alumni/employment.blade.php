@@ -336,7 +336,7 @@ new class extends Component {
         return $current !== $snap;
     }
 
-    // ── Alumni notification: ONE per alumni per day (dedup_key has no status suffix) ──
+    // ── Alumni notification ────────────────────────────────────────────────
     protected function saveAlumniNotification(array $payload): void
     {
         try {
@@ -376,7 +376,7 @@ new class extends Component {
         }
     }
 
-    // ── Registrar notification: ONE per alumni per day (dedup_key has no status suffix) ──
+    // ── Registrar notification ─────────────────────────────────────────────
     protected function saveRegistrarNotification(array $payload): void
     {
         try {
@@ -412,11 +412,62 @@ new class extends Component {
         }
     }
 
+    // ── Coordinator notifications ──────────────────────────────────────────
+    // Sends to ALL organizers — dedup per organizer user_id per day
+    protected function saveCoordinatorNotifications(array $payload): void
+    {
+        try {
+            // Get all active organizer user_ids
+            $organizerUserIds = DB::table('organizer')
+                ->whereNull('deleted_at')
+                ->where('status', 'ACTIVE')
+                ->pluck('user_id')
+                ->toArray();
+
+            if (empty($organizerUserIds)) return;
+
+            $today = now()->toDateString();
+
+            foreach ($organizerUserIds as $userId) {
+                $existing = DB::table('coordinator_notifications')
+                    ->where('user_id', $userId)
+                    ->where('dedup_key', $payload['dedup_key'])
+                    ->whereDate('created_at', $today)
+                    ->first();
+
+                if ($existing) {
+                    DB::table('coordinator_notifications')
+                        ->where('id', $existing->id)
+                        ->update([
+                            'read'       => false,
+                            'message'    => $payload['message'],
+                            'updated_at' => now(),
+                        ]);
+                } else {
+                    DB::table('coordinator_notifications')->insert([
+                        'user_id'    => $userId,
+                        'icon'       => $payload['icon'],
+                        'title'      => $payload['title'],
+                        'message'    => $payload['message'],
+                        'link_route' => $payload['link_route'],
+                        'link_label' => $payload['link_label'],
+                        'dedup_key'  => $payload['dedup_key'],
+                        'read'       => false,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Coordinator notification upsert failed: ' . $e->getMessage());
+        }
+    }
+
     public function saveEmployment(): void
     {
         $this->errorMessage = $this->successMessage = '';
 
-        // ── No-change guard (only for existing records) ──────────────────────
+        // ── No-change guard ──────────────────────────────────────────────
         if ($this->trackingId !== 0 && !$this->hasChanged()) {
             $this->dispatch('show-emp-toast', type: 'error', message: 'No changes were made. Please edit a field before saving.');
             return;
@@ -505,8 +556,7 @@ new class extends Component {
             $newStatusLabel = $this->statusLabel($this->employment_status);
             $oldStatusLabel = $oldStatus ? $this->statusLabel($oldStatus) : '';
 
-            // ── REGISTRAR NOTIFICATION ──
-            // dedup_key: "employment::{alumni_id}" — NO status suffix → one entry per alumni per day
+            // ── REGISTRAR NOTIFICATION ─────────────────────────────────────
             if ($isNew) {
                 $registrarMsg = $name . ' submitted their first employment record as ' . $newStatusLabel . '.';
             } else {
@@ -521,12 +571,30 @@ new class extends Component {
                 'message'    => $registrarMsg,
                 'link_route' => 'registrar.employment.tracking',
                 'link_label' => 'View Tracking',
-                // ONE key per alumni per day — no status suffix
                 'dedup_key'  => 'employment::' . $this->alumniId,
             ]);
 
-            // ── ALUMNI NOTIFICATION ──
-            // dedup_key: "employment-tracking" — NO status suffix → one entry per alumni per day
+            // ── COORDINATOR NOTIFICATIONS ──────────────────────────────────
+            // Sent to ALL active organizers — one entry per organizer per day
+            if ($isNew) {
+                $coordMsg = $name . ' submitted their first employment record as ' . $newStatusLabel . '.';
+            } else {
+                $coordMsg = $name . ' updated their employment status'
+                    . ($oldStatusLabel ? ' from ' . $oldStatusLabel : '')
+                    . ' to ' . $newStatusLabel . '.';
+            }
+
+            $this->saveCoordinatorNotifications([
+                'icon'       => 'chart-line',
+                'title'      => $isNew ? 'New Employment Record' : 'Employment Status Updated',
+                'message'    => $coordMsg,
+                'link_route' => 'organizer.alumni/employment',
+                'link_label' => 'View Employment',
+                // dedup_key: per alumni per day — all daily updates for same alumni merge here
+                'dedup_key'  => 'employment::' . $this->alumniId,
+            ]);
+
+            // ── ALUMNI NOTIFICATION ────────────────────────────────────────
             if ($isNew) {
                 $alumniMsg = 'Your employment record has been submitted successfully as ' . $newStatusLabel . '. Pending admin review.';
             } else {
@@ -541,7 +609,6 @@ new class extends Component {
                 'message'    => $alumniMsg,
                 'link_route' => 'alumni.employment',
                 'link_label' => 'View Employment',
-                // ONE key per day — no status suffix so all daily updates merge here
                 'dedup_key'  => 'employment-tracking',
             ]);
 

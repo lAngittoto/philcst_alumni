@@ -111,6 +111,14 @@ new class extends Component {
     private function autoRejectExpiredPendingEvents(): void
     {
         $now = \Carbon\Carbon::now('UTC');
+
+        $affected = AdminEvent::withoutTrashed()
+            ->where('status', 'PENDING')
+            ->where('event_date', '<=', $now)
+            ->get(['id', 'title']);
+
+        if ($affected->isEmpty()) return;
+
         AdminEvent::withoutTrashed()
             ->where('status', 'PENDING')
             ->where('event_date', '<=', $now)
@@ -118,12 +126,17 @@ new class extends Component {
                 'status'         => 'REJECTED',
                 'review_remarks' => 'Auto-rejected: event date has already passed without approval.',
             ]);
+
+        foreach ($affected as $e) {
+            $this->dispatch('event-management-updated', id: $e->id, title: $e->title, action: 'rejected');
+        }
     }
 
     private function autoCompleteExpiredEvents(): void
     {
         $now = \Carbon\Carbon::now('UTC');
-        AdminEvent::withoutTrashed()
+
+        $query = fn() => AdminEvent::withoutTrashed()
             ->where('status', 'APPROVED')
             ->where(function ($q) use ($now) {
                 $q->where(function ($sub) use ($now) {
@@ -133,8 +146,17 @@ new class extends Component {
                     $sub->whereNull('event_end_date')
                         ->where('event_date', '<=', $now);
                 });
-            })
-            ->update(['status' => 'COMPLETED']);
+            });
+
+        $affected = $query()->get(['id', 'title']);
+
+        if ($affected->isEmpty()) return;
+
+        $query()->update(['status' => 'COMPLETED']);
+
+        foreach ($affected as $e) {
+            $this->dispatch('event-management-updated', id: $e->id, title: $e->title, action: 'completed');
+        }
     }
 
     public function updatingSearch(): void        { $this->resetPage(); }
@@ -426,6 +448,7 @@ new class extends Component {
             ]);
 
             $this->dispatch('flash-message', type: 'success', message: 'Event updated successfully!');
+            $this->dispatch('event-management-updated', id: $this->editingEventId, title: $title, action: 'updated');
         }
 
         $this->showFormModal = false;
@@ -496,6 +519,7 @@ new class extends Component {
                 'user_agent'    => request()->userAgent(),
             ]);
             $this->dispatch('flash-message', type: 'success', message: "'{$this->approveEventTitle}' approved!");
+            $this->dispatch('event-management-updated', id: $this->approveEventId, title: $this->approveEventTitle, action: 'approved');
         }
         $this->showApproveModal  = false;
         $this->approveEventId    = null;
@@ -544,6 +568,7 @@ new class extends Component {
                 'user_agent'    => request()->userAgent(),
             ]);
             $this->dispatch('flash-message', type: 'success', message: "'{$this->rejectEventTitle}' rejected.");
+            $this->dispatch('event-management-updated', id: $this->rejectEventId, title: $this->rejectEventTitle, action: 'rejected');
         }
         $this->showRejectModal  = false;
         $this->rejectEventId    = null;

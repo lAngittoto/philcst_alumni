@@ -1,11 +1,8 @@
 <?php
-
 namespace App\Http\Controllers;
-
 use App\Models\RegistrarNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-
 class RegistrarNotificationController extends Controller
 {
     /**
@@ -21,17 +18,9 @@ class RegistrarNotificationController extends Controller
     /**
      * POST /registrar/notifications
      *
-     * Daily deduplication keyed on title + dedup_key (which includes the
-     * employment status).  This ensures that:
-     *
-     *   • "New Employment Record — Employed"
-     *   • "New Employment Record — Unemployed"
-     *   • "Employment Status Updated — Unemployed"
-     *
-     * all appear as SEPARATE notification rows, never collapsed together.
-     *
-     * The `message` is always overwritten with the latest payload so the
-     * panel always shows the most recent alumni name.
+     * Daily deduplication keyed on title + dedup_key.
+     * When a duplicate is found today, increment count + refresh BOTH
+     * created_at and updated_at so the panel always shows the latest time.
      */
     public function store(Request $request)
     {
@@ -46,23 +35,20 @@ class RegistrarNotificationController extends Controller
 
         $today = Carbon::today();
 
-        /*
-         * Build the dedup key:
-         *   dedup_key if provided (e.g. "recorded::employed")
-         *   otherwise fall back to first 40 chars of message.
-         *
-         * This means each status variant gets its own DB row.
-         */
         $dedupKey = $data['dedup_key'] ?? substr($data['message'], 0, 40);
 
         $existing = RegistrarNotification::where('title', $data['title'])
             ->where('dedup_key', $dedupKey)
             ->whereDate('created_at', $today)
-            ->latest('updated_at')   // uses Eloquent's built-in latest() — safe because
-            ->first();               // scopeLatest was renamed to scopeNewest in the model.
+            ->latest('updated_at')
+            ->first();
 
         if ($existing) {
-            // Same title + same status today → increment count + refresh message.
+            $now = now();
+
+            // ✅ Refresh BOTH created_at and updated_at so the displayed
+            //    timestamp always reflects the most recent update.
+            $existing->timestamps = false; // disable auto-touch so we set manually
             $existing->update([
                 'message'    => $data['message'],
                 'read'       => false,
@@ -70,7 +56,8 @@ class RegistrarNotificationController extends Controller
                 'icon'       => $data['icon']       ?? $existing->icon,
                 'link_route' => $data['link_route'] ?? $existing->link_route,
                 'link_label' => $data['link_label'] ?? $existing->link_label,
-                'updated_at' => now(),
+                'created_at' => $now, // ✅ this is what the JS panel reads for display
+                'updated_at' => $now,
             ]);
 
             return response()->json($existing->fresh(), 200);
@@ -82,7 +69,7 @@ class RegistrarNotificationController extends Controller
             [
                 'read'      => false,
                 'count'     => 1,
-                'dedup_key' => $dedupKey,   // persisted because dedup_key is in $fillable
+                'dedup_key' => $dedupKey,
             ]
         ));
 

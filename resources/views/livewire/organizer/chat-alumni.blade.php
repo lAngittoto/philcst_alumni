@@ -81,9 +81,20 @@ new class extends Component {
     // ── Pinned rooms ──────────────────────────────────────────────────────
     public array $pinnedRoomIds = [];
 
+    // ── Tick counter — drives staggered work inside the single poll ───────
+    public int $pollTick = 0;
+
+    // ── Online presence timeout (minutes) — 1 min = offline ──────────────
+    private int $onlineMinutes = 1;
+
     // ─────────────────────────────────────────────────────────────────────
     // Cache key helpers
     // ─────────────────────────────────────────────────────────────────────
+    private function lastReadCacheKey(int $roomId): string
+    {
+        return "chat_read.organizer.{$this->coordinatorId}.room.{$roomId}";
+    }
+
     private function lastNotifiedCacheKey(int $roomId): string
     {
         return "chat_notified.organizer.{$this->coordinatorId}.room.{$roomId}";
@@ -116,6 +127,12 @@ new class extends Component {
         $current = $this->getUnreadRoomIds();
         unset($current[(string) $roomId]);
         Cache::put($this->unreadCacheKey(), $current, now()->addHours(24));
+    }
+
+    public function markRoomAsRead(int $roomId): void
+    {
+        Cache::put($this->lastReadCacheKey($roomId), now()->toDateTimeString(), now()->addDays(30));
+        $this->clearUnreadRoomId($roomId);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -181,8 +198,10 @@ new class extends Component {
         $this->pingPresence();
         $this->loadRooms();
         $this->seedNotifiedPointers();
-
-        // ── No room auto-selected on load — user clicks to open a chat ──
+        
+        // ─ FIX: CHECK AND DISPATCH NOTIFICATIONS IMMEDIATELY ON MOUNT ─
+        // This ensures red dots show up on login without needing to visit chat first
+        $this->checkAndDispatchNewMessageNotifications();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -276,6 +295,35 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // SINGLE UNIFIED POLL — wire:poll.1500ms
+    // ─────────────────────────────────────────────────────────────────────
+    public function unifiedPoll(): void
+    {
+        $this->pollTick++;
+
+        $this->checkAndDispatchNewMessageNotifications();
+        $this->loadRooms();
+
+        if ($this->roomId) {
+            $this->loadTypingIndicators();
+        }
+
+        if ($this->pollTick % 2 === 0 && $this->roomId) {
+            $this->loadMessages();
+            $this->markRoomAsRead($this->roomId);
+            $this->dispatch('chat-scroll-bottom');
+        }
+
+        if ($this->pollTick % 4 === 0) {
+            $this->pingPresence();
+            $this->refreshOnlineCount();
+            if ($this->showMembers && $this->isStaffRoom) {
+                $this->loadStaffMembers();
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Toggle pin room
     // ─────────────────────────────────────────────────────────────────────
     public function togglePinRoom(int $roomId): void
@@ -292,33 +340,14 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Polling hooks
-    // ─────────────────────────────────────────────────────────────────────
-    public function refreshAll(): void
-    {
-        $this->pingPresence();
-        $this->ensureRoomsExist();
-        $this->checkAndDispatchNewMessageNotifications();
-        $this->loadRooms();
-
-        if ($this->roomId) {
-            $this->refreshOnlineCount();
-            $this->loadMessages();
-            $this->loadTypingIndicators();
-        }
-
-        if ($this->showMembers && $this->isStaffRoom) {
-            $this->loadStaffMembers();
-        }
-    }
-
-    public function refreshTyping(): void { $this->loadTypingIndicators(); }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Detect new messages → unread dots + JS notification
+    // Detect new messages → write coordinator_notifications DB row DIRECTLY
+    // (same pattern as notifyAlumniInRoom — no JS round-trip needed)
+    // then dispatch coord-notif-refresh so the bell JS store re-fetches
     // ─────────────────────────────────────────────────────────────────────
     private function checkAndDispatchNewMessageNotifications(): void
     {
+        $anyNewForBell = false; // track whether we need to trigger a bell refresh
+
         foreach ($this->rooms as $room) {
             $roomId = (int) $room['id'];
 
@@ -334,6 +363,7 @@ new class extends Component {
 
             $lastKnown = (int) $this->lastNotifiedMessageIds[$roomId];
 
+            // Only messages from OTHER senders (not this coordinator)
             $newMessages = DB::table('chat_messages as m')
                 ->where('m.room_id', $roomId)
                 ->whereNull('m.deleted_at')
@@ -346,21 +376,32 @@ new class extends Component {
                 ->get(['m.id', 'm.sender_type', 'm.sender_id', 'm.body'])
                 ->toArray();
 
-            if (empty($newMessages)) continue;
+            if (empty($newMessages)) {
+                // Advance pointer for own messages so we don't double-count later
+                $myNewMax = (int) (DB::table('chat_messages')
+                    ->where('room_id', $roomId)
+                    ->whereNull('deleted_at')
+                    ->where('id', '>', $lastKnown)
+                    ->max('id') ?? 0);
+                if ($myNewMax > $lastKnown) {
+                    $this->lastNotifiedMessageIds[$roomId] = $myNewMax;
+                    Cache::put($this->lastNotifiedCacheKey($roomId), $myNewMax, now()->addDays(30));
+                }
+                continue;
+            }
 
+            // Advance pointer
             $newMaxId = (int) max(array_column($newMessages, 'id'));
             $this->lastNotifiedMessageIds[$roomId] = $newMaxId;
             Cache::put($this->lastNotifiedCacheKey($roomId), $newMaxId, now()->addDays(30));
 
-            // Currently open room — just advance pointer, no dot
+            // If the coordinator is currently viewing this room, skip bell notif
+            // but still advance the pointer above
             if ($roomId === $this->roomId) {
-                $this->clearUnreadRoomId($roomId);
                 continue;
             }
 
-            // Background room → persist red dot
-            $this->setUnreadRoomId($roomId);
-
+            // ── Resolve sender name for the latest message ────────────────
             $latest     = end($newMessages);
             $senderName = 'Someone';
 
@@ -375,13 +416,61 @@ new class extends Component {
                 $senderName = ($firstName ?? 'Coordinator') . ' (Coordinator)';
             }
 
-            // ── FIX: dispatch as 'coord-message-received' so the layout listener catches it ──
-            $this->dispatch('coord-message-received', [
-                'sender' => $senderName,
-                'room'   => $room['name'] ?? 'Group Chat',
-                'body'   => mb_substr($latest->body ?? '', 0, 60),
-                'count'  => count($newMessages),
-            ]);
+            $count     = count($newMessages);
+            $roomLabel = $room['name'] ?? 'Group Chat';
+            $bodySnip  = mb_substr($latest->body ?? '', 0, 60);
+            $preview   = $bodySnip . (mb_strlen($latest->body ?? '') > 60 ? '…' : '');
+
+            $msgText = $count > 1
+                ? $senderName . ' and others sent ' . $count . ' new messages in ' . $roomLabel . '.'
+                : $senderName . ' sent a message in ' . $roomLabel
+                  . ($preview !== '' ? ': "' . $preview . '"' : '.');
+
+            $notifTitle = $count > 1 ? $count . ' New Messages' : 'New Message';
+
+            // ── Dedup key: per-room per-minute ────────────────────────────
+            $dedupKey = 'message-received::' . $roomId . '::' . floor(time() / 60);
+
+            // ── Write directly to coordinator_notifications table ─────────
+            // (mirrors notifyAlumniInRoom → alumni_notifications pattern)
+            try {
+                $alreadyExists = DB::table('coordinator_notifications')
+                    ->where('coordinator_id', $this->coordinatorId)
+                    ->where('dedup_key', $dedupKey)
+                    ->exists();
+
+                if (! $alreadyExists) {
+                    DB::table('coordinator_notifications')->insert([
+                        'coordinator_id' => $this->coordinatorId,
+                        'icon'           => 'comments',
+                        'title'          => $notifTitle,
+                        'message'        => $msgText,
+                        'link_route'     => 'organizer.chat/alumni',
+                        'link_label'     => 'Open Messages',
+                        'dedup_key'      => $dedupKey,
+                        'read'           => 0,
+                        'created_at'     => now(),
+                        'updated_at'     => now(),
+                    ]);
+
+                    $anyNewForBell = true;
+                }
+            } catch (\Throwable) {
+                // Fallback: if DB write fails, dispatch JS event so the old
+                // client-side path can still handle it
+                $this->dispatch('coord-message-received', [
+                    'sender' => $senderName,
+                    'room'   => $roomLabel,
+                    'body'   => mb_substr($latest->body ?? '', 0, 60),
+                    'count'  => $count,
+                ]);
+            }
+        }
+
+        // ── Tell the JS bell store to re-fetch immediately ────────────────
+        // Only dispatch once per poll cycle (not per room) to avoid flood
+        if ($anyNewForBell) {
+            $this->dispatch('coord-notif-refresh');
         }
     }
 
@@ -459,8 +548,8 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function loadRooms(): void
     {
-        $unreadRoomIds = $this->getUnreadRoomIds();
-        $search        = trim($this->roomSearch);
+        $search = trim($this->roomSearch);
+        $self   = $this;
 
         // ── 1. Staff room ─────────────────────────────────────────────
         $staffRoomRow = DB::table('chat_rooms')->where('course_code', '__director__')->first();
@@ -489,15 +578,25 @@ new class extends Component {
                 }
             }
 
+            // Staff room: count directors + active coordinators
             $staffOnline = DB::table('director')->whereNull('deleted_at')
-                ->where('last_seen_at', '>=', now()->subMinutes(5))->count()
+                ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
-                    ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                    ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
             $staffTotal  = DB::table('director')->whereNull('deleted_at')->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             $isCurrentRoom = ($staffRoomRow->id === $this->roomId);
-            $hasUnread     = ! $isCurrentRoom && isset($unreadRoomIds[(string) $staffRoomRow->id]);
+            $lastReadAt    = Cache::get($self->lastReadCacheKey($staffRoomRow->id));
+
+            $hasUnread = false;
+            if (! $isCurrentRoom && $latest !== null) {
+                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $this->coordinatorId);
+                if (! $isMySelf) {
+                    $hasUnread = $lastReadAt === null
+                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
+                }
+            }
 
             $matchesSearch = $search === ''
                 || str_contains(strtolower('Staff Chat'), strtolower($search));
@@ -569,15 +668,34 @@ new class extends Component {
             if (! empty($collegeCourses)) {
                 $baseQ       = DB::table('alumni')->whereIn('course_code', $collegeCourses)->whereNull('deleted_at');
                 $totalCount  = (clone $baseQ)->count();
-                $onlineCount = (clone $baseQ)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                $onlineCount = (clone $baseQ)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                $coordOnlineInDept = DB::table('organizer')
+                    ->where('status', 'ACTIVE')
+                    ->whereNull('deleted_at')
+                    ->where('department', $this->department)
+                    ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))
+                    ->count();
+                $onlineCount += $coordOnlineInDept;
+                $totalCount  += DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->where('department', $this->department)->count();
             } else {
                 $totalCount = $onlineCount = 0;
             }
 
-            $isCurrentRoom  = ($collegeRoomRow->id === $this->roomId);
-            $hasUnread      = ! $isCurrentRoom && isset($unreadRoomIds[(string) $collegeRoomRow->id]);
-            $collegeLabel   = $this->department . ' · All Courses & Batches';
-            $matchesSearch  = $search === ''
+            $isCurrentRoom = ($collegeRoomRow->id === $this->roomId);
+            $lastReadAt    = Cache::get($self->lastReadCacheKey($collegeRoomRow->id));
+
+            $hasUnread = false;
+            if (! $isCurrentRoom && $latest !== null) {
+                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $this->coordinatorId);
+                if (! $isMySelf) {
+                    $hasUnread = $lastReadAt === null
+                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
+                }
+            }
+
+            $collegeLabel  = $this->department . ' · All Courses & Batches';
+            $matchesSearch = $search === ''
                 || str_contains(strtolower($collegeLabel), strtolower($search))
                 || str_contains(strtolower($this->department), strtolower($search));
 
@@ -620,7 +738,7 @@ new class extends Component {
             ->get(['r.id', 'r.name', 'r.course_code', 'r.batch', 'r.department'])
             ->toArray();
 
-        $courseGcRooms = collect($courseGcRows)->map(function ($r) use ($unreadRoomIds, $search) {
+        $courseGcRooms = collect($courseGcRows)->map(function ($r) use ($search, $self) {
             $latest = DB::table('chat_messages as m')
                 ->where('m.room_id', $r->id)
                 ->whereNull('m.deleted_at')
@@ -646,13 +764,35 @@ new class extends Component {
                 }
             }
 
-            $totalCount  = DB::table('alumni')->where('course_code', $r->course_code)->whereNull('deleted_at')->count();
-            $onlineCount = DB::table('alumni')->where('course_code', $r->course_code)->whereNull('deleted_at')
-                ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+            $baseAlumni  = DB::table('alumni')->where('course_code', $r->course_code)->whereNull('deleted_at');
+            $totalCount  = (clone $baseAlumni)->count();
+            $onlineCount = (clone $baseAlumni)->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))->count();
+
+            $coordOnline = DB::table('organizer')
+                ->where('status', 'ACTIVE')->whereNull('deleted_at')
+                ->where('department', $self->department)
+                ->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))
+                ->count();
+            $coordTotal  = DB::table('organizer')
+                ->where('status', 'ACTIVE')->whereNull('deleted_at')
+                ->where('department', $self->department)
+                ->count();
+            $onlineCount += $coordOnline;
+            $totalCount  += $coordTotal;
+
             $courseName  = DB::table('courses')->where('code', $r->course_code)->value('name') ?? strtoupper($r->course_code);
 
-            $isCurrentRoom = ($r->id === $this->roomId);
-            $hasUnread     = ! $isCurrentRoom && isset($unreadRoomIds[(string) $r->id]);
+            $isCurrentRoom = ($r->id === $self->roomId);
+            $lastReadAt    = Cache::get($self->lastReadCacheKey($r->id));
+
+            $hasUnread = false;
+            if (! $isCurrentRoom && $latest !== null) {
+                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $self->coordinatorId);
+                if (! $isMySelf) {
+                    $hasUnread = $lastReadAt === null
+                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
+                }
+            }
 
             $label         = strtoupper($r->course_code) . ' · All Batches GC';
             $matchesSearch = $search === ''
@@ -683,7 +823,7 @@ new class extends Component {
                 'has_unread'     => $hasUnread,
                 'is_pinned_room' => in_array($r->id, $this->pinnedRoomIds, true),
             ];
-        })->filter()->sortBy('course_code');
+        })->filter();
 
         // ── 4. Batch rooms ────────────────────────────────────────────
         $rows = DB::table('chat_rooms as r')
@@ -699,7 +839,7 @@ new class extends Component {
             ->get(['r.id', 'r.name', 'r.course_code', 'r.batch', 'r.department'])
             ->toArray();
 
-        $batchRooms = collect($rows)->map(function ($r) use ($unreadRoomIds, $search) {
+        $batchRooms = collect($rows)->map(function ($r) use ($search, $self) {
             $latest = DB::table('chat_messages as m')
                 ->where('m.room_id', $r->id)
                 ->whereNull('m.deleted_at')
@@ -722,15 +862,35 @@ new class extends Component {
                 }
             }
 
-            $onlineCount = DB::table('alumni')
+            $baseAlumni  = DB::table('alumni')
                 ->where('course_code', $r->course_code)->where('batch', $r->batch)
-                ->whereNull('deleted_at')->where('last_seen_at', '>=', now()->subMinutes(5))->count();
-            $totalCount  = DB::table('alumni')
-                ->where('course_code', $r->course_code)->where('batch', $r->batch)
-                ->whereNull('deleted_at')->count();
+                ->whereNull('deleted_at');
+            $onlineCount = (clone $baseAlumni)->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))->count();
+            $totalCount  = (clone $baseAlumni)->count();
 
-            $isCurrentRoom = ($r->id === $this->roomId);
-            $hasUnread     = ! $isCurrentRoom && isset($unreadRoomIds[(string) $r->id]);
+            $coordOnline = DB::table('organizer')
+                ->where('status', 'ACTIVE')->whereNull('deleted_at')
+                ->where('department', $self->department)
+                ->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))
+                ->count();
+            $coordTotal  = DB::table('organizer')
+                ->where('status', 'ACTIVE')->whereNull('deleted_at')
+                ->where('department', $self->department)
+                ->count();
+            $onlineCount += $coordOnline;
+            $totalCount  += $coordTotal;
+
+            $isCurrentRoom = ($r->id === $self->roomId);
+            $lastReadAt    = Cache::get($self->lastReadCacheKey($r->id));
+
+            $hasUnread = false;
+            if (! $isCurrentRoom && $latest !== null) {
+                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $self->coordinatorId);
+                if (! $isMySelf) {
+                    $hasUnread = $lastReadAt === null
+                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
+                }
+            }
 
             $matchesSearch = $search === ''
                 || str_contains(strtolower($r->name), strtolower($search))
@@ -762,24 +922,25 @@ new class extends Component {
             ];
         })->filter();
 
-        // ── Sort batch rooms: course A-Z, then batch DESC within each course ─
-        $batchRoomsSorted = $batchRooms->sort(function ($a, $b) {
-            $courseCompare = strcmp($a['course_code'], $b['course_code']);
-            if ($courseCompare !== 0) return $courseCompare;
-            return $b['batch'] - $a['batch'];
-        })->values();
+        // ── Combine ALL rooms into one flat collection ─────────────────
+        $allRooms = collect();
+        if ($staffItem)   $allRooms->push($staffItem);
+        if ($collegeItem) $allRooms->push($collegeItem);
+        $allRooms = $allRooms->merge($courseGcRooms)->merge($batchRooms);
 
-        // ── Sort course GC rooms A-Z ──────────────────────────────────
-        $courseGcRoomsSorted = $courseGcRooms->sortBy('course_code')->values();
+        // ── MESSENGER-STYLE SORT ───────────────────────────────────────
+        $pinned   = $allRooms->filter(fn ($r) => $r['is_pinned_room']);
+        $unpinned = $allRooms->filter(fn ($r) => ! $r['is_pinned_room']);
 
-        // ── Combine: Staff → College → Course GCs (A-Z) → Batch rooms ─
-        $combined = collect();
-        if ($staffItem)   $combined->push($staffItem);
-        if ($collegeItem) $combined->push($collegeItem);
-        $combined = $combined->merge($courseGcRoomsSorted);
-        $combined = $combined->merge($batchRoomsSorted);
+        $pinnedWithMsg    = $pinned->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
+        $pinnedWithoutMsg = $pinned->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+        $pinnedSorted     = $pinnedWithMsg->merge($pinnedWithoutMsg)->values();
 
-        $this->rooms = $combined->values()->toArray();
+        $unpinnedWithMsg    = $unpinned->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
+        $unpinnedWithoutMsg = $unpinned->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+        $unpinnedSorted     = $unpinnedWithMsg->merge($unpinnedWithoutMsg)->values();
+
+        $this->rooms = $pinnedSorted->merge($unpinnedSorted)->values()->toArray();
     }
 
     public function updatedRoomSearch(): void { $this->loadRooms(); }
@@ -822,14 +983,13 @@ new class extends Component {
         $this->staffDirectors      = [];
         $this->staffCoords         = [];
 
-        // Advance pointer + clear unread
         $maxId = (int) (DB::table('chat_messages')
             ->where('room_id', $id)
             ->whereNull('deleted_at')
             ->max('id') ?? 0);
         $this->lastNotifiedMessageIds[$id] = $maxId;
         Cache::put($this->lastNotifiedCacheKey($id), $maxId, now()->addDays(30));
-        $this->clearUnreadRoomId($id);
+        $this->markRoomAsRead($id);
 
         $this->refreshOnlineCount();
         $this->loadMessages();
@@ -847,7 +1007,7 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Presence
+    // Presence — 1 min = offline
     // ─────────────────────────────────────────────────────────────────────
     public function pingPresence(): void
     {
@@ -862,30 +1022,54 @@ new class extends Component {
         try {
             if ($this->isStaffRoom) {
                 $this->onlineCount = DB::table('director')->whereNull('deleted_at')
-                    ->where('last_seen_at', '>=', now()->subMinutes(5))->count()
+                    ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
-                        ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                        ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
                 $this->totalCount  = DB::table('director')->whereNull('deleted_at')->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
+
             } elseif ($this->isCollegeRoom) {
                 if (! empty($this->deptCourseCodes)) {
                     $base = DB::table('alumni')->whereIn('course_code', $this->deptCourseCodes)->whereNull('deleted_at');
-                    $this->totalCount  = (clone $base)->count();
-                    $this->onlineCount = (clone $base)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                    $alumniTotal   = (clone $base)->count();
+                    $alumniOnline  = (clone $base)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                    $coordBase     = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->where('department', $this->department);
+                    $coordTotal    = (clone $coordBase)->count();
+                    $coordOnline   = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                    $this->totalCount  = $alumniTotal + $coordTotal;
+                    $this->onlineCount = $alumniOnline + $coordOnline;
                 } else {
                     $this->totalCount = $this->onlineCount = 0;
                 }
+
             } elseif ($this->isCourseRoom) {
                 $base = DB::table('alumni')->where('course_code', $this->room['course_code'])->whereNull('deleted_at');
-                $this->totalCount  = (clone $base)->count();
-                $this->onlineCount = (clone $base)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                $alumniTotal  = (clone $base)->count();
+                $alumniOnline = (clone $base)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                $coordBase    = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->where('department', $this->department);
+                $coordTotal   = (clone $coordBase)->count();
+                $coordOnline  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                $this->totalCount  = $alumniTotal + $coordTotal;
+                $this->onlineCount = $alumniOnline + $coordOnline;
+
             } else {
                 $base = DB::table('alumni')
                     ->where('course_code', $this->room['course_code'])
                     ->where('batch', $this->room['batch'])
                     ->whereNull('deleted_at');
-                $this->totalCount  = (clone $base)->count();
-                $this->onlineCount = (clone $base)->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+                $alumniTotal  = (clone $base)->count();
+                $alumniOnline = (clone $base)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                $coordBase    = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->where('department', $this->department);
+                $coordTotal   = (clone $coordBase)->count();
+                $coordOnline  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
+
+                $this->totalCount  = $alumniTotal + $coordTotal;
+                $this->onlineCount = $alumniOnline + $coordOnline;
             }
         } catch (\Throwable) {
             $this->totalCount = $this->onlineCount = 0;
@@ -1088,7 +1272,7 @@ new class extends Component {
 
         $this->lastNotifiedMessageIds[$this->roomId] = (int) $msgId;
         Cache::put($this->lastNotifiedCacheKey($this->roomId), (int) $msgId, now()->addDays(30));
-        $this->clearUnreadRoomId($this->roomId);
+        $this->markRoomAsRead($this->roomId);
         $this->notifyAlumniInRoom($body);
 
         $this->body = ''; $this->replyTo = null; $this->showMentions = false;
@@ -1258,7 +1442,7 @@ new class extends Component {
                 'photo'       => $self->resolvePhotoUrl($a->profile_photo ?? null),
                 'batch'       => $a->batch,
                 'course_code' => $a->course_code,
-                'is_online'   => isset($a->last_seen_at) && Carbon::parse($a->last_seen_at)->gte(now()->subMinutes(5)),
+                'is_online'   => isset($a->last_seen_at) && Carbon::parse($a->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes)),
             ])->toArray();
     }
 
@@ -1273,12 +1457,12 @@ new class extends Component {
         $dirQuery = DB::table('director')->whereNull('deleted_at');
         if ($q !== '') $dirQuery->where(function ($sub) use ($q) { $sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%")->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]); });
         $this->staffDirectors = $dirQuery->orderBy('first_name')->get(['id','first_name','last_name','profile_photo','last_seen_at'])
-            ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'photo'=>$self->resolvePhotoUrl($d->profile_photo??null),'is_online'=>isset($d->last_seen_at)&&Carbon::parse($d->last_seen_at)->gte(now()->subMinutes(5))])->toArray();
+            ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'photo'=>$self->resolvePhotoUrl($d->profile_photo??null),'is_online'=>isset($d->last_seen_at)&&Carbon::parse($d->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes))])->toArray();
 
         $coordQuery = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at');
         if ($q !== '') $coordQuery->where(function ($sub) use ($q) { $sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%")->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]); });
         $this->staffCoords = $coordQuery->orderBy('first_name')->get(['id','first_name','last_name','profile_photo','last_seen_at'])
-            ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'photo'=>$self->resolvePhotoUrl($o->profile_photo??null),'is_me'=>(int)$o->id===$self->coordinatorId,'is_online'=>isset($o->last_seen_at)&&Carbon::parse($o->last_seen_at)->gte(now()->subMinutes(5))])->toArray();
+            ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'photo'=>$self->resolvePhotoUrl($o->profile_photo??null),'is_me'=>(int)$o->id===$self->coordinatorId,'is_online'=>isset($o->last_seen_at)&&Carbon::parse($o->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes))])->toArray();
     }
 
     public function loadCoordinators(): void
@@ -1286,7 +1470,7 @@ new class extends Component {
         $self = $this;
         $this->coordinators = DB::table('organizer')->where('department',$this->department)->where('status','ACTIVE')->whereNull('deleted_at')->orderBy('first_name')
             ->get(['id','first_name','last_name','profile_photo','last_seen_at'])
-            ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'photo'=>$self->resolvePhotoUrl($o->profile_photo??null),'is_me'=>(int)$o->id===$self->coordinatorId,'is_online'=>isset($o->last_seen_at)&&Carbon::parse($o->last_seen_at)->gte(now()->subMinutes(5))])->toArray();
+            ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'photo'=>$self->resolvePhotoUrl($o->profile_photo??null),'is_me'=>(int)$o->id===$self->coordinatorId,'is_online'=>isset($o->last_seen_at)&&Carbon::parse($o->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes))])->toArray();
     }
 
     public function updatedMemberSearch(): void
@@ -1371,9 +1555,12 @@ new class extends Component {
     }
 }; ?>
 
+{{-- ══════════════════════════════════════════════════════════════════════
+     TEMPLATE — wire:poll.1500ms unified poll
+══════════════════════════════════════════════════════════════════════════ --}}
 <div class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
      style="height: calc(100vh - 90px);"
-     wire:poll.8000ms="refreshAll">
+     wire:poll.1500ms="unifiedPoll">
 
     @php $defaultAv = asset('storage/alumni-photos/default.png'); @endphp
 
@@ -1441,6 +1628,7 @@ new class extends Component {
                 $hasUnread  = $r['has_unread'];
                 $isPinnedRm = $r['is_pinned_room'];
                 $isActive   = $r['is_active'];
+                $hasMsg     = ! empty($r['latest_body']);
             @endphp
 
             <div class="relative" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
@@ -1454,16 +1642,14 @@ new class extends Component {
                     <div class="flex items-start gap-2.5">
                         {{-- Icon with badges --}}
                         <div class="relative flex-shrink-0 self-start mt-0.5">
-<div class="w-10 h-10 rounded-xl flex items-center justify-center text-sm flex-shrink-0 {{ $isActive ? 'text-white' : 'text-[#6b2490]' }}"
-     style="{{ $isActive ? 'background:#6b2490;' : 'background:#ede9f6;' }}">
-    <i class="fa-solid {{ $r['type']==='staff' ? 'fa-shield-halved' : ($r['type']==='college' ? 'fa-school' : ($r['type']==='course' ? 'fa-layer-group' : 'fa-users')) }}"></i>
-</div>
-                            {{-- Unread red dot --}}
+                            <div class="w-10 h-10 rounded-xl flex items-center justify-center text-sm flex-shrink-0 {{ $isActive ? 'text-white' : 'text-[#6b2490]' }}"
+                                 style="{{ $isActive ? 'background:#6b2490;' : 'background:#ede9f6;' }}">
+                                <i class="fa-solid {{ $r['type']==='staff' ? 'fa-shield-halved' : ($r['type']==='college' ? 'fa-school' : ($r['type']==='course' ? 'fa-layer-group' : 'fa-users')) }}"></i>
+                            </div>
                             @if($hasUnread)
                             <span class="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-red-500 border-2 border-white z-20 animate-pulse"
                                   style="box-shadow: 0 0 0 2px #fff;"></span>
                             @endif
-                            {{-- Pin badge --}}
                             @if($isPinnedRm)
                             <span class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-400 border-2 border-white flex items-center justify-center z-10" title="Pinned">
                                 <i class="fa-solid fa-thumbtack text-white" style="font-size:7px; transform:rotate(45deg);"></i>
@@ -1495,13 +1681,14 @@ new class extends Component {
 
                             <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
                                 @if($r['type'] === 'staff')
-                                  
+                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Internal</span>
+                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} staff</span>
                                 @elseif($r['type'] === 'college')
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Courses</span>
-                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} alumni</span>
+                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} members</span>
                                 @elseif($r['type'] === 'course')
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Batches</span>
-                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} alumni</span>
+                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} members</span>
                                 @else
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>{{ $r['batch'] }}</span>
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ strtoupper($r['course_code']) }}</span>
@@ -1609,9 +1796,9 @@ new class extends Component {
                     @if($isStaffRoom)
                     <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators</span>
                     @elseif($isCollegeRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-school text-[10px]"></i>All Courses & Batches · {{ $totalCount }} alumni total</span>
+                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-school text-[10px]"></i>All Courses & Batches · {{ $totalCount }} members total</span>
                     @elseif($isCourseRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-users-between-lines text-[10px]"></i>All Batch Years · {{ $totalCount }} alumni total</span>
+                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-users-between-lines text-[10px]"></i>All Batch Years · {{ $totalCount }} members total</span>
                     @else
                     <span class="text-white/60 text-xs font-semibold">{{ strtoupper($room['course_code']) }} · Batch {{ $room['batch'] }}</span>
                     @endif
@@ -1636,23 +1823,26 @@ new class extends Component {
 
                 {{-- Message list --}}
                 <div id="msg-list"
-                     class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 bg-[#fafafa]"
+                     class="flex-1 overflow-y-auto px-4 py-4 bg-[#fafafa]"
                      x-data
                      x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
-                     @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })">
+                     @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
+                     @click="$wire.closeReactionsPopup()">
 
                     @php
                         $prevDate    = null;
                         $prevSendKey = null;
+                        $lastIdx     = count($messages) - 1;
                     @endphp
 
-                    @forelse($messages as $msg)
+                    @forelse($messages as $msgIdx => $msg)
                         @php
                             $dateChanged = $msg['date'] !== $prevDate;
                             $senderKey   = $msg['sender_type'] . $msg['sender_id'];
                             $sameGroup   = ! $dateChanged && $senderKey === $prevSendKey;
                             $prevDate    = $msg['date'];
                             $prevSendKey = $senderKey;
+                            $isLast      = $msgIdx === $lastIdx;
 
                             if ($msg['is_mine']) {
                                 $bubbleBg  = 'background:#6b2490;';
@@ -1874,10 +2064,12 @@ new class extends Component {
                             </p>
                         </div>
                     @endforelse
+
+                    <div class="h-10"></div>
                 </div>
 
                 {{-- Typing indicator --}}
-                <div wire:poll.3000ms="refreshTyping" class="flex-shrink-0">
+                <div class="flex-shrink-0">
                     @if(! empty($typingUsers))
                     <div class="flex items-center gap-2.5 px-4 py-2 bg-[#fafafa] border-t border-[#ddd3e8]">
                         <div class="flex items-end gap-0.5 h-4">
@@ -1973,13 +2165,13 @@ new class extends Component {
                         <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Staff Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($staffDirectors)+count($staffCoords) }})</span></p>
                     @elseif($isCollegeRoom)
                         <i class="fa-solid fa-school text-[#6b2490]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Alumni <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) + count($coordinators) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @elseif($isCourseRoom)
                         <i class="fa-solid fa-layer-group text-[#6b2490]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">All Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) + count($coordinators) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @else
                         <i class="fa-solid fa-user-group text-[#6b2490]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
+                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) + count($coordinators) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @endif
                     <button wire:click="{{ $showPins?'togglePins':'toggleMembers' }}" class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
                         <i class="fa-solid fa-xmark text-sm"></i>
@@ -2179,7 +2371,7 @@ new class extends Component {
     </div>
 
     @else
-    {{-- No room selected — default landing state --}}
+    {{-- No room selected --}}
     <div class="flex flex-1 items-center justify-center bg-[#fafafa]">
         <div class="flex flex-col items-center text-center px-8">
             <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f2e8f9]">

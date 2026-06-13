@@ -109,11 +109,6 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
-    //  Mirrors alumni sidebar exactly:
-    //  - 3s poll (same as chat Livewire poll)
-    //  - _saveCoordNotif does immediate fetch after DB write (no delay)
-    //  - coord-notif-refresh just re-fetches (no DB write, no wait)
-    //  - coord-message-received saves to DB then immediately re-fetches
     // ─────────────────────────────────────────────────────────────────────────
     window.__makeCoordNotifsStore = function () {
         return {
@@ -144,17 +139,28 @@
                 } catch (e) { /* silently fail */ }
             },
 
+            // ─── GROUP-BY-DAY (fixed — always shows latest timestamp) ──────
             _groupByDay(rows) {
                 var map = new Map();
+
+                // Sort newest first so we process latest records first
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
                     .forEach(function (n) {
-                        var day = n.created_at
-                            ? new Date(n.created_at).toISOString().slice(0, 10)
-                            : 'unknown';
                         var rawDedup = n.dedup_key || '';
+
+                        // ✅ Use updated_at if available and newer, otherwise created_at
+                        // This ensures the displayed timestamp is always the most recent activity
+                        var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
+                            ? n.updated_at
+                            : n.created_at;
+
+                        // Use the DATE portion of the most recent timestamp for day grouping
+                        var day = nTimestamp
+                            ? new Date(nTimestamp).toISOString().slice(0, 10)
+                            : 'unknown';
 
                         var isEmpEvent = (
                             rawDedup.startsWith('employment_update') ||
@@ -175,8 +181,8 @@
                             n.icon  === 'briefcase'
                         );
                         var isCalEvent = (
-                            rawDedup.startsWith('event-announced::')   ||
-                            rawDedup.startsWith('event-management::')  ||
+                            rawDedup.startsWith('event-announced::')  ||
+                            rawDedup.startsWith('event-management::') ||
                             n.icon  === 'calendar-check' ||
                             n.icon  === 'calendar'
                         );
@@ -188,7 +194,7 @@
                         );
 
                         var groupKey;
-                        if (isEmpEvent)         { groupKey = 'employment_day::' + day; }
+                        if      (isEmpEvent)    { groupKey = 'employment_day::' + day; }
                         else if (isMsgEvent)    { groupKey = 'message_day::' + day; }
                         else if (isJobEvent)    { groupKey = 'job_day::' + day; }
                         else if (isCalEvent)    { groupKey = 'calendar_day::' + day; }
@@ -197,9 +203,16 @@
 
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
-                            g.count = (g.count || 1) + (n.count || 1);
+                            g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
+
+                            // ✅ KEY FIX: Always keep the LATEST timestamp in the group.
+                            // Since rows are sorted newest-first, the first record inserted
+                            // already has the latest timestamp, but update if somehow newer.
+                            if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
+                                g.created_at = nTimestamp;
+                            }
 
                             if (isEmpEvent)         { g.message = g.count + ' employment update(s) today.';      g.title = 'Employment Status Updated'; }
                             else if (isMsgEvent)    { g.message = g.count + ' new message(s) today.';            g.title = g.count + ' New Messages'; }
@@ -207,9 +220,12 @@
                             else if (isCalEvent)    { g.message = g.count + ' new event(s) updated today.';      g.title = 'Event Management Update'; }
                             else if (isAlumniEvent) { g.message = g.count + ' alumni profile update(s) today.';  g.title = 'Alumni Updates'; }
                         } else {
+                            // ✅ First record for this group — use the latest timestamp
                             map.set(groupKey, Object.assign({}, n, {
-                                count: n.count || 1,
-                                _ids:  [n.id],
+                                count:     Number(n.count) || 1,
+                                _ids:      [n.id],
+                                // ✅ Store the most recent timestamp as created_at for display
+                                created_at: nTimestamp || n.created_at,
                                 title: isEmpEvent    ? 'Employment Status Updated'
                                      : isMsgEvent    ? (n.title || 'New Message')
                                      : isJobEvent    ? (n.title || 'New Job Posting')
@@ -411,8 +427,6 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  SIDEBAR SMART MARK-READ
-    //  Clicking a sidebar link marks only that route's notifs as read.
-    //  Does NOT clear red dots on chat rooms — those only clear on selectRoom().
     // ─────────────────────────────────────────────────────────────────────────
     window.__coordSidebarNotifsMarkRead = function (routeName) {
         var s = window.__safeCoordNotifsStore();
@@ -422,21 +436,6 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  NOTIFICATION EVENT LISTENERS
-    //
-    //  KEY DIFFERENCE vs old version — mirrors alumni pattern exactly:
-    //
-    //  coord-message-received:
-    //    The Livewire PHP component now writes the coordinator notification
-    //    DIRECTLY to the DB (coordinator_notifications table) server-side
-    //    inside checkAndDispatchNewMessageNotifications(). It then dispatches
-    //    'coord-notif-refresh' — which just tells the JS store to re-fetch.
-    //    No JS-side DB write needed for chat messages.
-    //    The _saveCoordNotif() function below is kept only for non-chat events
-    //    (job updates, employment, events) that still come from JS dispatches.
-    //
-    //  coord-notif-refresh:
-    //    Just re-fetches the store. Same as alumni-notif-refresh.
-    //    Bell badge updates immediately without any extra DB round-trip.
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstCoordNotifListeners) {
         window.__philcstCoordNotifListeners = true;
@@ -448,7 +447,6 @@
             return d[0] || {};
         }
 
-        // Used only for non-chat events (job, employment, event updates)
         async function _saveCoordNotif(payload) {
             try {
                 await window.fetch('/coordinator/notifications', {
@@ -460,7 +458,7 @@
                     },
                     body: JSON.stringify(payload),
                 });
-                // Mirror alumni: small wait then fetch
+                // ✅ Wait a bit then re-fetch so the panel shows updated timestamp immediately
                 await new Promise(function (r) { setTimeout(r, 300); });
                 var s = window.__safeCoordNotifsStore();
                 if (s) await s._fetch();
@@ -507,10 +505,7 @@
             });
         });
 
-        // ── CHAT MESSAGE NOTIFS ──────────────────────────────────────────────
-        // The PHP component writes to DB directly (same as alumni notifyAlumniInRoom).
-        // This JS listener just re-fetches the store so bell updates instantly.
-        // No DB write here — avoids double-write and JS-side delay.
+        // coord-notif-refresh: just re-fetch the store — no DB write
         window.addEventListener('coord-notif-refresh', function () {
             var s = window.__safeCoordNotifsStore();
             if (s) {
@@ -522,10 +517,7 @@
             }
         });
 
-        // ── FALLBACK ONLY ────────────────────────────────────────────────────
-        // coord-message-received is now only dispatched as a fallback if the
-        // PHP DB write fails. In normal operation, coord-notif-refresh fires
-        // instead. This keeps backward compat if something goes wrong server-side.
+        // Fallback only — normally the PHP poller writes to DB directly
         window.addEventListener('coord-message-received', function (e) {
             var d = _coordDetail(e);
             var sender = d.sender || 'Someone';
@@ -543,7 +535,7 @@
                 message:    msgText,
                 link_route: 'organizer.chat/alumni',
                 link_label: 'Open Messages',
-                dedup_key:  'message-received::' + room + '::' + Math.floor(Date.now() / 60000),
+                dedup_key:  'message-received::fallback::' + Math.floor(Date.now() / 60000),
             });
         });
 
@@ -711,6 +703,12 @@
                 </a>
             @endforeach
         </nav>
+
+        {{-- ══ BACKGROUND NOTIF POLLER ══ --}}
+        {{-- Invisible Livewire component — polls every 3s on ALL pages --}}
+        {{-- Detects new chat messages and writes to coordinator_notifications --}}
+        {{-- even when the organizer is NOT on the chat page --}}
+        @livewire('organizer.coord-notif-poller')
 
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">

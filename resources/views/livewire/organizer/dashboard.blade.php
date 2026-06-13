@@ -396,29 +396,22 @@ new class extends Component {
                     $initials = collect(explode(' ', $this->organizerName))
                         ->filter()->take(2)->map(fn($w) => strtoupper($w[0]))->implode('');
                     $profilePhoto = $this->organizerProfilePhoto;
+                    $defaultOrgPhoto = asset('storage/alumni-photos/default.png');
                 @endphp
                 <div class="px-4 py-4 shrink-0 flex items-center gap-3"
                      style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
 
                     {{--
-                        FIX: Always render the <img> tag when we have a photo URL.
-                        Use onerror to fall back to the initials span gracefully.
+                        FIX: Always render the <img> tag. Use the actual profile photo
+                        if available, otherwise fall back to the default profile image.
                         The img has display:block inside .org-avatar so it fills properly.
                     --}}
                     <div class="org-avatar">
-                        @if($profilePhoto)
-                            <img src="{{ $profilePhoto }}"
-                                 alt="{{ $this->organizerName }}"
-                                 loading="eager"
-                                 decoding="async"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                            {{-- Hidden initials fallback (shown by onerror) --}}
-                            <span style="display:none; width:100%; height:100%; align-items:center; justify-content:center; font-size:1.15rem; font-weight:700; color:#fff;">
-                                {{ $initials ?: 'OR' }}
-                            </span>
-                        @else
-                            {{ $initials ?: 'OR' }}
-                        @endif
+                        <img src="{{ $profilePhoto ?: $defaultOrgPhoto }}"
+                             alt="{{ $this->organizerName }}"
+                             loading="eager"
+                             decoding="async"
+                             onerror="this.onerror=null; this.src='{{ $defaultOrgPhoto }}';">
                     </div>
 
                     <div class="min-w-0">

@@ -88,7 +88,7 @@
     </style>
     <script>
     // ─────────────────────────────────────────────────────────────────────────
-    //  ROUTE MAP — centralized so both notif-click and sidebar use the same map
+    //  ROUTE MAP
     // ─────────────────────────────────────────────────────────────────────────
     window.__registrarRouteMap = {
         'registrar.alumni':              '/registrar/alumni',
@@ -98,7 +98,7 @@
     };
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  STORE FACTORY — fresh object every call, no shared-reference bugs
+    //  STORE FACTORY
     // ─────────────────────────────────────────────────────────────────────────
     window.__makeNotifsStore = function () {
         return {
@@ -121,74 +121,126 @@
                     });
                     if (res.ok) {
                         var raw = await res.json();
+                        // ✅ Always replace items with fresh grouped data from server
                         this.items = this._groupByDay(raw);
                     }
                 } catch (e) { /* silently fail */ }
             },
+
+            // ─── GROUP-BY-DAY ──────────────────────────────────────────────────
             _groupByDay(rows) {
                 var map = new Map();
+
+                // Sort newest first so we process latest records first
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
                     .forEach(function (n) {
-                        var day = n.created_at
-                            ? new Date(n.created_at).toISOString().slice(0, 10)
-                            : 'unknown';
                         var rawDedup = n.dedup_key || '';
+
+                        // ✅ Use updated_at if available and newer, otherwise created_at
+                        // This ensures the displayed timestamp is always the most recent activity
+                        var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
+                            ? n.updated_at
+                            : n.created_at;
+
+                        // Use the DATE portion of the most recent timestamp for day grouping
+                        var day = nTimestamp
+                            ? new Date(nTimestamp).toISOString().slice(0, 10)
+                            : 'unknown';
+
                         var isEmpEvent = (
-                            rawDedup.startsWith('employment::') ||
-                            rawDedup.startsWith('recorded::')   ||
-                            rawDedup.startsWith('updated::')    ||
-                            rawDedup === 'employment_update'    ||
-                            n.title === 'Employment Status Updated' ||
-                            n.title === 'New Employment Record'
+                            rawDedup.startsWith('employment_update') ||
+                            rawDedup.startsWith('employment::')      ||
+                            rawDedup.startsWith('recorded::')        ||
+                            rawDedup.startsWith('updated::')         ||
+                            n.title === 'Employment Status Updated'  ||
+                            n.title === 'New Employment Record'      ||
+                            n.icon  === 'arrow-rotate-right'
                         );
-                        var isChatMsg = rawDedup.startsWith('chat_msg::');
+                        var isChatMsg = (
+                            rawDedup.startsWith('chat_msg::') ||
+                            n.icon === 'comment-dots'
+                        );
+                        var isAlumniEvent = (
+                            rawDedup === 'registered' ||
+                            n.title  === 'New Alumni Registered'
+                        );
+                        var isImportEvent = (
+                            rawDedup === 'imported' ||
+                            n.title  === 'Bulk Import Complete'
+                        );
 
                         var groupKey;
                         if (isEmpEvent) {
                             groupKey = 'employment_day::' + day;
                         } else if (isChatMsg) {
-                            groupKey = rawDedup + '::' + day;
+                            var roomSlug = rawDedup.replace('chat_msg::', '') || 'chat';
+                            groupKey = 'chat_msg::' + roomSlug + '::' + day;
+                        } else if (isAlumniEvent) {
+                            groupKey = 'alumni_registered::' + day;
+                        } else if (isImportEvent) {
+                            groupKey = 'alumni_imported::' + day;
                         } else {
                             groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
                         }
 
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
-                            g.count = (g.count || 1) + (n.count || 1);
+                            g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
+
+                            // ✅ KEY FIX: Always keep the LATEST timestamp in the group
+                            // Since rows are sorted newest-first, the first record inserted
+                            // into the group already has the latest timestamp.
+                            // But if this incoming record is somehow newer, update it.
+                            if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
+                                g.created_at = nTimestamp;
+                            }
+
                             if (isEmpEvent) {
                                 g.message = g.count + ' employment status update(s) today.';
                                 g.title   = 'Employment Status Updated';
                             } else if (isChatMsg) {
-                                g.message = g.count + ' new message(s) in ' + (g._roomName || 'group chat') + '.';
+                                var rName = g._roomName || 'group chat';
+                                g.message = g.count + ' new message(s) in ' + rName + '.';
+                            } else if (isAlumniEvent) {
+                                g.message = g.count + ' new alumni registered today.';
+                                g.title   = 'New Alumni Registered';
+                            } else if (isImportEvent) {
+                                g.message = g.count + ' alumni record(s) imported today.';
+                                g.title   = 'Bulk Import Complete';
                             }
                         } else {
+                            // ✅ First record for this group — use the latest timestamp
                             map.set(groupKey, Object.assign({}, n, {
-                                count:      n.count || 1,
+                                count:      Number(n.count) || 1,
                                 _ids:       [n.id],
                                 _roomName:  n._roomName || '',
-                                title:      isEmpEvent ? 'Employment Status Updated'
-                                          : isChatMsg  ? (n.title || 'New Chat Message')
-                                          : n.title,
-                                icon:       isEmpEvent ? 'arrow-rotate-right'
-                                          : isChatMsg  ? 'comment-dots'
-                                          : (n.icon || 'bell'),
+                                // ✅ Store the most recent timestamp as created_at for display
+                                created_at: nTimestamp || n.created_at,
+                                title: isEmpEvent    ? 'Employment Status Updated'
+                                     : isChatMsg     ? (n.title || 'New Chat Message')
+                                     : isAlumniEvent ? 'New Alumni Registered'
+                                     : isImportEvent ? 'Bulk Import Complete'
+                                     : n.title,
+                                icon: isEmpEvent    ? 'arrow-rotate-right'
+                                    : isChatMsg     ? 'comment-dots'
+                                    : (n.icon || 'bell'),
                             }));
                         }
                     });
                 return Array.from(map.values());
             },
+
             get unread() {
                 return this.items.filter(function (n) { return !n.read; }).length;
             },
             toggle() { this.open = !this.open; },
             close()  { this.open = false; },
 
-            // ── Mark a single grouped notif read (all its _ids) ───────────────
             async markRead(item) {
                 if (item.read) return;
                 item.read = true;
@@ -207,8 +259,6 @@
                 }
             },
 
-            // ── Mark ALL notifs read — used by bell panel "Mark all read" btn
-            //    AND by sidebar navigation clicks ──────────────────────────────
             async markAllRead() {
                 this.items.forEach(function (n) { n.read = true; });
                 try {
@@ -222,9 +272,6 @@
                 } catch (e) { /* ignore */ }
             },
 
-            // ── Mark only notifs that match a given link_route as read ────────
-            //    Called when a sidebar link is clicked so the red dot for that
-            //    section disappears without wiping unrelated notifications.
             async markReadByRoute(routeName) {
                 var matched = this.items.filter(function (n) {
                     return n.link_route === routeName && !n.read;
@@ -263,9 +310,6 @@
         return null;
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  INTERNAL BOOT HELPER
-    // ─────────────────────────────────────────────────────────────────────────
     window.__bootNotifsStore = function () {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         if (!Alpine.store('notifs')) {
@@ -278,16 +322,10 @@
         }
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PATH A — alpine:init
-    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:init', function () {
         Alpine.store('notifs', window.__makeNotifsStore());
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PATH B — alpine:initialized
-    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('alpine:initialized', function () {
         setTimeout(function () {
             var s = window.__safeNotifsStore();
@@ -295,9 +333,6 @@
         }, 0);
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PATH C — window load
-    // ─────────────────────────────────────────────────────────────────────────
     window.addEventListener('load', function () {
         var s = window.__safeNotifsStore();
         if (s) {
@@ -307,9 +342,6 @@
         }
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PATH D — livewire:navigated (wire:navigate SPA page swaps)
-    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
@@ -318,7 +350,6 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open  = false;
-                // NOTE: do NOT clear s.items here — we want notif history to persist
                 s.init();
             } else {
                 Alpine.store('notifs', window.__makeNotifsStore());
@@ -328,9 +359,6 @@
         }, 150);
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PATH E — IIFE IMMEDIATE BOOT
-    // ─────────────────────────────────────────────────────────────────────────
     ;(function immediateBootOnSpaNavigation() {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         var s = Alpine.store('notifs');
@@ -343,9 +371,6 @@
         }
     })();
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Re-fetch on tab focus
-    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') {
             var s = window.__safeNotifsStore();
@@ -379,9 +404,6 @@
         if (s && s.open) positionPanel();
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  CURSOR-FOLLOWING TOOLTIP
-    // ─────────────────────────────────────────────────────────────────────────
     document.addEventListener('mousemove', function (e) {
         var target = e.target;
         if (!target || typeof target.closest !== 'function') return;
@@ -395,27 +417,17 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  SIDEBAR SMART MARK-READ
-    //  When user clicks a sidebar link, mark as read only the notifs whose
-    //  link_route matches what they're navigating to.
-    //  Also handles "Alumni Records" covering both alumni + alumni.register.
     // ─────────────────────────────────────────────────────────────────────────
     window.__sidebarNotifsMarkRead = function (routeName) {
         var s = window.__safeNotifsStore();
         if (!s) return;
-
-        // Employment Tracking page clears employment notifs
-        // Alumni Records / Register Alumni page clears alumni notifs
         var routesToMark = [routeName];
-
-        // If going to alumni, also clear alumni.register notifs (same section)
         if (routeName === 'registrar.alumni') {
             routesToMark.push('registrar.alumni.register');
         }
-        // If going to alumni register, also clear alumni notifs
         if (routeName === 'registrar.alumni.register') {
             routesToMark.push('registrar.alumni');
         }
-
         routesToMark.forEach(function (r) {
             s.markReadByRoute(r);
         });
@@ -426,6 +438,7 @@
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstNotifListeners) {
         window.__philcstNotifListeners = true;
+
         function _detail(e) {
             var d = e.detail;
             if (!d) return {};
@@ -435,6 +448,7 @@
             var map = { employed: 'Employed', self_employed: 'Self-Employed', unemployed: 'Unemployed' };
             return map[raw] || (raw ? raw.replace(/_/g, ' ') : 'N/A');
         }
+
         async function _saveNotif(payload) {
             try {
                 await window.fetch('/registrar/notifications', {
@@ -446,6 +460,7 @@
                     },
                     body: JSON.stringify(payload),
                 });
+                // ✅ Wait a bit then re-fetch so the panel shows updated timestamp immediately
                 await new Promise(function (r) { setTimeout(r, 300); });
                 var s = window.__safeNotifsStore();
                 if (s) await s._fetch();
@@ -467,6 +482,7 @@
                 dedup_key:  'registered',
             });
         });
+
         window.addEventListener('alumni-imported', function (e) {
             var d = _detail(e);
             _saveNotif({
@@ -478,37 +494,37 @@
                 dedup_key:  'imported',
             });
         });
+
         window.addEventListener('employment-recorded', function (e) {
-            var d      = _detail(e);
-            var status = d.status || 'unknown';
+            var today = new Date().toISOString().slice(0, 10);
             _saveNotif({
                 icon:       'arrow-rotate-right',
                 title:      'Employment Status Updated',
-                message:    (d.name || 'An alumni') + ' submitted their employment record as ' + _statusLabel(status) + '.',
+                message:    'An alumni submitted a new employment record.',
                 link_route: 'registrar.employment.tracking',
                 link_label: 'View Tracking',
-                dedup_key:  'employment_update',
+                dedup_key:  'employment_update::' + today,
             });
         });
+
         window.addEventListener('employment-updated', function (e) {
-            var d      = _detail(e);
-            var status = d.status || 'unknown';
-            var from   = d.old_status ? ' from ' + _statusLabel(d.old_status) : '';
+            var today = new Date().toISOString().slice(0, 10);
             _saveNotif({
                 icon:       'arrow-rotate-right',
                 title:      'Employment Status Updated',
-                message:    (d.name || 'An alumni') + ' updated their employment status' + from + ' to ' + _statusLabel(status) + '.',
+                message:    'An alumni updated their employment status.',
                 link_route: 'registrar.employment.tracking',
                 link_label: 'View Tracking',
-                dedup_key:  'employment_update',
+                dedup_key:  'employment_update::' + today,
             });
         });
+
         window.addEventListener('message-received', function (e) {
             var d = _detail(e);
             var sender   = d.sender  || 'Someone';
             var roomName = d.room    || 'Group Chat';
             var bodySnip = d.body    || '';
-            var count    = d.count   || 1;
+            var count    = Number(d.count) || 1;
             if (bodySnip.length > 60) bodySnip = bodySnip.substring(0, 57) + '…';
             var message = count > 1
                 ? sender + ' and others sent ' + count + ' new message(s) in ' + roomName + '.'
@@ -551,7 +567,6 @@
 
         {{-- Sidebar Header --}}
         <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
-            {{-- Branding --}}
             <div class="text-left min-w-0 flex-1 pr-2">
                 <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
                     Registrar<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
@@ -609,11 +624,6 @@
             @endphp
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->routeIs($link['route']); @endphp
-                {{--
-                    FIX: On click, call __sidebarNotifsMarkRead(routeName) BEFORE navigating.
-                    This marks matching notifs as read (removes red dot) but keeps the
-                    notification text/history intact in the DB and panel.
-                --}}
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}')"
@@ -732,7 +742,6 @@
                 Mark all read
             </button>
 
-            {{-- ── Close button with tooltip ── --}}
             <div class="notif-close-wrap ml-1">
                 <span class="notif-close-tip">Close</span>
                 <button type="button"
@@ -791,15 +800,51 @@
                                 <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
-                                {{-- Count badge --}}
+
                                 <span
-                                    x-show="notif.count > 1"
+                                    x-show="Number(notif.count) > 1"
                                     x-cloak
                                     class="inline-flex items-center justify-center
                                            min-w-[22px] h-5 rounded-full px-1.5
                                            text-[10px] font-black text-white leading-none"
                                     style="background:#7A3F91;"
-                                    x-text="'×' + notif.count">
+                                    x-text="'×' + Number(notif.count)">
+                                </span>
+
+                                <span
+                                    x-show="notif.icon === 'arrow-rotate-right' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    EMPLOYMENT
+                                </span>
+
+                                <span
+                                    x-show="notif.icon === 'user-graduate' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                    NEW ALUMNI
+                                </span>
+
+                                <span
+                                    x-show="notif.icon === 'file-import' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    IMPORT
+                                </span>
+
+                                <span
+                                    x-show="notif.icon === 'comment-dots' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                    NEW MSG
                                 </span>
                             </div>
                             <span x-show="!notif.read" x-cloak
@@ -815,13 +860,15 @@
                                   overflow:hidden;"
                            x-text="notif.message">
                         </p>
+
+                        {{-- Timestamp --}}
                         <div class="flex items-center gap-1 mt-2">
                             <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
                             <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
                                   x-text="notif.created_at
-                                      ? new Date(notif.created_at).toLocaleString('en-PH',{
-                                          month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit'
+                                      ? new Date(notif.created_at).toLocaleString('en-PH', {
+                                          month: 'short', day: 'numeric', year: 'numeric',
+                                          hour: '2-digit', minute: '2-digit'
                                         })
                                       : ''">
                             </span>
@@ -845,7 +892,7 @@
 
 @livewireScripts
 
-{{-- ✅ CLOSE ON OUTSIDE CLICK --}}
+{{-- CLOSE ON OUTSIDE CLICK --}}
 <div
     x-data
     x-show="$store.notifs && $store.notifs.open"
