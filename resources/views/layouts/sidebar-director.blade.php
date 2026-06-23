@@ -95,9 +95,6 @@
     </style>
 
     <script>
-    // ─────────────────────────────────────────────────────────────────────────
-    //  ROUTE MAP
-    // ─────────────────────────────────────────────────────────────────────────
     window.__dirRouteMap = {
         'director.dashboard':              '/director/dashboard',
         'director.coordinator/management': '/director/coordinator/management',
@@ -106,9 +103,6 @@
         'director.director/messenger':     '/director/messenger',
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  STORE FACTORY
-    // ─────────────────────────────────────────────────────────────────────────
     window.__makeDirNotifsStore = function () {
         return {
             open:       false,
@@ -135,11 +129,12 @@
                         var raw = await res.json();
                         this.items = this._groupByDay(raw);
                     }
-                } catch (e) { /* silently fail */ }
+                } catch (e) {}
             },
 
             _groupByDay(rows) {
                 var map = new Map();
+
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
@@ -150,70 +145,106 @@
                             : 'unknown';
                         var rawDedup = n.dedup_key || '';
 
-                        var isCoordEvent = (
-                            rawDedup.startsWith('coordinator::') ||
-                            n.icon === 'users-gear'
-                        );
-                        var isCalEvent = (
-                            rawDedup.startsWith('event-management::') ||
-                            rawDedup.startsWith('event-announced::')  ||
-                            n.icon === 'calendar-check' ||
-                            n.icon === 'calendar'
-                        );
-                        var isJobEvent = (
-                            rawDedup.startsWith('job-posted::')     ||
-                            rawDedup.startsWith('job-management::') ||
-                            n.icon === 'briefcase'
-                        );
-                        var isMsgEvent = (
-                            rawDedup.startsWith('message-received::') ||
-                            n.icon === 'comments'
-                        );
-                        var isAlumniEvent = (
-                            rawDedup.startsWith('alumni-registered::') ||
-                            rawDedup.startsWith('profile-updated::')   ||
-                            n.icon === 'user-group' ||
-                            n.icon === 'user-plus'
-                        );
+                        // ── Self-action keys (never collapse) ──
+                        var isJobSelfEvent      = rawDedup.indexOf('job-self::') === 0;
+                        var isCoordSelfEvent    = rawDedup.indexOf('coordinator-self::') === 0;
 
+                        // ── Event submit/resubmit: each gets its OWN bucket ──
+                        var isEventSubmit       = rawDedup.startsWith('event-submitted::');
+                        var isEventResubmit     = rawDedup.startsWith('event-resubmitted::');
+
+                        // ── Group buckets ──
+                        var isCoordEvent  = !isCoordSelfEvent && (rawDedup.startsWith('coordinator::') || n.icon === 'users-gear');
+                        var isCalEvent    = !isEventSubmit && !isEventResubmit && (
+                                                rawDedup.startsWith('event-management::') ||
+                                                rawDedup.startsWith('event-announced::') ||
+                                                n.icon === 'calendar-check' ||
+                                                n.icon === 'calendar'
+                                            );
+                        var isJobEvent    = !isJobSelfEvent && (rawDedup.startsWith('job-posted::') || rawDedup.startsWith('job-management::') || n.icon === 'briefcase');
+                        var isMsgEvent    = rawDedup.startsWith('message-received::') || n.icon === 'comments';
+                        var isAlumniEvent = rawDedup.startsWith('alumni-registered::') || rawDedup.startsWith('profile-updated::') || n.icon === 'user-group' || n.icon === 'user-plus';
+
+                        // ── Determine group key ──
                         var groupKey;
-                        if (isCoordEvent)  { groupKey = 'coordinator_day::' + day; }
-                        else if (isCalEvent)   { groupKey = 'calendar_day::' + day; }
-                        else if (isJobEvent)   { groupKey = 'job_day::' + day; }
-                        else if (isMsgEvent)   { groupKey = 'message_day::' + day; }
-                        else if (isAlumniEvent){ groupKey = 'alumni_day::' + day; }
+                        if      (isJobSelfEvent)   { groupKey = rawDedup; }
+                        else if (isCoordSelfEvent) { groupKey = rawDedup; }
+                        else if (isEventSubmit)    { groupKey = rawDedup; }
+                        else if (isEventResubmit)  { groupKey = rawDedup; }
+                        else if (isCoordEvent)     { groupKey = 'coordinator_day::' + day; }
+                        else if (isCalEvent)       { groupKey = 'calendar_day::' + day; }
+                        else if (isJobEvent)       { groupKey = 'job_day::' + day; }
+                        else if (isMsgEvent)       { groupKey = 'message_day::' + day; }
+                        else if (isAlumniEvent)    { groupKey = 'alumni_day::' + day; }
                         else { groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id); }
+
+                        var rowCount = Number(n.count) || 1;
 
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
-                            g.count = (g.count || 1) + (n.count || 1);
-                            if (!n.read) g.read = false;
-                            g._ids.push(n.id);
 
-                            if (isCoordEvent)  { g.message = g.count + ' coordinator update(s) today.';    g.title = 'Coordinator Updates'; }
-                            else if (isCalEvent)   { g.message = g.count + ' event update(s) today.';          g.title = 'Event Management Update'; }
-                            else if (isJobEvent)   { g.message = g.count + ' job posting update(s) today.';    g.title = 'Job Posting Update'; }
-                            else if (isMsgEvent)   { g.message = g.count + ' new message(s) today.';           g.title = g.count + ' New Messages'; }
-                            else if (isAlumniEvent){ g.message = g.count + ' alumni update(s) today.';         g.title = 'Alumni Updates'; }
+                            g.count = (g.count || 1) + rowCount;
+
+                            if (!n.read) g.read = false;
+
+                            if (Array.isArray(n._ids)) {
+                                g._ids = g._ids.concat(n._ids);
+                            } else {
+                                g._ids.push(n.id);
+                            }
+
+                            // ── Update title & message per group type ──
+                            if (isJobSelfEvent || isCoordSelfEvent || isEventSubmit || isEventResubmit) {
+                                // Never overwrite — each is its own independent notif
+                                g.title   = n.title   || g.title;
+                                g.message = n.message || g.message;
+                            } else if (isCoordEvent) {
+                                g.title   = 'Coordinator Updates';
+                                g.message = g.count + ' coordinator update(s) today.';
+                            } else if (isCalEvent) {
+                                g.title   = 'Event Management Update';
+                                g.message = g.count + ' event update(s) today.';
+                            } else if (isJobEvent) {
+                                g.title   = 'Job Posting Update';
+                                g.message = g.count + ' job posting update(s) today.';
+                            } else if (isMsgEvent) {
+                                g.title   = g.count + ' New Messages';
+                                g.message = n.message || g.message;
+                            } else if (isAlumniEvent) {
+                                g.title   = 'Alumni Updates';
+                                g.message = g.count + ' alumni update(s) today.';
+                            }
+
                         } else {
-                            map.set(groupKey, Object.assign({}, n, {
-                                count: n.count || 1,
-                                _ids:  [n.id],
-                                title: isCoordEvent  ? (n.title || 'Coordinator Update')
+                            // ── First occurrence — seed from DB row ──
+                            var entry = Object.assign({}, n, {
+                                count: rowCount,
+                                _ids:  Array.isArray(n._ids) ? n._ids.slice() : [n.id],
+                                title: (isJobSelfEvent || isCoordSelfEvent || isEventSubmit || isEventResubmit)
+                                    ? (n.title || (isEventSubmit
+                                        ? 'New Event for Review'
+                                        : isEventResubmit
+                                        ? 'Event Resubmitted for Review'
+                                        : isCoordSelfEvent ? 'Coordinator Update' : 'Job Update'))
+                                    : isMsgEvent
+                                    ? (rowCount > 1 ? rowCount + ' New Messages' : (n.title || 'New Message'))
+                                    : (isCoordEvent  ? (n.title || 'Coordinator Update')
                                      : isCalEvent    ? (n.title || 'Event Management Update')
                                      : isJobEvent    ? (n.title || 'Job Posting Update')
-                                     : isMsgEvent    ? (n.title || 'New Message')
                                      : isAlumniEvent ? (n.title || 'Alumni Update')
-                                     : n.title,
-                                icon:  isCoordEvent  ? 'users-gear'
-                                     : isCalEvent    ? 'calendar-check'
-                                     : isJobEvent    ? 'briefcase'
-                                     : isMsgEvent    ? 'comments'
-                                     : isAlumniEvent ? 'user-group'
-                                     : (n.icon || 'bell'),
-                            }));
+                                     : n.title),
+                                icon: (isCoordEvent || isCoordSelfEvent) ? 'users-gear'
+                                    : (isEventSubmit || isEventResubmit) ? 'calendar-days'
+                                    : isCalEvent    ? 'calendar-check'
+                                    : (isJobEvent || isJobSelfEvent) ? 'briefcase'
+                                    : isMsgEvent    ? 'comments'
+                                    : isAlumniEvent ? 'user-group'
+                                    : (n.icon || 'bell'),
+                            });
+                            map.set(groupKey, entry);
                         }
                     });
+
                 return Array.from(map.values());
             },
 
@@ -238,7 +269,7 @@
                                 'X-Requested-With': 'XMLHttpRequest',
                             }
                         });
-                    } catch (e) { /* ignore */ }
+                    } catch (e) {}
                 }
             },
 
@@ -252,7 +283,7 @@
                             'X-Requested-With': 'XMLHttpRequest',
                         }
                     });
-                } catch (e) { /* ignore */ }
+                } catch (e) {}
             },
 
             async markReadByRoute(routeName) {
@@ -273,16 +304,13 @@
                                     'X-Requested-With': 'XMLHttpRequest',
                                 }
                             });
-                        } catch (e) { /* ignore */ }
+                        } catch (e) {}
                     }
                 }
             },
         };
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  SAFE ACCESSOR
-    // ─────────────────────────────────────────────────────────────────────────
     window.__safeDirNotifsStore = function () {
         try {
             if (window.Alpine && typeof Alpine.store === 'function') {
@@ -322,7 +350,7 @@
         else    { window.__bootDirNotifsStore(); }
     });
 
-    // PATH D — livewire:navigated
+    // PATH D
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
@@ -340,7 +368,7 @@
         }, 150);
     });
 
-    // PATH E — IIFE
+    // PATH E
     ;(function () {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         var s = Alpine.store('dirNotifs');
@@ -359,9 +387,18 @@
         }
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PANEL POSITIONING
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── dir-notif-refresh listener (fired by Livewire dispatch) ──
+    document.addEventListener('dir-notif-refresh', function () {
+        var s = window.__safeDirNotifsStore();
+        if (s) {
+            s._fetch();
+            setTimeout(function () {
+                var s2 = window.__safeDirNotifsStore();
+                if (s2) s2._fetch();
+            }, 800);
+        }
+    });
+
     function positionDirPanel() {
         var btn   = document.getElementById('dir-bell-btn');
         var panel = document.getElementById('dir-notif-panel');
@@ -386,7 +423,6 @@
         if (s && s.open) positionDirPanel();
     });
 
-    // Cursor-following tooltip
     document.addEventListener('mousemove', function (e) {
         var target = e.target;
         if (!target || typeof target.closest !== 'function') return;
@@ -398,18 +434,12 @@
         label.style.top  = (e.clientY + 14) + 'px';
     });
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  SIDEBAR SMART MARK-READ
-    // ─────────────────────────────────────────────────────────────────────────
     window.__dirSidebarNotifsMarkRead = function (routeName) {
         var s = window.__safeDirNotifsStore();
         if (!s) return;
         s.markReadByRoute(routeName);
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  NOTIFICATION EVENT LISTENERS
-    // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstDirNotifListeners) {
         window.__philcstDirNotifListeners = true;
 
@@ -438,18 +468,35 @@
                     var s2 = window.__safeDirNotifsStore();
                     if (s2) await s2._fetch();
                 }, 600);
-            } catch (e) { /* ignore */ }
+            } catch (e) {}
         }
 
         window.addEventListener('dir-coordinator-updated', function (e) {
-            var d = _dirDetail(e);
+            var d      = _dirDetail(e);
+            var name   = d.name   || 'A coordinator';
+            var action = d.action || 'updated';
+            var id     = d.id     || Math.floor(Date.now() / 60000);
+
+            var titleMap = {
+                created:       'New Coordinator Registered',
+                activated:     'Coordinator Activated',
+                deactivated:   'Coordinator Deactivated',
+                email_updated: 'Coordinator Email Updated',
+            };
+            var msgMap = {
+                created:       name + ' has been registered as a new coordinator.',
+                activated:     name + ' has been activated.',
+                deactivated:   name + ' has been deactivated.',
+                email_updated: name + "'s email address has been updated.",
+            };
+
             _saveDirNotif({
                 icon:       'users-gear',
-                title:      'Coordinator Update',
-                message:    (d.name || 'A coordinator') + ' account has been updated.',
+                title:      titleMap[action] || ('Coordinator ' + action),
+                message:    msgMap[action]   || (name + ' account has been updated.'),
                 link_route: 'director.coordinator/management',
                 link_label: 'View Coordinators',
-                dedup_key:  'coordinator::' + (d.id || Math.floor(Date.now() / 60000)),
+                dedup_key:  'coordinator-self::' + id + '::' + action + '::' + Math.floor(Date.now() / 60000),
             });
         });
 
@@ -515,10 +562,6 @@
     class="antialiased"
     x-data="{ open: false }"
     @click="$store.dirNotifs && $store.dirNotifs.open && $store.dirNotifs.close()">
-
-@php
-    $authDirector = auth()->user()?->director;
-@endphp
 
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
@@ -592,40 +635,6 @@
                 <i class="fa-solid fa-circle-xmark text-xl"></i>
             </button>
         </div>
-
-        {{-- Director info card --}}
-        @if($authDirector)
-        <div class="mx-4 mt-5 mb-1 rounded-xl p-4 border"
-             style="background: linear-gradient(135deg, rgba(122,63,145,0.07), rgba(122,63,145,0.03)); border-color: rgba(122,63,145,0.2);">
-            <div class="flex items-center gap-3">
-                <div class="w-11 h-11 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-md"
-                     style="background: linear-gradient(135deg, #7A3F91, #6a3080); color: white;">
-                    {{ strtoupper(substr($authDirector->name, 0, 1)) }}
-                </div>
-                <div class="min-w-0">
-                    <p class="text-sm font-bold text-[#333333] truncate leading-tight">
-                        {{ $authDirector->name }}
-                    </p>
-                    <p class="text-[11px] text-[#666666] truncate">
-                        {{ $authDirector->department ?? 'Alumni Director' }}
-                    </p>
-                </div>
-            </div>
-            <div class="mt-3 flex items-center gap-2 flex-wrap text-[10px]">
-                @if($authDirector->status === 'ACTIVE')
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(5, 150, 105, 0.1); color: #059669;">
-                        <i class="fa-solid fa-circle-check text-[8px]"></i> Active
-                    </span>
-                @elseif($authDirector->status === 'INACTIVE')
-                    <span class="inline-flex items-center gap-1 font-bold uppercase tracking-widest px-2.5 py-1.5 rounded-lg"
-                          style="background: rgba(107, 114, 128, 0.1); color: #6B7280;">
-                        <i class="fa-solid fa-circle text-[8px]"></i> Inactive
-                    </span>
-                @endif
-            </div>
-        </div>
-        @endif
 
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
@@ -738,9 +747,7 @@
 
 </div>
 
-{{-- ══════════════════════════════════════════════════════════════════════════
-     DIRECTOR NOTIFICATION PANEL
-════════════════════════════════════════════════════════════════════════════ --}}
+{{-- ══ NOTIFICATION PANEL ══ --}}
 <div
     id="dir-notif-panel"
     x-show="$store.dirNotifs && $store.dirNotifs.open"
@@ -801,7 +808,7 @@
         </div>
     </div>
 
-    {{-- Scrollable notification list --}}
+    {{-- Notification List --}}
     <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
         <template x-if="$store.dirNotifs && $store.dirNotifs.items.length === 0">
@@ -860,6 +867,16 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
+                                {{-- New Event badge --}}
+                                <span
+                                    x-show="(notif.icon === 'calendar-days') && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                    NEW EVENT
+                                </span>
+
                                 {{-- Coordinator badge --}}
                                 <span
                                     x-show="notif.icon === 'users-gear' && !notif.read"
@@ -867,7 +884,7 @@
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-                                    COORD
+                                    COORDINATOR
                                 </span>
 
                                 {{-- Event badge --}}
@@ -897,7 +914,7 @@
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-                                    MSG
+                                    MESSAGE
                                 </span>
 
                                 {{-- Alumni badge --}}
@@ -953,9 +970,10 @@
     </div>
 </div>
 
+<livewire:director.director-notif-poller />
+
 @livewireScripts
 
-{{-- CLOSE ON OUTSIDE CLICK --}}
 <div
     x-show="$store.dirNotifs && $store.dirNotifs.open"
     x-cloak

@@ -66,9 +66,11 @@ new class extends Component {
     public ?int   $pendingDeleteId   = null;
     public string $pendingDeleteTitle = '';
 
+    // ── Restore confirm modal (unified — future & past date) ──
     public bool   $showRestoreModal   = false;
     public ?int   $pendingRestoreId   = null;
     public string $pendingRestoreTitle = '';
+    public bool   $restoreDateIsPast  = false;   // true = past date → YES opens view details
 
     public bool   $showShareModal        = false;
     public ?int   $shareEventId          = null;
@@ -107,6 +109,7 @@ new class extends Component {
         }
     }
 
+    // ── Auto-ops: NO event-management-updated dispatch (no notif for auto events) ──
     private function autoRejectExpiredPendingEvents(): void
     {
         $orgId = Auth::user()?->organizer?->id;
@@ -129,9 +132,7 @@ new class extends Component {
                 'review_remarks' => 'Auto-rejected: event date has already passed without Alumni Director approval.',
             ]);
 
-        foreach ($affected as $e) {
-            $this->dispatch('event-management-updated', id: $e->id, title: $e->title, action: 'rejected');
-        }
+        // No dispatch — auto-ops do not generate notifs
     }
 
     private function autoCompleteExpiredEvents(): void
@@ -160,9 +161,7 @@ new class extends Component {
 
         $query()->update(['status' => 'COMPLETED']);
 
-        foreach ($affected as $e) {
-            $this->dispatch('event-management-updated', id: $e->id, title: $e->title, action: 'completed');
-        }
+        // No dispatch — auto-ops do not generate notifs
     }
 
     public function updatingSearch(): void       { $this->resetPage(); }
@@ -233,7 +232,7 @@ new class extends Component {
         if (!$orgId) abort(403);
 
         $q = OrganizerEvent::where('organizer_id', $orgId)
-            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED', 'DELETED']);
+            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED', 'ORGANIZER_DELETED']);
 
         if ($this->search !== '') {
             $s = trim($this->search);
@@ -243,7 +242,7 @@ new class extends Component {
             );
         }
 
-        if ($this->filterStatus !== '' && in_array($this->filterStatus, ['PENDING','APPROVED','REJECTED','COMPLETED','DELETED'], true)) {
+        if ($this->filterStatus !== '' && in_array($this->filterStatus, ['PENDING','APPROVED','REJECTED','COMPLETED','ORGANIZER_DELETED'], true)) {
             $q->where('status', $this->filterStatus);
         }
 
@@ -331,7 +330,7 @@ new class extends Component {
             return;
         }
 
-        if ($event->status === 'DELETED') {
+        if ($event->status === 'ORGANIZER_DELETED') {
             $this->isRestoring       = true;
             $this->restoreEventTitle = $event->title;
             $this->populateEditForm($event);
@@ -370,7 +369,7 @@ new class extends Component {
             return;
         }
 
-        if ($event->status === 'DELETED') {
+        if ($event->status === 'ORGANIZER_DELETED') {
             $this->isRestoring       = true;
             $this->restoreEventTitle = $event->title;
             $this->populateEditForm($event);
@@ -412,8 +411,13 @@ new class extends Component {
             ->where('status', 'PENDING')
             ->firstOrFail();
 
-        $event->status = 'DELETED';
-        $event->save();
+        $user = Auth::user();
+
+        $event->update([
+            'status'          => 'ORGANIZER_DELETED',
+            'deleted_by'      => $user?->name,
+            'deleted_by_role' => $user?->role ?? 'organizer',
+        ]);
 
         try {
             AuditLog::create([
@@ -432,7 +436,7 @@ new class extends Component {
             ]);
         } catch (\Throwable) {}
 
-        $this->dispatch('event-management-updated', id: $this->pendingDeleteId, title: $event->title, action: 'deleted');
+        // NO event-management-updated dispatch for delete
         $this->dispatch('flash-message', type: 'success', message: 'Event deleted. You can restore it anytime from the Deleted filter.');
 
         $this->showDeleteModal    = false;
@@ -440,16 +444,21 @@ new class extends Component {
         $this->pendingDeleteTitle = '';
     }
 
-    // ── Restore: open confirm modal ──
+    // ── Restore: unified confirm modal ──
+    //    Future date → YES = auto-restore to PENDING
+    //    Past date   → YES = open view details (so they can edit date)
     public function confirmRestore(int $id): void
     {
         $event = OrganizerEvent::where('id', $id)
             ->where('organizer_id', $this->organizerId)
-            ->where('status', 'DELETED')
+            ->where('status', 'ORGANIZER_DELETED')
             ->firstOrFail();
+
+        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
 
         $this->pendingRestoreId    = $id;
         $this->pendingRestoreTitle = $event->title;
+        $this->restoreDateIsPast   = ! $eventDatePH->isFuture();
         $this->showRestoreModal    = true;
     }
 
@@ -458,18 +467,62 @@ new class extends Component {
         $this->showRestoreModal    = false;
         $this->pendingRestoreId    = null;
         $this->pendingRestoreTitle = '';
+        $this->restoreDateIsPast   = false;
     }
 
     public function proceedRestore(): void
     {
         if (!$this->pendingRestoreId) return;
 
-        $this->showRestoreModal = false;
-        $id = $this->pendingRestoreId;
+        if ($this->restoreDateIsPast) {
+            // Past date → open view details so coordinator can edit date
+            $id = $this->pendingRestoreId;
+            $this->showRestoreModal    = false;
+            $this->pendingRestoreId    = null;
+            $this->pendingRestoreTitle = '';
+            $this->restoreDateIsPast   = false;
+            // Open view details (not edit form)
+            $this->viewingEventId = $id;
+            $this->showViewModal  = true;
+            return;
+        }
+
+        // Future date → auto-restore directly to PENDING
+        $event = OrganizerEvent::where('id', $this->pendingRestoreId)
+            ->where('organizer_id', $this->organizerId)
+            ->where('status', 'ORGANIZER_DELETED')
+            ->firstOrFail();
+
+        $event->update([
+            'status'         => 'PENDING',
+            'review_remarks' => null,
+            'reviewed_at'    => null,
+        ]);
+
+        try {
+            AuditLog::create([
+                'user_id'       => Auth::id(),
+                'user_name'     => Auth::user()?->name ?? 'Organizer',
+                'user_email'    => Auth::user()?->email,
+                'user_role'     => 'organizer',
+                'action'        => 'restored',
+                'module'        => 'event',
+                'subject_id'    => $this->pendingRestoreId,
+                'subject_label' => $event->title,
+                'description'   => "Organizer restored deleted event: '{$event->title}' — resubmitted for Alumni Director review.",
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+                'severity'      => 'info',
+            ]);
+        } catch (\Throwable) {}
+
+        // NO event-management-updated dispatch for restore
+        $this->dispatch('flash-message', type: 'success', message: 'Event restored and resubmitted for Alumni Director review!');
+
+        $this->showRestoreModal    = false;
         $this->pendingRestoreId    = null;
         $this->pendingRestoreTitle = '';
-
-        $this->viewEvent($id);
+        $this->restoreDateIsPast   = false;
     }
 
     public function resetForm(): void
@@ -683,11 +736,14 @@ new class extends Component {
         $ctrl  = app(OrganizerEventController::class);
         $photo = $this->photo;
 
+        // ── Determine which actions dispatch a notif ──
+        // ONLY 'updated' and 'resubmitted' dispatch — NOT 'created' or 'restored'
         $notifAction = $this->isRestoring
-            ? 'restored'
+            ? null                                      // restored → no notif
             : ($this->isResubmitting
-                ? 'resubmitted'
-                : ($this->isEditing ? 'updated' : 'created'));
+                ? 'resubmitted'                         // resubmitted → notif (optional)
+                : ($this->isEditing ? 'updated' : null) // updated → notif, created → NO notif
+            );
 
         if ($this->isEditing) {
             $event = OrganizerEvent::where('id', $this->editingEventId)
@@ -779,6 +835,7 @@ new class extends Component {
 
             $this->dispatch('flash-message', type: 'success', message: $msg);
         } else {
+            // CREATE — no notif dispatch
             $ctrl->createEvent($data, $photo ?: null);
 
             try {
@@ -807,8 +864,12 @@ new class extends Component {
             $this->dispatch('flash-message', type: 'success', message: 'Event submitted for Alumni Director review!');
         }
 
+        // Only dispatch event-management-updated for UPDATED action
+        // NOT for created, deleted, restored
         $savedEventId = $this->isEditing ? $this->editingEventId : null;
-        $this->dispatch('event-management-updated', id: $savedEventId, title: trim($this->title), action: $notifAction);
+        if ($notifAction !== null) {
+            $this->dispatch('event-management-updated', id: $savedEventId, title: trim($this->title), action: $notifAction);
+        }
 
         Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->showFormModal = false;
@@ -1125,7 +1186,7 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    {{-- ══ UNIFIED TABLE BLOCK — FIX #1: reduced to 75vh so it fits within screen ══ --}}
+    {{-- ══ UNIFIED TABLE BLOCK ══ --}}
     <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 75vh; max-height: 75vh; overflow: hidden;">
 
         {{-- ── FILTER BAR ── --}}
@@ -1154,7 +1215,7 @@ select.tw-select-arrow {
                 <option value="APPROVED">Approved</option>
                 <option value="REJECTED">Rejected</option>
                 <option value="COMPLETED">Completed</option>
-                <option value="DELETED">Deleted</option>
+                <option value="ORGANIZER_DELETED">Deleted</option>
             </select>
 
             @if($filterStatus)
@@ -1162,9 +1223,9 @@ select.tw-select-arrow {
                 $pillMap = [
                     'PENDING'   => ['label' => 'Pending',   'cls' => 'bg-yellow-50 border-yellow-300 text-yellow-800'],
                     'APPROVED'  => ['label' => 'Approved',  'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-red-50 border-red-300 text-red-800'],
+                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-orange-50 border-orange-300 text-orange-800'],
                     'COMPLETED' => ['label' => 'Completed', 'cls' => 'bg-green-50 border-green-300 text-green-800'],
-                    'DELETED'   => ['label' => 'Deleted',   'cls' => 'bg-gray-100 border-gray-300 text-gray-700'],
+                    'ORGANIZER_DELETED' => ['label' => 'Deleted', 'cls' => 'bg-red-50 border-red-300 text-red-700'],
                 ];
                 $pill = $pillMap[$filterStatus] ?? null;
             @endphp
@@ -1191,12 +1252,11 @@ select.tw-select-arrow {
             </button>
         </div>
 
-        {{-- ── TABLE WRAPPER — scrollable body, fixed header/pagination ── --}}
+        {{-- ── TABLE WRAPPER ── --}}
         <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
 
             @if($this->events->count() > 0)
 
-            {{-- Scrollable table area only --}}
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
                 <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
@@ -1216,7 +1276,7 @@ select.tw-select-arrow {
                             $isApproved  = $event->status === 'APPROVED';
                             $isPending   = $event->status === 'PENDING';
                             $isRejected  = $event->status === 'REJECTED';
-                            $isDeleted   = $event->status === 'DELETED';
+                            $isDeleted   = $event->status === 'ORGANIZER_DELETED';
 
                             $tp          = $event->target_participants ?? '';
                             $tpParts     = explode(' · Batch ', $tp, 2);
@@ -1227,7 +1287,7 @@ select.tw-select-arrow {
                             $rowNum     = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
                         @endphp
 
-                        <tr class="transition-colors duration-100 cursor-pointer {{ $isDeleted ? 'bg-gray-50 opacity-70 hover:opacity-100 hover:bg-gray-100' : 'bg-white hover:bg-[#f5f0fa]' }}"
+                        <tr class="transition-colors duration-100 cursor-pointer {{ $isDeleted ? 'bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60' : 'bg-white hover:bg-[#f5f0fa]' }}"
                             wire:click="viewEvent({{ $event->id }})"
                             wire:key="event-row-{{ $event->id }}"
                             data-eo-row>
@@ -1238,13 +1298,13 @@ select.tw-select-arrow {
 
                             <td class="px-4 py-3.5">
                                 <div class="max-w-[240px]">
-                                    <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isDeleted ? 'text-[#999999] line-through' : 'text-[#333333]' }}">{{ $event->title }}</p>
+                                    <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isDeleted ? 'text-red-400 line-through' : 'text-[#333333]' }}">{{ $event->title }}</p>
                                     <p class="text-xs mt-0.5 text-[#666666]">{{ $eventDate->diffForHumans() }}</p>
                                 </div>
                             </td>
 
                             <td class="px-4 py-3.5 hidden md:table-cell whitespace-nowrap">
-                                <p class="text-sm font-semibold {{ $isDeleted ? 'text-[#999999]' : 'text-[#333333]' }}">{{ $eventDate->format('M d, Y') }}</p>
+                                <p class="text-sm font-semibold {{ $isDeleted ? 'text-red-300' : 'text-[#333333]' }}">{{ $eventDate->format('M d, Y') }}</p>
                                 <p class="text-xs mt-0.5 text-[#555555]">
                                     {{ $eventDate->format('g:i A') }}
                                     @if($event->event_end_date)
@@ -1280,11 +1340,11 @@ select.tw-select-arrow {
                                         <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
                                     </span>
                                 @elseif($isDeleted)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-gray-300 bg-gray-100 text-gray-600 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-600 whitespace-nowrap">
                                         <i class="fas fa-trash-can text-[9px] mr-1"></i>Deleted
                                     </span>
                                 @else
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
                                         <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
                                     </span>
                                 @endif
@@ -1493,28 +1553,48 @@ select.tw-select-arrow {
 @endif
 
 
-{{-- ══ RESTORE CONFIRM MODAL ══ --}}
+{{-- ══ RESTORE CONFIRM MODAL ══
+     Future date → YES = auto-restore to PENDING
+     Past date   → YES = open view details (edit date from there)
+══ --}}
 @if($showRestoreModal)
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelRestore">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
-        <div class="px-6 py-4 border-b border-emerald-100 bg-emerald-50">
-            <h2 class="text-base font-semibold text-emerald-800 flex items-center gap-2.5">
-                <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-rotate-left text-emerald-600 text-sm"></i>
+
+        <div class="px-6 py-4 border-b {{ $restoreDateIsPast ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50' }}">
+            <h2 class="text-base font-semibold {{ $restoreDateIsPast ? 'text-amber-800' : 'text-emerald-800' }} flex items-center gap-2.5">
+                <div class="w-8 h-8 {{ $restoreDateIsPast ? 'bg-amber-100' : 'bg-emerald-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-rotate-left {{ $restoreDateIsPast ? 'text-amber-600' : 'text-emerald-600' }} text-sm"></i>
                 </div>
-                Restore Event
+                {{ $restoreDateIsPast ? 'Restore Event — Update Required' : 'Restore Event' }}
             </h2>
         </div>
+
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to restore:</p>
+            <p class="text-sm text-[#555555] mb-1">
+                {{ $restoreDateIsPast ? 'The event date has already passed for:' : 'Are you sure you want to restore:' }}
+            </p>
             <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $pendingRestoreTitle }}
             </p>
-            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-blue-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-blue-800">You'll be taken to the edit form. <strong>Update the date to a future date</strong>, then save to resubmit the event for Alumni Director review.</span>
+
+            @if($restoreDateIsPast)
+            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
+                <span class="text-xs text-amber-800">
+                    The event date has already passed. Click <strong>View Details</strong> to open the event — you can update the date there and save to resubmit for Alumni Director review.
+                </span>
             </div>
+            @else
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-xs"></i>
+                <span class="text-xs text-emerald-800">
+                    The event will be restored to <strong>Pending</strong> status and resubmitted for Alumni Director review.
+                </span>
+            </div>
+            @endif
+
             <div class="flex gap-2">
                 <button wire:click="cancelRestore"
                         class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
@@ -1523,10 +1603,15 @@ select.tw-select-arrow {
                 <button wire:click="proceedRestore"
                         wire:loading.attr="disabled"
                         wire:target="proceedRestore"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition cursor-pointer disabled:opacity-60">
-                    <span wire:loading wire:target="proceedRestore"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="proceedRestore"><i class="fas fa-rotate-left mr-1 text-xs"></i></span>
-                    Yes, Restore
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-60
+                               {{ $restoreDateIsPast ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-500 hover:bg-emerald-600' }}">
+                    <span wire:loading wire:target="proceedRestore">
+                        <i class="fas fa-spinner animate-spin mr-1 text-xs"></i>
+                    </span>
+                    <span wire:loading.remove wire:target="proceedRestore">
+                        <i class="fas {{ $restoreDateIsPast ? 'fa-eye' : 'fa-rotate-left' }} mr-1 text-xs"></i>
+                    </span>
+                    {{ $restoreDateIsPast ? 'View Details' : 'Yes, Restore' }}
                 </button>
             </div>
         </div>
@@ -1571,7 +1656,7 @@ select.tw-select-arrow {
      @keydown.escape.window="$wire.closeFormModal()">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 flex-shrink-0 shadow-lg"
-         style="background: {{ $isRestoring ? '#059669' : '#7a3f91' }};">
+         style="background: {{ $isRestoring ? '#d97706' : '#7a3f91' }};">
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
                 @if($isRestoring)
@@ -1586,14 +1671,14 @@ select.tw-select-arrow {
             </div>
             <div>
                 <h2 class="text-white font-semibold text-lg leading-tight">
-                    @if($isRestoring) Restore Event
+                    @if($isRestoring) Restore Event — Update Date
                     @elseif($isResubmitting) Edit &amp; Resubmit Event
                     @elseif($isEditing) Edit Event
                     @else Submit a New Event
                     @endif
                 </h2>
                 <p class="text-white/60 text-xs mt-0.5">
-                    @if($isRestoring) Fix the date to a future date — saving will resubmit for Alumni Director review
+                    @if($isRestoring) Set a future date and save to resubmit for Alumni Director review
                     @elseif($isResubmitting) Make changes — saving will resubmit for Alumni Director review
                     @elseif($isEditing) Update event details below
                     @else Fill in details — will be sent for Alumni Director review
@@ -1631,14 +1716,14 @@ select.tw-select-arrow {
     </div>
 
     @if($isRestoring)
-    <div class="bg-emerald-50 border-b border-emerald-200 px-6 lg:px-10 py-2 flex-shrink-0 flex items-start gap-3">
-        <i class="fas fa-rotate-left text-emerald-600 flex-shrink-0 text-xs mt-1"></i>
+    <div class="bg-amber-50 border-b border-amber-200 px-6 lg:px-10 py-2 flex-shrink-0 flex items-start gap-3">
+        <i class="fas fa-rotate-left text-amber-600 flex-shrink-0 text-xs mt-1"></i>
         <div class="flex-1 min-w-0">
             <p class="text-sm text-[#333333]">
                 <strong>Restoring:</strong> Update the <strong>date &amp; time</strong> to a future date, then click <strong>Save &amp; Restore</strong> to resubmit for Alumni Director approval.
             </p>
-            <p class="text-xs mt-1 text-emerald-700 flex items-center gap-1.5">
-                <i class="fas fa-circle-info text-emerald-500 text-[10px] flex-shrink-0"></i>
+            <p class="text-xs mt-1 text-amber-700 flex items-center gap-1.5">
+                <i class="fas fa-circle-info text-amber-500 text-[10px] flex-shrink-0"></i>
                 A future date is required — the event will go back to <strong>Pending</strong> status after saving.
             </p>
         </div>
@@ -1671,8 +1756,8 @@ select.tw-select-arrow {
 
                 {{-- Event Photo --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-image text-[9px]"></i> Event Photo
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        Event Photo
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-2.5">
@@ -1720,8 +1805,7 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-book text-[9px]"></i>
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Courses
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
@@ -1854,8 +1938,8 @@ select.tw-select-arrow {
             <div class="flex-1 min-h-0 overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
                 <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
-                        <i class="fas fa-circle-info text-[9px]"></i> Event Details
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                        Event Details
                     </div>
                     <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3">
 
@@ -1869,7 +1953,6 @@ select.tw-select-arrow {
                             @if(isset($formErrors['title']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['title'] }}</p>@endif
                         </div>
 
-                        {{-- FIX #2a: Description min-height reduced from 120px to 80px --}}
                         <div class="flex flex-col" style="flex: 1; min-height: 80px;">
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1 flex-shrink-0">
                                 Description <span class="text-red-500">*</span>
@@ -1886,11 +1969,11 @@ select.tw-select-arrow {
                             <div>
                                 <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Date <span class="text-red-500">*</span>
-                                    @if($isRestoring)<span class="font-normal normal-case tracking-normal text-emerald-600 ml-1">— must be future</span>@endif
+                                    @if($isRestoring)<span class="font-normal normal-case tracking-normal text-amber-600 ml-1">— must be future</span>@endif
                                 </label>
                                 <input wire:model="event_date" type="date"
                                        min="{{ now('Asia/Manila')->format('Y-m-d') }}"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : ($isRestoring ? 'border-emerald-400' : 'border-gray-300') }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : ($isRestoring ? 'border-amber-400' : 'border-gray-300') }}">
                                 @if(isset($formErrors['event_date']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['event_date'] }}</p>@endif
                             </div>
 
@@ -2020,10 +2103,9 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                {{-- FIX #2b: Notes textarea height increased from 150px to 200px --}}
                 <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-list-check text-[9px]"></i> Notes / Requirements
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        Notes / Requirements
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-2.5">
@@ -2046,8 +2128,8 @@ select.tw-select-arrow {
             <div class="p-3 space-y-3 flex-1">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-address-card text-[9px]"></i> Contact Person
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        Contact Person
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— pre-filled</span>
                     </div>
                     <div class="p-2.5 space-y-2.5">
@@ -2075,8 +2157,8 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#7a3f91] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-lightbulb text-[9px]"></i> Submission Tips
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        Submission Tips
                     </div>
                     <div class="p-2.5">
                         <ul class="space-y-2">
@@ -2106,7 +2188,7 @@ select.tw-select-arrow {
                 <button type="button" wire:click="saveEvent"
                         wire:loading.attr="disabled" wire:target="saveEvent"
                         class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
-                               {{ $isRestoring ? 'bg-emerald-600 hover:bg-emerald-700' : ($isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]') }}">
+                               {{ $isRestoring ? 'bg-amber-500 hover:bg-amber-600' : ($isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]') }}">
                     <span wire:loading wire:target="saveEvent">
                         <i class="fas fa-spinner animate-spin text-xs"></i>
                     </span>
@@ -2153,6 +2235,7 @@ select.tw-select-arrow {
     $timeDisplay = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
     $createdPH   = \Carbon\Carbon::parse($ev->created_at)->setTimezone('Asia/Manila');
     $hasPhoto    = !empty($ev->photo_url);
+    $isDeleted   = $ev->status === 'ORGANIZER_DELETED';
 @endphp
 
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in"
@@ -2180,6 +2263,22 @@ select.tw-select-arrow {
                     </div>
                 </div>
             @endif
+
+            {{-- If deleted and past date: show Edit Date button to open edit form --}}
+            @if($isDeleted)
+                <div class="relative inline-flex group">
+                    <button type="button" wire:click="openEditModal({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-amber-400/30 border border-amber-300/40 hover:bg-amber-400/50"
+                            aria-label="Edit to restore">
+                        <i class="fas fa-pen-to-square text-white text-sm"></i>
+                    </button>
+                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                        Edit &amp; Restore
+                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                    </div>
+                </div>
+            @endif
+
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
@@ -2208,6 +2307,8 @@ select.tw-select-arrow {
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Completed</span>
                         @elseif($isApproved)
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Approved</span>
+                        @elseif($isDeleted)
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Deleted</span>
                         @endif
                     </div>
                 </div>
@@ -2220,6 +2321,8 @@ select.tw-select-arrow {
                         <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 text-white text-xs font-bold">Completed</span>
                     @elseif($isApproved)
                         <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 text-white text-xs font-bold">Approved</span>
+                    @elseif($isDeleted)
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/90 text-white text-xs font-bold">Deleted</span>
                     @endif
                 </div>
             </div>
@@ -2267,17 +2370,30 @@ select.tw-select-arrow {
                 </div>
                 @endif
 
-                <div class="p-4 rounded-xl border {{ $isCompleted ? 'bg-green-50 border-green-200' : 'bg-emerald-50 border-emerald-200' }}">
-                    @if($isCompleted)
-                        <p class="text-base font-bold text-[#333333]">Completed</p>
-                        <p class="text-sm font-medium mt-0.5 text-[#333333]">This event has already taken place.</p>
-                    @elseif($isApproved)
-                        <p class="text-base font-bold text-[#333333]">Approved — Now Live</p>
-                        @if($ev->reviewed_at)
-                        <p class="text-sm font-medium mt-0.5 text-[#333333]">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>
+                @if($isDeleted)
+                <div class="p-4 rounded-xl border bg-red-50 border-red-200">
+                    <p class="text-base font-bold text-[#333333]">Deleted</p>
+                    <p class="text-sm font-medium mt-0.5 text-[#555555]">
+                        @if($eventDatePH->isFuture())
+                            This event was deleted but the date is still in the future. You can restore it.
+                        @else
+                            This event was deleted and its date has passed. Update the date to restore it.
                         @endif
+                    </p>
+                </div>
+                @elseif($isCompleted)
+                <div class="p-4 rounded-xl border bg-green-50 border-green-200">
+                    <p class="text-base font-bold text-[#333333]">Completed</p>
+                    <p class="text-sm font-medium mt-0.5 text-[#333333]">This event has already taken place.</p>
+                </div>
+                @elseif($isApproved)
+                <div class="p-4 rounded-xl border bg-emerald-50 border-emerald-200">
+                    <p class="text-base font-bold text-[#333333]">Approved — Now Live</p>
+                    @if($ev->reviewed_at)
+                    <p class="text-sm font-medium mt-0.5 text-[#333333]">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>
                     @endif
                 </div>
+                @endif
 
                 <p class="text-sm text-center font-medium text-[#333333]">
                     Posted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}

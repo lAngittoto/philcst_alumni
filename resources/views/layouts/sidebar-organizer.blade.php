@@ -134,16 +134,23 @@
                     });
                     if (res.ok) {
                         var raw = await res.json();
-                        this.items = this._groupByDay(raw);
+                        this.items = this._processNotifs(raw);
                     }
                 } catch (e) { /* silently fail */ }
             },
 
-            // ─── GROUP-BY-DAY (fixed — always shows latest timestamp) ──────
-            _groupByDay(rows) {
-                var map = new Map();
+            // ─────────────────────────────────────────────────────────────────
+            //  PROCESS NOTIFS
+            //  - Chat/message notifs  : group by day
+            //  - Employment notifs    : group by day (×N badge, latest updater)
+            //  - Event notifs         : show individually (APPROVED, REJECTED, UPDATED only)
+            // ─────────────────────────────────────────────────────────────────
+            _processNotifs(rows) {
+                var result = [];
+                var msgMap = new Map();
+                var empMap = new Map();
 
-                // Sort newest first so we process latest records first
+                // Sort newest first
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
@@ -151,97 +158,110 @@
                     .forEach(function (n) {
                         var rawDedup = n.dedup_key || '';
 
-                        // ✅ Use updated_at if available and newer, otherwise created_at
-                        // This ensures the displayed timestamp is always the most recent activity
+                        // ── Determine notif type ──
+                        var isMsgEvent = (
+                            rawDedup.startsWith('message-received::') ||
+                            n.icon === 'comments'
+                        );
+
+                        var isEventNotif = (
+                            rawDedup.startsWith('event-management::') ||
+                            n.icon === 'calendar-check' ||
+                            n.icon === 'calendar'
+                        );
+
+                        var isEmpNotif = (
+                            rawDedup.startsWith('employment::') ||
+                            n.icon === 'chart-line'
+                        );
+
+                        // ── Filter: only keep APPROVED, REJECTED, UPDATED for events ──
+                        if (isEventNotif) {
+                            var action = '';
+                            var parts = rawDedup.split('::');
+                            if (parts.length >= 2) action = parts[1];
+                            var allowedActions = ['approved', 'rejected', 'updated'];
+                            if (allowedActions.indexOf(action) === -1) return;
+                        }
+
+                        // ── Use the latest timestamp for display ──
                         var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
                             ? n.updated_at
                             : n.created_at;
 
-                        // Use the DATE portion of the most recent timestamp for day grouping
-                        var day = nTimestamp
-                            ? new Date(nTimestamp).toISOString().slice(0, 10)
-                            : 'unknown';
+                        if (isMsgEvent) {
+                            // ── Group chat messages by day ──
+                            var day      = nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown';
+                            var groupKey = 'message_day::' + day;
 
-                        var isEmpEvent = (
-                            rawDedup.startsWith('employment_update') ||
-                            rawDedup.startsWith('employment::')      ||
-                            rawDedup.startsWith('recorded::')        ||
-                            rawDedup.startsWith('updated::')         ||
-                            n.title === 'Employment Status Updated'  ||
-                            n.title === 'New Employment Record'      ||
-                            n.icon  === 'chart-line'
-                        );
-                        var isMsgEvent = (
-                            rawDedup.startsWith('message-received::') ||
-                            n.icon  === 'comments'
-                        );
-                        var isJobEvent = (
-                            rawDedup.startsWith('job-posted::')     ||
-                            rawDedup.startsWith('job-management::') ||
-                            n.icon  === 'briefcase'
-                        );
-                        var isCalEvent = (
-                            rawDedup.startsWith('event-announced::')  ||
-                            rawDedup.startsWith('event-management::') ||
-                            n.icon  === 'calendar-check' ||
-                            n.icon  === 'calendar'
-                        );
-                        var isAlumniEvent = (
-                            rawDedup.startsWith('alumni-registered::') ||
-                            rawDedup.startsWith('profile-updated::')   ||
-                            n.icon  === 'user-group' ||
-                            n.icon  === 'user-plus'
-                        );
-
-                        var groupKey;
-                        if      (isEmpEvent)    { groupKey = 'employment_day::' + day; }
-                        else if (isMsgEvent)    { groupKey = 'message_day::' + day; }
-                        else if (isJobEvent)    { groupKey = 'job_day::' + day; }
-                        else if (isCalEvent)    { groupKey = 'calendar_day::' + day; }
-                        else if (isAlumniEvent) { groupKey = 'alumni_day::' + day; }
-                        else { groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id); }
-
-                        if (map.has(groupKey)) {
-                            var g = map.get(groupKey);
-                            g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
-                            if (!n.read) g.read = false;
-                            g._ids.push(n.id);
-
-                            // ✅ KEY FIX: Always keep the LATEST timestamp in the group.
-                            // Since rows are sorted newest-first, the first record inserted
-                            // already has the latest timestamp, but update if somehow newer.
-                            if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
-                                g.created_at = nTimestamp;
+                            if (msgMap.has(groupKey)) {
+                                var g = msgMap.get(groupKey);
+                                g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
+                                if (!n.read) g.read = false;
+                                g._ids.push(n.id);
+                                if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
+                                    g.created_at = nTimestamp;
+                                }
+                                g.title   = 'Chat Messages';
+                                g.message = g.count + ' new chat message(s) today.';
+                            } else {
+                                var initCount = Number(n.count) || 1;
+                                msgMap.set(groupKey, Object.assign({}, n, {
+                                    count:      initCount,
+                                    _ids:       [n.id],
+                                    created_at: nTimestamp || n.created_at,
+                                    title:      'Chat Messages',
+                                    message:    initCount + ' new chat message(s) today.',
+                                    icon:       'comments',
+                                }));
                             }
 
-                            if (isEmpEvent)         { g.message = g.count + ' employment update(s) today.';      g.title = 'Employment Status Updated'; }
-                            else if (isMsgEvent)    { g.message = g.count + ' new message(s) today.';            g.title = g.count + ' New Messages'; }
-                            else if (isJobEvent)    { g.message = g.count + ' new job posting(s) today.';        g.title = 'New Job Postings'; }
-                            else if (isCalEvent)    { g.message = g.count + ' new event(s) updated today.';      g.title = 'Event Management Update'; }
-                            else if (isAlumniEvent) { g.message = g.count + ' alumni profile update(s) today.';  g.title = 'Alumni Updates'; }
+                        } else if (isEmpNotif) {
+                            // ── Group employment notifs by day ──
+                            var empDay = nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown';
+                            var empKey = 'employment_day::' + empDay;
+
+                            if (empMap.has(empKey)) {
+                                var eg = empMap.get(empKey);
+                                eg.count = (Number(eg.count) || 1) + 1;
+                                if (!n.read) eg.read = false;
+                                eg._ids.push(n.id);
+                                // If this notif is newer → update timestamp + message (most recent updater)
+                                if (nTimestamp && new Date(nTimestamp) > new Date(eg.created_at)) {
+                                    eg.created_at = nTimestamp;
+                                    eg.message    = n.message;
+                                }
+                                eg.title = eg.count + ' Employment Status Updated';
+                            } else {
+                                empMap.set(empKey, Object.assign({}, n, {
+                                    count:      1,
+                                    _ids:       [n.id],
+                                    created_at: nTimestamp || n.created_at,
+                                    title:      '1 Employment Status Updated',
+                                    icon:       'chart-line',
+                                }));
+                            }
+
                         } else {
-                            // ✅ First record for this group — use the latest timestamp
-                            map.set(groupKey, Object.assign({}, n, {
-                                count:     Number(n.count) || 1,
-                                _ids:      [n.id],
-                                // ✅ Store the most recent timestamp as created_at for display
+                            // ── All other notifs (events, jobs, alumni): individual ──
+                            result.push(Object.assign({}, n, {
+                                count:      Number(n.count) || 1,
+                                _ids:       [n.id],
                                 created_at: nTimestamp || n.created_at,
-                                title: isEmpEvent    ? 'Employment Status Updated'
-                                     : isMsgEvent    ? (n.title || 'New Message')
-                                     : isJobEvent    ? (n.title || 'New Job Posting')
-                                     : isCalEvent    ? (n.title || 'Event Management Update')
-                                     : isAlumniEvent ? (n.title || 'Alumni Update')
-                                     : n.title,
-                                icon:  isEmpEvent    ? 'chart-line'
-                                     : isMsgEvent    ? 'comments'
-                                     : isJobEvent    ? 'briefcase'
-                                     : isCalEvent    ? 'calendar-check'
-                                     : isAlumniEvent ? 'user-group'
-                                     : (n.icon || 'bell'),
                             }));
                         }
                     });
-                return Array.from(map.values());
+
+                // Merge grouped items into result
+                msgMap.forEach(function (v) { result.push(v); });
+                empMap.forEach(function (v) { result.push(v); });
+
+                // Re-sort combined result newest first
+                result.sort(function (a, b) {
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
+
+                return result;
             },
 
             get unread() {
@@ -458,7 +478,7 @@
                     },
                     body: JSON.stringify(payload),
                 });
-                // ✅ Wait a bit then re-fetch so the panel shows updated timestamp immediately
+                // Wait a bit then re-fetch so panel shows updated timestamp immediately
                 await new Promise(function (r) { setTimeout(r, 300); });
                 var s = window.__safeCoordNotifsStore();
                 if (s) await s._fetch();
@@ -469,27 +489,76 @@
             } catch (e) { /* ignore */ }
         }
 
+        // ── EVENT NOTIFS: only APPROVED and REJECTED dispatch from director ──
         window.addEventListener('event-management-updated', function (e) {
             var d = _coordDetail(e);
+            var action = d.action || '';
+
+            if (action !== 'approved' && action !== 'rejected' && action !== 'updated') {
+                return;
+            }
+
+            var titleMap = {
+                'approved': 'Event Approved',
+                'rejected': 'Event Rejected',
+                'updated':  'Event Updated',
+            };
+            var msgMap = {
+                'approved': (d.title || 'Your event') + ' has been approved by the Alumni Director.',
+                'rejected': (d.title || 'Your event') + ' has been rejected by the Alumni Director.',
+                'updated':  (d.title || 'An event') + ' has been updated.',
+            };
+            var iconMap = {
+                'approved': 'calendar-check',
+                'rejected': 'calendar',
+                'updated':  'calendar-check',
+            };
+
             _saveCoordNotif({
-                icon:       'calendar-check',
-                title:      'Event Management Update',
-                message:    (d.title || 'An event') + ' has been updated.',
+                icon:       iconMap[action]  || 'calendar-check',
+                title:      titleMap[action] || 'Event Update',
+                message:    msgMap[action]   || (d.title || 'An event') + ' was ' + action + '.',
                 link_route: 'organizer.event/organizer',
                 link_label: 'View Events',
-                dedup_key:  'event-management::' + (d.id || Math.floor(Date.now() / 60000)),
+                dedup_key:  'event-management::' + action + '::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
 
+        // ── JOB NOTIFS: only activated, deactivated, restored, director_posted ──
         window.addEventListener('job-management-updated', function (e) {
             var d = _coordDetail(e);
+            var action = d.action || '';
+
+            // Only these actions trigger a coordinator notification
+            var allowedJobActions = ['activated', 'deactivated', 'restored', 'director_posted'];
+            if (allowedJobActions.indexOf(action) === -1) return;
+
+            var titleMap = {
+                'activated':       'Job Posting Activated',
+                'deactivated':     'Job Posting Deactivated',
+                'restored':        'Job Posting Restored',
+                'director_posted': 'New Job Posted by Director',
+            };
+            var msgMap = {
+                'activated':       (d.title || 'A job posting') + ' is now active and visible to alumni.',
+                'deactivated':     (d.title || 'A job posting') + ' has been deactivated.',
+                'restored':        (d.title || 'A deleted job posting') + ' has been restored.',
+                'director_posted': 'Alumni Director posted a new job: "' + (d.title || 'Untitled') + '".',
+            };
+            var iconMap = {
+                'activated':       'circle-check',
+                'deactivated':     'circle-pause',
+                'restored':        'rotate-left',
+                'director_posted': 'briefcase',
+            };
+
             _saveCoordNotif({
-                icon:       'briefcase',
-                title:      'Job Management Update',
-                message:    (d.title || 'A job posting') + ' has been updated.',
+                icon:       iconMap[action]  || 'briefcase',
+                title:      titleMap[action] || 'Job Update',
+                message:    msgMap[action]   || (d.title || 'A job posting') + ' was ' + action + '.',
                 link_route: 'organizer.job/management',
                 link_label: 'View Jobs',
-                dedup_key:  'job-management::' + (d.id || Math.floor(Date.now() / 60000)),
+                dedup_key:  'job-management::' + action + '::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
 
@@ -531,7 +600,7 @@
 
             _saveCoordNotif({
                 icon:       'comments',
-                title:      count > 1 ? count + ' New Messages' : 'New Message',
+                title:      'Chat Messages',
                 message:    msgText,
                 link_route: 'organizer.chat/alumni',
                 link_label: 'Open Messages',
@@ -705,9 +774,6 @@
         </nav>
 
         {{-- ══ BACKGROUND NOTIF POLLER ══ --}}
-        {{-- Invisible Livewire component — polls every 3s on ALL pages --}}
-        {{-- Detects new chat messages and writes to coordinator_notifications --}}
-        {{-- even when the organizer is NOT on the chat page --}}
         @livewire('organizer.coord-notif-poller')
 
         {{-- Logout --}}
@@ -867,14 +933,25 @@
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
 
-                                {{-- Count badge --}}
+                                {{-- Count badge: grouped chat messages --}}
                                 <span
-                                    x-show="Number(notif.count) > 1"
+                                    x-show="Number(notif.count) > 1 && notif.icon === 'comments'"
                                     x-cloak
                                     class="inline-flex items-center justify-center
                                            min-w-[22px] h-5 rounded-full px-1.5
                                            text-[10px] font-black text-white leading-none"
                                     style="background:#7A3F91;"
+                                    x-text="'×' + Number(notif.count)">
+                                </span>
+
+                                {{-- Count badge: grouped employment notifs --}}
+                                <span
+                                    x-show="Number(notif.count) > 1 && notif.icon === 'chart-line'"
+                                    x-cloak
+                                    class="inline-flex items-center justify-center
+                                           min-w-[22px] h-5 rounded-full px-1.5
+                                           text-[10px] font-black text-white leading-none"
+                                    style="background:#0284c7;"
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
@@ -888,13 +965,53 @@
                                     JOB
                                 </span>
 
-                                {{-- Event badge --}}
+                                {{-- Job activated badge --}}
                                 <span
-                                    x-show="(notif.icon === 'calendar-check' || notif.icon === 'calendar') && !notif.read"
+                                    x-show="notif.icon === 'circle-check' && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#059669,#047857);">
+                                    JOB
+                                </span>
+
+                                {{-- Job deactivated badge --}}
+                                <span
+                                    x-show="notif.icon === 'circle-pause' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#d97706,#b45309);">
+                                    JOB
+                                </span>
+
+                                {{-- Job restored badge --}}
+                                <span
+                                    x-show="notif.icon === 'rotate-left' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    JOB
+                                </span>
+
+                                {{-- Event Approved badge --}}
+                                <span
+                                    x-show="notif.icon === 'calendar-check' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    EVENT
+                                </span>
+
+                                {{-- Event Rejected badge --}}
+                                <span
+                                    x-show="notif.icon === 'calendar' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#dc2626,#b91c1c);">
                                     EVENT
                                 </span>
 
@@ -908,14 +1025,14 @@
                                     EMPLOYMENT
                                 </span>
 
-                                {{-- Message badge --}}
+                                {{-- Chat Message badge --}}
                                 <span
                                     x-show="notif.icon === 'comments' && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-                                    MSG
+                                    MESSAGES
                                 </span>
 
                                 {{-- Alumni badge --}}

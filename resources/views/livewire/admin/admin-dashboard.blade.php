@@ -5,7 +5,8 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use App\Models\Alumni;
 use App\Models\Course;
-use App\Models\AuditLog;
+use App\Models\AdminEvent;
+use App\Models\JobPosting;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -13,40 +14,38 @@ use Illuminate\Support\Facades\DB;
 new #[Layout('app')] class extends Component {
 
     public array  $stats        = [];
-    public array  $recentLogs   = [];
     public array  $courseStats  = [];
-    public array  $monthlyData  = [];
     public string $greeting     = '';
     public string $adminName    = '';
 
-    // ── Employment Analytics ──────────────────────────────────────────────────
-    public string $filterBatch   = '';
-    public string $filterCollege = '';
-    public string $filterCourse  = '';
+    public int    $empTotal      = 0;
+    public int    $empEmployed   = 0;
+    public int    $empSelf       = 0;
+    public int    $empUnemployed = 0;
+    public int    $empNotFilled  = 0;
+    public int    $empRate       = 0;
+    public string $chartEmpSnapshotData = '{}';
 
-    public int $totalAlumni     = 0;
-    public int $totalFilled     = 0;
-    public int $totalEmployed   = 0;
-    public int $totalSelf       = 0;
-    public int $totalUnemployed = 0;
-    public int $totalNotFilled  = 0;
-    public int $totalLocal      = 0;
-    public int $totalAbroad     = 0;
+    public int    $eventsTotal     = 0;
+    public int    $eventsPending   = 0;
+    public int    $eventsApproved  = 0;
+    public int    $eventsCompleted = 0;
+    public int    $eventsRejected  = 0;
+    public string $chartEventsSnapshotData = '{}';
 
-    public string $chartStatusData        = '{}';
-    public string $chartLocationData      = '{}';
-    public string $chartRelevanceData     = '{}';
-    public string $chartBatchData         = '{}';
-    public string $chartCollegeData       = '{}';
-    public string $chartCourseData        = '{}';
-    public string $chartEmpTypeData       = '{}';
-    public string $chartCareerPathData    = '{}';
-    public string $chartEduStatusData     = '{}';
-    public string $chartUnemployedData    = '{}';
+    public int    $jobsTotal    = 0;
+    public int    $jobsActive   = 0;
+    public int    $jobsInactive = 0;
+    public int    $jobsExpiring = 0;
+    public string $chartJobsSnapshotData = '{}';
 
-    public array $empBatches  = [];
-    public array $empColleges = [];
-    public array $empCourses  = [];
+    // Role counts for the footer strip
+    public int $roleActiveDirectors    = 0;
+    public int $roleActiveCoordinators = 0;
+    public int $roleActiveRegistrars   = 0;
+    public int $roleInactiveDirectors    = 0;
+    public int $roleInactiveCoordinators = 0;
+    public int $roleInactiveRegistrars   = 0;
 
     public function mount(): void
     {
@@ -54,7 +53,8 @@ new #[Layout('app')] class extends Component {
             $this->redirect(route('login'));
         }
 
-        $this->adminName = Auth::user()?->name ?? 'Admin';
+        $this->adminName = 'Admin';
+
         $hour = now()->setTimezone('Asia/Manila')->hour;
         $this->greeting = match(true) {
             $hour < 12 => 'Good morning',
@@ -63,29 +63,62 @@ new #[Layout('app')] class extends Component {
         };
 
         $this->loadStats();
-        $this->loadRecentLogs();
         $this->loadCourseStats();
-        $this->loadMonthlyData();
-        $this->loadEmpMetaLists();
-        $this->refreshEmpAll();
+        $this->loadEmploymentSnapshot();
+        $this->loadEventsSnapshot();
+        $this->loadJobsSnapshot();
+        $this->loadRoleCounts();
     }
 
-    // ── Dashboard Stats ───────────────────────────────────────────────────────
+    public function goToAlumni(string $filter = ''): void
+    {
+        session()->put('admin_alumni_filter', $filter);
+        $this->redirect(route('user.management'));
+    }
+
+    public function goToEmployment(string $filter = ''): void
+    {
+        $mapped = match($filter) {
+            'employed'      => 'employed',
+            'self_employed' => 'self_employed',
+            'unemployed'    => 'unemployed',
+            'no_record'     => 'not_filled',
+            default         => '',
+        };
+        session()->put('admin_employment_filter', $mapped);
+        $this->redirect(route('employment.tracking'));
+    }
+
+    public function goToEvents(string $filter = ''): void
+    {
+        session()->put('admin_events_filter', $filter);
+        $this->redirect(route('events'));
+    }
+
+    public function goToJobs(string $filter = ''): void
+    {
+        session()->put('admin_jobs_filter', $filter);
+        $this->redirect(route('job.posts'));
+    }
+
+    public function goToUsers(string $tab = '', string $status = ''): void
+    {
+        session()->put('admin_users_tab', $tab);
+        session()->put('admin_users_status', $status);
+        $this->redirect(route('user.management'));
+    }
 
     private function loadStats(): void
     {
         $this->stats = Cache::remember('dashboard_stats', 60, function () {
-            $totalAlumni   = Alumni::count();
-            $verified      = Alumni::where('status', 'verified')->count();
-            $pending       = Alumni::where('status', 'pending')->count();
-            $rejected      = Alumni::where('status', 'rejected')->count();
-            $totalCourses  = Course::count();
-            $todayActivity = AuditLog::whereDate('created_at', today())->count();
-            $flagged       = AuditLog::where('is_flagged', true)->count();
-            $thisMonth     = Alumni::whereMonth('created_at', now()->month)
+            $totalAlumni  = Alumni::count();
+            $verified     = Alumni::where('status', 'verified')->count();
+            $pending      = Alumni::where('status', 'pending')->count();
+            $totalCourses = Course::count();
+            $thisMonth    = Alumni::whereMonth('created_at', now()->month)
                                    ->whereYear('created_at',  now()->year)
                                    ->count();
-            $lastMonth     = Alumni::whereMonth('created_at', now()->subMonth()->month)
+            $lastMonth    = Alumni::whereMonth('created_at', now()->subMonth()->month)
                                    ->whereYear('created_at',  now()->subMonth()->year)
                                    ->count();
             $growth = $lastMonth > 0
@@ -93,36 +126,10 @@ new #[Layout('app')] class extends Component {
                 : ($thisMonth > 0 ? 100 : 0);
 
             return compact(
-                'totalAlumni','verified','pending','rejected',
-                'totalCourses','todayActivity','flagged',
-                'thisMonth','growth'
+                'totalAlumni','verified','pending',
+                'totalCourses','thisMonth','growth'
             );
         });
-    }
-
-    private function loadRecentLogs(): void
-    {
-        $this->recentLogs = AuditLog::latest()
-            ->take(8)
-            ->get()
-            ->map(fn($l) => [
-                'id'          => $l->id,
-                'action'      => $l->action,
-                'action_label'=> $l->action_label,
-                'action_icon' => $l->action_icon,
-                'user_name'   => $l->user_name ?? 'System',
-                'user_email'  => $l->user_email,
-                'user_role'   => $l->user_role ?? 'system',
-                'description' => mb_strlen($l->description) > 60
-                    ? mb_substr($l->description, 0, 57).'…'
-                    : $l->description,
-                'severity'      => $l->severity,
-                'severity_badge'=> $l->severity_badge,
-                'is_flagged'    => $l->is_flagged,
-                'time'          => $l->created_at->setTimezone('Asia/Manila')->diffForHumans(),
-                'date'          => $l->created_at->setTimezone('Asia/Manila')->format('M j, g:i A'),
-            ])
-            ->toArray();
     }
 
     private function loadCourseStats(): void
@@ -130,1232 +137,638 @@ new #[Layout('app')] class extends Component {
         $this->courseStats = Course::select('courses.id','courses.code','courses.name')
             ->withCount('alumni')
             ->orderByDesc('alumni_count')
-            ->take(6)
             ->get()
             ->toArray();
     }
 
-    private function loadMonthlyData(): void
+    private function loadEmploymentSnapshot(): void
     {
-        $data = [];
-        for ($i = 5; $i >= 0; $i--) {
-            $month = now()->subMonths($i);
-            $count = Alumni::whereYear('created_at',  $month->year)
-                           ->whereMonth('created_at', $month->month)
-                           ->count();
-            $data[] = [
-                'label' => $month->format('M'),
-                'count' => $count,
-            ];
-        }
-        $this->monthlyData = $data;
-    }
+        $snap = Cache::remember('dashboard_emp_snapshot', 60, function () {
+            $total = DB::table('alumni')->whereNull('deleted_at')->count();
 
-    public function refresh(): void
-    {
-        Cache::forget('dashboard_stats');
-        Cache::forget('audit_stats');
-        $this->loadStats();
-        $this->loadRecentLogs();
-        $this->loadCourseStats();
-        $this->loadMonthlyData();
-        $this->refreshEmpAll();
-    }
-
-    // ── Employment Analytics ──────────────────────────────────────────────────
-
-    private function loadEmpMetaLists(): void
-    {
-        $this->empBatches = DB::table('alumni')
-            ->whereNull('deleted_at')
-            ->distinct()->orderBy('batch', 'desc')
-            ->pluck('batch')->toArray();
-
-        $this->empColleges = DB::table('courses')
-            ->distinct()->orderBy('college')
-            ->pluck('college')->filter()->values()->toArray();
-
-        $this->empCourses = DB::table('courses')
-            ->orderBy('code')
-            ->get(['code', 'name', 'college'])
-            ->map(fn($r) => ['code' => $r->code, 'name' => $r->name, 'college' => $r->college])
-            ->toArray();
-    }
-
-    private function empBaseQ(): \Illuminate\Database\Query\Builder
-    {
-        $q = DB::table('alumni as a')->whereNull('a.deleted_at');
-        if ($this->filterBatch)   $q->where('a.batch', $this->filterBatch);
-        if ($this->filterCollege) {
-            $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
-            $q->whereIn('a.course_code', $codes);
-        }
-        if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
-        return $q;
-    }
-
-    private function empEmpQ(): \Illuminate\Database\Query\Builder
-    {
-        return (clone $this->empBaseQ())
-            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
-            ->whereNull('et.deleted_at');
-    }
-
-    public function refreshEmpAll(): void
-    {
-        $this->computeEmpStats();
-        $this->buildEmpCharts();
-    }
-
-    public function computeEmpStats(): void
-    {
-        $this->totalAlumni     = (clone $this->empBaseQ())->count();
-        $this->totalEmployed   = (clone $this->empEmpQ())->where('et.employment_status', 'employed')->count();
-        $this->totalSelf       = (clone $this->empEmpQ())->where('et.employment_status', 'self_employed')->count();
-        $this->totalUnemployed = (clone $this->empEmpQ())->where('et.employment_status', 'unemployed')->count();
-        $this->totalFilled     = $this->totalEmployed + $this->totalSelf + $this->totalUnemployed;
-        $this->totalNotFilled  = max(0, $this->totalAlumni - $this->totalFilled);
-        $this->totalLocal      = (clone $this->empEmpQ())->where('et.work_location', 'local')->count();
-        $this->totalAbroad     = (clone $this->empEmpQ())->where('et.work_location', 'abroad')->count();
-    }
-
-    public function buildEmpCharts(): void
-    {
-        $this->chartStatusData = json_encode([
-            'labels' => ['Employed', 'Self-Employed', 'Unemployed', 'Not Filled'],
-            'data'   => [$this->totalEmployed, $this->totalSelf, $this->totalUnemployed, $this->totalNotFilled],
-            'colors' => ['#10b981', '#3b82f6', '#f59e0b', '#d1d5db'],
-        ]);
-
-        $this->chartLocationData = json_encode([
-            'labels' => ['Local', 'Abroad (OFW)'],
-            'data'   => [$this->totalLocal, $this->totalAbroad],
-            'colors' => ['#7a3f91', '#e879f9'],
-        ]);
-
-        $relRows = (clone $this->empEmpQ())
-            ->whereNotNull('et.course_relevance')
-            ->select('et.course_relevance', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('et.course_relevance')
-            ->get()->keyBy('course_relevance');
-
-        $this->chartRelevanceData = json_encode([
-            'labels' => ['Related', 'Partially', 'Not Related'],
-            'data'   => [
-                $relRows->get('yes')->cnt       ?? 0,
-                $relRows->get('partially')->cnt ?? 0,
-                $relRows->get('no')->cnt        ?? 0,
-            ],
-            'colors' => ['#10b981', '#f59e0b', '#ef4444'],
-        ]);
-
-        $batchRows = (clone $this->empBaseQ())
-            ->leftJoin('employment_trackings as et', function ($j) {
-                $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
-            })
-            ->select(
-                'a.batch',
-                DB::raw("SUM(CASE WHEN et.employment_status='employed'      THEN 1 ELSE 0 END) as employed"),
-                DB::raw("SUM(CASE WHEN et.employment_status='self_employed' THEN 1 ELSE 0 END) as self_emp"),
-                DB::raw("SUM(CASE WHEN et.employment_status='unemployed'    THEN 1 ELSE 0 END) as unemployed"),
-                DB::raw('COUNT(a.id) as total')
-            )
-            ->groupBy('a.batch')->orderBy('a.batch', 'asc')->get();
-
-        $this->chartBatchData = json_encode([
-            'labels'     => $batchRows->pluck('batch')->values(),
-            'employed'   => $batchRows->pluck('employed')->values(),
-            'self_emp'   => $batchRows->pluck('self_emp')->values(),
-            'unemployed' => $batchRows->pluck('unemployed')->values(),
-            'total'      => $batchRows->pluck('total')->values(),
-        ]);
-
-        $colleges    = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
-        $collegeData = $colleges->map(function ($col) {
-            $codes = DB::table('courses')->where('college', $col)->pluck('code');
-            $base  = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
-            if ($this->filterBatch) $base->where('a.batch', $this->filterBatch);
-            $total = (clone $base)->count();
-            $emp   = DB::table('alumni as a')
+            $empQ = DB::table('alumni as a')
                 ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                ->whereIn('a.course_code', $codes);
-            if ($this->filterBatch) $emp->where('a.batch', $this->filterBatch);
-            $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
-            $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
-            $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
-            return compact('col', 'total', 'employed', 'self_emp', 'unemployed');
+                ->whereNull('a.deleted_at')->whereNull('et.deleted_at');
+
+            $employed   = (clone $empQ)->where('et.employment_status', 'employed')->count();
+            $selfEmp    = (clone $empQ)->where('et.employment_status', 'self_employed')->count();
+            $unemployed = (clone $empQ)->where('et.employment_status', 'unemployed')->count();
+
+            $filled    = $employed + $selfEmp + $unemployed;
+            $notFilled = max(0, $total - $filled);
+            $rate      = $filled > 0 ? round((($employed + $selfEmp) / $filled) * 100) : 0;
+
+            return compact('total', 'employed', 'selfEmp', 'unemployed', 'notFilled', 'rate');
         });
 
-        $this->chartCollegeData = json_encode([
-            'labels'     => $collegeData->pluck('col')->values(),
-            'employed'   => $collegeData->pluck('employed')->values(),
-            'self_emp'   => $collegeData->pluck('self_emp')->values(),
-            'unemployed' => $collegeData->pluck('unemployed')->values(),
-            'total'      => $collegeData->pluck('total')->values(),
-        ]);
+        $this->empTotal      = $snap['total'];
+        $this->empEmployed   = $snap['employed'];
+        $this->empSelf       = $snap['selfEmp'];
+        $this->empUnemployed = $snap['unemployed'];
+        $this->empNotFilled  = $snap['notFilled'];
+        $this->empRate       = $snap['rate'];
 
-        $courseQ = DB::table('alumni as a')
-            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
-            ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-            ->whereIn('et.employment_status', ['employed', 'self_employed']);
-        if ($this->filterBatch)   $courseQ->where('a.batch', $this->filterBatch);
-        if ($this->filterCollege) {
-            $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
-            $courseQ->whereIn('a.course_code', $codes);
-        }
-        if ($this->filterCourse) $courseQ->where('a.course_code', $this->filterCourse);
-        $courseRows = $courseQ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('a.course_code')->orderByDesc('cnt')->limit(10)->get();
-
-        $this->chartCourseData = json_encode([
-            'labels' => $courseRows->pluck('course_code')->values(),
-            'data'   => $courseRows->pluck('cnt')->values(),
-        ]);
-
-        $empTypeRows = (clone $this->empEmpQ())
-            ->whereNotNull('et.employment_type')
-            ->select('et.employment_type', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('et.employment_type')->get()->keyBy('employment_type');
-
-        $this->chartEmpTypeData = json_encode([
-            'labels' => ['Full-Time', 'Part-Time', 'Contractual', 'Project-Based', 'Internship'],
-            'data'   => [
-                $empTypeRows->get('full_time')->cnt     ?? 0,
-                $empTypeRows->get('part_time')->cnt     ?? 0,
-                $empTypeRows->get('contractual')->cnt   ?? 0,
-                $empTypeRows->get('project_based')->cnt ?? 0,
-                $empTypeRows->get('internship')->cnt    ?? 0,
-            ],
-            'colors' => ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe', '#ede9fe'],
-        ]);
-
-        $cpRows = (clone $this->empEmpQ())->whereNotNull('et.career_path')->select('et.career_path')->get();
-        $cpCounts = ['ofw' => 0, 'freelancer' => 0, 'entrepreneur' => 0, 'career_shifter' => 0, 'industry_professional' => 0];
-        foreach ($cpRows as $r) {
-            $arr = json_decode($r->career_path, true) ?? [];
-            foreach ($arr as $v) { if (isset($cpCounts[$v])) $cpCounts[$v]++; }
-        }
-
-        $this->chartCareerPathData = json_encode([
-            'labels' => ['OFW', 'Freelancer', 'Entrepreneur', 'Career Shifter', 'Industry Pro'],
-            'data'   => array_values($cpCounts),
-            'colors' => ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#7a3f91'],
-        ]);
-
-        $eduRows = (clone $this->empEmpQ())
-            ->whereNotNull('et.education_status')
-            ->select('et.education_status', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('et.education_status')->get()->keyBy('education_status');
-
-        $this->chartEduStatusData = json_encode([
-            'labels' => ['None', 'Pursuing Masteral', 'Pursuing Doctorate'],
-            'data'   => [
-                $eduRows->get('none')->cnt               ?? 0,
-                $eduRows->get('pursuing_masteral')->cnt  ?? 0,
-                $eduRows->get('pursuing_doctorate')->cnt ?? 0,
-            ],
-            'colors' => ['#9ca3af', '#3b82f6', '#7a3f91'],
-        ]);
-
-        $unRows = (clone $this->empEmpQ())
-            ->where('et.employment_status', 'unemployed')
-            ->whereNotNull('et.unemployment_status')
-            ->select('et.unemployment_status', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('et.unemployment_status')->get()->keyBy('unemployment_status');
-
-        $this->chartUnemployedData = json_encode([
-            'labels' => ['Seeking Employment', 'Not Looking'],
-            'data'   => [
-                $unRows->get('seeking_employment')->cnt ?? 0,
-                $unRows->get('not_looking')->cnt        ?? 0,
-            ],
-            'colors' => ['#f59e0b', '#9ca3af'],
+        $this->chartEmpSnapshotData = json_encode([
+            'labels' => ['Employed', 'Self-Employed', 'Unemployed', 'Not Filled'],
+            'data'   => [$this->empEmployed, $this->empSelf, $this->empUnemployed, $this->empNotFilled],
+            'colors' => ['#10b981', '#3b82f6', '#f59e0b', '#d1d5db'],
         ]);
     }
 
-    public function updatedFilterBatch(): void   { $this->refreshEmpAll(); }
-    public function updatedFilterCollege(): void { $this->filterCourse = ''; $this->refreshEmpAll(); }
-    public function updatedFilterCourse(): void  { $this->refreshEmpAll(); }
-
-    public function clearEmpFilters(): void
+    private function loadEventsSnapshot(): void
     {
-        $this->filterBatch = $this->filterCollege = $this->filterCourse = '';
-        $this->refreshEmpAll();
+        $snap = Cache::remember('dashboard_events_snapshot', 60, function () {
+            $base = AdminEvent::withoutTrashed()->where('status', '!=', 'ORGANIZER_DELETED');
+
+            return [
+                'total'     => (clone $base)->count(),
+                'pending'   => (clone $base)->where('status', 'PENDING')->count(),
+                'approved'  => (clone $base)->where('status', 'APPROVED')->count(),
+                'completed' => (clone $base)->where('status', 'COMPLETED')->count(),
+                'rejected'  => (clone $base)->where('status', 'REJECTED')->count(),
+            ];
+        });
+
+        $this->eventsTotal     = $snap['total'];
+        $this->eventsPending   = $snap['pending'];
+        $this->eventsApproved  = $snap['approved'];
+        $this->eventsCompleted = $snap['completed'];
+        $this->eventsRejected  = $snap['rejected'];
+
+        $this->chartEventsSnapshotData = json_encode([
+            'labels' => ['Pending', 'Approved', 'Completed', 'Rejected'],
+            'data'   => [$this->eventsPending, $this->eventsApproved, $this->eventsCompleted, $this->eventsRejected],
+            'colors' => ['#f59e0b', '#10b981', '#16a34a', '#ef4444'],
+        ]);
+    }
+
+    private function loadJobsSnapshot(): void
+    {
+        $snap = Cache::remember('dashboard_jobs_snapshot', 60, function () {
+            return [
+                'total'    => JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])->count(),
+                'active'   => JobPosting::where('status', 'ACTIVE')->count(),
+                'inactive' => JobPosting::where('status', 'INACTIVE')->count(),
+                'expiring' => JobPosting::where('status', 'ACTIVE')
+                                ->whereBetween('deadline', [
+                                    now('Asia/Manila')->toDateString(),
+                                    now('Asia/Manila')->addDays(7)->toDateString(),
+                                ])
+                                ->count(),
+            ];
+        });
+
+        $this->jobsTotal    = $snap['total'];
+        $this->jobsActive   = $snap['active'];
+        $this->jobsInactive = $snap['inactive'];
+        $this->jobsExpiring = $snap['expiring'];
+
+        $this->chartJobsSnapshotData = json_encode([
+            'labels' => ['Active', 'Inactive'],
+            'data'   => [$this->jobsActive, $this->jobsInactive],
+            'colors' => ['#10b981', '#f59e0b'],
+        ]);
+    }
+
+    private function loadRoleCounts(): void
+    {
+        $snap = Cache::remember('dashboard_role_counts', 60, function () {
+            return [
+                'dirActive'      => DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count(),
+                'dirInactive'    => DB::table('director')->where('status', 'INACTIVE')->whereNull('deleted_at')->count(),
+                'coordActive'    => DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count(),
+                'coordInactive'  => DB::table('organizer')->where('status', 'INACTIVE')->whereNull('deleted_at')->count(),
+                'regActive'      => DB::table('users')->where('role', 'registrar')->where('user_status', 'ACTIVE')->count(),
+                'regInactive'    => DB::table('users')->where('role', 'registrar')->where('user_status', 'INACTIVE')->count(),
+            ];
+        });
+
+        $this->roleActiveDirectors      = $snap['dirActive'];
+        $this->roleInactiveDirectors    = $snap['dirInactive'];
+        $this->roleActiveCoordinators   = $snap['coordActive'];
+        $this->roleInactiveCoordinators = $snap['coordInactive'];
+        $this->roleActiveRegistrars     = $snap['regActive'];
+        $this->roleInactiveRegistrars   = $snap['regInactive'];
     }
 }; ?>
 
-{{-- ✅ SINGLE ROOT ELEMENT — fixes MultipleRootElementsDetectedException --}}
-<div>
+<div style="height:80vh; display:flex; flex-direction:column; overflow:hidden;">
 
 <style>
-@keyframes fadeUp  { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:none } }
-@keyframes shimmer { 0%,100% { opacity:.7 } 50% { opacity:1 } }
-@keyframes spin    { to { transform:rotate(360deg) } }
-@keyframes pulse-ring {
-    0%   { box-shadow: 0 0 0 0 rgba(122,63,145,.35) }
-    70%  { box-shadow: 0 0 0 8px rgba(122,63,145,0)  }
-    100% { box-shadow: 0 0 0 0 rgba(122,63,145,0)    }
+/* ── Tooltips (shared) ── */
+.adm-tip-wrap { position: relative; overflow: visible; }
+.adm-tip {
+    position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    background: #000; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+    padding: 5px 11px; border-radius: 7px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 9999;
 }
-@keyframes bar-grow { from { height:0 } to { height:var(--h) } }
-
-.fade-up   { animation: fadeUp .44s cubic-bezier(.25,.8,.25,1) both }
-.fade-up-1 { animation-delay:.04s } .fade-up-2 { animation-delay:.09s }
-.fade-up-3 { animation-delay:.14s } .fade-up-4 { animation-delay:.19s }
-.fade-up-5 { animation-delay:.24s } .fade-up-6 { animation-delay:.29s }
-.fade-up-7 { animation-delay:.34s } .fade-up-8 { animation-delay:.39s }
-
-.pulse-dot  { animation: pulse-ring 2s ease-in-out infinite }
-.spin-anim  { animation: spin 1s linear infinite }
-
-.card-hover {
-    transition: transform .18s cubic-bezier(.25,.8,.25,1), box-shadow .18s;
+.adm-tip::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #000;
 }
-.card-hover:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 28px rgba(122,63,145,.13), 0 3px 8px rgba(0,0,0,.06);
+.adm-tip-wrap:hover .adm-tip { opacity: 1; }
+
+/* ── Overlay tooltip (fixed-position, never clipped) ── */
+#adm-overlay-tip {
+    position: fixed;
+    background: #000; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 4px 9px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; z-index: 99999;
+    transition: opacity 0.12s;
+    opacity: 0;
+}
+#adm-overlay-tip.visible { opacity: 1; }
+#adm-overlay-tip::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 4px solid transparent; border-top-color: #000;
+}
+/* keep old mini-tip-wrap class for snap tiles (they're not clipped) */
+.adm-mini-tip-wrap { position: relative; overflow: visible; }
+.adm-mini-tip {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #000; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 4px 9px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 9999;
+}
+.adm-mini-tip::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 4px solid transparent; border-top-color: #000;
+}
+.adm-mini-tip-wrap:hover .adm-mini-tip { opacity: 1; }
+
+/* ── Cards ── */
+.adm-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 14px; }
+
+.adm-panel-head {
+    padding: 10px 16px; border-bottom: 1px solid #E8E0F0;
+    background: #ffffff;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    flex-shrink: 0;
+}
+.adm-panel-ttl { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #000000; line-height: 1; }
+.adm-panel-sub { font-size: .63rem; color: #555555; font-weight: 500; margin-top: 2px; }
+
+/* ── Scrollbar ── */
+.adm-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
+.adm-scroll::-webkit-scrollbar { width: 4px; }
+.adm-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+
+/* ── KPI Stat grid — icon LEFT, text RIGHT ── */
+.adm-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; flex-shrink: 0; }
+@media (max-width: 768px) { .adm-stat-grid { grid-template-columns: 1fr 1fr; } }
+
+.adm-stat-card {
+    background: #ffffff;
+    border: 1px solid #E8E0F0;
+    border-radius: 12px; padding: 12px 14px; position: relative; overflow: visible;
+    display: flex; flex-direction: row; align-items: center; gap: 12px;
+    cursor: pointer;
+    transition: box-shadow .15s, border-color .15s;
+}
+.adm-stat-card:hover { border-color: #c4b5d4; box-shadow: 0 3px 10px rgba(122,63,145,.10); }
+
+/* Large icon on the left */
+.adm-stat-icon-lg {
+    width: 46px; height: 46px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.adm-stat-icon-lg i { font-size: 1.15rem; }
+
+/* Text block on the right */
+.adm-stat-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.adm-stat-num { font-size: 1.45rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; color: #000000; }
+.adm-stat-lbl { font-size: .68rem; font-weight: 700; margin-top: 2px; color: #000000; }
+.adm-stat-sub { font-size: .62rem; font-weight: 500; margin-top: 1px; color: #555555; }
+
+/* ── Body grid: courses (left) + snapshots (right) ── */
+.adm-body-grid {
+    display: grid; grid-template-columns: 1.6fr 1fr; gap: 0.75rem;
+    flex: 1; min-height: 0; overflow: hidden;
+}
+@media (max-width: 1023px) {
+    .adm-body-grid { grid-template-columns: 1fr; }
 }
 
-.scroll-sm::-webkit-scrollbar       { width:3px }
-.scroll-sm::-webkit-scrollbar-track { background:#f3f0f8; border-radius:99px }
-.scroll-sm::-webkit-scrollbar-thumb { background:#c4a8d8; border-radius:99px }
-.scroll-sm::-webkit-scrollbar-thumb:hover { background:#7a3f91 }
+.adm-panel-col { display: flex; flex-direction: column; min-height: 0; overflow: hidden; gap: 0.5rem; }
+.adm-panel-body-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 
-.bar-anim { animation: bar-grow .7s cubic-bezier(.25,.8,.25,1) both }
-
-.hero-mesh {
-    background: linear-gradient(135deg,#7A3F91 0%,#9b59b6 40%,#6c3483 100%);
-    position: relative;
-    overflow: hidden;
-}
-.hero-mesh::before {
-    content:'';
-    position:absolute;
-    inset:0;
-    background:
-        radial-gradient(ellipse 60% 80% at 80% -20%, rgba(255,255,255,.12) 0%, transparent 60%),
-        radial-gradient(ellipse 40% 60% at -10% 80%, rgba(0,0,0,.15) 0%, transparent 70%);
-    pointer-events:none;
-}
-.hero-mesh::after {
-    content:'';
-    position:absolute;
-    inset:0;
-    background-image: repeating-linear-gradient(
-        45deg,
-        transparent,
-        transparent 18px,
-        rgba(255,255,255,.03) 18px,
-        rgba(255,255,255,.03) 19px
-    );
-    pointer-events:none;
-}
-
-/* Employment analytics styles */
-.emp-stat-card {
+/* ── Role counts strip (now at TOP of left column) ── */
+.adm-role-strip {
     background: #fff;
     border: 1px solid #E8E0F0;
-    border-radius: 16px;
-    padding: 18px 18px 14px;
-    position: relative;
+    border-radius: 12px;
+    padding: 8px 14px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    flex-shrink: 0;
+}
+.adm-role-tile {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 8px; border-radius: 8px;
+    border: 1px solid #E8E0F0; background: #FAFBFF;
+    cursor: pointer; transition: background .12s, border-color .12s;
+}
+.adm-role-tile:hover { background: #F0E6F8; border-color: #d4b8e8; }
+.adm-role-tile-top { display: flex; align-items: center; gap: 5px; }
+.adm-role-tile-icon { width: 18px; height: 18px; border-radius: 5px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.adm-role-tile-label { font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #333; }
+.adm-role-tile-counts { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.adm-role-tile-pill {
+    display: inline-flex; align-items: center; gap: 2px;
+    font-size: .58rem; font-weight: 700; padding: 1px 5px; border-radius: 999px; border: 1px solid;
+}
+
+/* ── Snapshot stack (right column) — equal height across all 3 cards ── */
+.adm-snap-stack {
+    display: grid;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 0.6rem;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
 }
-.emp-stat-card::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 3px;
-    border-radius: 0 0 16px 16px;
-}
-.emp-stat-card.c-purple::after { background: #7a3f91; }
-.emp-stat-card.c-green::after  { background: #10b981; }
-.emp-stat-card.c-blue::after   { background: #3b82f6; }
-.emp-stat-card.c-amber::after  { background: #f59e0b; }
-.emp-stat-card.c-gray::after   { background: #9ca3af; }
-.emp-stat-card.c-teal::after   { background: #14b8a6; }
-.emp-stat-card.c-rose::after   { background: #f43f5e; }
-.emp-stat-card.c-orange::after { background: #f97316; }
 
-.emp-chart-card {
-    background: #fff;
-    border: 1px solid #E8E0F0;
-    border-radius: 16px;
+/* Each snap card fills its row and clips internally */
+.adm-snap-card {
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     overflow: hidden;
-    box-shadow: 0 1px 4px rgba(0,0,0,.04);
 }
-.emp-chart-head {
-    padding: 12px 18px;
-    border-bottom: 1px solid #E8E0F0;
-    background: #F9F7FC;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px;
+
+/* snap-row fills remaining height inside each card */
+.adm-snap-row {
+    display: flex;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
 }
-.emp-chart-dot  { width: 8px; height: 8px; border-radius: 50%; background: #7a3f91; flex-shrink: 0; }
-.emp-chart-ttl  { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #333; }
-.emp-chart-body { padding: 16px; }
 
-.emp-prog { height: 5px; border-radius: 99px; background: #ede9fe; overflow: hidden; margin-top: 5px; }
-.emp-prog-fill { height: 100%; border-radius: 99px; transition: width .6s; }
-
-.emp-rank-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 9px 0;
-    border-bottom: 1px solid #f5f5f5;
+.adm-snap-mini-chart {
+    display: flex; align-items: center; justify-content: center;
+    padding: 6px 4px; width: 88px; flex-shrink: 0;
 }
-.emp-rank-row:last-child { border-bottom: none; }
-.emp-rank-num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 600; flex-shrink: 0; }
-
-.emp-f-select {
-    padding: 8px 12px; border: 1.5px solid #E8E0F0; border-radius: 10px;
-    font-size: .85rem; font-family: inherit; font-weight: 500;
-    background: #fff; color: #333;
-    transition: border-color .15s, box-shadow .15s;
+.adm-snap-mini-tiles {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px;
+    padding: 8px 10px 8px 0; flex: 1;
+}
+.adm-snap-mini-tile {
+    border-radius: 8px; padding: 5px 7px; border: 1px solid #E8E0F0; background: #FAFBFF;
     cursor: pointer;
 }
-.emp-f-select:focus { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
+.adm-snap-mini-tile:hover { background: #F0E6F8; }
+.adm-snap-mini-num { font-size: .9rem; font-weight: 800; color: #000000; line-height: 1; }
+.adm-snap-mini-lbl { font-size: .56rem; font-weight: 700; color: #000000; text-transform: uppercase; letter-spacing: .03em; margin-top: 1px; }
 
-.wire-emp-loading { opacity: .4; pointer-events: none; transition: opacity .2s; }
+/* Snap panel head — no purple icon, just text */
+.adm-snap-head-text { display: flex; flex-direction: column; }
 
 [x-cloak] { display:none !important }
 </style>
 
-<div class="min-h-screen bg-[#F4F0F9] font-sans antialiased">
-<div class="px-3 sm:px-5 lg:px-7 pt-5 pb-10 max-w-screen-2xl mx-auto space-y-5">
-
-    {{-- ══════════════════════ HERO HEADER ══════════════════════ --}}
-    <div class="hero-mesh rounded-2xl px-6 sm:px-8 py-7 fade-up">
-        <div class="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
-
-            {{-- Left --}}
-            <div class="flex items-center gap-4">
-                <div class="w-14 h-14 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center flex-shrink-0 shadow-lg pulse-dot">
-                    <i class="fas fa-gauge-high text-white text-2xl"></i>
-                </div>
-                <div>
-                    <p class="text-white/55 text-[.65rem] font-semibold uppercase tracking-[.15em] leading-none mb-1">
-                        Admin Panel
-                    </p>
-                    <h1 class="text-white text-[1.75rem] sm:text-[2rem] font-bold leading-tight tracking-tight">
-                        {{ $greeting }}, {{ $adminName }}
-                    </h1>
-                    <p class="text-white/60 text-[.78rem] mt-1">
-                        <i class="fas fa-circle text-[5px] text-emerald-300 mr-1.5 align-middle"></i>
-                        {{ now()->setTimezone('Asia/Manila')->format('l, F j, Y · g:i A') }} PHT
-                    </p>
-                </div>
-            </div>
-
-            {{-- Right Actions --}}
-            <div class="flex items-center gap-2.5 flex-wrap">
-                <button wire:click="refresh"
-                        class="inline-flex items-center gap-2 px-4 py-2.5 bg-white/15 border border-white/30
-                               rounded-xl text-white text-sm font-semibold hover:bg-white/25 transition-colors">
-                    <i class="fas fa-arrows-rotate text-xs" wire:loading.class="spin-anim" wire:target="refresh"></i>
-                    Refresh
-                </button>
-            </div>
+{{-- ══ PAGE HEADER ══ --}}
+<div class="flex items-center justify-between gap-3 mb-3 shrink-0">
+    <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <i class="fas fa-gauge-high text-white text-sm"></i>
         </div>
+        <div>
+            <h1 class="text-xl font-semibold leading-tight" style="color:#000000;">
+                {{ $greeting }}, {{ $adminName }}
+            </h1>
+            <p class="text-xs font-normal flex flex-wrap items-center gap-x-1.5">
+                <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
+                <span style="color:#000000;">{{ now()->setTimezone('Asia/Manila')->format('l, F j, Y · g:i A') }}</span>
+                <span class="text-[#c0a0d8]">·</span>
+                <span class="font-semibold text-[#7A3F91]">Admin Panel</span>
+            </p>
+        </div>
+    </div>
+</div>
 
-        {{-- Mini KPI strip --}}
-        <div class="relative z-10 mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            @php
-            $kpis = [
-                ['label' => 'Total Alumni',  'value' => number_format($stats['totalAlumni'] ?? 0),  'icon' => 'fa-users',         'color' => 'bg-white/15'],
-                ['label' => 'Verified',      'value' => number_format($stats['verified']    ?? 0),  'icon' => 'fa-circle-check',  'color' => 'bg-emerald-400/20'],
-                ['label' => 'Pending',       'value' => number_format($stats['pending']     ?? 0),  'icon' => 'fa-clock',         'color' => 'bg-amber-400/20'],
-                ['label' => 'Total Courses', 'value' => number_format($stats['totalCourses']?? 0),  'icon' => 'fa-book-open',     'color' => 'bg-indigo-400/20'],
-            ];
-            @endphp
-            @foreach($kpis as $k)
-            <div class="flex items-center gap-3 {{ $k['color'] }} border border-white/20 rounded-xl px-4 py-3">
-                <div class="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                    <i class="fas {{ $k['icon'] }} text-white text-sm"></i>
-                </div>
-                <div>
-                    <div class="text-white text-[1.2rem] font-bold leading-none">{{ $k['value'] }}</div>
-                    <div class="text-white/60 text-[.67rem] font-semibold mt-0.5">{{ $k['label'] }}</div>
-                </div>
-            </div>
-            @endforeach
+{{-- ══ KPI STRIP — icon left, text right ══ --}}
+<div class="adm-stat-grid">
+
+    <div wire:click="goToAlumni" class="adm-stat-card adm-tip-wrap">
+        <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View All Alumni</span>
+        <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
+            <i class="fas fa-users text-white"></i>
+        </div>
+        <div class="adm-stat-text">
+            <div class="adm-stat-num">{{ number_format($stats['totalAlumni'] ?? 0) }}</div>
+            <div class="adm-stat-lbl">Total Alumni</div>
+            <div class="adm-stat-sub">{{ $stats['totalCourses'] ?? 0 }} courses · {{ $stats['totalAlumni'] > 0 ? round((($stats['verified']??0)/$stats['totalAlumni'])*100) : 0 }}% verified</div>
         </div>
     </div>
 
-    {{-- ══════════════════════ STAT CARDS ROW ══════════════════════ --}}
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        @php
-        $cards = [
-            ['label'=>'Total Alumni',  'value'=>number_format($stats['totalAlumni']??0),  'sub'=>'all records',        'icon'=>'fa-users',        'bg'=>'bg-[#f5eef9]', 'icon_c'=>'text-[#7A3F91]', 'delay'=>'fade-up-1'],
-            ['label'=>'Verified',      'value'=>number_format($stats['verified']??0),     'sub'=>'approved alumni',    'icon'=>'fa-circle-check', 'bg'=>'bg-emerald-50','icon_c'=>'text-emerald-600','delay'=>'fade-up-2'],
-            ['label'=>'Pending',       'value'=>number_format($stats['pending']??0),      'sub'=>'awaiting review',    'icon'=>'fa-clock',        'bg'=>'bg-amber-50',  'icon_c'=>'text-amber-600', 'delay'=>'fade-up-3'],
-            ['label'=>'Rejected',      'value'=>number_format($stats['rejected']??0),     'sub'=>'declined records',   'icon'=>'fa-circle-xmark', 'bg'=>'bg-red-50',    'icon_c'=>'text-red-500',   'delay'=>'fade-up-4'],
-            ['label'=>'This Month',    'value'=>number_format($stats['thisMonth']??0),    'sub'=>(($stats['growth']??0)>=0?'+':''). ($stats['growth']??0).'% vs last mo.','icon'=>'fa-calendar-plus','bg'=>'bg-cyan-50','icon_c'=>'text-cyan-600','delay'=>'fade-up-5'],
-            ['label'=>'Flagged Logs',  'value'=>number_format($stats['flagged']??0),      'sub'=>'needs review',       'icon'=>'fa-flag',         'bg'=>'bg-orange-50', 'icon_c'=>'text-orange-500','delay'=>'fade-up-6'],
-        ];
-        @endphp
-
-        @foreach($cards as $c)
-        <div class="bg-white rounded-2xl p-5 border border-[#E8E0F0] shadow-sm card-hover fade-up {{ $c['delay'] }}">
-            <div class="w-[42px] h-[42px] rounded-[11px] {{ $c['bg'] }} flex items-center justify-center mb-3">
-                <i class="fas {{ $c['icon'] }} {{ $c['icon_c'] }} text-[17px]"></i>
-            </div>
-            <div class="text-[2rem] font-bold leading-none text-[#333333] tracking-tight">{{ $c['value'] }}</div>
-            <div class="text-[.7rem] font-semibold uppercase tracking-[.07em] text-[#888] mt-2">{{ $c['label'] }}</div>
-            <div class="text-[.72rem] font-normal text-[#AAAAAA] mt-[3px]">{{ $c['sub'] }}</div>
+    <div wire:click="goToAlumni('verified')" class="adm-stat-card adm-tip-wrap">
+        <span class="adm-tip"><i class="fas fa-circle-check mr-1.5"></i>View Verified Alumni</span>
+        <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#027a4f,#059669);">
+            <i class="fas fa-circle-check text-white"></i>
         </div>
-        @endforeach
+        <div class="adm-stat-text">
+            <div class="adm-stat-num">{{ number_format($stats['verified'] ?? 0) }}</div>
+            <div class="adm-stat-lbl">Verified</div>
+            <div class="adm-stat-sub">{{ $stats['totalAlumni'] > 0 ? round((($stats['verified']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</div>
+        </div>
     </div>
 
-    {{-- ══════════════════════ MIDDLE ROW: Chart + System Summary ══════════════════════ --}}
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
+    <div wire:click="goToAlumni('pending')" class="adm-stat-card adm-tip-wrap">
+        <span class="adm-tip"><i class="fas fa-clock mr-1.5"></i>Review Pending Alumni</span>
+        <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#b55a05,#d97706);">
+            <i class="fas fa-clock text-white"></i>
+        </div>
+        <div class="adm-stat-text">
+            <div class="adm-stat-num">{{ number_format($stats['pending'] ?? 0) }}</div>
+            <div class="adm-stat-lbl">Pending</div>
+            <div class="adm-stat-sub">{{ $stats['totalAlumni'] > 0 ? round((($stats['pending']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</div>
+        </div>
+    </div>
 
-        {{-- Monthly Alumni Bar Chart --}}
-        <div class="lg:col-span-3 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden card-hover fade-up fade-up-4">
-            <div class="px-6 py-4 border-b border-[#E8E0F0] flex items-center justify-between"
-                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+    <div wire:click="goToAlumni('this_month')" class="adm-stat-card adm-tip-wrap">
+        <span class="adm-tip"><i class="fas fa-calendar-plus mr-1.5"></i>View New Registrations</span>
+        <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#1a4db5,#2563eb);">
+            <i class="fas fa-calendar-plus text-white"></i>
+        </div>
+        <div class="adm-stat-text">
+            <div class="adm-stat-num">{{ number_format($stats['thisMonth'] ?? 0) }}</div>
+            <div class="adm-stat-lbl">This Month</div>
+            <div class="adm-stat-sub">{{ ($stats['growth'] ?? 0) >= 0 ? '+' : '' }}{{ $stats['growth'] ?? 0 }}% vs last mo.</div>
+        </div>
+    </div>
+
+</div>
+
+{{-- ══ BODY: Courses + Role Strip (left) + Snapshots (right) ══ --}}
+<div class="adm-body-grid mt-3">
+
+    {{-- ── LEFT: Role strip (TOP) + All Courses (BELOW) stacked ── --}}
+    <div class="adm-panel-col">
+
+        {{-- ── Role counts strip — MOVED TO TOP ── --}}
+        <div class="adm-role-strip">
+            {{-- Directors --}}
+            <div wire:click="goToUsers('director')" class="adm-role-tile adm-otip" data-tip="👁 View Directors">
+                <div class="adm-role-tile-top">
+                    <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#4f46e5,#6366f1);">
+                        <i class="fas fa-user-tie text-white" style="font-size:.5rem;"></i>
+                    </div>
+                    <span class="adm-role-tile-label">Directors</span>
+                </div>
+                <div class="adm-role-tile-counts">
+                    <span class="adm-role-tile-pill" style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0;">
+                        <i class="fas fa-circle text-[4px]"></i>{{ $roleActiveDirectors }} Active
+                    </span>
+                    <span class="adm-role-tile-pill" style="background:#fffbeb;color:#b45309;border-color:#fde68a;">
+                        <i class="fas fa-circle text-[4px]"></i>{{ $roleInactiveDirectors }} Inactive
+                    </span>
+                </div>
+            </div>
+
+            {{-- Coordinators --}}
+            <div wire:click="goToUsers('coordinator')" class="adm-role-tile adm-otip" data-tip="👁 View Coordinators">
+                <div class="adm-role-tile-top">
+                    <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        <i class="fas fa-users-gear text-white" style="font-size:.5rem;"></i>
+                    </div>
+                    <span class="adm-role-tile-label">Coordinators</span>
+                </div>
+                <div class="adm-role-tile-counts">
+                    <span class="adm-role-tile-pill" style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0;">
+                        <i class="fas fa-circle text-[4px]"></i>{{ $roleActiveCoordinators }} Active
+                    </span>
+                    <span class="adm-role-tile-pill" style="background:#fffbeb;color:#b45309;border-color:#fde68a;">
+                        <i class="fas fa-circle text-[4px]"></i>{{ $roleInactiveCoordinators }} Inactive
+                    </span>
+                </div>
+            </div>
+
+            {{-- Registrars --}}
+            <div wire:click="goToUsers('registrar')" class="adm-role-tile adm-otip" data-tip="👁 View Registrars">
+                <div class="adm-role-tile-top">
+                    <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#059669,#10b981);">
+                        <i class="fas fa-user-clock text-white" style="font-size:.5rem;"></i>
+                    </div>
+                    <span class="adm-role-tile-label">Registrars</span>
+                </div>
+                <div class="adm-role-tile-counts">
+                    <span class="adm-role-tile-pill" style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0;">
+                        <i class="fas fa-circle text-[4px]"></i>{{ $roleActiveRegistrars }} Active
+                    </span>
+                    <span class="adm-role-tile-pill" style="background:#fffbeb;color:#b45309;border-color:#fde68a;">
+                        <i class="fas fa-circle text-[4px]"></i>{{ $roleInactiveRegistrars }} Inactive
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        {{-- All Courses — now BELOW the role strip ── --}}
+        <div class="adm-card" style="display:flex; flex-direction:column; min-height:0; flex:1; overflow:hidden;">
+            <div class="adm-panel-head">
                 <div class="flex items-center gap-2">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        <i class="fas fa-chart-column text-white text-xs"></i>
-                    </div>
                     <div>
-                        <p class="text-sm font-bold text-[#333333] uppercase tracking-wide leading-none">Alumni Registrations</p>
-                        <p class="text-[.67rem] text-[#999] mt-0.5">Last 6 months</p>
+                        <p class="adm-panel-ttl">All Courses</p>
+                        <p class="adm-panel-sub">Alumni count per course</p>
                     </div>
                 </div>
-                <span class="text-[.68rem] font-semibold px-2.5 py-1 rounded-full bg-[#f5eef9] text-[#7A3F91] border border-[#d4aaeb]">
-                    Monthly Trend
-                </span>
             </div>
 
-            @php
-                $maxVal = max(array_column($monthlyData, 'count') ?: [1]);
-                $maxVal = $maxVal < 1 ? 1 : $maxVal;
-            @endphp
-
-            <div class="px-6 py-6">
-                <div class="flex items-end justify-between gap-3 h-40">
-                    @foreach($monthlyData as $i => $m)
+            <div class="adm-panel-body-scroll adm-scroll">
+                <div class="p-3 space-y-2.5">
                     @php
-                        $pct   = ($m['count'] / $maxVal) * 100;
-                        $isMax = $m['count'] === $maxVal && $m['count'] > 0;
-                        $ht    = max($pct, 4);
+                        $maxAlumni = max(array_column($courseStats, 'alumni_count') ?: [1]);
+                        $maxAlumni = $maxAlumni < 1 ? 1 : $maxAlumni;
+                        $palette   = ['#7A3F91','#9b59b6','#c0a0d8','#2563eb','#059669','#d97706','#ef4444','#0891b2','#65a30d','#db2777'];
                     @endphp
-                    <div class="flex-1 flex flex-col items-center gap-2">
-                        <span class="text-[.72rem] font-bold text-[#7A3F91]">{{ $m['count'] > 0 ? $m['count'] : '' }}</span>
-                        <div class="w-full flex items-end" style="height:120px;">
-                            <div class="w-full rounded-t-xl transition-all duration-700 bar-anim"
-                                 style="--h:{{ $ht }}%; height:{{ $ht }}%;
-                                        background: {{ $isMax
-                                            ? 'linear-gradient(180deg,#7A3F91,#9b59b6)'
-                                            : 'linear-gradient(180deg,#d4aaeb,#e9d5f9)' }};
-                                        animation-delay: {{ $i * 0.08 }}s;">
-                            </div>
-                        </div>
-                        <span class="text-[.67rem] font-semibold text-[#AAAAAA] uppercase">{{ $m['label'] }}</span>
-                    </div>
-                    @endforeach
-                </div>
-
-                <div class="mt-4 flex items-center gap-4 pt-4 border-t border-[#F5F0FA]">
-                    <div class="flex items-center gap-1.5">
-                        <div class="w-3 h-3 rounded-sm" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);"></div>
-                        <span class="text-[.67rem] font-semibold text-[#888]">Peak Month</span>
-                    </div>
-                    <div class="flex items-center gap-1.5">
-                        <div class="w-3 h-3 rounded-sm" style="background:#d4aaeb;"></div>
-                        <span class="text-[.67rem] font-semibold text-[#888]">Other Months</span>
-                    </div>
-                    <div class="ml-auto text-[.67rem] text-[#AAAAAA]">
-                        Total: <strong class="text-[#333]">{{ array_sum(array_column($monthlyData,'count')) }}</strong>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {{-- System Summary Panel --}}
-        <div class="lg:col-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden card-hover fade-up fade-up-5">
-            <div class="px-5 py-4 border-b border-[#E8E0F0]"
-                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                <div class="flex items-center gap-2">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        <i class="fas fa-chart-pie text-white text-xs"></i>
-                    </div>
-                    <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">System Summary</p>
-                </div>
-            </div>
-
-            <div class="p-5 space-y-3">
-                @php
-                $summaryItems = [
-                    ['icon'=>'fa-users',        'label'=>'Total Alumni',    'value'=>number_format($stats['totalAlumni']??0),  'color'=>'#7A3F91','bg'=>'#f5eef9'],
-                    ['icon'=>'fa-circle-check', 'label'=>'Verified Alumni', 'value'=>number_format($stats['verified']??0),     'color'=>'#059669','bg'=>'#ecfdf5'],
-                    ['icon'=>'fa-clock',        'label'=>'Pending Review',  'value'=>number_format($stats['pending']??0),      'color'=>'#d97706','bg'=>'#fffbeb'],
-                    ['icon'=>'fa-circle-xmark', 'label'=>'Rejected',        'value'=>number_format($stats['rejected']??0),     'color'=>'#ef4444','bg'=>'#fef2f2'],
-                    ['icon'=>'fa-book-open',    'label'=>'Total Courses',   'value'=>number_format($stats['totalCourses']??0), 'color'=>'#2563eb','bg'=>'#eff6ff'],
-                    ['icon'=>'fa-flag',         'label'=>'Flagged Logs',    'value'=>number_format($stats['flagged']??0),      'color'=>'#f97316','bg'=>'#fff7ed'],
-                ];
-                @endphp
-
-                @foreach($summaryItems as $item)
-                <div class="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#F0E8F8]"
-                     style="background:#fdfbff;">
-                    <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                         style="background:{{ $item['bg'] }};">
-                        <i class="fas {{ $item['icon'] }} text-sm" style="color:{{ $item['color'] }};"></i>
-                    </div>
-                    <span class="text-sm font-semibold text-[#444444] flex-1">{{ $item['label'] }}</span>
-                    <span class="text-sm font-bold" style="color:{{ $item['color'] }};">{{ $item['value'] }}</span>
-                </div>
-                @endforeach
-            </div>
-        </div>
-    </div>
-
-    {{-- ══════════════════════ BOTTOM ROW: Recent Logs + Course Breakdown ══════════════════════ --}}
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
-
-        {{-- Recent Activity Feed --}}
-        <div class="lg:col-span-3 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col card-hover fade-up fade-up-6">
-            <div class="px-5 py-4 border-b border-[#E8E0F0] flex items-center justify-between"
-                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                <div class="flex items-center gap-2">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        <i class="fas fa-clock-rotate-left text-white text-xs"></i>
-                    </div>
+                    @forelse($courseStats as $idx => $cs)
+                    @php
+                        $pct   = round(($cs['alumni_count'] / $maxAlumni) * 100);
+                        $color = $palette[$idx % count($palette)];
+                    @endphp
                     <div>
-                        <p class="text-sm font-bold text-[#333333] uppercase tracking-wide leading-none">Recent Activity</p>
-                        <p class="text-[.67rem] text-[#999] mt-0.5">Latest system events</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="divide-y divide-[#F9F5FD] overflow-y-auto flex-1 max-h-[420px] scroll-sm">
-                @forelse($recentLogs as $log)
-                @php
-                    $actionColor = match($log['action']) {
-                        'login'          => 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                        'logout'         => 'bg-gray-50 text-gray-600 border-gray-200',
-                        'failed_login'   => 'bg-amber-50 text-amber-700 border-yellow-300',
-                        'account_locked' => 'bg-red-50 text-red-700 border-red-200',
-                        'deleted'        => 'bg-red-50 text-red-700 border-red-200',
-                        'created'        => 'bg-blue-50 text-blue-700 border-blue-200',
-                        'verified'       => 'bg-[#f5eef9] text-[#7a3f91] border-[#d4aaeb]',
-                        'updated'        => 'bg-orange-50 text-orange-700 border-orange-200',
-                        default          => 'bg-gray-50 text-gray-700 border-gray-200',
-                    };
-                    $roleColor = match($log['user_role']) {
-                        'admin'     => 'text-[#7a3f91] font-semibold',
-                        'organizer' => 'text-blue-600 font-semibold',
-                        'alumni'    => 'text-emerald-600 font-semibold',
-                        default     => 'text-gray-400',
-                    };
-                @endphp
-                <div class="flex items-start gap-3.5 px-5 py-3.5 hover:bg-[#FAFBFF] transition-colors">
-                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-                         style="background:linear-gradient(135deg,#f5eef9,#e9d5f9);">
-                        <i class="fas {{ $log['action_icon'] }} text-[#7A3F91] text-sm"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-[.78rem] font-semibold text-[#333333]">{{ $log['user_name'] }}</span>
-                            <span class="text-[.62rem] {{ $roleColor }} uppercase tracking-wide">{{ $log['user_role'] }}</span>
-                            @if($log['is_flagged'])
-                            <span class="text-[.6rem] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                                <i class="fas fa-flag text-[8px]"></i> Flagged
-                            </span>
-                            @endif
-                        </div>
-                        <p class="text-[.73rem] text-[#888] font-normal mt-0.5 leading-snug truncate">
-                            {{ $log['description'] }}
-                        </p>
-                    </div>
-                    <div class="flex flex-col items-end gap-1.5 flex-shrink-0">
-                        <span class="inline-flex items-center gap-1 text-[.62rem] font-semibold
-                                     px-2 py-0.5 rounded-full border {{ $actionColor }}">
-                            {{ $log['action_label'] }}
-                        </span>
-                        <span class="text-[.67rem] text-[#BBBBBB]">{{ $log['time'] }}</span>
-                    </div>
-                </div>
-                @empty
-                <div class="py-16 text-center">
-                    <div class="w-12 h-12 rounded-2xl bg-[#f5eef9] flex items-center justify-center mx-auto mb-3">
-                        <i class="fas fa-shield-halved text-[#d4aaeb] text-xl"></i>
-                    </div>
-                    <p class="text-sm font-semibold text-[#999]">No activity yet</p>
-                </div>
-                @endforelse
-            </div>
-        </div>
-
-        {{-- Alumni by Course --}}
-        <div class="lg:col-span-2 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden card-hover fade-up fade-up-7">
-            <div class="px-5 py-4 border-b border-[#E8E0F0]"
-                 style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                <div class="flex items-center gap-2">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        <i class="fas fa-chart-pie text-white text-xs"></i>
-                    </div>
-                    <div>
-                        <p class="text-sm font-bold text-[#333333] uppercase tracking-wide leading-none">Top Courses</p>
-                        <p class="text-[.67rem] text-[#999] mt-0.5">Alumni by course</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="p-5 space-y-3">
-                @php
-                    $maxAlumni = max(array_column($courseStats, 'alumni_count') ?: [1]);
-                    $maxAlumni = $maxAlumni < 1 ? 1 : $maxAlumni;
-                    $palette   = ['#7A3F91','#9b59b6','#c0a0d8','#2563eb','#059669','#d97706'];
-                @endphp
-
-                @forelse($courseStats as $idx => $cs)
-                @php
-                    $pct   = round(($cs['alumni_count'] / $maxAlumni) * 100);
-                    $color = $palette[$idx % count($palette)];
-                @endphp
-                <div>
-                    <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <div class="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[.58rem] font-bold text-white"
-                                 style="background:{{ $color }};">
-                                {{ $idx + 1 }}
+                        <div class="flex items-center justify-between mb-1">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <div class="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[.56rem] font-bold text-white"
+                                     style="background:{{ $color }};">{{ $idx + 1 }}</div>
+                                <span class="text-[.75rem] font-semibold font-mono uppercase truncate" style="color:#000000;">{{ $cs['code'] }}</span>
                             </div>
-                            <span class="text-[.78rem] font-semibold text-[#333] font-mono uppercase truncate">
-                                {{ $cs['code'] }}
-                            </span>
+                            <span class="text-[.7rem] font-bold ml-2 flex-shrink-0" style="color:#000000;">{{ $cs['alumni_count'] }}</span>
                         </div>
-                        <span class="text-[.72rem] font-bold text-[#555] ml-2 flex-shrink-0">
-                            {{ $cs['alumni_count'] }}
-                        </span>
+                        <div class="w-full h-1.5 rounded-full overflow-hidden" style="background:#F0E8F8;">
+                            <div class="h-full rounded-full transition-all duration-700" style="width:{{ $pct }}%; background:{{ $color }};"></div>
+                        </div>
+                        <p class="text-[.6rem] mt-0.5 truncate" style="color:#555555;">{{ $cs['name'] }}</p>
                     </div>
-                    <div class="w-full h-2 bg-[#F0E8F8] rounded-full overflow-hidden">
-                        <div class="h-full rounded-full transition-all duration-700"
-                             style="width:{{ $pct }}%; background:{{ $color }};"></div>
+                    @empty
+                    <div class="py-8 text-center">
+                        <div class="w-10 h-10 rounded-2xl flex items-center justify-center mx-auto mb-2" style="background:#f5eef9;">
+                            <i class="fas fa-book text-[#d4aaeb] text-lg"></i>
+                        </div>
+                        <p class="text-sm font-semibold" style="color:#000000;">No courses yet</p>
                     </div>
-                    <p class="text-[.62rem] text-[#BBBBBB] mt-0.5 truncate">{{ $cs['name'] }}</p>
+                    @endforelse
                 </div>
-                @empty
-                <div class="py-10 text-center">
-                    <div class="w-12 h-12 rounded-2xl bg-[#f5eef9] flex items-center justify-center mx-auto mb-3">
-                        <i class="fas fa-book text-[#d4aaeb] text-xl"></i>
-                    </div>
-                    <p class="text-sm font-semibold text-[#999]">No courses yet</p>
-                </div>
-                @endforelse
             </div>
 
             @if(count($courseStats) > 0)
-            <div class="px-5 py-3 border-t border-[#E8E0F0] bg-[#FAFBFF]">
-                <p class="text-[.72rem] font-semibold text-[#7A3F91]">
-                    Total: {{ $stats['totalCourses'] ?? 0 }} courses registered
+            <div class="px-4 py-2 border-t border-[#E8E0F0] bg-white flex items-center justify-between shrink-0">
+                <p class="text-[.66rem] font-semibold text-[#7A3F91]">
+                    {{ $stats['totalCourses'] ?? 0 }} courses
+                    @if(count($courseStats) > 4)
+                        <span class="text-[#c0a0d8] font-normal">· scroll for more</span>
+                    @endif
+                </p>
+                <p class="text-[.62rem] font-normal" style="color:#555555;">
+                    Alumni: {{ number_format($stats['totalAlumni'] ?? 0) }}
                 </p>
             </div>
             @endif
         </div>
-    </div>
 
-    {{-- ══════════════════════ ALUMNI STATUS BREAKDOWN ══════════════════════ --}}
-    <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden card-hover fade-up fade-up-8">
-        <div class="px-5 py-4 border-b border-[#E8E0F0]"
-             style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-            <div class="flex items-center gap-2">
-                <div class="w-7 h-7 rounded-lg flex items-center justify-center"
-                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                    <i class="fas fa-circle-half-stroke text-white text-xs"></i>
-                </div>
-                <div>
-                    <p class="text-sm font-bold text-[#333333] uppercase tracking-wide leading-none">Alumni Status Overview</p>
-                    <p class="text-[.67rem] text-[#999] mt-0.5">Verification breakdown</p>
+    </div>{{-- /adm-panel-col --}}
+
+    {{-- ── RIGHT: Snapshot Stack (Employment / Events / Jobs) ── --}}
+    <div class="adm-snap-stack adm-scroll">
+
+        {{-- Employment Snapshot --}}
+        <div wire:click="goToEmployment" class="adm-card adm-snap-card adm-tip-wrap">
+            <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Full Employment Page</span>
+            <div class="adm-panel-head">
+                <div class="adm-snap-head-text">
+                    <p class="adm-panel-ttl">Employment</p>
+                    <p class="adm-panel-sub">Quick snapshot</p>
                 </div>
             </div>
-        </div>
-
-        @php
-            $total     = max($stats['totalAlumni'] ?? 1, 1);
-            $verified  = $stats['verified']  ?? 0;
-            $pending   = $stats['pending']   ?? 0;
-            $rejected  = $stats['rejected']  ?? 0;
-            $vPct      = round(($verified  / $total) * 100);
-            $pPct      = round(($pending   / $total) * 100);
-            $rPct      = round(($rejected  / $total) * 100);
-
-            $statuses  = [
-                ['label' => 'Verified',  'count' => $verified, 'pct' => $vPct, 'bar' => '#059669', 'badge' => 'bg-emerald-50 text-emerald-700 border-emerald-200'],
-                ['label' => 'Pending',   'count' => $pending,  'pct' => $pPct, 'bar' => '#d97706', 'badge' => 'bg-amber-50 text-amber-700 border-yellow-300'],
-                ['label' => 'Rejected',  'count' => $rejected, 'pct' => $rPct, 'bar' => '#ef4444', 'badge' => 'bg-red-50 text-red-700 border-red-200'],
-            ];
-        @endphp
-
-        <div class="px-6 py-6">
-            <div class="w-full h-4 rounded-full overflow-hidden flex mb-5 gap-0.5" style="background:#F0E8F8;">
-                @foreach($statuses as $s)
-                @if($s['pct'] > 0)
-                <div class="h-full transition-all duration-700 first:rounded-l-full last:rounded-r-full"
-                     style="width:{{ $s['pct'] }}%; background:{{ $s['bar'] }};"
-                     title="{{ $s['label'] }}: {{ $s['count'] }}"></div>
-                @endif
-                @endforeach
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
-                @foreach($statuses as $s)
-                <div class="flex items-center gap-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-white text-sm"
-                         style="background:{{ $s['bar'] }};">
-                        {{ $s['pct'] }}%
+            <div class="adm-snap-row">
+                <div class="adm-snap-mini-chart" wire:ignore>
+                    <canvas id="adm_chartEmpSnapshot"></canvas>
+                </div>
+                <div class="adm-snap-mini-tiles">
+                    {{-- Employed --}}
+                    <div wire:click.stop="goToEmployment('employed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Employed</span>
+                        <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($empEmployed) }}</p>
+                        <p class="adm-snap-mini-lbl">Employed</p>
                     </div>
-                    <div>
-                        <div class="text-xl font-bold text-[#333]">{{ number_format($s['count']) }}</div>
-                        <span class="inline-flex items-center gap-1 text-[.67rem] font-semibold
-                                     px-2 py-0.5 rounded-full border {{ $s['badge'] }} mt-0.5">
-                            <i class="fa-solid fa-circle text-[4px]"></i>
-                            {{ $s['label'] }}
-                        </span>
+                    {{-- Self-Employed --}}
+                    <div wire:click.stop="goToEmployment('self_employed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Self-Employed</span>
+                        <p class="adm-snap-mini-num" style="color:#2563eb;">{{ number_format($empSelf) }}</p>
+                        <p class="adm-snap-mini-lbl">Self-Employed</p>
                     </div>
-                </div>
-                @endforeach
-            </div>
-        </div>
-    </div>
-
-    {{-- ══════════════════════════════════════════════════════════════════════
-         EMPLOYMENT ANALYTICS SECTION
-    ══════════════════════════════════════════════════════════════════════ --}}
-
-    {{-- Section Divider --}}
-    <div class="flex items-center gap-4 py-2">
-        <div class="flex-1 h-px bg-gradient-to-r from-transparent via-[#d4aaeb] to-transparent"></div>
-        <div class="flex items-center gap-2 px-4 py-2 rounded-full border border-[#d4aaeb] bg-[#f5eef9]">
-            <i class="fas fa-chart-column text-[#7a3f91] text-sm"></i>
-            <span class="text-[.78rem] font-bold text-[#7a3f91] uppercase tracking-wider">Employment Analytics</span>
-        </div>
-        <div class="flex-1 h-px bg-gradient-to-r from-[#d4aaeb] via-[#d4aaeb] to-transparent"></div>
-    </div>
-
-    {{-- Employment Filter Bar --}}
-    <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm px-5 py-4 flex flex-wrap items-center gap-3"
-         wire:loading.class="wire-emp-loading"
-         wire:target="updatedFilterBatch,updatedFilterCollege,updatedFilterCourse,clearEmpFilters">
-        <i class="fas fa-sliders text-sm text-[#7a3f91]"></i>
-        <span class="text-[.75rem] font-bold uppercase tracking-wider text-[#888]">Filter Employment:</span>
-
-        <select wire:model.live="filterBatch" class="emp-f-select">
-            <option value="">All Batches</option>
-            @foreach($empBatches as $b)
-                <option value="{{ $b }}">Batch {{ $b }}</option>
-            @endforeach
-        </select>
-
-        <select wire:model.live="filterCollege" class="emp-f-select">
-            <option value="">All Colleges</option>
-            @foreach($empColleges as $c)
-                <option value="{{ $c }}">{{ $c }}</option>
-            @endforeach
-        </select>
-
-        @if($filterCollege)
-        <select wire:model.live="filterCourse" class="emp-f-select">
-            <option value="">All Courses in College</option>
-            @foreach($empCourses as $c)
-                @if($c['college'] === $filterCollege)
-                    <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
-                @endif
-            @endforeach
-        </select>
-        @else
-        <select wire:model.live="filterCourse" class="emp-f-select">
-            <option value="">All Courses</option>
-            @foreach($empCourses as $c)
-                <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
-            @endforeach
-        </select>
-        @endif
-
-        @if($filterBatch || $filterCollege || $filterCourse)
-            <button wire:click="clearEmpFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-red-200 bg-red-50 text-red-600 transition">
-                <i class="fas fa-rotate-left text-xs"></i> Reset
-            </button>
-            <span class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#f5eef9] text-[#7a3f91]">
-                <i class="fas fa-filter text-xs mr-1"></i> Filtered
-            </span>
-        @endif
-
-        <div class="ml-auto" wire:loading wire:target="filterBatch,filterCollege,filterCourse,clearEmpFilters">
-            <i class="fas fa-circle-notch fa-spin text-sm text-[#7a3f91]"></i>
-        </div>
-    </div>
-
-    {{-- Employment Stat Cards --}}
-    <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3"
-         wire:loading.class="wire-emp-loading"
-         wire:target="filterBatch,filterCollege,filterCourse,clearEmpFilters">
-
-        @php
-        $empRate  = ($totalFilled > 0) ? round(($totalEmployed + $totalSelf) / $totalFilled * 100) : 0;
-        $empCards = [
-            ['cls'=>'c-purple','bg'=>'#f5eef9','ic'=>'#7a3f91', 'icon'=>'fa-users',          'num'=>$totalAlumni,     'lbl'=>'Total Alumni',    'sub'=>($totalAlumni>0?round($totalFilled/$totalAlumni*100).'% have records':'—')],
-            ['cls'=>'c-green', 'bg'=>'#d1fae5','ic'=>'#059669', 'icon'=>'fa-briefcase',       'num'=>$totalEmployed,   'lbl'=>'Employed',        'sub'=>($totalAlumni>0?round($totalEmployed/$totalAlumni*100).'% of total':'—')],
-            ['cls'=>'c-blue',  'bg'=>'#dbeafe','ic'=>'#2563eb', 'icon'=>'fa-store',           'num'=>$totalSelf,       'lbl'=>'Self-Employed',   'sub'=>($totalAlumni>0?round($totalSelf/$totalAlumni*100).'% of total':'—')],
-            ['cls'=>'c-amber', 'bg'=>'#fef3c7','ic'=>'#d97706', 'icon'=>'fa-circle-pause',    'num'=>$totalUnemployed, 'lbl'=>'Unemployed',      'sub'=>($totalAlumni>0?round($totalUnemployed/$totalAlumni*100).'% of total':'—')],
-            ['cls'=>'c-gray',  'bg'=>'#f3f4f6','ic'=>'#9ca3af', 'icon'=>'fa-circle-question', 'num'=>$totalNotFilled,  'lbl'=>'Not Filled',      'sub'=>'no record'],
-            ['cls'=>'c-teal',  'bg'=>'#ccfbf1','ic'=>'#0d9488', 'icon'=>'fa-house',           'num'=>$totalLocal,      'lbl'=>'Local Workers',   'sub'=>(($totalLocal+$totalAbroad)>0?round($totalLocal/max($totalLocal+$totalAbroad,1)*100).'% employed':'—')],
-            ['cls'=>'c-orange','bg'=>'#ffedd5','ic'=>'#ea580c', 'icon'=>'fa-plane-departure',  'num'=>$totalAbroad,     'lbl'=>'Abroad / OFW',    'sub'=>(($totalLocal+$totalAbroad)>0?round($totalAbroad/max($totalLocal+$totalAbroad,1)*100).'% employed':'—')],
-            ['cls'=>'c-rose',  'bg'=>'#ffe4e6','ic'=>'#e11d48', 'icon'=>'fa-chart-pie',        'num'=>$empRate.'%',     'lbl'=>'Emp. Rate',       'sub'=>'of those w/ records'],
-        ];
-        @endphp
-
-        @foreach($empCards as $ec)
-        <div class="emp-stat-card {{ $ec['cls'] }}">
-            <div class="w-10 h-10 rounded-[10px] flex items-center justify-center mb-3"
-                 style="background:{{ $ec['bg'] }};">
-                <i class="fas {{ $ec['icon'] }} text-[15px]" style="color:{{ $ec['ic'] }};"></i>
-            </div>
-            <p class="text-[1.5rem] font-bold leading-none text-[#333] tracking-tight">{{ $ec['num'] }}</p>
-            <p class="text-[.68rem] font-semibold uppercase tracking-[.07em] text-[#888] mt-1.5">{{ $ec['lbl'] }}</p>
-            <p class="text-[.68rem] text-[#AAAAAA] mt-[3px]">{{ $ec['sub'] }}</p>
-        </div>
-        @endforeach
-    </div>
-
-    {{-- Row 1: Status / Location / Relevance / Unemployed Why --}}
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
-         wire:loading.class="wire-emp-loading"
-         wire:target="filterBatch,filterCollege,filterCourse,clearEmpFilters">
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot"></div>
-                    <span class="emp-chart-ttl">Employment Status</span>
-                </div>
-            </div>
-            <div class="emp-chart-body flex items-center justify-center" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartStatus"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#e879f9;"></div>
-                    <span class="emp-chart-ttl">Work Location</span>
-                </div>
-            </div>
-            <div class="emp-chart-body flex items-center justify-center" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartLocation"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#10b981;"></div>
-                    <span class="emp-chart-ttl">Job-Course Relevance</span>
-                </div>
-            </div>
-            <div class="emp-chart-body flex items-center justify-center" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartRelevance"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#f59e0b;"></div>
-                    <span class="emp-chart-ttl">Unemployed — Why?</span>
-                </div>
-            </div>
-            <div class="emp-chart-body flex items-center justify-center" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartUnemployed"></canvas>
-            </div>
-        </div>
-
-    </div>
-
-    {{-- Row 2: Emp Type / Career Path / Education / Top Courses --}}
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
-         wire:loading.class="wire-emp-loading"
-         wire:target="filterBatch,filterCollege,filterCourse,clearEmpFilters">
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#a855f7;"></div>
-                    <span class="emp-chart-ttl">Employment Type</span>
-                </div>
-            </div>
-            <div class="emp-chart-body flex items-center justify-center" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartEmpType"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#14b8a6;"></div>
-                    <span class="emp-chart-ttl">Career Path Labels</span>
-                </div>
-            </div>
-            <div class="emp-chart-body" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartCareerPath"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#3b82f6;"></div>
-                    <span class="emp-chart-ttl">Further Education</span>
-                </div>
-            </div>
-            <div class="emp-chart-body flex items-center justify-center" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartEduStatus"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot"></div>
-                    <span class="emp-chart-ttl">Top Courses (Employed)</span>
-                </div>
-            </div>
-            <div class="emp-chart-body" style="height:210px;" wire:ignore>
-                <canvas id="dash_chartCourse"></canvas>
-            </div>
-        </div>
-
-    </div>
-
-    {{-- Row 3: By Batch + By College --}}
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4"
-         wire:loading.class="wire-emp-loading"
-         wire:target="filterBatch,filterCollege,filterCourse,clearEmpFilters">
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head" style="justify-content:space-between;">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#f59e0b;"></div>
-                    <div>
-                        <div class="emp-chart-ttl">Employment by Batch Year</div>
-                        <div class="text-[.68rem] text-[#999] font-medium mt-0.5">Stacked across all years</div>
+                    {{-- Unemployed --}}
+                    <div wire:click.stop="goToEmployment('unemployed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Unemployed</span>
+                        <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($empUnemployed) }}</p>
+                        <p class="adm-snap-mini-lbl">Unemployed</p>
                     </div>
-                </div>
-                <div id="dash_batchNavControls" class="flex items-center gap-1.5" style="display:none!important;">
-                    <button id="dash_batchPrev"
-                            class="w-7 h-7 rounded-lg border border-gray-200 bg-white flex items-center justify-center text-xs transition disabled:opacity-30"
-                            style="color:#7a3f91;">
-                        <i class="fa-solid fa-chevron-left" style="font-size:.6rem;"></i>
-                    </button>
-                    <span id="dash_batchPageInfo" class="text-xs font-semibold text-[#999] whitespace-nowrap min-w-[36px] text-center"></span>
-                    <button id="dash_batchNext"
-                            class="w-7 h-7 rounded-lg border border-gray-200 bg-white flex items-center justify-center text-xs transition disabled:opacity-30"
-                            style="color:#7a3f91;">
-                        <i class="fa-solid fa-chevron-right" style="font-size:.6rem;"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="emp-chart-body" style="height:260px;" wire:ignore>
-                <canvas id="dash_chartBatch"></canvas>
-            </div>
-        </div>
-
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#06b6d4;"></div>
-                    <div>
-                        <div class="emp-chart-ttl">Employment by College</div>
-                        <div class="text-[.68rem] text-[#999] font-medium mt-0.5">Across all departments</div>
+                    {{-- Not Filled (replaces Emp. Rate) --}}
+                    <div wire:click.stop="goToEmployment('no_record')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Not Filled</span>
+                        <p class="adm-snap-mini-num" style="color:#9ca3af;">{{ number_format($empNotFilled) }}</p>
+                        <p class="adm-snap-mini-lbl">Not Filled</p>
                     </div>
                 </div>
             </div>
-            <div class="emp-chart-body" style="height:260px;" wire:ignore>
-                <canvas id="dash_chartCollege"></canvas>
+        </div>
+
+        {{-- Events Snapshot --}}
+        <div wire:click="goToEvents" class="adm-card adm-snap-card adm-tip-wrap">
+            <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Full Events Page</span>
+            <div class="adm-panel-head">
+                <div class="adm-snap-head-text">
+                    <p class="adm-panel-ttl">Events</p>
+                    <p class="adm-panel-sub">Quick snapshot</p>
+                </div>
+            </div>
+            <div class="adm-snap-row">
+                <div class="adm-snap-mini-chart" wire:ignore>
+                    <canvas id="adm_chartEventsSnapshot"></canvas>
+                </div>
+                <div class="adm-snap-mini-tiles">
+                    <div wire:click.stop="goToEvents('PENDING')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Pending</span>
+                        <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($eventsPending) }}</p>
+                        <p class="adm-snap-mini-lbl">Pending</p>
+                    </div>
+                    <div wire:click.stop="goToEvents('APPROVED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Approved</span>
+                        <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($eventsApproved) }}</p>
+                        <p class="adm-snap-mini-lbl">Approved</p>
+                    </div>
+                    <div wire:click.stop="goToEvents('COMPLETED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Completed</span>
+                        <p class="adm-snap-mini-num" style="color:#16a34a;">{{ number_format($eventsCompleted) }}</p>
+                        <p class="adm-snap-mini-lbl">Completed</p>
+                    </div>
+                    <div wire:click.stop="goToEvents('REJECTED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Rejected</span>
+                        <p class="adm-snap-mini-num" style="color:#dc2626;">{{ number_format($eventsRejected) }}</p>
+                        <p class="adm-snap-mini-lbl">Rejected</p>
+                    </div>
+                </div>
             </div>
         </div>
 
-    </div>
-
-    {{-- Employment Insights: Top Colleges / Courses / Batches --}}
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4"
-         wire:loading.class="wire-emp-loading"
-         wire:target="filterBatch,filterCollege,filterCourse,clearEmpFilters">
-
-        @php
-            $allCollegesInsight = collect($empColleges)->map(function($col) {
-                $codes    = DB::table('courses')->where('college',$col)->pluck('code');
-                $total    = DB::table('alumni')->whereNull('deleted_at')->whereIn('course_code',$codes)->count();
-                $employed = DB::table('alumni as a')
-                    ->join('employment_trackings as et','a.id','=','et.alumni_id')
-                    ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                    ->whereIn('a.course_code',$codes)
-                    ->whereIn('et.employment_status',['employed','self_employed'])->count();
-                return ['name'=>$col,'total'=>$total,'employed'=>$employed,'rate'=>$total>0?round($employed/$total*100):0];
-            })->sortByDesc('rate')->values();
-
-            $topCoursesInsight = DB::table('alumni as a')
-                ->join('employment_trackings as et','a.id','=','et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                ->whereIn('et.employment_status',['employed','self_employed'])
-                ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
-                ->groupBy('a.course_code')->orderByDesc('cnt')->limit(5)->get();
-
-            $topBatchesInsight = DB::table('alumni as a')
-                ->join('employment_trackings as et','a.id','=','et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                ->whereIn('et.employment_status',['employed','self_employed'])
-                ->select('a.batch', DB::raw('COUNT(*) as cnt'))
-                ->groupBy('a.batch')->orderByDesc('cnt')->limit(5)->get();
-        @endphp
-
-        {{-- Colleges --}}
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot"></div>
-                    <div>
-                        <div class="emp-chart-ttl">Colleges — Emp. Rate</div>
-                        <div class="text-[.68rem] text-[#999] font-medium mt-0.5">Highest first</div>
-                    </div>
+        {{-- Jobs Snapshot --}}
+        <div wire:click="goToJobs" class="adm-card adm-snap-card adm-tip-wrap">
+            <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Full Job Postings Page</span>
+            <div class="adm-panel-head">
+                <div class="adm-snap-head-text">
+                    <p class="adm-panel-ttl">Job Postings</p>
+                    <p class="adm-panel-sub">Quick snapshot</p>
                 </div>
-                <i class="fas fa-trophy text-sm text-amber-400"></i>
             </div>
-            <div class="emp-chart-body space-y-0">
-                @forelse($allCollegesInsight->take(6) as $i => $col)
-                @php
-                    $medals = ['🥇','🥈','🥉'];
-                    $medal  = $medals[$i] ?? null;
-                    $pct    = $col['rate'];
-                    $fillColor = $pct >= 70 ? '#10b981' : ($pct >= 40 ? '#f59e0b' : '#ef4444');
-                @endphp
-                <div class="emp-rank-row">
-                    <div class="emp-rank-num"
-                         style="background:{{ $i===0?'#fef3c7':($i===1?'#f3f4f6':($i===2?'#fde8d8':'#f9fafb')) }};
-                                color:{{ $i===0?'#b45309':($i===1?'#6b7280':'#c2410c') }};">
-                        {{ $medal ?? ($i+1) }}
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-xs font-semibold truncate text-[#333]">{{ $col['name'] }}</p>
-                        <div class="emp-prog">
-                            <div class="emp-prog-fill" style="width:{{ $pct }}%;background:{{ $fillColor }};"></div>
-                        </div>
-                    </div>
-                    <span class="text-xs font-semibold flex-shrink-0 ml-2" style="color:{{ $fillColor }};">{{ $pct }}%</span>
+            <div class="adm-snap-row">
+                <div class="adm-snap-mini-chart" wire:ignore>
+                    <canvas id="adm_chartJobsSnapshot"></canvas>
                 </div>
-                @empty
-                    <p class="text-sm text-center py-6 text-[#999]">No data available.</p>
-                @endforelse
+                <div class="adm-snap-mini-tiles">
+                    <div wire:click.stop="goToJobs('ACTIVE')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Active</span>
+                        <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($jobsActive) }}</p>
+                        <p class="adm-snap-mini-lbl">Active</p>
+                    </div>
+                    <div wire:click.stop="goToJobs('INACTIVE')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive</span>
+                        <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($jobsInactive) }}</p>
+                        <p class="adm-snap-mini-lbl">Inactive</p>
+                    </div>
+                    <div wire:click.stop="goToJobs('EXPIRING')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Expiring Soon</span>
+                        <p class="adm-snap-mini-num" style="color:#f97316;">{{ number_format($jobsExpiring) }}</p>
+                        <p class="adm-snap-mini-lbl">Expiring Soon</p>
+                    </div>
+                    <div wire:click.stop="goToJobs" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View All Postings</span>
+                        <p class="adm-snap-mini-num" style="color:#7a3f91;">{{ number_format($jobsTotal) }}</p>
+                        <p class="adm-snap-mini-lbl">Total Postings</p>
+                    </div>
+                </div>
             </div>
         </div>
 
-        {{-- Top Courses --}}
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#3b82f6;"></div>
-                    <div>
-                        <div class="emp-chart-ttl">Top Courses (Employed)</div>
-                        <div class="text-[.68rem] text-[#999] font-medium mt-0.5">Most alumni employed</div>
-                    </div>
-                </div>
-                <i class="fas fa-graduation-cap text-sm text-blue-500"></i>
-            </div>
-            <div class="emp-chart-body space-y-0">
-                @php $maxCourseI = $topCoursesInsight->max('cnt') ?: 1; @endphp
-                @forelse($topCoursesInsight as $i => $c)
-                <div class="emp-rank-row">
-                    <div class="emp-rank-num bg-[#f5eef9] text-[#7a3f91]">{{ $i+1 }}</div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-xs font-semibold text-[#333]">{{ $c->course_code }}</p>
-                        <div class="emp-prog">
-                            <div class="emp-prog-fill" style="width:{{ round($c->cnt/$maxCourseI*100) }}%;background:#7a3f91;"></div>
-                        </div>
-                    </div>
-                    <span class="text-xs font-semibold flex-shrink-0 ml-2 text-[#7a3f91]">{{ $c->cnt }}</span>
-                </div>
-                @empty
-                    <p class="text-sm text-center py-6 text-[#999]">No data available.</p>
-                @endforelse
-            </div>
-        </div>
+    </div>{{-- end snapshot stack --}}
 
-        {{-- Top Batches --}}
-        <div class="emp-chart-card">
-            <div class="emp-chart-head">
-                <div class="flex items-center gap-2">
-                    <div class="emp-chart-dot" style="background:#f59e0b;"></div>
-                    <div>
-                        <div class="emp-chart-ttl">Top Batches (Employed)</div>
-                        <div class="text-[.68rem] text-[#999] font-medium mt-0.5">Most alumni working</div>
-                    </div>
-                </div>
-                <i class="fas fa-calendar-check text-sm text-amber-400"></i>
-            </div>
-            <div class="emp-chart-body space-y-0">
-                @php $maxBatchI = $topBatchesInsight->max('cnt') ?: 1; @endphp
-                @forelse($topBatchesInsight as $i => $b)
-                <div class="emp-rank-row">
-                    <div class="emp-rank-num bg-amber-50 text-amber-700">{{ $i+1 }}</div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-xs font-semibold text-[#333]">Batch {{ $b->batch }}</p>
-                        <div class="emp-prog">
-                            <div class="emp-prog-fill" style="width:{{ round($b->cnt/$maxBatchI*100) }}%;background:#f59e0b;"></div>
-                        </div>
-                    </div>
-                    <span class="text-xs font-semibold flex-shrink-0 ml-2 text-amber-600">{{ $b->cnt }}</span>
-                </div>
-                @empty
-                    <p class="text-sm text-center py-6 text-[#999]">No data available.</p>
-                @endforelse
-            </div>
-        </div>
+</div>{{-- end body grid --}}
 
-    </div>
-
-    {{-- ══════════════════════ FOOTER ══════════════════════ --}}
-    <div class="rounded-2xl px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-         style="background:#2b0d3e;">
-        <p class="text-white/50 text-xs">
-            <i class="fas fa-shield-halved text-[#9b59b6] mr-1.5"></i>
-            Admin Dashboard &nbsp;·&nbsp; All times displayed in <strong class="text-white/70">Asia/Manila (PHT)</strong>
-        </p>
-        <p class="text-white/40 text-xs">
-            Last refreshed: {{ now()->setTimezone('Asia/Manila')->format('g:i:s A') }}
-        </p>
-    </div>
-
-</div>
-</div>
-
-{{-- ══ EMPLOYMENT CHART DATA BRIDGE ══════════════════════════════════════════ --}}
-<div id="__dash_emp_data" style="display:none"
-     data-status="{{ $chartStatusData }}"
-     data-location="{{ $chartLocationData }}"
-     data-relevance="{{ $chartRelevanceData }}"
-     data-batch="{{ $chartBatchData }}"
-     data-college="{{ $chartCollegeData }}"
-     data-course="{{ $chartCourseData }}"
-     data-emptype="{{ $chartEmpTypeData }}"
-     data-career="{{ $chartCareerPathData }}"
-     data-edu="{{ $chartEduStatusData }}"
-     data-unemployed="{{ $chartUnemployedData }}">
+{{-- ══ CHART DATA BRIDGE ══ --}}
+<div id="__dash_chart_data" style="display:none"
+     data-empsnapshot="{{ $chartEmpSnapshotData }}"
+     data-eventssnapshot="{{ $chartEventsSnapshotData }}"
+     data-jobssnapshot="{{ $chartJobsSnapshotData }}">
 </div>
 
 <script>
 (function(){
     'use strict';
 
-    var BATCH_PAGE = 8;
-    var batchIdx   = 0;
-    var batchAll   = null;
-    var registry   = {};
+    var registry = {};
 
     function loadChartJs(cb){
         if(window.Chart){ cb(); return; }
@@ -1366,31 +779,19 @@ new #[Layout('app')] class extends Component {
     }
 
     function bridge(){
-        var el = document.getElementById('__dash_emp_data');
+        var el = document.getElementById('__dash_chart_data');
         if(!el) return null;
         try {
             return {
-                status:     JSON.parse(el.getAttribute('data-status')     || 'null'),
-                location:   JSON.parse(el.getAttribute('data-location')   || 'null'),
-                relevance:  JSON.parse(el.getAttribute('data-relevance')  || 'null'),
-                batch:      JSON.parse(el.getAttribute('data-batch')      || 'null'),
-                college:    JSON.parse(el.getAttribute('data-college')    || 'null'),
-                course:     JSON.parse(el.getAttribute('data-course')     || 'null'),
-                emptype:    JSON.parse(el.getAttribute('data-emptype')    || 'null'),
-                career:     JSON.parse(el.getAttribute('data-career')     || 'null'),
-                edu:        JSON.parse(el.getAttribute('data-edu')        || 'null'),
-                unemployed: JSON.parse(el.getAttribute('data-unemployed') || 'null'),
+                empSnapshot:    JSON.parse(el.getAttribute('data-empsnapshot')    || 'null'),
+                eventsSnapshot: JSON.parse(el.getAttribute('data-eventssnapshot') || 'null'),
+                jobsSnapshot:   JSON.parse(el.getAttribute('data-jobssnapshot')   || 'null'),
             };
         } catch(e){ return null; }
     }
 
-    function kill(id){
-        if(registry[id]){ registry[id].destroy(); delete registry[id]; }
-    }
-
-    function allZero(arr){
-        return !arr || arr.every(function(v){ return !v || v === 0; });
-    }
+    function kill(id){ if(registry[id]){ registry[id].destroy(); delete registry[id]; } }
+    function allZero(arr){ return !arr || arr.every(function(v){ return !v || v === 0; }); }
 
     function donut(id, data){
         if(!data || !data.labels || allZero(data.data)){ kill(id); return; }
@@ -1403,233 +804,36 @@ new #[Layout('app')] class extends Component {
                 datasets: [{
                     data: data.data,
                     backgroundColor: data.colors,
-                    borderWidth: 2, borderColor: '#fff', hoverOffset: 8
+                    borderWidth: 2,
+                    borderColor: '#fff',
+                    hoverOffset: 6
                 }]
             },
             options: {
-                responsive: true, maintainAspectRatio: false, cutout: '64%',
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        onClick: function(){},
-                        labels: { font: { size: 10, weight: '600' }, color: '#333', padding: 8, usePointStyle: true, pointStyleWidth: 7 }
-                    },
-                    tooltip: { callbacks: { label: function(ctx){
-                        var t = ctx.dataset.data.reduce(function(a,b){ return a+b; }, 0);
-                        var p = t ? Math.round(ctx.parsed / t * 100) : 0;
-                        return ' ' + ctx.label + ': ' + ctx.parsed + ' (' + p + '%)';
-                    }}}
-                }
-            }
-        });
-    }
-
-    function hbar(id, data){
-        if(!data || !data.labels) return;
-        var c = document.getElementById(id); if(!c) return;
-        kill(id);
-        registry[id] = new Chart(c, {
-            type: 'bar',
-            data: {
-                labels: data.labels,
-                datasets: [{ label: 'Alumni', data: data.data, backgroundColor: 'rgba(122,63,145,.75)', borderColor: '#7a3f91', borderWidth: 1, borderRadius: 4 }]
-            },
-            options: {
-                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '64%',
                 plugins: {
                     legend: { display: false },
-                    tooltip: { callbacks: { label: function(ctx){ return ' ' + ctx.parsed.x + ' alumni'; }}}
-                },
-                scales: {
-                    x: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 }, beginAtZero: true },
-                    y: { grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#333' }}
-                }
-            }
-        });
-    }
-
-    function polar(id, data){
-        if(!data || !data.labels) return;
-        var c = document.getElementById(id); if(!c) return;
-        kill(id);
-        registry[id] = new Chart(c, {
-            type: 'polarArea',
-            data: {
-                labels: data.labels,
-                datasets: [{
-                    data: data.data,
-                    backgroundColor: data.colors.map(function(x){ return x + 'cc'; }),
-                    borderColor: data.colors, borderWidth: 1.5
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom', onClick: function(){},
-                        labels: { font: { size: 10, weight: '600' }, color: '#333', padding: 7, usePointStyle: true, pointStyleWidth: 7 }
-                    },
-                    tooltip: { callbacks: { label: function(ctx){ return ' ' + ctx.label + ': ' + ctx.parsed.r; }}}
-                },
-                scales: { r: { ticks: { display: false }, grid: { color: '#f3f4f6' }}}
-            }
-        });
-    }
-
-    function stackedBar(id, labels, employed, self_emp, unemployed){
-        var c = document.getElementById(id); if(!c) return;
-        if(registry[id]){
-            var ch = registry[id];
-            ch.data.labels = labels;
-            ch.data.datasets[0].data = employed;
-            ch.data.datasets[1].data = self_emp;
-            ch.data.datasets[2].data = unemployed;
-            ch.update('active'); return;
-        }
-        kill(id);
-        registry[id] = new Chart(c, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    { label: 'Employed',      data: employed,   backgroundColor: '#10b981', borderRadius: 3, stack: 'a' },
-                    { label: 'Self-Employed', data: self_emp,   backgroundColor: '#3b82f6', borderRadius: 3, stack: 'a' },
-                    { label: 'Unemployed',    data: unemployed, backgroundColor: '#f59e0b', borderRadius: 3, stack: 'a' },
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, animation: { duration: 350 },
-                plugins: {
-                    legend: { position: 'top', align: 'end', onClick: function(){},
-                        labels: { font: { size: 10, weight: '600' }, color: '#333', padding: 10, usePointStyle: true }
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx){
+                                var t = ctx.dataset.data.reduce(function(a,b){ return a+b; }, 0);
+                                var p = t ? Math.round(ctx.parsed / t * 100) : 0;
+                                return ' ' + ctx.label + ': ' + ctx.parsed + ' (' + p + '%)';
+                            }
+                        }
                     }
-                },
-                scales: {
-                    x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#666', maxRotation: 35 }},
-                    y: { stacked: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 }, beginAtZero: true }
                 }
             }
-        });
-    }
-
-    function stackedBarH(id, labels, employed, self_emp, unemployed){
-        var c = document.getElementById(id); if(!c) return;
-        if(registry[id]){
-            var ch = registry[id];
-            ch.data.labels = labels;
-            ch.data.datasets[0].data = employed;
-            ch.data.datasets[1].data = self_emp;
-            ch.data.datasets[2].data = unemployed;
-            ch.update('active'); return;
-        }
-        kill(id);
-        var fullLabels = labels;
-        var shortLabels = labels.map(function(l){
-            var s = l.replace(/^College of\s+/i, '').replace(/^College\s+/i, '');
-            return s.length > 22 ? s.slice(0, 20) + '…' : s;
-        });
-        registry[id] = new Chart(c, {
-            type: 'bar',
-            data: {
-                labels: shortLabels,
-                datasets: [
-                    { label: 'Employed',      data: employed,   backgroundColor: '#10b981', borderRadius: 3, stack: 'a' },
-                    { label: 'Self-Employed', data: self_emp,   backgroundColor: '#3b82f6', borderRadius: 3, stack: 'a' },
-                    { label: 'Unemployed',    data: unemployed, backgroundColor: '#f59e0b', borderRadius: 3, stack: 'a' },
-                ]
-            },
-            options: {
-                indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: { duration: 350 },
-                plugins: {
-                    legend: { position: 'top', align: 'end', onClick: function(){},
-                        labels: { font: { size: 10, weight: '600' }, color: '#333', padding: 10, usePointStyle: true }
-                    },
-                    tooltip: { callbacks: {
-                        title: function(items){ var idx = items[0].dataIndex; return fullLabels[idx] || shortLabels[idx]; },
-                        label: function(ctx){ return ' ' + ctx.dataset.label + ': ' + ctx.parsed.x; }
-                    }}
-                },
-                scales: {
-                    x: { stacked: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 }, beginAtZero: true },
-                    y: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#333', maxRotation: 0, minRotation: 0 }}
-                }
-            }
-        });
-    }
-
-    function sliceBatch(data, start){
-        var end = start + BATCH_PAGE;
-        return {
-            labels:     data.labels.slice(start, end),
-            employed:   data.employed.slice(start, end),
-            self_emp:   data.self_emp.slice(start, end),
-            unemployed: data.unemployed.slice(start, end)
-        };
-    }
-
-    function drawBatch(data, start){
-        if(!data || !data.labels || !data.labels.length) return;
-        var sl = sliceBatch(data, start);
-        stackedBar('dash_chartBatch', sl.labels, sl.employed, sl.self_emp, sl.unemployed);
-        var total = data.labels.length, pages = Math.ceil(total / BATCH_PAGE), cur = Math.floor(start / BATCH_PAGE) + 1;
-        var nav  = document.getElementById('dash_batchNavControls');
-        var prev = document.getElementById('dash_batchPrev');
-        var next = document.getElementById('dash_batchNext');
-        var info = document.getElementById('dash_batchPageInfo');
-        if(nav && pages > 1){
-            nav.style.display = 'flex';
-            if(info) info.textContent = cur + ' / ' + pages;
-            if(prev) prev.disabled = (start <= 0);
-            if(next) next.disabled = (start + BATCH_PAGE >= total);
-        } else if(nav) { nav.style.display = 'none'; }
-    }
-
-    function bindBatchNav(){
-        var prev = document.getElementById('dash_batchPrev');
-        var next = document.getElementById('dash_batchNext');
-        if(!prev || !next) return;
-        var np = prev.cloneNode(true); var nn = next.cloneNode(true);
-        prev.parentNode.replaceChild(np, prev);
-        next.parentNode.replaceChild(nn, next);
-        np.addEventListener('click', function(){
-            if(!batchAll) return;
-            batchIdx = Math.max(0, batchIdx - BATCH_PAGE);
-            drawBatch(batchAll, batchIdx);
-        });
-        nn.addEventListener('click', function(){
-            if(!batchAll) return;
-            var mx = batchAll.labels.length - BATCH_PAGE;
-            batchIdx = Math.min(mx, batchIdx + BATCH_PAGE);
-            drawBatch(batchAll, batchIdx);
         });
     }
 
     function initAll(){
         var d = bridge(); if(!d) return;
-
-        donut('dash_chartStatus',    d.status);
-        donut('dash_chartLocation',  d.location);
-        donut('dash_chartRelevance', d.relevance);
-        donut('dash_chartUnemployed',d.unemployed);
-        donut('dash_chartEmpType',   d.emptype);
-        donut('dash_chartEduStatus', d.edu);
-        hbar( 'dash_chartCourse',    d.course);
-        polar('dash_chartCareerPath',d.career);
-
-        if(d.college && d.college.labels){
-            stackedBarH('dash_chartCollege', d.college.labels, d.college.employed, d.college.self_emp, d.college.unemployed);
-        }
-
-        if(d.batch && d.batch.labels){
-            var changed = !batchAll || JSON.stringify(d.batch.labels) !== JSON.stringify(batchAll.labels);
-            if(changed){
-                batchAll = d.batch;
-                batchIdx = Math.max(0, batchAll.labels.length - BATCH_PAGE);
-                kill('dash_chartBatch');
-            }
-            drawBatch(batchAll, batchIdx);
-        }
-        bindBatchNav();
+        donut('adm_chartEmpSnapshot',    d.empSnapshot);
+        donut('adm_chartEventsSnapshot', d.eventsSnapshot);
+        donut('adm_chartJobsSnapshot',   d.jobsSnapshot);
     }
 
     loadChartJs(function(){
@@ -1638,12 +842,12 @@ new #[Layout('app')] class extends Component {
         } else {
             requestAnimationFrame(initAll);
         }
-
         document.addEventListener('livewire:navigated', function(){
-            kill('dash_chartBatch'); kill('dash_chartCollege');
+            kill('adm_chartEmpSnapshot');
+            kill('adm_chartEventsSnapshot');
+            kill('adm_chartJobsSnapshot');
             requestAnimationFrame(initAll);
         });
-
         if(window.Livewire){
             Livewire.hook('commit', function(p){
                 var ok = p.succeed || (p.component && p.respond);
@@ -1659,9 +863,58 @@ new #[Layout('app')] class extends Component {
             });
         }
     });
-
 })();
 </script>
+
+<script>
+// ── Overlay tooltip for role strip tiles (fixed-pos, never clipped) ──
+(function(){
+    var tip = document.getElementById('adm-overlay-tip');
+    if (!tip) return;
+    var hideTimer;
+
+    function show(el, text) {
+        clearTimeout(hideTimer);
+        tip.textContent = text;
+        tip.classList.add('visible');
+        position(el);
+    }
+    function hide() {
+        hideTimer = setTimeout(function(){ tip.classList.remove('visible'); }, 80);
+    }
+    function position(el) {
+        var r  = el.getBoundingClientRect();
+        var tw = tip.offsetWidth;
+        var th = tip.offsetHeight;
+        var left = r.left + r.width / 2 - tw / 2;
+        var top  = r.top - th - 8;
+        left = Math.max(6, Math.min(left, window.innerWidth - tw - 6));
+        tip.style.left = left + 'px';
+        tip.style.top  = top + 'px';
+    }
+
+    function bind() {
+        document.querySelectorAll('.adm-otip').forEach(function(el) {
+            if (el.__otipBound) return;
+            el.__otipBound = true;
+            el.addEventListener('mouseenter', function() { show(el, el.getAttribute('data-tip')); });
+            el.addEventListener('mousemove',  function() { position(el); });
+            el.addEventListener('mouseleave', hide);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bind);
+    } else {
+        bind();
+    }
+    document.addEventListener('livewire:navigated', function(){ setTimeout(bind, 50); });
+    document.addEventListener('livewire:updated',   function(){ setTimeout(bind, 50); });
+})();
+</script>
+
+{{-- Overlay tooltip element — inside root div so Livewire sees only one root --}}
+<div id="adm-overlay-tip"></div>
 
 </div>
 {{-- ✅ END single root wrapper --}}

@@ -60,10 +60,11 @@ new class extends Component {
     public int $lastNotifiedMessageId = 0;
 
     // ─────────────────────────────────────────────────────────────────────
-    // Cache key helpers
+    // Cache key — MUST match director-notif-poller.blade.php
     // ─────────────────────────────────────────────────────────────────────
     private function lastNotifiedCacheKey(): string
     {
+        // Unified key shared with the poller so both advance the same watermark
         return "chat_notified.director.{$this->directorId}.room.{$this->roomId}";
     }
 
@@ -131,20 +132,20 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Seed notification pointer on mount
+    // Only sets if not already cached — preserves poller's watermark
     // ─────────────────────────────────────────────────────────────────────
     private function seedNotifiedPointer(): void
     {
         if (! $this->roomId) return;
 
-        $maxId = (int) (DB::table('chat_messages')
-            ->where('room_id', $this->roomId)
-            ->whereNull('deleted_at')
-            ->max('id') ?? 0);
-
         $cached = Cache::get($this->lastNotifiedCacheKey());
 
         if ($cached === null) {
             // First visit — set pointer to current max so we don't flood old msgs
+            $maxId = (int) (DB::table('chat_messages')
+                ->where('room_id', $this->roomId)
+                ->whereNull('deleted_at')
+                ->max('id') ?? 0);
             $this->lastNotifiedMessageId = $maxId;
             Cache::put($this->lastNotifiedCacheKey(), $maxId, now()->addDays(30));
         } else {
@@ -193,7 +194,7 @@ new class extends Component {
     public function refreshAll(): void
     {
         $this->pingPresence();
-        $this->checkAndDispatchNewMessageNotifications(); // ← FIX: check for new msgs
+        $this->checkAndDispatchNewMessageNotifications();
         $this->loadMessages();
         $this->loadTypingIndicators();
         $this->refreshOnlineCount();
@@ -205,59 +206,38 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Detect new messages → dispatch dir-message-received to layout
+    // Detect new messages → advance shared watermark
+    // (Messenger does NOT insert notif rows — that's the poller's job.
+    //  It only advances the cache pointer so the poller skips already-seen msgs.)
     // ─────────────────────────────────────────────────────────────────────
     private function checkAndDispatchNewMessageNotifications(): void
     {
         if (! $this->roomId) return;
 
-        // Make sure watermark is initialized
         if ($this->lastNotifiedMessageId === 0) {
             $this->seedNotifiedPointer();
             return;
         }
 
-        $lastKnown = $this->lastNotifiedMessageId;
-
-        // Only look at messages NOT sent by this director
-        $newMessages = DB::table('chat_messages as m')
-            ->where('m.room_id', $this->roomId)
-            ->whereNull('m.deleted_at')
-            ->where('m.id', '>', $lastKnown)
-            ->where(function ($q) {
-                $q->where('m.sender_type', '!=', 'director')
-                  ->orWhere('m.sender_id', '!=', $this->directorId);
-            })
-            ->orderBy('m.id')
-            ->get(['m.id', 'm.sender_type', 'm.sender_id', 'm.body'])
-            ->toArray();
-
-        if (empty($newMessages)) return;
-
-        // Advance watermark
-        $newMaxId = (int) max(array_column($newMessages, 'id'));
-        $this->lastNotifiedMessageId = $newMaxId;
-        Cache::put($this->lastNotifiedCacheKey(), $newMaxId, now()->addDays(30));
-
-        // Build notification payload from the latest message
-        $latest     = end($newMessages);
-        $senderName = 'Someone';
-
-        if (in_array($latest->sender_type, ['coordinator', 'organizer'])) {
-            $firstName  = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
-            $senderName = ($firstName ?? 'Coordinator') . ' (Coordinator)';
-        } elseif ($latest->sender_type === 'director') {
-            $firstName  = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
-            $senderName = ($firstName ?? 'Director') . ' (Director)';
+        // Re-sync from cache — poller may have already advanced it
+        $cached = Cache::get($this->lastNotifiedCacheKey());
+        if ($cached !== null) {
+            $this->lastNotifiedMessageId = max($this->lastNotifiedMessageId, (int) $cached);
         }
 
-        // ── Dispatch to director layout listener ──
-        $this->dispatch('dir-message-received', [
-            'sender' => $senderName,
-            'room'   => 'Internal Staff Chat',
-            'body'   => mb_substr($latest->body ?? '', 0, 60),
-            'count'  => count($newMessages),
-        ]);
+        $lastKnown = $this->lastNotifiedMessageId;
+
+        // All new messages (any sender) — we advance the pointer for all
+        $globalMax = (int) (DB::table('chat_messages')
+            ->where('room_id', $this->roomId)
+            ->whereNull('deleted_at')
+            ->where('id', '>', $lastKnown)
+            ->max('id') ?? 0);
+
+        if ($globalMax > $lastKnown) {
+            $this->lastNotifiedMessageId = $globalMax;
+            Cache::put($this->lastNotifiedCacheKey(), $globalMax, now()->addDays(30));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -275,25 +255,15 @@ new class extends Component {
     public function refreshOnlineCount(): void
     {
         try {
-            $onlineDirs = DB::table('director')
-                ->whereNull('deleted_at')
-                ->where('last_seen_at', '>=', now()->subMinutes(5))
-                ->count();
+            $onlineDirs = DB::table('director')->whereNull('deleted_at')
+                ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
 
-            $onlineCoords = DB::table('organizer')
-                ->where('status', 'ACTIVE')
-                ->whereNull('deleted_at')
-                ->where('last_seen_at', '>=', now()->subMinutes(5))
-                ->count();
+            $onlineCoords = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
+                ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
 
-            $totalDirs = DB::table('director')
-                ->whereNull('deleted_at')
-                ->count();
+            $totalDirs = DB::table('director')->whereNull('deleted_at')->count();
 
-            $totalCoords = DB::table('organizer')
-                ->where('status', 'ACTIVE')
-                ->whereNull('deleted_at')
-                ->count();
+            $totalCoords = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             $this->onlineCount = $onlineDirs + $onlineCoords;
             $this->totalCount  = $totalDirs  + $totalCoords;
@@ -550,7 +520,7 @@ new class extends Component {
             }
         }
 
-        // Advance watermark so we don't notify ourselves
+        // Advance shared watermark so poller skips our own outgoing message
         $this->lastNotifiedMessageId = (int) $msgId;
         Cache::put($this->lastNotifiedCacheKey(), (int) $msgId, now()->addDays(30));
 
@@ -1059,8 +1029,9 @@ new class extends Component {
                 {{-- Message list --}}
                 <div id="msg-list"
                      class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 bg-[#fafafa]"
-                     x-data
+                     x-data="{ openMessageId: null }"
                      x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
+                     @click.outside="openMessageId = null"
                      @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })">
 
                     @php $prevDate = null; $prevSendKey = null; @endphp
@@ -1087,8 +1058,9 @@ new class extends Component {
 
                         {{-- Message row --}}
                         <div class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}"
-                             x-data="{ open: false, confirmUnsend: false }"
-                             @click.outside="open = false; confirmUnsend = false">
+                             x-data="{ confirmUnsend: false }"
+                             x-ref="row"
+                             @click.outside="confirmUnsend = false">
 
                             {{-- Avatar – others --}}
                             @if(! $msg['is_mine'])
@@ -1111,7 +1083,7 @@ new class extends Component {
                             @endif
 
                             {{-- Bubble wrapper --}}
-                            <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[70%]">
+                            <div class="relative flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[70%]">
 
                                 {{-- Sender name --}}
                                 @if(! $msg['is_mine'] && ! $sameGroup)
@@ -1149,76 +1121,26 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- ══ DELETED / UNSENT PLACEHOLDER ══════════════════ --}}
-                                @if($msg['deleted'])
-                                <div class="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs italic
-                                            {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
-                                     style="background:rgba(0,0,0,0.05); border:1px dashed #d1d5db; color:#9ca3af;">
-                                    <i class="fa-solid fa-ban text-[11px] opacity-60"></i>
-                                    <span>
-                                        @if($msg['is_mine'])
-                                            You unsent a message.
-                                        @else
-                                            {{ $msg['sender_name'] }} unsent a message.
-                                        @endif
-                                    </span>
-                                </div>
-
-                                {{-- ══ EDIT MODE ════════════════════════════════════ --}}
-                                @elseif($editingId === $msg['id'])
-                                <div class="flex flex-col gap-1.5 min-w-[220px]">
-                                    <textarea wire:model="editBody"
-                                              rows="2"
-                                              class="text-sm rounded-lg border border-[#7a3f91] px-3 py-2 resize-none
-                                                     focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/30 w-full bg-white shadow-sm"
-                                              wire:keydown.escape="cancelEdit"></textarea>
-                                    <div class="flex gap-1.5 justify-end">
-                                        <button wire:click="cancelEdit"
-                                                class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0]
-                                                       text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">
-                                            Cancel
-                                        </button>
-                                        <button wire:click="saveEdit"
-                                                class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold
-                                                       hover:opacity-90 transition"
-                                                style="background:#7a3f91;">
-                                            Save
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {{-- ══ NORMAL BUBBLE ════════════════════════════════ --}}
-                                @else
-                                @php
-                                    $safe         = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
-                                    $mentionClass = 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded';
-                                    $formatted    = preg_replace(
-                                        '/@(everyone|\w+(?:\s\w+)?)/u',
-                                        '<span class="' . $mentionClass . '">@$1</span>',
-                                        $safe
-                                    );
-                                @endphp
-                                <div @click.stop="open = !open; confirmUnsend = false"
-                                     class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
-                                            shadow-sm cursor-pointer select-none transition-opacity active:opacity-80
-                                            {{ $msg['is_mine'] ? 'text-white rounded-br-none' : 'text-white rounded-bl-none' }}"
-                                     style="{{ $msg['is_mine'] ? 'background:#7a3f91;' : 'background:#9333ea;' }}">
-                                    {!! $formatted !!}
-                                    @if($msg['edited'])
-                                        <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
-                                    @endif
-                                </div>
-                                @endif
-
-                                {{-- ── Inline action bar (only for non-deleted) ──── --}}
+                                {{-- ── Inline action bar ── --}}
                                 @if(!$msg['deleted'])
-                                <div x-show="open"
+                                <div class="relative w-full">
+                                <div x-show="openMessageId === {{ $msg['id'] }}"
                                      x-transition:enter="transition ease-out duration-150"
-                                     x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                                     x-transition:enter-start="opacity-0 scale-95 translate-y-2"
                                      x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-100"
+                                     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 scale-95 translate-y-2"
                                      x-cloak
-                                     class="flex flex-wrap items-center gap-1.5 mt-2 bg-white border border-[#E8E0F0]
-                                            rounded-2xl px-3 py-2 shadow-lg z-10 w-auto">
+                                     @click.stop
+                                     class="absolute bottom-full {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} mb-2.5
+                                            flex flex-wrap items-center gap-1.5 bg-white border border-[#E8E0F0]
+                                            rounded-2xl px-3 py-2 shadow-xl z-30 w-max max-w-[90vw]"
+                                     style="box-shadow:0 6px 16px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.06);">
+
+                                    <span class="absolute -bottom-[7px] {{ $msg['is_mine'] ? 'right-5' : 'left-5' }}
+                                                 w-3.5 h-3.5 bg-white border-r border-b border-[#E8E0F0] rotate-45"
+                                          style="box-shadow:2px 2px 4px rgba(0,0,0,.04);"></span>
 
                                     @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎'] as $rk => $re)
                                     <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
@@ -1231,7 +1153,7 @@ new class extends Component {
                                     <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                     <button wire:click="setReply({{ $msg['id'] }})"
-                                            @click.stop="open = false"
+                                            @click.stop="openMessageId = null"
                                             class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
                                                    hover:text-[#7a3f91] hover:bg-[#f3eef8] transition text-xs font-semibold">
                                         <i class="fa-solid fa-reply text-xs"></i>
@@ -1264,7 +1186,7 @@ new class extends Component {
                                     <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                     <button wire:click="startEdit({{ $msg['id'] }})"
-                                            @click.stop="open = false"
+                                            @click.stop="openMessageId = null"
                                             class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
                                                    hover:text-blue-600 hover:bg-blue-50 transition text-xs font-semibold">
                                         <i class="fa-solid fa-pen text-xs"></i>
@@ -1293,9 +1215,77 @@ new class extends Component {
                                     </div>
                                     @endif
                                 </div>
+                                </div>
                                 @endif
 
-                                {{-- ── View Reactions Popup ────────────────────────── --}}
+                                {{-- ══ DELETED / UNSENT PLACEHOLDER ══ --}}
+                                @if($msg['deleted'])
+                                <div class="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs italic
+                                            {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
+                                     style="background:rgba(0,0,0,0.05); border:1px dashed #d1d5db; color:#9ca3af;">
+                                    <i class="fa-solid fa-ban text-[11px] opacity-60"></i>
+                                    <span>
+                                        @if($msg['is_mine'])
+                                            You unsent a message.
+                                        @else
+                                            {{ $msg['sender_name'] }} unsent a message.
+                                        @endif
+                                    </span>
+                                </div>
+
+                                {{-- ══ EDIT MODE ══ --}}
+                                @elseif($editingId === $msg['id'])
+                                <div class="flex flex-col gap-1.5 min-w-[220px]">
+                                    <textarea wire:model="editBody"
+                                              rows="2"
+                                              class="text-sm rounded-lg border border-[#7a3f91] px-3 py-2 resize-none
+                                                     focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/30 w-full bg-white shadow-sm"
+                                              wire:keydown.escape="cancelEdit"></textarea>
+                                    <div class="flex gap-1.5 justify-end">
+                                        <button wire:click="cancelEdit"
+                                                class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0]
+                                                       text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">
+                                            Cancel
+                                        </button>
+                                        <button wire:click="saveEdit"
+                                                class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold
+                                                       hover:opacity-90 transition"
+                                                style="background:#7a3f91;">
+                                            Save
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {{-- ══ NORMAL BUBBLE ══ --}}
+                                @else
+                                @php
+                                    $safe         = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
+                                    $mentionClass = $msg['is_mine']
+                                        ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
+                                        : 'font-semibold text-[#7a3f91] bg-[#f3eef8] px-0.5 rounded';
+                                    $formatted    = preg_replace(
+                                        '/@(everyone|\w+(?:\s\w+)?)/u',
+                                        '<span class="' . $mentionClass . '">@$1</span>',
+                                        $safe
+                                    );
+                                @endphp
+                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); })"
+                                     class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
+                                            cursor-pointer select-none transition-opacity active:opacity-80
+                                            {{ $msg['is_mine']
+                                                ? 'text-white rounded-br-none shadow-sm'
+                                                : 'text-[#1a1a1a] rounded-bl-none border border-[#ECECEC]' }}"
+                                     style="{{ $msg['is_mine']
+                                            ? 'background:#7a3f91;'
+                                            : 'background:#ffffff; box-shadow:0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.05), inset 0 1px 0 rgba(255,255,255,.9);' }}">
+                                    {!! $formatted !!}
+                                    @if($msg['edited'])
+                                        <span class="text-xs ml-1 italic {{ $msg['is_mine'] ? 'opacity-50' : 'text-[#999999]' }}">(edited)</span>
+                                    @endif
+                                </div>
+                                @endif
+
+                                {{-- ── View Reactions Popup ── --}}
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
                                 <div class="mt-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-xl z-20 w-64 overflow-hidden"
                                      @click.stop>
@@ -1500,9 +1490,9 @@ new class extends Component {
                                         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
                                     });
                                 "
-                                class="w-full resize-none rounded-lg border border-[#E8E0F0] bg-[#fafafa]
+                                class="w-full resize-none rounded-lg border-2 border-[#7a3f91] bg-white
                                        px-4 py-2.5 text-sm leading-relaxed text-[#333333]
-                                       focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/20
+                                       focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/30
                                        transition placeholder-[#999999]"
                                 style="max-height:120px; overflow-y:auto;"></textarea>
                         </div>
@@ -1523,30 +1513,30 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ── SIDE PANEL ───────────────────────────────────────────── --}}
+            {{-- ── SIDE PANEL ── --}}
             @if($showMembers || $showPins)
             <div class="w-72 border-l border-[#E8E0F0] flex flex-col flex-shrink-0 bg-white">
 
                 <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#E8E0F0] flex-shrink-0"
-                     style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
+                     style="background:#7a3f91;">
                     @if($showPins)
-                        <i class="fa-solid fa-thumbtack text-amber-600"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Pinned Messages</p>
+                        <i class="fa-solid fa-thumbtack text-white"></i>
+                        <p class="text-sm font-semibold text-white flex-1 uppercase tracking-wide">Pinned Messages</p>
                     @else
-                        <i class="fa-solid fa-user-group text-[#7a3f91]"></i>
-                        <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">
+                        <i class="fa-solid fa-user-group text-white"></i>
+                        <p class="text-sm font-semibold text-white flex-1 uppercase tracking-wide">
                             Staff Members
-                            <span class="text-xs font-semibold text-[#999999] ml-1">
+                            <span class="text-xs font-semibold text-white/70 ml-1">
                                 ({{ count($directors) + count($coordinators) }})
                             </span>
                             @if($onlineCount > 0)
-                            <span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>
+                            <span class="ml-1 text-xs font-semibold text-emerald-300">· {{ $onlineCount }} online</span>
                             @endif
                         </p>
                     @endif
                     <button wire:click="{{ $showPins ? 'togglePins' : 'toggleMembers' }}"
-                            class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999]
-                                   hover:text-[#333333] hover:bg-[#f5f5f5] transition">
+                            class="w-7 h-7 flex items-center justify-center rounded-lg text-white/70
+                                   hover:text-white hover:bg-white/15 transition">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>

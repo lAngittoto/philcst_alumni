@@ -119,7 +119,6 @@ new class extends Component {
 
         try {
             if ($this->editingId) {
-                // ── EDIT ──────────────────────────────────────────────
                 $course  = Course::findOrFail($this->editingId);
                 $oldCode = $course->code;
                 $oldName = $course->name;
@@ -132,7 +131,6 @@ new class extends Component {
                           ->update(['course_code' => $code, 'course_name' => $name]);
                 }
 
-                // Always write audit log on edit (even if unchanged, log the intent)
                 $this->writeAuditLog(
                     action:       'updated',
                     description:  $changed
@@ -147,7 +145,6 @@ new class extends Component {
                 $this->setAlert('success', "Course '{$code}' updated successfully.");
 
             } else {
-                // ── CREATE ────────────────────────────────────────────
                 Course::create(['code' => $code, 'name' => $name]);
 
                 $this->writeAuditLog(
@@ -179,15 +176,53 @@ new class extends Component {
 
 <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-6 max-w-screen-2xl mx-auto" style="height:90vh;">
 
+<style>
+[x-cloak] { display: none !important; }
+
+.crs-action-tip {
+    position: fixed;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    padding: 5px 10px;
+    border-radius: 7px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 99999;
+    box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    transform: translate(-50%, -100%);
+}
+.crs-action-tip .tip-arrow {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #1a1a1a;
+}
+</style>
+
+{{-- Fixed hover tooltip --}}
+<div id="crs-tip" class="crs-action-tip">
+    <span id="crs-tip-text"></span>
+    <span class="tip-arrow"></span>
+</div>
+
     {{-- ── PAGE HEADER ─────────────────────────────────────────── --}}
     <div class="flex items-center gap-3 mb-6">
         <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <i class="fas fa-book-open text-white text-base"></i>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" class="w-5 h-5">
+                <path d="M11.25 4.533A9.707 9.707 0 0 0 6 3a9.735 9.735 0 0 0-3.25.555.75.75 0 0 0-.5.707v14.25a.75.75 0 0 0 1 .707A8.237 8.237 0 0 1 6 18.75c1.995 0 3.823.707 5.25 1.886V4.533ZM12.75 20.636A8.214 8.214 0 0 1 18 18.75c.966 0 1.89.166 2.75.47a.75.75 0 0 0 1-.708V4.262a.75.75 0 0 0-.5-.707A9.735 9.735 0 0 0 18 3a9.707 9.707 0 0 0-5.25 1.533v16.103Z" />
+            </svg>
         </div>
         <div>
             <h1 class="text-3xl font-semibold text-[#333333] leading-tight">Manage Courses</h1>
-            <p class="text-xl text-[#666666] font-normal">Add and edit course codes</p>
+            <p class="text-xl text-[#333333] font-normal">Add and edit course codes</p>
         </div>
     </div>
 
@@ -197,23 +232,17 @@ new class extends Component {
         <div class="lg:col-span-2">
             <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden lg:sticky lg:top-5">
 
-                {{-- Card Header --}}
-                <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center gap-2"
+                {{-- Card Header — no icon, plain text only --}}
+                <div class="px-5 py-3.5 border-b border-[#E8E0F0]"
                      style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                    <div class="w-6 h-6 rounded-lg flex items-center justify-center"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        <i class="fas fa-{{ $editingId ? 'pencil' : 'plus-circle' }} text-white" style="font-size:12px;"></i>
-                    </div>
-                    <div>
-                        <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide leading-tight">
-                            {{ $editingId ? 'Edit Course' : 'Add New Course' }}
+                    <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide leading-tight">
+                        {{ $editingId ? 'Edit Course' : 'Add New Course' }}
+                    </p>
+                    @if($editingId)
+                        <p class="text-xs text-[#333333] font-normal mt-0.5">
+                            Editing: <strong>{{ $courseCode }}</strong>
                         </p>
-                        @if($editingId)
-                            <p class="text-xs text-[#999999] font-normal mt-0.5">
-                                Editing: <strong class="text-[#333333]">{{ $courseCode }}</strong>
-                            </p>
-                        @endif
-                    </div>
+                    @endif
                 </div>
 
                 {{-- Alert --}}
@@ -222,17 +251,13 @@ new class extends Component {
                             {{ $alertType === 'success'
                                 ? 'bg-emerald-50 border border-emerald-200'
                                 : 'bg-red-50 border border-red-200' }}">
-                    <i class="fas mt-0.5 text-sm
-                               {{ $alertType === 'success'
-                                   ? 'fa-circle-check text-emerald-500'
-                                   : 'fa-circle-xmark text-red-500' }}"></i>
                     <p class="text-sm font-semibold flex-1
                               {{ $alertType === 'success' ? 'text-emerald-800' : 'text-red-800' }}">
                         {{ $alertMsg }}
                     </p>
                     <button wire:click="$set('alertMsg','')"
-                            class="text-[#999999] hover:text-[#333333] transition shrink-0">
-                        <i class="fas fa-xmark text-sm"></i>
+                            class="text-[#333333] hover:text-black transition shrink-0 text-sm font-bold leading-none">
+                        ✕
                     </button>
                 </div>
                 @endif
@@ -241,7 +266,7 @@ new class extends Component {
 
                     {{-- Course Code --}}
                     <div>
-                        <label class="block text-xs font-semibold text-[#666666] uppercase tracking-[.08em] mb-1.5">
+                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-[.08em] mb-1.5">
                             Course Code <span class="text-red-400">*</span>
                         </label>
                         <input wire:model.defer="courseCode"
@@ -252,14 +277,14 @@ new class extends Component {
                                maxlength="20"
                                autocomplete="off"
                                @keydown.enter.prevent="$wire.saveCourse()">
-                        <p class="text-xs text-[#999999] font-normal mt-1">
+                        <p class="text-xs text-[#333333] font-normal mt-1">
                             Unique identifier — e.g. BSIT, BSN, BSED
                         </p>
                     </div>
 
                     {{-- Course Name --}}
                     <div>
-                        <label class="block text-xs font-semibold text-[#666666] uppercase tracking-[.08em] mb-1.5">
+                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-[.08em] mb-1.5">
                             Course Name <span class="text-red-400">*</span>
                         </label>
                         <input wire:model.defer="courseName"
@@ -276,7 +301,7 @@ new class extends Component {
                     <div class="flex gap-2.5 pt-1">
                         @if($editingId)
                         <button wire:click="cancelEdit"
-                                class="flex-1 bg-white border border-[#E8E0F0] text-[#666666] px-4 py-3 rounded-xl
+                                class="flex-1 bg-white border border-[#E8E0F0] text-[#333333] px-4 py-3 rounded-xl
                                        text-sm font-semibold hover:bg-[#F9FAFB] transition active:scale-[.99]">
                             Cancel
                         </button>
@@ -287,11 +312,8 @@ new class extends Component {
                                 class="{{ $editingId ? 'flex-1' : 'w-full' }} text-white px-4 py-3 rounded-xl text-sm font-semibold
                                        transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
                                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                            <span wire:loading wire:target="saveCourse">
-                                <i class="fas fa-spinner animate-spin text-sm"></i>
-                            </span>
+                            <span wire:loading wire:target="saveCourse" class="text-sm">...</span>
                             <span wire:loading.remove wire:target="saveCourse">
-                                <i class="fas fa-{{ $editingId ? 'floppy-disk' : 'plus' }} text-sm"></i>
                                 {{ $editingId ? 'Update Course' : 'Add Course' }}
                             </span>
                         </button>
@@ -301,7 +323,6 @@ new class extends Component {
                 {{-- Info note --}}
                 <div class="mx-4 mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200">
                     <p class="text-xs text-amber-700 font-normal">
-                        <i class="fas fa-circle-info mr-1.5 text-amber-400"></i>
                         Editing a course will automatically update all linked alumni records.
                     </p>
                 </div>
@@ -312,19 +333,12 @@ new class extends Component {
         <div class="lg:col-span-3 h-full min-h-0 flex flex-col">
             <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden flex flex-col flex-1 min-h-0">
 
-                {{-- Card Header --}}
+                {{-- Card Header — no icon, plain text only --}}
                 <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center justify-between shrink-0"
                      style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-lg flex items-center justify-center"
-                             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                            <i class="fas fa-list text-white" style="font-size:12px;"></i>
-                        </div>
-                        <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Course List</p>
-                    </div>
+                    <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Course List</p>
                     <div class="flex items-center gap-2 px-3 py-1 bg-[#F9F7FC] rounded-xl border border-[#E8E0F0]">
-                        <i class="fas fa-book text-[#c0a0d8] text-xs"></i>
-                        <span class="text-sm font-semibold text-[#666666]">
+                        <span class="text-sm font-semibold text-[#333333]">
                             {{ count($coursesList) }} course{{ count($coursesList) !== 1 ? 's' : '' }}
                         </span>
                     </div>
@@ -333,12 +347,13 @@ new class extends Component {
                 {{-- List --}}
                 <div class="divide-y divide-[#F5F5F5] overflow-y-auto flex-1 min-h-0">
                     @forelse($this->filteredCourses as $c)
-                    <div class="flex items-center justify-between px-5 py-4 transition-colors
+                    <div wire:click="openEdit({{ $c['id'] }})"
+                         data-crs-row
+                         class="flex items-center justify-between px-5 py-4 cursor-pointer transition-colors select-none
                                 {{ $editingId === $c['id']
                                     ? 'bg-[#F9F7FC] border-l-4 border-[#7A3F91]'
                                     : 'hover:bg-[#FAFAFA]' }}">
 
-                        {{-- Info --}}
                         <div class="flex items-center gap-4 min-w-0">
                             {{-- Avatar --}}
                             <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 font-bold text-sm"
@@ -348,40 +363,35 @@ new class extends Component {
                                 {{ strtoupper(substr($c['code'], 0, 2)) }}
                             </div>
 
-                            {{-- Text --}}
                             <div class="min-w-0">
                                 <p class="font-semibold text-[#333333] text-xl font-mono leading-tight uppercase">
                                     {{ $c['code'] }}
                                 </p>
-                                <p class="text-[#999999] text-xl font-normal mt-0.5 leading-snug truncate max-w-xs">
+                                <p class="text-[#333333] text-xl font-normal mt-0.5 leading-snug truncate max-w-xs">
                                     {{ $c['name'] }}
                                 </p>
                             </div>
                         </div>
 
-                        {{-- Edit Action --}}
+                        {{-- Editing badge --}}
+                        @if($editingId === $c['id'])
                         <div class="ml-3 shrink-0">
-                            <button wire:click="openEdit({{ $c['id'] }})"
-                                    class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border transition active:scale-[.97]
-                                           {{ $editingId === $c['id']
-                                               ? 'text-white border-[#5e2f72]'
-                                               : 'text-[#7A3F91] border-[#d4aaeb] hover:bg-[#F9F7FC]' }}"
-                                    style="{{ $editingId === $c['id']
-                                        ? 'background:linear-gradient(135deg,#7A3F91,#9b59b6);'
-                                        : 'background:#f9f5ff;' }}">
-                                <i class="fas fa-pencil text-xs"></i>
-                                Edit
-                            </button>
+                            <span class="text-xs font-semibold text-[#7A3F91] bg-[#ede9fe] px-2.5 py-1 rounded-lg">
+                                Editing
+                            </span>
                         </div>
+                        @endif
                     </div>
                     @empty
                     <div class="py-20 text-center">
                         <div class="flex flex-col items-center gap-3">
                             <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f5eef9;">
-                                <i class="fas fa-book text-2xl" style="color:#d4aaeb;"></i>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#d4aaeb" class="w-7 h-7">
+                                    <path d="M11.25 4.533A9.707 9.707 0 0 0 6 3a9.735 9.735 0 0 0-3.25.555.75.75 0 0 0-.5.707v14.25a.75.75 0 0 0 1 .707A8.237 8.237 0 0 1 6 18.75c1.995 0 3.823.707 5.25 1.886V4.533ZM12.75 20.636A8.214 8.214 0 0 1 18 18.75c.966 0 1.89.166 2.75.47a.75.75 0 0 0 1-.708V4.262a.75.75 0 0 0-.5-.707A9.735 9.735 0 0 0 18 3a9.707 9.707 0 0 0-5.25 1.533v16.103Z" />
+                                </svg>
                             </div>
-                            <p class="font-semibold text-[#999999] text-base">No courses yet</p>
-                            <p class="text-xs text-[#CCCCCC] font-normal">Add your first course using the form on the left</p>
+                            <p class="font-semibold text-[#333333] text-base">No courses yet</p>
+                            <p class="text-xs text-[#333333] font-normal">Add your first course using the form on the left</p>
                         </div>
                     </div>
                     @endforelse
@@ -390,8 +400,8 @@ new class extends Component {
                 {{-- Footer count --}}
                 @if(count($this->filteredCourses) > 0)
                 <div class="px-5 py-3 border-t border-[#E8E0F0] bg-[#F9FAFB] shrink-0">
-                    <p class="text-xs text-[#999999] font-semibold">
-                        Showing <strong class="text-[#333333]">{{ count($this->filteredCourses) }}</strong>
+                    <p class="text-xs text-[#333333] font-semibold">
+                        Showing <strong>{{ count($this->filteredCourses) }}</strong>
                         course{{ count($this->filteredCourses) !== 1 ? 's' : '' }}
                     </p>
                 </div>
@@ -402,3 +412,36 @@ new class extends Component {
 
     </div>
 </div>
+
+<script>
+(function () {
+    var tip     = document.getElementById('crs-tip');
+    var tipText = document.getElementById('crs-tip-text');
+
+    function bindRows() {
+        document.querySelectorAll('[data-crs-row]').forEach(function (row) {
+            if (row._crsBound) return;
+            row._crsBound = true;
+
+            row.addEventListener('mousemove', function (e) {
+                if (!tip) return;
+                tip.style.left        = e.clientX + 'px';
+                tip.style.top         = e.clientY + 'px';
+                tipText.textContent   = 'Click to edit';
+                tip.style.opacity     = '1';
+            });
+
+            row.addEventListener('mouseleave', function () {
+                if (tip) tip.style.opacity = '0';
+            });
+
+            row.addEventListener('click', function () {
+                if (tip) tip.style.opacity = '0';
+            });
+        });
+    }
+
+    bindRows();
+    document.addEventListener('livewire:updated', function () { bindRows(); });
+})();
+</script>

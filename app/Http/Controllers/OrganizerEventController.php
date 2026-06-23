@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\OrganizerEvent;
+use App\Models\DirectorNotification;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\UploadedFile;
 
 class OrganizerEventController extends Controller
@@ -12,7 +14,6 @@ class OrganizerEventController extends Controller
     public function getEvent(int $id): OrganizerEvent
     {
         $org = Auth::user()?->organizer;
-        // Use withTrashed so organizer can still load their soft-deleted events
         return OrganizerEvent::withTrashed()
             ->where('id', $id)
             ->where('organizer_id', $org?->id)
@@ -28,7 +29,7 @@ class OrganizerEventController extends Controller
     {
         $org = Auth::user()?->organizer;
 
-        return OrganizerEvent::create([
+        $event = OrganizerEvent::create([
             'organizer_id'        => $org->id,
             'title'               => $data['title'],
             'description'         => $data['description'] ?? null,
@@ -46,12 +47,26 @@ class OrganizerEventController extends Controller
             'updated_by'          => null,
             'updated_by_role'     => null,
         ]);
+
+        // ── Notify director: new event submitted for review ──
+        $this->notifyDirector(
+            icon:     'calendar-days',
+            title:    'New Event for Review',
+            message:  ($org->name ?? 'A coordinator') . ' submitted a new event: "' . $data['title'] . '" — awaiting your approval.',
+            dedupKey: 'event-submitted::' . $event->id,
+        );
+
+        return $event;
     }
 
     public function updateEvent(int $id, array $data, ?UploadedFile $photo = null): OrganizerEvent
     {
         $event = $this->getEvent($id);
         $user  = Auth::user();
+        $org   = $user?->organizer;
+
+        $isResubmit = isset($data['status']) && $data['status'] === 'PENDING'
+            && $event->status === 'REJECTED';
 
         $newStatus = $event->status === 'APPROVED' ? 'PENDING' : $event->status;
 
@@ -83,32 +98,37 @@ class OrganizerEventController extends Controller
         }
 
         $event->update($updateData);
+
+        // ── Notify director: resubmitted rejected event ──
+        if ($isResubmit) {
+            $this->notifyDirector(
+                icon:     'calendar-days',
+                title:    'Event Resubmitted for Review',
+                message:  ($org->name ?? 'A coordinator') . ' resubmitted "' . $data['title'] . '" after rejection — awaiting your approval.',
+                dedupKey: 'event-resubmitted::' . $event->id . '::' . floor(time() / 300),
+            );
+        }
+
         return $event->fresh();
     }
 
-    /**
-     * Organizer soft-delete: sets status = ORGANIZER_DELETED first,
-     * then soft-deletes so admin can see it via withTrashed().
-     */
     public function deleteEvent(int $id): void
     {
         $event = $this->getEvent($id);
         $user  = Auth::user();
 
-        // Mark status BEFORE soft-deleting so admin query can filter by status
         $event->update([
             'status'          => 'ORGANIZER_DELETED',
             'deleted_by'      => $user?->name,
             'deleted_by_role' => $user?->role ?? 'organizer',
         ]);
 
-        // Delete uploaded photo if not the default
         if ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO) {
             Storage::disk('public')->delete($event->photo);
             $event->update(['photo' => null]);
         }
 
-        $event->delete(); // SoftDeletes — sets deleted_at
+        $event->delete();
     }
 
     public function approveEvent(int $id, ?string $remarks = null): OrganizerEvent
@@ -143,6 +163,43 @@ class OrganizerEventController extends Controller
         ]);
 
         return $event->fresh();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Insert a notification row into director_notifications for ALL
+    // directors. Uses dedup_key so rapid duplicate submits merge.
+    // NOTE: status column in director table is nullable — no status filter.
+    // ─────────────────────────────────────────────────────────────────────
+    private function notifyDirector(
+        string $icon,
+        string $title,
+        string $message,
+        string $dedupKey,
+    ): void {
+        try {
+            // ── Removed ->where('status', 'ACTIVE') because the director
+            //    table's status column is nullable (defaults to NULL),
+            //    causing zero results and silently dropping all notifications.
+            $directorIds = DB::table('director')
+                ->whereNull('deleted_at')
+                ->pluck('id');
+
+            foreach ($directorIds as $directorId) {
+                DirectorNotification::createOrIncrement(
+                    (int) $directorId,
+                    [
+                        'icon'       => $icon,
+                        'title'      => $title,
+                        'message'    => $message,
+                        'link_route' => 'director.event/management',
+                        'link_label' => 'View Events',
+                        'dedup_key'  => $dedupKey,
+                    ]
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('notifyDirector (event) failed: ' . $e->getMessage());
+        }
     }
 
     private function storePhoto(?UploadedFile $photo): ?string

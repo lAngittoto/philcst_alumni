@@ -1,4 +1,4 @@
-{{-- resources/views/livewire/director/manage-users.blade.php --}}
+{{-- resources/views/livewire/ADMIN/manage-users.blade.php --}}
 
 <?php
 
@@ -20,7 +20,6 @@ new class extends Component {
     public string $activeRole   = 'all';
     public string $search       = '';
     public string $statusFilter = '';
-    public string $sortBy       = 'recent';
     public string $activeModal  = '';
 
     // ── Create Director ───────────────────────────────────────────────────────
@@ -37,7 +36,7 @@ new class extends Component {
     public $vPhoto       = null;
     public bool $vPhotoSave = false;
 
-    // ── Alumni Email Update Modal ─────────────────────────────────────────────
+    // ── Alumni Email ──────────────────────────────────────────────────────────
     public ?int   $ueId     = null;
     public string $ueName   = '';
     public string $ueEmail  = '';
@@ -55,19 +54,53 @@ new class extends Component {
     public ?int   $tId      = null;
     public string $tName='', $tAction='', $tRole='';
 
+    // ── Manual page tracker ───────────────────────────────────────────────────
+    public int $currentPage = 1;
+
     // ─────────────────────────────────────────────────────────────────────────
-    public function mount(): void {}
+    public function mount(): void {
+        $filter = session()->pull('admin_alumni_filter', '');
+        if ($filter) {
+            $this->activeRole   = 'alumni';
+            $this->statusFilter = match($filter) {
+                'verified'   => 'VERIFIED',
+                'pending'    => 'PENDING',
+                'this_month' => '',
+                default      => '',
+            };
+        }
 
-    private function perPage(): int { return 20; }
-
-    public function updatingSearch()       { $this->resetPage(); }
-    public function updatingStatusFilter() { $this->resetPage(); }
-
-    public function switchTab(string $r): void {
-        $this->activeRole = $r;
-        $this->search = $this->statusFilter = '';
-        $this->resetPage();
+        // Check for tab filter from dashboard role strip
+        $tab = session()->pull('admin_users_tab', '');
+        if ($tab) {
+            $this->activeRole   = $tab;
+            $this->statusFilter = session()->pull('admin_users_status', '');
+        }
     }
+
+    private function perPage(): int
+    {
+        return match($this->activeRole) {
+            'alumni'                    => 100,
+            'director', 'coordinator',
+            'registrar'                 => 10,
+            default                     => 20,
+        };
+    }
+
+    public function updatingSearch(): void       { $this->currentPage = 1; }
+    public function updatingStatusFilter(): void { $this->currentPage = 1; }
+
+    public function switchTab(string $r, string $status = ''): void {
+        $this->activeRole   = $r;
+        $this->statusFilter = $status;
+        $this->search       = '';
+        $this->currentPage  = 1;
+    }
+
+    public function goToPage(int $p): void  { $this->currentPage = $p; }
+    public function nextPage(): void        { $this->currentPage++; }
+    public function previousPage(): void    { if ($this->currentPage > 1) $this->currentPage--; }
 
     // ── Stats ─────────────────────────────────────────────────────────────────
     #[Computed]
@@ -77,13 +110,34 @@ new class extends Component {
             ->selectRaw("role, COUNT(*) as cnt")
             ->groupBy('role')
             ->pluck('cnt', 'role');
+
+        $dirActive   = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
+        $dirInactive = DB::table('director')->where('status', 'INACTIVE')->whereNull('deleted_at')->count();
+
+        $coordActive   = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
+        $coordInactive = DB::table('organizer')->where('status', 'INACTIVE')->whereNull('deleted_at')->count();
+
+        $regActive   = DB::table('users')->where('role','registrar')->where('user_status','ACTIVE')->count();
+        $regInactive = DB::table('users')->where('role','registrar')->where('user_status','INACTIVE')->count();
+
+        $alumniTotal   = $rows->get('alumni', 0);
+        $alumniVerified = DB::table('alumni')->whereNotNull('password_changed_at')->count();
+        $alumniPending  = $alumniTotal - $alumniVerified;
+
         return [
-            'total'       => $rows->sum(),
-            'alumni'      => $rows->get('alumni',    0),
-            'director'    => $rows->get('director',  0),
-            'coordinator' => $rows->get('organizer', 0),
-            'registrar'   => $rows->get('registrar', 0),
-            'admin'       => $rows->get('admin',     0),
+            'total'           => $rows->sum(),
+            'alumni'          => $alumniTotal,
+            'alumniVerified'  => $alumniVerified,
+            'alumniPending'   => $alumniPending,
+            'director'        => $rows->get('director',  0),
+            'dirActive'       => $dirActive,
+            'dirInactive'     => $dirInactive,
+            'coordinator'     => $rows->get('organizer', 0),
+            'coordActive'     => $coordActive,
+            'coordInactive'   => $coordInactive,
+            'registrar'       => $rows->get('registrar', 0),
+            'regActive'       => $regActive,
+            'regInactive'     => $regInactive,
         ];
     }
 
@@ -114,7 +168,9 @@ new class extends Component {
             ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
             ->leftJoin('director as dir',  fn($j) => $j->on('dir.user_id','=','users.id')->whereNull('dir.deleted_at'));
 
-        $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar','admin'=>'admin'];
+        $q->where('users.role', '!=', 'admin');
+
+        $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar'];
         if ($this->activeRole !== 'all' && isset($map[$this->activeRole]))
             $q->where('users.role', $map[$this->activeRole]);
 
@@ -125,8 +181,27 @@ new class extends Component {
         if ($this->statusFilter)
             $q->whereRaw("{$st} = ?", [$this->statusFilter]);
 
-        $q->orderBy('users.created_at', $this->sortBy === 'oldest' ? 'asc' : 'desc');
-        return $q->paginate($this->perPage());
+        $q->orderBy('users.created_at', 'desc');
+
+        $pp    = $this->perPage();
+        $total = $q->count();
+        $lp    = (int) ceil($total / $pp);
+        $cp    = max(1, min($this->currentPage, max($lp, 1)));
+        $this->currentPage = $cp;
+
+        $items = $q->offset(($cp - 1) * $pp)->limit($pp)->get();
+
+        return (object)[
+            'items'       => $items,
+            'total'       => $total,
+            'perPage'     => $pp,
+            'currentPage' => $cp,
+            'lastPage'    => $lp,
+            'from'        => $total > 0 ? ($cp - 1) * $pp + 1 : 0,
+            'to'          => min($cp * $pp, $total),
+            'hasPrev'     => $cp > 1,
+            'hasNext'     => $cp < $lp,
+        ];
     }
 
     // ── Modal helpers ─────────────────────────────────────────────────────────
@@ -134,6 +209,7 @@ new class extends Component {
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
+        $this->vPhoto = null;
     }
 
     public function closeModal(): void {
@@ -149,7 +225,6 @@ new class extends Component {
         $this->dErrs=[]; $this->dOk=''; $this->dSave=true;
         try {
             $errors = [];
-
             if (!trim($this->dFn))       $errors[] = 'First name is required.';
             if (!trim($this->dMn))       $errors[] = 'Middle name is required.';
             if (!trim($this->dLn))       $errors[] = 'Last name is required.';
@@ -157,17 +232,10 @@ new class extends Component {
             if (!trim($this->dEmail))    $errors[] = 'Email address is required.';
             elseif (!filter_var(trim($this->dEmail), FILTER_VALIDATE_EMAIL))
                                          $errors[] = 'Please enter a valid email address.';
+            if (!empty($errors)) { $this->dErrs = ['general' => $errors]; return; }
 
-            if (!empty($errors)) {
-                $this->dErrs = ['general' => $errors];
-                return;
-            }
-
-            // ── ONE ACTIVE DIRECTOR ONLY ──────────────────────────────────────
             if (DB::table('director')->where('status', 'ACTIVE')->exists()) {
-                $this->dErrs = ['general' => [
-                    'There is already an active Director in the system. Please deactivate the current Director first before creating a new one.'
-                ]];
+                $this->dErrs = ['general' => ['There is already an active Director. Please deactivate the current Director first.']];
                 return;
             }
 
@@ -207,9 +275,7 @@ new class extends Component {
                 'username'     => $uname,
                 'tempPassword' => $autoPassword,
                 'email'        => trim($this->dEmail),
-            ], function ($m) {
-                $m->to(trim($this->dEmail))->subject("Your Director Account – Philcst Alumni Connect");
-            });
+            ], function ($m) { $m->to(trim($this->dEmail))->subject("Your Director Account – Philcst Alumni Connect"); });
 
             $this->dOk = "Director <strong>{$full}</strong> created successfully!"
                 . "|Login username: <code class='font-mono bg-green-100 px-1.5 py-0.5 rounded text-green-800'>{$uname}</code>"
@@ -234,28 +300,24 @@ new class extends Component {
                     WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
                     ELSE 'ACTIVE'
                 END) as user_status"),
-                // Alumni fields
-                DB::raw("COALESCE(al.student_id,'')                          as student_id"),
-                DB::raw("COALESCE(al.course_code,'')                         as course_code"),
-                DB::raw("COALESCE(al.course_name,'')                         as course_name"),
-                DB::raw("COALESCE(CAST(al.batch AS CHAR),'')                 as batch"),
-                DB::raw("COALESCE(al.first_name,'')                          as alumni_first_name"),
-                DB::raw("COALESCE(al.middle_initial,'')                      as alumni_middle_name"),
-                DB::raw("COALESCE(al.last_name,'')                           as alumni_last_name"),
-                DB::raw("COALESCE(al.suffix,'')                              as alumni_suffix"),
-                DB::raw("COALESCE(al.email,'')                               as record_email"),
-                // Organizer fields
-                DB::raw("COALESCE(org.first_name,'')                         as org_first_name"),
-                DB::raw("COALESCE(org.last_name,'')                          as org_last_name"),
-                DB::raw("COALESCE(org.id_number,'')                          as id_number"),
-                DB::raw("COALESCE(org.department,'')                         as department"),
-                // Director fields
-                DB::raw("COALESCE(dir.first_name,'')                         as first_name"),
-                DB::raw("COALESCE(dir.middle_name,'')                        as middle_name"),
-                DB::raw("COALESCE(dir.last_name,'')                          as last_name"),
-                DB::raw("COALESCE(dir.suffix,'')                             as suffix"),
-                DB::raw("COALESCE(dir.email,'')                              as director_email"),
-                // Photo
+                DB::raw("COALESCE(al.student_id,'')         as student_id"),
+                DB::raw("COALESCE(al.course_code,'')        as course_code"),
+                DB::raw("COALESCE(al.course_name,'')        as course_name"),
+                DB::raw("COALESCE(CAST(al.batch AS CHAR),'') as batch"),
+                DB::raw("COALESCE(al.first_name,'')         as alumni_first_name"),
+                DB::raw("COALESCE(al.middle_initial,'')     as alumni_middle_name"),
+                DB::raw("COALESCE(al.last_name,'')          as alumni_last_name"),
+                DB::raw("COALESCE(al.suffix,'')             as alumni_suffix"),
+                DB::raw("COALESCE(al.email,'')              as record_email"),
+                DB::raw("COALESCE(org.first_name,'')        as org_first_name"),
+                DB::raw("COALESCE(org.last_name,'')         as org_last_name"),
+                DB::raw("COALESCE(org.id_number,'')         as id_number"),
+                DB::raw("COALESCE(org.department,'')        as department"),
+                DB::raw("COALESCE(dir.first_name,'')        as first_name"),
+                DB::raw("COALESCE(dir.middle_name,'')       as middle_name"),
+                DB::raw("COALESCE(dir.last_name,'')         as last_name"),
+                DB::raw("COALESCE(dir.suffix,'')            as suffix"),
+                DB::raw("COALESCE(dir.email,'')             as director_email"),
                 DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
             ])
             ->leftJoin('alumni as al','al.user_id','=','users.id')
@@ -265,6 +327,22 @@ new class extends Component {
         if (!$r) { $this->flash('error','User not found.'); return; }
         $this->vData = (array) $r;
         $this->vPhoto = null;
+        $this->ueEmail  = '';
+        $this->ueErrors = [];
+        $this->cpNew = $this->cpConfirm = '';
+        $this->cpErrs = [];
+        if ($r->role === 'alumni' && !empty($r->record_email) && !str_contains($r->record_email,'@pending.local')) {
+            $this->ueEmail = $r->record_email;
+            $this->ueId    = $id;
+            $this->ueName  = $r->name;
+        } elseif ($r->role === 'alumni') {
+            $this->ueId   = $id;
+            $this->ueName = $r->name;
+        }
+        if (in_array($r->role, ['registrar','admin'])) {
+            $this->cpId   = $id;
+            $this->cpName = $r->name;
+        }
         $this->activeModal = 'viewProfile';
     }
 
@@ -272,16 +350,10 @@ new class extends Component {
     public function savePhoto(): void {
         $this->vPhotoSave = true;
         try {
-            if (!$this->vPhoto) {
-                $this->flash('error', 'Please select a photo to upload.');
-                return;
-            }
-
+            if (!$this->vPhoto) { $this->flash('error', 'Please select a photo to upload.'); return; }
             $this->validate(['vPhoto' => 'image|mimes:jpg,jpeg,png,gif,webp|max:2048']);
-
             $role   = $this->vData['role'];
             $userId = $this->vData['id'];
-
             $folder = match($role) {
                 'alumni'    => 'alumni-photos',
                 'organizer' => 'organizers',
@@ -289,15 +361,10 @@ new class extends Component {
                 'registrar' => 'registrars',
                 default     => 'profile-photos',
             };
-
-            // Delete old photo if it exists
             $oldPhoto = $this->vData['photo'] ?? null;
-            if ($oldPhoto && Storage::disk('public')->exists($oldPhoto)) {
+            if ($oldPhoto && Storage::disk('public')->exists($oldPhoto))
                 Storage::disk('public')->delete($oldPhoto);
-            }
-
             $path = $this->vPhoto->store($folder, 'public');
-
             match($role) {
                 'alumni'    => DB::table('alumni')->where('user_id', $userId)->update(['profile_photo' => $path, 'updated_at' => now()]),
                 'organizer' => DB::table('organizer')->where('user_id', $userId)->update(['profile_photo' => $path, 'updated_at' => now()]),
@@ -305,122 +372,57 @@ new class extends Component {
                 'registrar' => DB::table('users')->where('id', $userId)->update(['profile_photo' => $path, 'updated_at' => now()]),
                 default     => null,
             };
-
             $this->vData['photo'] = $path;
             $this->vPhoto = null;
             $this->flash('success', 'Profile photo updated successfully!');
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to upload photo: ' . $e->getMessage());
-        } finally {
-            $this->vPhotoSave = false;
-        }
+        } finally { $this->vPhotoSave = false; }
     }
 
-    // ── Alumni Email Update ───────────────────────────────────────────────────
-    public function openUpdateEmail(int $id): void {
-        $u  = DB::table('users')->find($id);
-        $al = DB::table('alumni')->where('user_id', $id)->first();
-        if (!$u || $u->role !== 'alumni') { $this->flash('error','User not found.'); return; }
-        $this->ueId     = $id;
-        $this->ueName   = $u->name;
-        $this->ueEmail  = ($al && $al->email && !str_contains($al->email, '@pending.local')) ? $al->email : '';
-        $this->ueErrors = [];
-        $this->activeModal = 'updateAlumniEmail';
-    }
-
+    // ── Save Email ────────────────────────────────────────────────────────────
     public function saveUpdateEmail(): void {
         $this->ueErrors = []; $this->ueSave = true;
         try {
             $email = trim($this->ueEmail);
-
             if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $this->ueErrors = ['general' => ['Please enter a valid email address.']];
-                return;
+                $this->ueErrors = ['general' => ['Please enter a valid email address.']]; return;
             }
-
-            // Friendly duplicate check before hitting the DB constraint
-            $duplicate = DB::table('alumni')
-                ->where('email', $email)
-                ->where('user_id', '!=', $this->ueId)
-                ->exists();
-
+            $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
             if ($duplicate) {
-                $this->ueErrors = ['general' => [
-                    "The email address \"{$email}\" is already registered to another alumni account. Please use a different email address."
-                ]];
-                return;
+                $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another alumni account."]]; return;
             }
-
-            // Update email AND reset password_changed_at so wizard runs on next login
             DB::table('alumni')->where('user_id', $this->ueId)
-                ->update([
-                    'email'               => $email,
-                    'password_changed_at' => null,
-                    'updated_at'          => now(),
-                ]);
-
+                ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
+            if ($this->vData) $this->vData['record_email'] = $email;
+            $this->ueErrors = [];
             $this->flash('success', "Email updated for {$this->ueName}. They will be required to reset their password on next login.");
-            $this->closeModal();
-
         } catch (\Illuminate\Database\QueryException $e) {
-            // Safety net: catch DB-level duplicate key error
-            if (($e->errorInfo[1] ?? null) === 1062) {
-                $this->ueErrors = ['general' => [
-                    'That email address is already in use by another alumni account. Please choose a different one.'
-                ]];
-            } else {
-                $this->ueErrors = ['general' => ['A database error occurred. Please try again.']];
-            }
+            $this->ueErrors = ($e->errorInfo[1] ?? null) === 1062
+                ? ['general' => ['That email is already in use by another alumni account.']]
+                : ['general' => ['A database error occurred. Please try again.']];
         } catch (\Exception $e) {
             $this->ueErrors = ['general' => [$e->getMessage()]];
         } finally { $this->ueSave = false; }
     }
 
     // ── Change Password ───────────────────────────────────────────────────────
-    public function openChangePassword(int $id): void {
-        $u = DB::table('users')->find($id);
-        if (!$u) { $this->flash('error','User not found.'); return; }
-        $this->cpId      = $id;
-        $this->cpName    = $u->name;
-        $this->cpNew     = $this->cpConfirm = '';
-        $this->cpErrs    = [];
-        $this->activeModal = 'changePassword';
-    }
-
     public function saveChangePassword(): void {
         $this->cpErrs = []; $this->cpSave = true;
         try {
-            if (strlen(trim($this->cpNew)) < 8)
-                throw new \Exception('Password must be at least 8 characters long.');
-            if ($this->cpNew !== $this->cpConfirm)
-                throw new \Exception('Passwords do not match. Please re-enter and try again.');
-
+            if (strlen(trim($this->cpNew)) < 8) throw new \Exception('Password must be at least 8 characters long.');
+            if ($this->cpNew !== $this->cpConfirm) throw new \Exception('Passwords do not match. Please re-enter and try again.');
             $user = DB::table('users')->find($this->cpId);
-
-            // Update the password
-            DB::table('users')->where('id', $this->cpId)
-                ->update(['password' => Hash::make($this->cpNew), 'updated_at' => now()]);
-
-            // Reset password_changed_at in the role table so the user is forced
-            // through the change-password wizard on their very next login
+            DB::table('users')->where('id', $this->cpId)->update(['password' => Hash::make($this->cpNew), 'updated_at' => now()]);
             match($user->role ?? '') {
-                'alumni'    => DB::table('alumni')
-                                    ->where('user_id', $this->cpId)
-                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
-                'organizer' => DB::table('organizer')
-                                    ->where('user_id', $this->cpId)
-                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
-                'director'  => DB::table('director')
-                                    ->where('user_id', $this->cpId)
-                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
-                'registrar' => DB::table('users')
-                                    ->where('id', $this->cpId)
-                                    ->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'alumni'    => DB::table('alumni')->where('user_id', $this->cpId)->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'organizer' => DB::table('organizer')->where('user_id', $this->cpId)->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'director'  => DB::table('director')->where('user_id', $this->cpId)->update(['password_changed_at' => null, 'updated_at' => now()]),
+                'registrar' => DB::table('users')->where('id', $this->cpId)->update(['password_changed_at' => null, 'updated_at' => now()]),
                 default     => null,
             };
-
+            $this->cpNew = $this->cpConfirm = '';
             $this->flash('success', "Password updated for {$this->cpName}. They will be required to change it on next login.");
-            $this->closeModal();
         } catch (\Exception $e) {
             $this->cpErrs = ['general' => [$e->getMessage()]];
         } finally { $this->cpSave = false; }
@@ -437,8 +439,8 @@ new class extends Component {
     public function executeToggle(): void {
         try {
             $s = $this->tAction==='activate' ? 'ACTIVE' : 'INACTIVE';
-            if ($this->tRole==='director')  DB::table('director') ->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
-            if ($this->tRole==='registrar') DB::table('users')    ->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
+            if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
+            if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
             $this->flash('success', $this->tName.' has been '.($s==='ACTIVE'?'activated':'deactivated').'.');
         } catch (\Exception $e) { $this->flash('error','Failed: '.$e->getMessage()); }
         finally { $this->closeModal(); }
@@ -489,1108 +491,1020 @@ new class extends Component {
 };
 ?>
 
-<div>
+<div class="flex flex-col" style="height:90vh; overflow:hidden;">
 
-{{-- ══════════════════ FLASH TOAST ══════════════════ --}}
-<div x-data="{
-        show:false,type:'success',msg:'',timer:null,
-        display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,7000);}
-     }"
-     @flash-message.window="display($event.detail.type,$event.detail.message)"
-     x-show="show"
-     x-transition:enter="transition ease-out duration-250"
-     x-transition:enter-start="opacity-0 translate-x-6 scale-95"
-     x-transition:enter-end="opacity-100 translate-x-0 scale-100"
-     x-transition:leave="transition ease-in duration-150"
-     x-transition:leave-start="opacity-100"
-     x-transition:leave-end="opacity-0 translate-x-6"
-     class="fixed top-4 right-4 z-[200] flex items-start gap-3 px-4 py-3.5 rounded-xl shadow-xl max-w-sm border bg-white"
-     :class="{'border-emerald-200':type==='success','border-blue-200':type==='info','border-red-200':type==='error'}"
-     style="display:none">
-    <i class="fas mt-0.5 text-sm shrink-0"
-       :class="{'fa-circle-check text-emerald-500':type==='success','fa-circle-info text-blue-500':type==='info','fa-circle-exclamation text-red-500':type==='error'}"></i>
-    <div class="flex-1 min-w-0">
-        <p class="font-bold text-sm text-gray-900" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
-        <p class="text-sm mt-0.5 text-gray-600 leading-snug break-words" x-text="msg"></p>
-    </div>
-    <button @click="show=false" class="text-gray-400 hover:text-gray-600 transition shrink-0"><i class="fas fa-xmark"></i></button>
+{{-- ══ STYLES ══ --}}
+<style>
+/* ── Filter inputs ── */
+.mu-filter-input {
+    border: 1px solid #E8E0F0;
+    transition: border-color .15s, box-shadow .15s;
+    color: #000000;
+    background: #ffffff;
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+}
+.mu-filter-input::placeholder { color: #888888; font-weight: 400; }
+.mu-filter-input:hover  { border-color: #c4b5d4; }
+.mu-filter-input:focus  { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+select.mu-filter-input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23000000' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 0.6rem center;
+    background-repeat: no-repeat;
+    background-size: 1.25em 1.25em;
+    padding-right: 2.25rem;
+    -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer;
+}
+select.mu-filter-input.mu-active {
+    border-color: #7a3f91; background-color: #f5f0fa; color: #7a3f91; font-weight: 600;
+}
+
+/* ── KPI Stat grid — 4 cards, icon LEFT, text RIGHT ── */
+.mu-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.6rem;
+    flex-shrink: 0;
+}
+@media (max-width: 768px) { .mu-stat-grid { grid-template-columns: 1fr 1fr; } }
+
+.mu-stat-card {
+    background: #ffffff;
+    border: 1px solid #E8E0F0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    position: relative; overflow: visible;
+    display: flex; flex-direction: row; align-items: center; gap: 12px;
+    min-height: 72px;
+}
+
+.mu-stat-icon-lg {
+    width: 46px; height: 46px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.mu-stat-icon-lg i { font-size: 1.15rem; }
+
+.mu-stat-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mu-stat-num  { font-size: 1.45rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; color: #000000; }
+.mu-stat-lbl  { font-size: .68rem; font-weight: 700; margin-top: 2px; color: #000000; }
+.mu-stat-sub  { font-size: .62rem; font-weight: 600; margin-top: 1px; color: #000000; }
+
+/* ── Table block ── */
+.mu-table-block {
+    display: flex; flex-direction: column;
+    border-radius: 1rem; overflow: hidden;
+    border: 1px solid #E8E0F0;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    flex: 1; min-height: 0;
+}
+.mu-table-block-filter {
+    background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
+    padding: 0.6rem 0.875rem; flex-shrink: 0;
+}
+.mu-table-block-pagination {
+    flex-shrink: 0;
+    background: linear-gradient(to right, #7a3f91, #9b59b6);
+    padding: 0 1rem; min-height: 48px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 0.5rem; flex-wrap: wrap;
+    border-top: 1px solid rgba(122,63,145,.3);
+}
+
+.mu-tbl-row {
+    background-color: #ffffff; cursor: pointer;
+    transition: background-color .15s ease;
+}
+.mu-tbl-row:hover { background-color: #f5f0fa !important; }
+
+/* ── Hover tooltip on table rows ── */
+.mu-hover-tip {
+    position: fixed; background: #1a1a1a; color: #fff;
+    font-size: 11px; font-weight: 600; letter-spacing: .05em;
+    padding: 6px 12px; border-radius: 7px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s ease;
+    z-index: 99999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    transform: translate(12px, -110%);
+}
+.mu-hover-tip.visible { opacity: 1; }
+.mu-hover-tip::after {
+    content: ''; position: absolute; top: 100%; left: 14px;
+    border: 5px solid transparent; border-top-color: #1a1a1a;
+}
+
+/* ── Scrollbar ── */
+.scroll-c::-webkit-scrollbar { width: 5px; }
+.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ── Tab pills ── */
+.mu-tab-pill {
+    display: inline-flex; align-items: center; gap: 0.375rem;
+    padding: 0.375rem 0.75rem; border-radius: 0.5rem;
+    font-size: 0.8125rem; font-weight: 600;
+    transition: all .15s; cursor: pointer; white-space: nowrap;
+    border: 1px solid transparent;
+}
+.mu-tab-pill:hover { background: #ede9f6; color: #7a3f91; }
+.mu-tab-pill.mu-tab-active   { background: #fff; color: #7a3f91; border-color: #d4b8e8; box-shadow: 0 1px 3px rgba(122,63,145,.12); }
+.mu-tab-pill.mu-tab-inactive { color: #000000; }
+
+/* ── Close tooltip on modals ── */
+.mu-close-tooltip { position: relative; }
+.mu-close-tooltip::after {
+    content: 'Close'; position: absolute; top: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%); background: #1a1a1a; color: #fff;
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 4px 8px; border-radius: 5px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s ease; z-index: 99999;
+}
+.mu-close-tooltip::before {
+    content: ''; position: absolute; top: calc(100% + 1px); left: 50%;
+    transform: translateX(-50%); border: 4px solid transparent;
+    border-bottom-color: #1a1a1a; pointer-events: none;
+    opacity: 0; transition: opacity .15s ease; z-index: 99999;
+}
+.mu-close-tooltip:hover::after, .mu-close-tooltip:hover::before { opacity: 1; }
+
+/* ── Table text all black ── */
+.mu-tbl-text { color: #000000; }
+</style>
+
+{{-- Row hover tooltip --}}
+<div id="mu-hover-tip" class="mu-hover-tip">
+    <i class="fas fa-eye mr-1.5"></i>View &amp; Edit Details
 </div>
 
-{{-- ══════════════════ PAGE WRAPPER ══════════════════ --}}
-<div class="flex flex-col px-4 sm:px-6 lg:px-8 pt-5 pb-4 mx-auto max-w-screen-2xl" style="height:90vh;">
+{{-- FLASH TOAST --}}
+<div
+    x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,7000);}}"
+    @flash-message.window="display($event.detail.type,$event.detail.message)"
+    x-show="show"
+    x-transition:enter="transition ease-out duration-300"
+    x-transition:enter-start="opacity-0 translate-x-8 scale-95"
+    x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+    x-transition:leave="transition ease-in duration-200"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0 translate-x-8"
+    class="fixed top-5 right-4 sm:right-6 z-[100] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-xs sm:max-w-sm border w-full bg-white"
+    :class="{'border-emerald-300 text-emerald-800':type==='success','border-red-300 text-red-800':type==='error','border-blue-300 text-blue-800':type==='info'}"
+    style="display:none">
+    <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+         :class="{'bg-emerald-100':type==='success','bg-red-100':type==='error','bg-blue-100':type==='info'}">
+        <i class="fas text-sm" :class="{'fa-check text-emerald-600':type==='success','fa-exclamation text-red-600':type==='error','fa-info text-blue-600':type==='info'}"></i>
+    </div>
+    <div class="flex-1 min-w-0">
+        <p class="font-bold text-sm" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
+        <p class="text-sm mt-0.5 opacity-80 leading-snug break-words" x-text="msg"></p>
+    </div>
+    <button @click="show=false" class="opacity-40 hover:opacity-80 transition shrink-0"><i class="fas fa-xmark text-sm"></i></button>
+</div>
 
-    {{-- ── HEADER ── --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
-        <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-sm shrink-0" style="background:#7A3F91;">
-                <i class="fas fa-users-cog text-white text-base"></i>
-            </div>
-            <div>
-                <h1 class="text-2xl font-bold leading-tight" style="color:#1a1a1a;">User Management</h1>
-                <p class="text-sm mt-0.5 font-medium" style="color:#666;">Manage all system users across every role</p>
-            </div>
+{{-- MAIN LAYOUT --}}
+<div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
+
+    {{-- PAGE HEADER --}}
+    <div class="flex items-center gap-4 flex-shrink-0">
+        <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
+             style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+            <i class="fas fa-users-cog text-white text-lg"></i>
         </div>
-        <div class="flex flex-wrap gap-2 shrink-0">
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight" style="color:#000000;">User Management</h1>
+            <p class="text-xs leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
+        </div>
+
+        {{-- New Director icon button --}}
+        <div class="ml-auto relative" x-data="{tip:false}">
             <button wire:click="openModal('createDirector')"
-                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-95"
-                    style="background:#7A3F91;">
-                <i class="fas fa-user-tie"></i> New Director
+                    @mouseenter="tip=true" @mouseleave="tip=false"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+                    style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                <i class="fas fa-user-tie text-white text-base"></i>
             </button>
-        </div>
-    </div>
-
-    {{-- ── STAT CARDS ── --}}
-    <div class="grid grid-cols-3 sm:grid-cols-6 gap-2.5 mb-4 shrink-0">
-        @php
-            $statCards = [
-                ['fa-users',          '#EDE9F6','#7A3F91', $this->stats['total'],       'Total Users' ],
-                ['fa-graduation-cap', '#EFF6FF','#3B82F6', $this->stats['alumni'],      'Alumni'      ],
-                ['fa-user-tie',       '#EEF2FF','#4F46E5', $this->stats['director'],    'Directors'   ],
-                ['fa-users-gear',     '#F5EEF9','#7A3F91', $this->stats['coordinator'], 'Coordinators'],
-                ['fa-user-clock',     '#ECFDF5','#059669', $this->stats['registrar'],   'Registrars'  ],
-                ['fa-shield-halved',  '#FEF2F2','#DC2626', $this->stats['admin'],       'Admins'      ],
-            ];
-        @endphp
-        @foreach($statCards as [$icon,$bg,$color,$count,$label])
-        <div class="bg-white rounded-xl border p-3 sm:p-4" style="border-color:#e5e7eb;">
-            <div class="w-9 h-9 rounded-xl flex items-center justify-center mb-2" style="background:{{ $bg }};">
-                <i class="fas {{ $icon }} text-sm" style="color:{{ $color }};"></i>
+            <div x-show="tip" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
+                <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                    <i class="fas fa-user-tie mr-1.5"></i>New Director
+                </div>
+                <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
             </div>
-            <p class="text-2xl font-bold leading-none" style="color:#1a1a1a;">{{ $count }}</p>
-            <p class="text-xs font-semibold mt-1 truncate" style="color:#6b7280;">{{ $label }}</p>
         </div>
-        @endforeach
     </div>
 
-    {{-- ── TABLE CARD ── --}}
-    <div class="bg-white rounded-xl border flex flex-col overflow-hidden flex-1 min-h-0" style="border-color:#e5e7eb;">
+    {{-- ══ 4 KPI STAT CARDS (display only — not clickable) ══ --}}
+    @php $s = $this->stats; @endphp
+    <div class="mu-stat-grid">
 
-        {{-- Tab Bar + Filters --}}
-        <div class="px-4 py-3 border-b flex flex-wrap gap-2 items-center shrink-0" style="border-color:#e5e7eb;background:#f9fafb;">
-            <div class="flex gap-1 bg-gray-100 p-0.5 rounded-lg">
+        {{-- Total Alumni --}}
+        <div class="mu-stat-card">
+            <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
+                <i class="fas fa-graduation-cap text-white"></i>
+            </div>
+            <div class="mu-stat-text">
+                <div class="mu-stat-num">{{ number_format($s['alumni']) }}</div>
+                <div class="mu-stat-lbl">Total Alumni</div>
+                <div class="mu-stat-sub">{{ number_format($s['alumniVerified']) }} verified · {{ number_format($s['alumniPending']) }} pending</div>
+            </div>
+        </div>
+
+        {{-- Directors --}}
+        <div class="mu-stat-card">
+            <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#3730a3,#6366f1);">
+                <i class="fas fa-user-tie text-white"></i>
+            </div>
+            <div class="mu-stat-text">
+                <div class="mu-stat-num">{{ number_format($s['director']) }}</div>
+                <div class="mu-stat-lbl">Directors</div>
+                <div class="mu-stat-sub">{{ $s['dirActive'] }} active · {{ $s['dirInactive'] }} inactive</div>
+            </div>
+        </div>
+
+        {{-- Coordinators --}}
+        <div class="mu-stat-card">
+            <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#7a3f91,#b07cc6);">
+                <i class="fas fa-users-gear text-white"></i>
+            </div>
+            <div class="mu-stat-text">
+                <div class="mu-stat-num">{{ number_format($s['coordinator']) }}</div>
+                <div class="mu-stat-lbl">Coordinators</div>
+                <div class="mu-stat-sub">{{ $s['coordActive'] }} active · {{ $s['coordInactive'] }} inactive</div>
+            </div>
+        </div>
+
+        {{-- Registrars --}}
+        <div class="mu-stat-card">
+            <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#027a4f,#10b981);">
+                <i class="fas fa-user-clock text-white"></i>
+            </div>
+            <div class="mu-stat-text">
+                <div class="mu-stat-num">{{ number_format($s['registrar']) }}</div>
+                <div class="mu-stat-lbl">Registrars</div>
+                <div class="mu-stat-sub">{{ $s['regActive'] }} active · {{ $s['regInactive'] }} inactive</div>
+            </div>
+        </div>
+
+    </div>{{-- /mu-stat-grid --}}
+
+    {{-- UNIFIED TABLE BLOCK --}}
+    <div class="mu-table-block min-h-0">
+
+        {{-- FILTER BAR --}}
+        <div class="mu-table-block-filter flex flex-wrap gap-2 items-center">
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                 style="color:#7a3f91;">Filters</div>
+
+            {{-- Tab pills --}}
+            <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
                     ['all','All','fa-globe'],
                     ['alumni','Alumni','fa-graduation-cap'],
                     ['director','Directors','fa-user-tie'],
                     ['coordinator','Coordinators','fa-users-gear'],
                     ['registrar','Registrars','fa-user-clock'],
-                    ['admin','Admins','fa-shield-halved'],
                 ] as [$tab,$lbl,$ico])
                 <button wire:click="switchTab('{{ $tab }}')"
-                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-semibold transition-all duration-150
-                               {{ $activeRole===$tab
-                                    ? 'bg-white shadow-sm border text-[#7A3F91]'
-                                    : 'text-gray-500 hover:text-gray-700' }}"
-                        style="{{ $activeRole===$tab ? 'border-color:#e9d5f3;' : '' }}">
+                        class="mu-tab-pill {{ $activeRole===$tab ? 'mu-tab-active' : 'mu-tab-inactive' }}">
                     <i class="fas {{ $ico }} text-xs"></i>
                     <span class="hidden sm:inline">{{ $lbl }}</span>
                 </button>
                 @endforeach
             </div>
 
-            <div class="flex flex-wrap gap-2 ml-auto items-center">
-                <div class="relative" wire:ignore
-                     x-data="{ timer:null }"
-                     x-on:input="clearTimeout(timer); timer=setTimeout(()=>{ $wire.set('search',$el.querySelector('input').value); },350)">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                    <input type="text" placeholder="Search name or email…"
-                           class="pl-9 pr-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 w-44 sm:w-60"
-                           style="border-color:#d1d5db;color:#333;" autocomplete="off">
-                </div>
+            {{-- Search --}}
+            <div class="relative flex-1 min-w-[160px] max-w-xs"
+                 wire:ignore
+                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#000000;z-index:1;"></i>
+                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
+                       placeholder="Search name or email…"
+                       class="mu-filter-input w-full" style="padding-left:2.25rem;padding-right:1rem;"
+                       autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
 
-                <select wire:model.live="statusFilter"
-                        class="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:border-[#7A3F91]"
-                        style="border-color:#d1d5db;color:#333;">
-                    <option value="">All Status</option>
+            {{-- Smart Status Filter --}}
+            @if($activeRole === 'alumni')
+                <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
+                    <option value="">All Statuses</option>
+                    <option value="VERIFIED">Verified</option>
+                    <option value="PENDING">Pending</option>
+                </select>
+            @elseif($activeRole === 'all')
+                <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
+                    <option value="">All Statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="VERIFIED">Verified</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="INACTIVE">Inactive</option>
+                </select>
+            @else
+                <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
+                    <option value="">All Statuses</option>
                     <option value="ACTIVE">Active</option>
                     <option value="INACTIVE">Inactive</option>
                 </select>
+            @endif
 
-                <select wire:model.live="sortBy"
-                        class="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:border-[#7A3F91]"
-                        style="border-color:#d1d5db;color:#333;">
-                    <option value="recent">Newest First</option>
-                    <option value="oldest">Oldest First</option>
-                </select>
-            </div>
-        </div>
-
-        @php $pagedUsers = $this->users; @endphp
-
-        {{-- Table --}}
-        <div class="flex-1 min-h-0 overflow-y-auto overflow-x-auto"
-             wire:loading.class="opacity-40 pointer-events-none"
-             wire:target="switchTab,search,statusFilter,sortBy,previousPage,nextPage">
-            <table class="w-full border-collapse" style="min-width:600px;">
-                <thead>
-                    <tr class="sticky top-0 z-10" style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                        <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider" style="color:#374151;">User</th>
-
-                        @if($activeRole === 'alumni')
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider" style="color:#374151;">Student ID</th>
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider" style="color:#374151;">Email</th>
-                        @elseif($activeRole === 'coordinator')
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider" style="color:#374151;">Teacher ID</th>
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden md:table-cell" style="color:#374151;">College</th>
-                            <th class="px-5 py-3.5 text-center text-sm font-bold uppercase tracking-wider" style="color:#374151;">Status</th>
-                        @elseif($activeRole === 'registrar')
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden sm:table-cell" style="color:#374151;">Email</th>
-                            <th class="px-5 py-3.5 text-center text-sm font-bold uppercase tracking-wider" style="color:#374151;">Status</th>
-                        @elseif($activeRole === 'admin')
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden sm:table-cell" style="color:#374151;">Username</th>
-                        @elseif($activeRole === 'director')
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden sm:table-cell" style="color:#374151;">Email</th>
-                            <th class="px-5 py-3.5 text-center text-sm font-bold uppercase tracking-wider" style="color:#374151;">Status</th>
-                        @else
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider hidden sm:table-cell" style="color:#374151;">Email</th>
-                            <th class="px-5 py-3.5 text-left text-sm font-bold uppercase tracking-wider" style="color:#374151;">Role</th>
-                        @endif
-
-                        <th class="px-5 py-3.5 text-center text-sm font-bold uppercase tracking-wider hidden lg:table-cell" style="color:#374151;">Joined</th>
-                        <th class="px-5 py-3.5 text-center text-sm font-bold uppercase tracking-wider" style="color:#374151;">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($pagedUsers as $u)
-                    @php $rowStatus = $u->computed_status ?? $u->user_status ?? 'ACTIVE'; @endphp
-                    <tr class="bg-white hover:bg-gray-50 transition-colors" style="border-bottom:1px solid #f3f4f6;">
-                        <td class="px-5 py-3.5">
-                            <div class="flex items-center gap-3">
-                                <img src="{{ $this->photoUrl($u->photo ?? '') }}"
-                                     alt="{{ $u->name }}"
-                                     class="w-9 h-9 rounded-lg object-cover shrink-0 shadow-sm"
-                                     style="border:1px solid #e5e7eb;">
-                                <div class="min-w-0">
-                                    <p class="text-sm font-semibold truncate leading-tight" style="color:#111827;">
-                                        @if($u->role === 'admin')
-                                            {{ $this->adminUsername($u->email, $u->name) }}
-                                        @else
-                                            {{ $u->name }}
-                                        @endif
-                                    </p>
-                                    @if($activeRole !== 'alumni' && $activeRole !== 'admin' && $activeRole !== 'director' && $activeRole !== 'coordinator' && $activeRole !== 'registrar')
-                                    <p class="text-xs truncate sm:hidden mt-0.5" style="color:#9ca3af;">
-                                        {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
-                                    </p>
-                                    @endif
-                                </div>
-                            </div>
-                        </td>
-
-                        @if($activeRole === 'alumni')
-                            <td class="px-5 py-3.5">
-                                <span class="font-mono text-sm font-bold" style="color:#111827;">
-                                    {{ $u->student_id ?: '—' }}
-                                </span>
-                            </td>
-                            <td class="px-5 py-3.5">
-                                <span class="text-sm" style="color:#374151;">
-                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
-                                </span>
-                            </td>
-                        @elseif($activeRole === 'coordinator')
-                            <td class="px-5 py-3.5">
-                                <span class="font-mono text-sm font-bold" style="color:#111827;">{{ $u->id_number ?: '—' }}</span>
-                            </td>
-                            <td class="px-5 py-3.5 hidden md:table-cell">
-                                <span class="text-sm" style="color:#374151;">{{ $u->department ?: '—' }}</span>
-                            </td>
-                            <td class="px-5 py-3.5 text-center">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $this->statusBadge($rowStatus) }}">
-                                    {{ $rowStatus }}
-                                </span>
-                            </td>
-                        @elseif($activeRole === 'registrar')
-                            <td class="px-5 py-3.5 hidden sm:table-cell">
-                                <span class="text-sm" style="color:#4b5563;">
-                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
-                                </span>
-                            </td>
-                            <td class="px-5 py-3.5 text-center">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $this->statusBadge($rowStatus) }}">
-                                    {{ $rowStatus }}
-                                </span>
-                            </td>
-                        @elseif($activeRole === 'admin')
-                            <td class="px-5 py-3.5 hidden sm:table-cell">
-                                <span class="text-sm font-mono font-semibold" style="color:#4b5563;">
-                                    {{ $this->adminUsername($u->email, $u->name) }}
-                                </span>
-                            </td>
-                        @elseif($activeRole === 'director')
-                            <td class="px-5 py-3.5 hidden sm:table-cell">
-                                <span class="text-sm" style="color:#4b5563;">
-                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
-                                </span>
-                            </td>
-                            <td class="px-5 py-3.5 text-center">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $this->statusBadge($rowStatus) }}">
-                                    {{ $rowStatus }}
-                                </span>
-                            </td>
-                        @else
-                            <td class="px-5 py-3.5 hidden sm:table-cell">
-                                <span class="text-sm" style="color:#4b5563;">
-                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
-                                </span>
-                            </td>
-                            <td class="px-5 py-3.5">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $this->roleBadge($u->role) }}">
-                                    {{ $this->roleLabel($u->role) }}
-                                </span>
-                            </td>
-                        @endif
-
-                        <td class="px-5 py-3.5 text-center hidden lg:table-cell">
-                            <span class="text-sm font-medium" style="color:#6b7280;">
-                                {{ \Carbon\Carbon::parse($u->created_at)->timezone('Asia/Manila')->format('M d, Y') }}
-                            </span>
-                        </td>
-
-                        <td class="px-5 py-3.5">
-                            <div class="flex items-center justify-center gap-1.5 flex-wrap">
-
-                                {{-- VIEW --}}
-                                <button wire:click="showProfile({{ $u->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition hover:opacity-80"
-                                        style="background:#F5EEF9;color:#7A3F91;border-color:#d4aaeb;">
-                                    <i class="fas fa-eye text-xs"></i>
-                                    <span class="hidden sm:inline">View</span>
-                                </button>
-
-                                {{-- UPDATE EMAIL — alumni only --}}
-                                @if($u->role === 'alumni')
-                                <button wire:click="openUpdateEmail({{ $u->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition hover:opacity-80"
-                                        style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;">
-                                    <i class="fas fa-envelope text-xs"></i>
-                                    <span class="hidden lg:inline">Update Email</span>
-                                </button>
-                                @endif
-
-                                {{-- CHANGE PASSWORD — registrar and admin only --}}
-                                @if(in_array($u->role, ['registrar','admin']))
-                                <button wire:click="openChangePassword({{ $u->id }})"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition hover:opacity-80"
-                                        style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;">
-                                    <i class="fas fa-key text-xs"></i>
-                                    <span class="hidden lg:inline">Password</span>
-                                </button>
-                                @endif
-
-                                {{-- ACTIVATE / DEACTIVATE — director and registrar ONLY --}}
-                                @if(in_array($u->role, ['director','registrar']))
-                                @if($rowStatus === 'ACTIVE')
-                                <button wire:click="confirmToggle({{ $u->id }},'deactivate')"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition hover:opacity-80"
-                                        style="background:#fef2f2;color:#b91c1c;border-color:#fecaca;">
-                                    <i class="fas fa-ban text-xs"></i>
-                                    <span class="hidden lg:inline">Deactivate</span>
-                                </button>
-                                @else
-                                <button wire:click="confirmToggle({{ $u->id }},'activate')"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition hover:opacity-80"
-                                        style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0;">
-                                    <i class="fas fa-circle-check text-xs"></i>
-                                    <span class="hidden lg:inline">Activate</span>
-                                </button>
-                                @endif
-                                @endif
-
-                            </div>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="7" class="py-20 text-center">
-                            <div class="flex flex-col items-center gap-3">
-                                <div class="w-16 h-16 rounded-full flex items-center justify-center" style="background:#f3f4f6;">
-                                    <i class="fas fa-users text-2xl" style="color:#d1d5db;"></i>
-                                </div>
-                                <p class="font-semibold text-base" style="color:#9ca3af;">No users found</p>
-                                <p class="text-sm" style="color:#d1d5db;">Try adjusting your search or filters</p>
-                            </div>
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-
-        {{-- ── PAGINATION ── --}}
-        <div class="px-5 py-3 border-t shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-             style="background:#7A3F91;border-color:#6A3080;">
-            @php
-                $tot  = $pagedUsers->total();
-                $pp   = $pagedUsers->perPage();
-                $cp   = $pagedUsers->currentPage();
-                $from = $tot > 0 ? ($cp-1)*$pp+1 : 0;
-                $to   = min($cp*$pp, $tot);
-            @endphp
-            <p class="text-white text-sm font-medium">
-                Showing <strong>{{ $from }}–{{ $to }}</strong> of <strong>{{ $tot }}</strong> users
-            </p>
-            <div class="flex items-center gap-2">
-                @if($pagedUsers->onFirstPage())
-                    <button disabled class="px-4 py-1.5 rounded-lg text-sm font-semibold cursor-not-allowed"
-                            style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.35);">← Prev</button>
-                @else
-                    <button wire:click="previousPage"
-                            class="px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition hover:opacity-80"
-                            style="background:rgba(255,255,255,.2);">← Prev</button>
-                @endif
-                <span class="px-4 py-1.5 text-sm font-bold rounded-lg" style="background:white;color:#7A3F91;">
-                    {{ $cp }} / {{ $pagedUsers->lastPage() }}
-                </span>
-                @if($pagedUsers->hasMorePages())
-                    <button wire:click="nextPage"
-                            class="px-4 py-1.5 rounded-lg text-sm font-semibold text-white transition hover:opacity-80"
-                            style="background:rgba(255,255,255,.2);">Next →</button>
-                @else
-                    <button disabled class="px-4 py-1.5 rounded-lg text-sm font-semibold cursor-not-allowed"
-                            style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.35);">Next →</button>
-                @endif
-            </div>
-        </div>
-
-    </div>
-</div>
-
-{{-- ═══════════════════════════════════════════
-     MODALS
-     ═══════════════════════════════════════════ --}}
-
-{{-- ══════════════════════════════════════════════════════════
-     CREATE DIRECTOR MODAL
-     ══════════════════════════════════════════════════════════ --}}
-@if($activeModal === 'createDirector')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto"
-     @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl my-4 overflow-hidden">
-
-        {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-5" style="background:#7A3F91;">
-            <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
-                <i class="fas fa-user-tie text-lg"></i> Create New Director
-            </h2>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white text-2xl transition">
-                <i class="fas fa-xmark"></i>
+            {{-- Reset --}}
+            <button wire:click="switchTab('all')"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer"
+                    style="color:#000000;">
+                <i class="fas fa-rotate-left text-sm"></i>
+                <span class="hidden sm:inline">Reset</span>
             </button>
         </div>
 
-        {{-- Success state --}}
-        @if($dOk)
-        @php $parts = explode('|', $dOk); @endphp
-        <div class="p-6">
-            <div class="p-5 rounded-xl border bg-green-50 border-green-200 mb-5">
+        {{-- TABLE --}}
+        @php $pu = $this->users; @endphp
+        <div class="relative flex-1 min-h-0 flex flex-col">
+
+            @if($pu->items->count() > 0)
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff;"
+                 wire:loading.class="opacity-40 pointer-events-none"
+                 wire:target="switchTab,search,statusFilter,goToPage,nextPage,previousPage">
+                <table class="w-full bg-white border-collapse">
+                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10" style="color:#000000;">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#000000;">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#000000;">Identifier</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#000000;">Email</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Role</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Status</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#000000;">Joined</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-[#F5F5F5]">
+                        @foreach($pu->items as $index => $u)
+                        @php
+                            $rowStatus = $u->computed_status ?? $u->user_status ?? 'ACTIVE';
+                            $rowNum    = ($pu->currentPage - 1) * $pu->perPage + $index + 1;
+                            $identifier = match($u->role) {
+                                'alumni'    => $u->student_id ?: '—',
+                                'organizer' => $u->id_number  ?: '—',
+                                default     => $this->adminUsername($u->email, $u->name),
+                            };
+                        @endphp
+                        <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
+                            wire:key="mu-row-{{ $u->id }}" data-mu-row>
+                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
+                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
+                            </td>
+                            <td class="px-4 py-3.5">
+                                <div class="flex items-center gap-3">
+                                    <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $u->name }}"
+                                         class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
+                                    <div class="min-w-0">
+                                        <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#000000;">
+                                            {{ $u->role === 'admin' ? $this->adminUsername($u->email, $u->name) : $u->name }}
+                                        </p>
+                                        <p class="text-xs font-mono mt-0.5" style="color:#000000;">{{ $u->role }}</p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3.5 hidden md:table-cell">
+                                <span class="font-mono text-xs font-semibold px-2 py-1 rounded-lg bg-gray-50 border border-gray-200" style="color:#000000;">
+                                    {{ $identifier }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 hidden lg:table-cell">
+                                <p class="text-sm truncate max-w-[200px]" style="color:#000000;">
+                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
+                                </p>
+                            </td>
+                            <td class="px-4 py-3.5 text-center">
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border {{ $this->roleBadge($u->role) }}">
+                                    {{ $this->roleLabel($u->role) }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 text-center">
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border {{ $this->statusBadge($rowStatus) }}">
+                                    {{ $rowStatus }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3.5 text-center hidden xl:table-cell">
+                                <span class="text-sm font-semibold" style="color:#000000;">
+                                    {{ \Carbon\Carbon::parse($u->created_at)->timezone('Asia/Manila')->format('M d, Y') }}
+                                </span>
+                            </td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+
+            @else
+            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
+                    <i class="fas fa-users-slash text-xl text-gray-400"></i>
+                </div>
+                <div>
+                    <p class="font-semibold text-base" style="color:#000000;">
+                        {{ ($search || $statusFilter) ? 'No users match your filters' : 'No users found' }}
+                    </p>
+                    <p class="text-sm mt-1" style="color:#000000;">
+                        {{ ($search || $statusFilter) ? 'Try clearing your filters to see all users.' : 'No users are registered in this category yet.' }}
+                    </p>
+                </div>
+                @if($search || $statusFilter)
+                <button wire:click="switchTab('all')"
+                        class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition cursor-pointer"
+                        style="background-color:#7a3f91;">
+                    <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
+                </button>
+                @endif
+            </div>
+            @endif
+        </div>
+
+        {{-- PAGINATION --}}
+        @php
+            $pgStart = max(1, $pu->currentPage - 2);
+            $pgEnd   = min($pu->lastPage, $pu->currentPage + 2);
+        @endphp
+        <div class="mu-table-block-pagination">
+            <p class="text-white/80 text-xs font-normal whitespace-nowrap">
+                Showing <strong class="text-white font-bold">{{ $pu->from }}&ndash;{{ $pu->to }}</strong>
+                of <strong class="text-white font-bold">{{ $pu->total }}</strong> users
+                @if($statusFilter || $search)
+                    <span class="text-white/60 text-xs ml-1">(filtered)</span>
+                @endif
+            </p>
+
+            <div class="flex items-center gap-1 flex-wrap py-2">
+                <button wire:click="previousPage"
+                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        @if(!$pu->hasPrev) disabled @endif>
+                    <i class="fas fa-chevron-left text-[9px]"></i>
+                </button>
+
+                @if($pgStart > 1)
+                    <button wire:click="goToPage(1)"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                    @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                @endif
+
+                @for($p = $pgStart; $p <= $pgEnd; $p++)
+                    @if($p === $pu->currentPage)
+                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                     bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
+                    @else
+                        <button wire:click="goToPage({{ $p }})"
+                                class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                    @endif
+                @endfor
+
+                @if($pgEnd < $pu->lastPage)
+                    @if($pgEnd < $pu->lastPage - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                    <button wire:click="goToPage({{ $pu->lastPage }})"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $pu->lastPage }}</button>
+                @endif
+
+                <button wire:click="nextPage"
+                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                               bg-white/15 border border-white/25 text-white
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        @if(!$pu->hasNext) disabled @endif>
+                    <i class="fas fa-chevron-right text-[9px]"></i>
+                </button>
+
+                <span class="hidden sm:inline text-white/80 text-xs font-semibold whitespace-nowrap ml-1">
+                    Page {{ $pu->currentPage }}/{{ $pu->lastPage }}
+                </span>
+            </div>
+        </div>
+
+    </div>{{-- /mu-table-block --}}
+
+</div>{{-- /main layout --}}
+
+
+{{-- ═══════════════════════════════════════════════════════════
+     UNIFIED VIEW + EDIT PROFILE MODAL
+     ═══════════════════════════════════════════════════════════ --}}
+@if($activeModal === 'viewProfile' && $vData)
+@php
+    $vd       = $vData;
+    $vRole    = $vd['role'];
+    $vStatus  = $vd['user_status'];
+    $isAlumni = $vRole === 'alumni';
+    $isOrg    = $vRole === 'organizer';
+    $isDir    = $vRole === 'director';
+    $isReg    = $vRole === 'registrar';
+    $isAdmin  = $vRole === 'admin';
+    $canPhoto = in_array($vRole, ['alumni','organizer','director','registrar']);
+    $canToggle= in_array($vRole, ['director','registrar']);
+
+    if ($isDir)
+        $headerName = implode(' ', array_filter([$vd['first_name']??'', $vd['middle_name']??'', $vd['last_name']??'', $vd['suffix']??''])) ?: $vd['name'];
+    elseif ($isAlumni)
+        $headerName = implode(' ', array_filter([$vd['alumni_first_name']??'', $vd['alumni_middle_name']??'', $vd['alumni_last_name']??'', $vd['alumni_suffix']??''])) ?: $vd['name'];
+    elseif ($isAdmin)
+        $headerName = $this->adminUsername($vd['email'], $vd['name']);
+    else
+        $headerName = $vd['name'];
+
+    $headerSub = '';
+    if ($isAlumni && !empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local'))
+        $headerSub = $vd['record_email'];
+    elseif ($isDir && !empty($vd['director_email']))
+        $headerSub = $vd['director_email'];
+    elseif (!str_ends_with($vd['email']??'','.internal'))
+        $headerSub = $vd['email'];
+@endphp
+<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4"
+     @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]"
+         style="max-height:95vh;"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+         x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+
+        <div class="flex items-center justify-between px-5 py-4 flex-shrink-0" style="background:#7A3F91;">
+            <div class="flex items-center gap-3">
+                @if($vPhoto)
+                    <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
+                         class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
+                @else
+                    <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
+                         class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
+                @endif
+                <div>
+                    <p class="font-semibold text-white text-sm leading-snug uppercase">{{ $headerName }}</p>
+                    <p class="text-xs text-white/70 mt-0.5">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
+                </div>
+            </div>
+            <button wire:click="closeModal"
+                    class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-5 scroll-c"
+             style="scrollbar-width:thin;scrollbar-color:#d9c9e8 #F9F7FC;">
+
+            {{-- Badges --}}
+            <div class="flex flex-wrap gap-2 items-center">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $this->roleBadge($vRole) }}">
+                    {{ $this->roleLabel($vRole) }}
+                </span>
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $this->statusBadge($vStatus) }}">
+                    {{ $vStatus }}
+                </span>
+                <span class="text-xs font-semibold ml-auto" style="color:#000000;">
+                    <i class="fa-regular fa-calendar mr-1"></i>
+                    Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
+                </span>
+            </div>
+
+            {{-- PHOTO UPLOAD --}}
+            @if($canPhoto)
+            <div class="rounded-xl overflow-hidden border border-[#E8E0F0]">
+                <div class="px-4 py-2.5 border-b border-[#E8E0F0] flex items-center gap-2" style="background:#F9F7FC;">
+                    <i class="fas fa-camera text-xs" style="color:#7A3F91;"></i>
+                    <p class="text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Profile Photo</p>
+                </div>
+                <div class="p-4">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4"
+                         x-data="{ dragging: false }"
+                         @dragover.prevent="dragging=true"
+                         @dragleave.prevent="dragging=false"
+                         @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
+                        <label for="vPhotoInput"
+                               :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-[#E8E0F0] bg-[#F9F7FC] hover:border-[#7A3F91]'"
+                               class="flex-1 flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all w-full">
+                            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#ede9f6;">
+                                <i class="fas fa-cloud-arrow-up text-sm" style="color:#7A3F91;"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm font-semibold" style="color:#000000;">Click or drag &amp; drop to upload</p>
+                                <p class="text-xs mt-0.5 font-semibold" style="color:#000000;">JPG, PNG, GIF, WEBP — max 2 MB</p>
+                            </div>
+                            <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
+                        </label>
+                        @if($vPhoto)
+                        <div class="flex flex-col items-center gap-2 flex-shrink-0">
+                            <div class="w-16 h-16 rounded-xl overflow-hidden shadow-md ring-2 ring-[#7A3F91]/30">
+                                <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
+                            </div>
+                            <button wire:click="savePhoto" wire:loading.attr="disabled" wire:target="savePhoto"
+                                    class="w-full px-3 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
+                                    style="background:#7A3F91;">
+                                <span wire:loading wire:target="savePhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                                <span wire:loading.remove wire:target="savePhoto"><i class="fas fa-check text-xs"></i> Save</span>
+                            </button>
+                            <button wire:click="$set('vPhoto', null)"
+                                    class="w-full px-3 py-1 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition" style="color:#000000;">Cancel</button>
+                        </div>
+                        @endif
+                    </div>
+                    <div wire:loading wire:target="vPhoto" class="mt-2 flex items-center gap-2 text-xs font-medium" style="color:#7A3F91;">
+                        <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                    </div>
+                    @error('vPhoto')<p class="mt-2 text-xs text-red-600 flex items-center gap-1.5"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
+                </div>
+            </div>
+            @endif
+
+            {{-- ALUMNI INFO --}}
+            @if($isAlumni)
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Student Information</p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                    @foreach([
+                        ['First Name',    $vd['alumni_first_name']  ?? '—'],
+                        ['Middle Initial',$vd['alumni_middle_name'] ?? '—'],
+                        ['Last Name',     $vd['alumni_last_name']   ?? '—'],
+                        ['Suffix',        $vd['alumni_suffix']      ?? '—'],
+                        ['Student ID',    $vd['student_id']         ?? '—'],
+                        ['Batch',         $vd['batch']              ?? '—'],
+                        ['Course Code',   $vd['course_code']        ?? '—'],
+                    ] as [$lbl,$val])
+                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
+                        <p class="text-sm font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+                    </div>
+                    @endforeach
+                </div>
+                @if(!empty($vd['course_name']))
+                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Course</p>
+                    <p class="text-sm font-semibold" style="color:#000000;">{{ $vd['course_name'] }}</p>
+                </div>
+                @endif
+            </div>
+            @endif
+
+            {{-- DIRECTOR INFO --}}
+            @if($isDir)
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Director Information</p>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                    @foreach([
+                        ['First Name',  $vd['first_name']  ?? '—'],
+                        ['Middle Name', $vd['middle_name'] ?? '—'],
+                        ['Last Name',   $vd['last_name']   ?? '—'],
+                        ['Suffix',      $vd['suffix']      ?? '—'],
+                    ] as [$lbl,$val])
+                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
+                        <p class="text-sm font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+                    </div>
+                    @endforeach
+                </div>
+                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Email Address</p>
+                    <p class="text-sm font-semibold break-all" style="color:#000000;">{{ $vd['director_email'] ?: '—' }}</p>
+                </div>
+            </div>
+            @endif
+
+            {{-- COORDINATOR INFO --}}
+            @if($isOrg)
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Coordinator Details</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Teacher ID</p>
+                        <p class="text-sm font-bold font-mono" style="color:#000000;">{{ $vd['id_number'] ?: '—' }}</p>
+                    </div>
+                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">College / Dept</p>
+                        <p class="text-sm font-semibold" style="color:#000000;">{{ $vd['department'] ?: '—' }}</p>
+                    </div>
+                </div>
+            </div>
+            @endif
+
+            {{-- REGISTRAR / ADMIN INFO --}}
+            @if($isReg || $isAdmin)
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Account Details</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Username</p>
+                        <p class="text-sm font-bold font-mono" style="color:#000000;">
+                            {{ $this->adminUsername($vd['email'], $vd['name']) }}
+                        </p>
+                    </div>
+                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Role</p>
+                        <p class="text-sm font-semibold" style="color:#000000;">{{ $this->roleLabel($vRole) }}</p>
+                    </div>
+                </div>
+            </div>
+            @endif
+
+            {{-- UPDATE EMAIL — Alumni --}}
+            @if($isAlumni)
+            <div class="border-t border-[#E8E0F0] pt-5">
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Email Address</p>
+                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] mb-3">
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
+                    <p class="text-sm font-semibold break-all" style="color:#000000;">
+                        @if(!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local'))
+                            {{ $vd['record_email'] }}
+                        @else
+                            <span class="italic" style="color:#000000;">Not set</span>
+                        @endif
+                    </p>
+                </div>
+                @if(count($ueErrors))
+                <div class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                    @foreach($ueErrors as $msgs)
+                        @foreach($msgs as $msg)
+                        <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                        @endforeach
+                    @endforeach
+                </div>
+                @endif
+                <div class="flex gap-2">
+                    <div class="relative flex-1">
+                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                        <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
+                               class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                    </div>
+                    <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                            class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                            style="background:#7A3F91;">
+                        <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-xs"></i> Update</span>
+                    </button>
+                </div>
+                <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                    <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">Updating the email will require the alumni to reset their password on next login.</p>
+                </div>
+            </div>
+            @endif
+
+            {{-- CHANGE PASSWORD — Registrar / Admin --}}
+            @if($isReg || $isAdmin)
+            <div class="border-t border-[#E8E0F0] pt-5">
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Change Password</p>
+                @if(count($cpErrs))
+                <div class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                    @foreach($cpErrs as $msgs)
+                        @foreach($msgs as $msg)
+                        <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                        @endforeach
+                    @endforeach
+                </div>
+                @endif
+                <div class="grid grid-cols-2 gap-2 mb-2">
+                    <input wire:model.defer="cpNew" type="password" placeholder="New password (min. 8)"
+                           class="mu-filter-input w-full" autocomplete="new-password">
+                    <input wire:model.defer="cpConfirm" type="password" placeholder="Confirm new password"
+                           class="mu-filter-input w-full" autocomplete="new-password">
+                </div>
+                <button wire:click="saveChangePassword" wire:loading.attr="disabled" wire:target="saveChangePassword"
+                        class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5"
+                        style="background:#7A3F91;">
+                    <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin text-xs"></i> Saving…</span>
+                    <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-key text-xs"></i> Update Password</span>
+                </button>
+                <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                    <i class="fas fa-rotate-left text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">After saving, the user will be required to change their password on next login.</p>
+                </div>
+            </div>
+            @endif
+
+            {{-- ACTIVATE / DEACTIVATE --}}
+            @if($canToggle)
+            <div class="border-t border-[#E8E0F0] pt-5">
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Account Status</p>
+                @if($vStatus === 'ACTIVE')
+                <button wire:click="confirmToggle({{ $vd['id'] }}, 'deactivate')"
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition hover:opacity-90"
+                        style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
+                    <i class="fas fa-ban text-xs"></i> Deactivate Account
+                </button>
+                @else
+                <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition hover:opacity-90"
+                        style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;">
+                    <i class="fas fa-circle-check text-xs"></i> Activate Account
+                </button>
+                @endif
+            </div>
+            @endif
+
+        </div>{{-- /scroll --}}
+    </div>
+</div>
+@endif
+
+
+{{-- ═══════════════════════════════════════════════════════════
+     CREATE DIRECTOR MODAL
+     ═══════════════════════════════════════════════════════════ --}}
+@if($activeModal === 'createDirector')
+<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
+     @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-2xl w-full max-w-xl my-4 flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]">
+
+        <div class="flex items-center justify-between px-5 py-4 flex-shrink-0" style="background:#7A3F91;">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                    <i class="fas fa-user-tie text-white text-base"></i>
+                </div>
+                <div>
+                    <p class="font-semibold text-white text-sm">Create New Director</p>
+                    <p class="text-xs text-white/70 mt-0.5">Fill in the details below</p>
+                </div>
+            </div>
+            <button wire:click="closeModal"
+                    class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 scroll-c" style="scrollbar-width:thin;scrollbar-color:#d9c9e8 #F9F7FC;">
+
+            @if($dOk)
+            @php $parts = explode('|', $dOk); @endphp
+            <div class="p-4 rounded-xl border bg-emerald-50 border-emerald-200 mb-5 space-y-2">
                 <div class="flex items-start gap-3">
-                    <i class="fas fa-circle-check text-green-500 mt-0.5 shrink-0 text-xl"></i>
-                    <div class="space-y-2">
+                    <i class="fas fa-circle-check text-emerald-500 mt-0.5 shrink-0"></i>
+                    <div class="space-y-1.5">
                         @foreach($parts as $part)
-                        <p class="text-base text-green-800">{!! $part !!}</p>
+                        <p class="text-sm text-emerald-800">{!! $part !!}</p>
                         @endforeach
                     </div>
                 </div>
             </div>
             <button wire:click="closeModal"
-                    class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90"
-                    style="background:#7A3F91;">Done</button>
-        </div>
-        @endif
+                    class="w-full py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style="background:#7A3F91;">Done</button>
+            @endif
 
-        {{-- Validation errors --}}
-        @if(count($dErrs))
-        <div class="mx-6 mt-5 p-4 rounded-xl bg-red-50 border border-red-200 space-y-1.5">
-            @foreach($dErrs as $msgs)
-                @foreach($msgs as $msg)
-                <p class="text-base text-red-700 flex items-start gap-2">
-                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5"></i>
-                    <span>{{ $msg }}</span>
-                </p>
+            @if(count($dErrs))
+            <div class="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 space-y-1.5">
+                @foreach($dErrs as $msgs)
+                    @foreach($msgs as $msg)
+                    <p class="text-sm text-red-700 flex items-start gap-2">
+                        <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span>
+                    </p>
+                    @endforeach
                 @endforeach
-            @endforeach
-        </div>
-        @endif
-
-        {{-- Form --}}
-        @if(!$dOk)
-        <form wire:submit="createDirector" class="p-6 space-y-6">
-
-            {{-- Full Name --}}
-            <div>
-                <label class="block text-base font-bold mb-3" style="color:#1a1a1a;">
-                    Full Name <span class="text-red-500">*</span>
-                </label>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <input wire:model.defer="dFn" type="text" placeholder="First Name"
-                               class="w-full px-4 py-3 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/15 focus:border-[#7A3F91] transition"
-                               style="border-color:#d1d5db;color:#111;">
-                        <p class="text-sm mt-1.5 font-semibold" style="color:#9ca3af;">First Name <span class="text-red-400">*</span></p>
-                    </div>
-                    <div>
-                        <input wire:model.defer="dLn" type="text" placeholder="Last Name"
-                               class="w-full px-4 py-3 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/15 focus:border-[#7A3F91] transition"
-                               style="border-color:#d1d5db;color:#111;">
-                        <p class="text-sm mt-1.5 font-semibold" style="color:#9ca3af;">Last Name <span class="text-red-400">*</span></p>
-                    </div>
-                    <div>
-                        <input wire:model.defer="dMn" type="text" placeholder="Middle Name"
-                               class="w-full px-4 py-3 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/15 focus:border-[#7A3F91] transition"
-                               style="border-color:#d1d5db;color:#111;">
-                        <p class="text-sm mt-1.5 font-semibold" style="color:#9ca3af;">Middle Name <span class="text-red-400">*</span></p>
-                    </div>
-                    <div>
-                        <input wire:model.defer="dSfx" type="text" placeholder="e.g. Jr., Sr., III"
-                               class="w-full px-4 py-3 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/15 focus:border-[#7A3F91] transition"
-                               style="border-color:#d1d5db;color:#111;">
-                        <p class="text-sm mt-1.5 font-semibold" style="color:#9ca3af;">Suffix <span class="text-gray-300 text-xs font-normal">(optional)</span></p>
-                    </div>
-                </div>
             </div>
+            @endif
 
-            {{-- Username --}}
-            <div>
-                <label class="block text-base font-bold mb-2" style="color:#1a1a1a;">
-                    Username <span class="text-red-500">*</span>
-                    <span class="ml-1.5 text-sm font-normal" style="color:#9ca3af;">(used to log in)</span>
-                </label>
-                <input wire:model.defer="dUsername" type="text" placeholder="e.g. jdelacruz2024"
-                       class="w-full px-4 py-3 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/15 focus:border-[#7A3F91] transition"
-                       style="border-color:#d1d5db;color:#111;" autocomplete="off">
-            </div>
-
-            {{-- Email --}}
-            <div>
-                <label class="block text-base font-bold mb-2" style="color:#1a1a1a;">
-                    Email Address <span class="text-red-500">*</span>
-                    <span class="ml-1.5 text-sm font-normal" style="color:#9ca3af;">(for records &amp; credentials)</span>
-                </label>
-                <div class="relative">
-                    <i class="fas fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
-                    <input wire:model.defer="dEmail" type="email" placeholder="e.g. jdelacruz@email.com"
-                           class="w-full pl-10 pr-4 py-3 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/15 focus:border-[#7A3F91] transition"
-                           style="border-color:#d1d5db;color:#111;" autocomplete="off">
-                </div>
-                <div class="mt-3 p-3.5 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
-                    <i class="fas fa-circle-info text-amber-500 mt-0.5 shrink-0"></i>
-                    <p class="text-sm font-medium leading-snug" style="color:#92400e;">
-                        A secure password will be <strong>auto-generated</strong> and sent to this email.
-                        The director logs in using their <strong>username</strong>.
-                    </p>
-                </div>
-            </div>
-
-            {{-- Actions --}}
-            <div class="flex gap-3 pt-1">
-                <button type="button" wire:click="closeModal"
-                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold border transition hover:bg-gray-50"
-                        style="color:#374151;border-color:#d1d5db;">Cancel</button>
-                <button type="submit" wire:loading.attr="disabled" wire:target="createDirector"
-                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
-                        style="background:#7A3F91;">
-                    <span wire:loading wire:target="createDirector">
-                        <i class="fas fa-spinner animate-spin"></i> Creating…
-                    </span>
-                    <span wire:loading.remove wire:target="createDirector">
-                        <i class="fas fa-user-tie"></i> Create Director
-                    </span>
-                </button>
-            </div>
-        </form>
-        @endif
-    </div>
-</div>
-@endif
-
-{{-- ══════════════════════════════════════════════════════════
-     VIEW PROFILE MODAL
-     ══════════════════════════════════════════════════════════ --}}
-@if($activeModal === 'viewProfile' && $vData)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm overflow-y-auto"
-     @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4 overflow-hidden">
-
-        {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-4" style="background:#7A3F91;">
-            <h2 class="text-white font-bold text-lg flex items-center gap-2">
-                <i class="fas fa-id-card"></i> User Profile
-            </h2>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white text-xl transition">
-                <i class="fas fa-xmark"></i>
-            </button>
-        </div>
-
-        <div class="p-5 space-y-4 overflow-y-auto" style="max-height:85vh;">
-
-            {{-- ── Avatar + quick info ── --}}
-            <div class="flex items-center gap-4 p-4 rounded-xl" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                @if($vPhoto)
-                    <img src="{{ $vPhoto->temporaryUrl() }}"
-                         alt="Preview"
-                         class="w-16 h-16 rounded-xl object-cover shadow shrink-0"
-                         style="border:2px solid #7A3F91;">
-                @else
-                    <img src="{{ $this->photoUrl($vData['photo'] ?? '') }}"
-                         alt="{{ $vData['name'] }}"
-                         class="w-16 h-16 rounded-xl object-cover shadow shrink-0"
-                         style="border:2px solid #e5e7eb;">
-                @endif
-                <div>
-                    @if($vData['role'] === 'director')
-                        <p class="font-bold text-xl leading-tight" style="color:#111827;">
-                            {{ implode(' ', array_filter([
-                                $vData['first_name'] ?? '',
-                                $vData['middle_name'] ?? '',
-                                $vData['last_name'] ?? '',
-                                $vData['suffix'] ?? '',
-                            ])) ?: $vData['name'] }}
-                        </p>
-                    @elseif($vData['role'] === 'alumni')
-                        @php
-                            $alumniFullName = implode(' ', array_filter([
-                                $vData['alumni_first_name'] ?? '',
-                                $vData['alumni_middle_name'] ?? '',
-                                $vData['alumni_last_name'] ?? '',
-                                $vData['alumni_suffix'] ?? '',
-                            ]));
-                        @endphp
-                        <p class="font-bold text-xl leading-tight" style="color:#111827;">
-                            {{ $alumniFullName ?: $vData['name'] }}
-                        </p>
-                    @elseif($vData['role'] === 'admin')
-                        <p class="font-bold text-xl leading-tight" style="color:#111827;">
-                            {{ $this->adminUsername($vData['email'], $vData['name']) }}
-                        </p>
-                    @else
-                        <p class="font-bold text-xl leading-tight" style="color:#111827;">{{ $vData['name'] }}</p>
-                    @endif
-
-                    <p class="text-sm mt-1" style="color:#6b7280;">
-                        @if($vData['role'] === 'alumni' && !empty($vData['record_email']) && !str_contains($vData['record_email'],'@pending.local'))
-                            {{ $vData['record_email'] }}
-                        @elseif($vData['role'] === 'director' && !empty($vData['director_email']))
-                            {{ $vData['director_email'] }}
-                        @elseif(!str_ends_with($vData['email'] ?? '','@director.internal') && !str_ends_with($vData['email'] ?? '','@registrar.internal'))
-                            {{ $vData['email'] }}
-                        @endif
-                    </p>
-
-                    <div class="flex flex-wrap gap-1.5 mt-2">
-                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $this->roleBadge($vData['role']) }}">
-                            {{ $this->roleLabel($vData['role']) }}
-                        </span>
-                        @if($vData['role'] !== 'alumni')
-                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border {{ $this->statusBadge($vData['user_status']) }}">
-                            {{ $vData['user_status'] }}
-                        </span>
-                        @endif
-                    </div>
-                </div>
-            </div>
-
-            {{-- ── UPLOAD PROFILE PHOTO ── --}}
-            @if(in_array($vData['role'], ['alumni','organizer','director','registrar']))
-            <div class="rounded-xl overflow-hidden" style="border:1px solid #e9d5f3;">
-                <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#f5eef9;border-color:#e9d5f3;">
-                    <i class="fas fa-camera text-sm" style="color:#7A3F91;"></i>
-                    <p class="text-sm font-bold uppercase tracking-wide" style="color:#374151;">Update Profile Photo</p>
-                </div>
-                <div class="p-4">
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                        <div class="flex-1 w-full"
-                             x-data="{ dragging: false }"
-                             @dragover.prevent="dragging=true"
-                             @dragleave.prevent="dragging=false"
-                             @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                            <label for="vPhotoInput"
-                                   :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-gray-200 bg-gray-50 hover:border-[#7A3F91] hover:bg-purple-50'"
-                                   class="flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-150 w-full">
-                                <div class="w-10 h-10 rounded-full flex items-center justify-center" style="background:#ede9f6;">
-                                    <i class="fas fa-cloud-arrow-up text-lg" style="color:#7A3F91;"></i>
-                                </div>
-                                <div class="text-center">
-                                    <p class="text-sm font-bold" style="color:#374151;">
-                                        Click to browse or drag &amp; drop
-                                    </p>
-                                    <p class="text-xs mt-0.5" style="color:#9ca3af;">JPG, PNG, GIF, WEBP — max 2 MB</p>
-                                </div>
-                                <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                            </label>
-
-                            <div wire:loading wire:target="vPhoto" class="mt-2 flex items-center gap-2 text-sm" style="color:#7A3F91;">
-                                <i class="fas fa-spinner animate-spin text-xs"></i>
-                                <span class="font-medium">Uploading…</span>
-                            </div>
-
-                            @error('vPhoto')
-                            <p class="mt-2 text-sm text-red-600 flex items-center gap-1.5">
-                                <i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}
-                            </p>
-                            @enderror
-                        </div>
-
+            @if(!$dOk)
+            {{-- Photo upload --}}
+            <div class="mb-5">
+                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">
+                    Profile Photo <span class="font-normal normal-case" style="color:#000000;">(optional)</span>
+                </p>
+                <div class="flex items-center gap-4"
+                     x-data="{ dragging: false }"
+                     @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false"
+                     @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
+                    <div class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 ring-1 ring-[#E8E0F0] bg-gray-100 flex items-center justify-center">
                         @if($vPhoto)
-                        <div class="flex flex-col items-center gap-2 shrink-0">
-                            <div class="w-20 h-20 rounded-xl overflow-hidden shadow-md" style="border:2px solid #7A3F91;">
-                                <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
-                            </div>
-                            <button wire:click="savePhoto"
-                                    wire:loading.attr="disabled"
-                                    wire:target="savePhoto"
-                                    class="w-full px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5"
-                                    style="background:#7A3F91;">
-                                <span wire:loading wire:target="savePhoto">
-                                    <i class="fas fa-spinner animate-spin text-xs"></i> Saving…
-                                </span>
-                                <span wire:loading.remove wire:target="savePhoto">
-                                    <i class="fas fa-check text-xs"></i> Save Photo
-                                </span>
-                            </button>
-                            <button wire:click="$set('vPhoto', null)"
-                                    class="w-full px-4 py-1.5 rounded-lg text-xs font-semibold border transition hover:bg-gray-50"
-                                    style="color:#6b7280;border-color:#e5e7eb;">
-                                <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
-                            </button>
-                        </div>
+                            <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
+                        @else
+                            <i class="fas fa-user-tie text-2xl text-gray-300"></i>
                         @endif
                     </div>
+                    <label for="dPhotoInput"
+                           :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-[#E8E0F0] bg-[#F9F7FC] hover:border-[#7A3F91]'"
+                           class="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all">
+                        <i class="fas fa-cloud-arrow-up text-sm" style="color:#7A3F91;"></i>
+                        <div>
+                            <p class="text-sm font-semibold" style="color:#000000;">Click or drag &amp; drop</p>
+                            <p class="text-xs font-semibold" style="color:#000000;">JPG, PNG — max 2 MB</p>
+                        </div>
+                        <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
+                    </label>
+                </div>
+                <div wire:loading wire:target="vPhoto" class="mt-2 flex items-center gap-2 text-xs font-medium" style="color:#7A3F91;">
+                    <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
                 </div>
             </div>
-            @endif
 
-            {{-- ── ALUMNI: Two-column layout ── --}}
-            @if($vData['role'] === 'alumni')
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-                {{-- Personal Information --}}
-                <div class="rounded-xl overflow-hidden" style="border:1px solid #bfdbfe;">
-                    <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#eff6ff;border-color:#bfdbfe;">
-                        <i class="fas fa-user text-sm text-blue-600"></i>
-                        <p class="text-sm font-bold uppercase tracking-wide" style="color:#374151;">Personal Information</p>
-                    </div>
-                    <div class="p-4 grid grid-cols-2 gap-3">
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">First Name</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">
-                                {{ !empty($vData['alumni_first_name']) ? $vData['alumni_first_name'] : '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Middle Initial</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">
-                                {{ !empty($vData['alumni_middle_name']) ? $vData['alumni_middle_name'] : '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Last Name</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">
-                                {{ !empty($vData['alumni_last_name']) ? $vData['alumni_last_name'] : '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Suffix</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">
-                                {{ !empty($vData['alumni_suffix']) ? $vData['alumni_suffix'] : '—' }}
-                            </p>
-                        </div>
-                        <div class="col-span-2 rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Email Address</p>
-                            <p class="text-sm font-semibold break-all" style="color:#111827;">
-                                @if(!empty($vData['record_email']) && !str_contains($vData['record_email'],'@pending.local'))
-                                    {{ $vData['record_email'] }}
-                                @else
-                                    <span style="color:#9ca3af;">—</span>
-                                @endif
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Student Record --}}
-                <div class="rounded-xl overflow-hidden" style="border:1px solid #bfdbfe;">
-                    <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#eff6ff;border-color:#bfdbfe;">
-                        <i class="fas fa-graduation-cap text-sm text-blue-600"></i>
-                        <p class="text-sm font-bold uppercase tracking-wide" style="color:#374151;">Student Record</p>
-                    </div>
-                    <div class="p-4 grid grid-cols-2 gap-3">
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Student ID</p>
-                            <p class="text-sm font-bold font-mono" style="color:#111827;">
-                                {{ !empty($vData['student_id']) ? $vData['student_id'] : '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Batch</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">{{ $vData['batch'] ?: '—' }}</p>
-                        </div>
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Course Code</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">
-                                {{ !empty($vData['course_code']) ? $vData['course_code'] : '—' }}
-                            </p>
-                        </div>
-                        <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Role</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">{{ $this->roleLabel($vData['role']) }}</p>
-                        </div>
-                        @if(!empty($vData['course_name']))
-                        <div class="col-span-2 rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Course</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">{{ $vData['course_name'] }}</p>
-                        </div>
-                        @endif
-                        <div class="col-span-2 rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                            <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Joined</p>
-                            <p class="text-sm font-semibold" style="color:#111827;">
-                                {{ \Carbon\Carbon::parse($vData['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-            @endif
-
-            {{-- ── DIRECTOR NAME DETAILS ── --}}
-            @if($vData['role'] === 'director')
-            <div class="rounded-xl overflow-hidden" style="border:1px solid #e9d5f3;">
-                <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#f5eef9;border-color:#e9d5f3;">
-                    <i class="fas fa-shield-halved text-sm" style="color:#7A3F91;"></i>
-                    <p class="text-sm font-bold uppercase tracking-wide" style="color:#374151;">Director Name Details</p>
-                </div>
-                <div class="p-4 grid grid-cols-3 gap-3">
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">First Name</p>
-                        <p class="text-sm font-semibold" style="color:#111827;">
-                            {{ !empty($vData['first_name']) ? $vData['first_name'] : '—' }}
-                        </p>
-                    </div>
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Middle Name</p>
-                        <p class="text-sm font-semibold" style="color:#111827;">
-                            {{ !empty($vData['middle_name']) ? $vData['middle_name'] : '—' }}
-                        </p>
-                    </div>
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Last Name</p>
-                        <p class="text-sm font-semibold" style="color:#111827;">
-                            {{ !empty($vData['last_name']) ? $vData['last_name'] : '—' }}
-                        </p>
-                    </div>
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Suffix</p>
-                        <p class="text-sm font-semibold" style="color:#111827;">
-                            {{ !empty($vData['suffix']) ? $vData['suffix'] : '—' }}
-                        </p>
-                    </div>
-                    <div class="col-span-2 rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Email Address</p>
-                        <p class="text-sm font-semibold break-all" style="color:#111827;">
-                            {{ !empty($vData['director_email']) ? $vData['director_email'] : '—' }}
-                        </p>
-                    </div>
-                </div>
-            </div>
-            @endif
-
-            {{-- ── ACCOUNT DETAILS (non-alumni) ── --}}
-            @if($vData['role'] !== 'alumni')
-            <div class="rounded-xl overflow-hidden" style="border:1px solid #e5e7eb;">
-                <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#f9fafb;border-color:#e5e7eb;">
-                    <i class="fas fa-circle-info text-sm" style="color:#7A3F91;"></i>
-                    <p class="text-sm font-bold uppercase tracking-wide" style="color:#374151;">Account Details</p>
-                </div>
-                <div class="p-4 grid grid-cols-3 gap-3">
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Role</p>
-                        <p class="text-sm font-semibold" style="color:#111827;">{{ $this->roleLabel($vData['role']) }}</p>
-                    </div>
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Joined</p>
-                        <p class="text-sm font-semibold" style="color:#111827;">
-                            {{ \Carbon\Carbon::parse($vData['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
-                        </p>
-                    </div>
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Status</p>
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold border {{ $this->statusBadge($vData['user_status']) }}">
-                            {{ $vData['user_status'] }}
-                        </span>
-                    </div>
-                    @if(in_array($vData['role'], ['director','registrar']) && str_ends_with($vData['email'] ?? '', '.internal'))
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Username</p>
-                        <p class="text-sm font-semibold font-mono" style="color:#111827;">
-                            {{ str_replace(['@director.internal','@registrar.internal'], '', $vData['email']) }}
-                        </p>
-                    </div>
-                    @endif
-                    @if($vData['role'] === 'admin')
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Username</p>
-                        <p class="text-sm font-semibold font-mono" style="color:#111827;">
-                            {{ $this->adminUsername($vData['email'], $vData['name']) }}
-                        </p>
-                    </div>
-                    @endif
-                </div>
-            </div>
-            @endif
-
-            {{-- ── COORDINATOR RECORD ── --}}
-            @if($vData['role'] === 'organizer' && !empty($vData['id_number']))
-            <div class="rounded-xl overflow-hidden" style="border:1px solid #e9d5f3;">
-                <div class="px-4 py-3 border-b flex items-center gap-2" style="background:#f5eef9;border-color:#e9d5f3;">
-                    <i class="fas fa-users-gear text-sm" style="color:#7A3F91;"></i>
-                    <p class="text-sm font-bold uppercase tracking-wide" style="color:#374151;">Coordinator Details</p>
-                </div>
-                <div class="p-4 grid grid-cols-2 gap-3">
-                    <div class="rounded-lg p-3" style="background:#f9fafb;border:1px solid #e5e7eb;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#9ca3af;">Teacher ID</p>
-                        <p class="text-sm font-bold font-mono" style="color:#111827;">{{ $vData['id_number'] }}</p>
-                    </div>
-                    <div class="rounded-lg p-3" style="background:#f5eef9;border:1px solid #e9d5f3;">
-                        <p class="text-xs font-bold uppercase tracking-wide mb-1" style="color:#7A3F91;">College / Dept</p>
-                        <p class="text-sm font-semibold" style="color:#5e2f72;">{{ $vData['department'] ?: '—' }}</p>
-                    </div>
-                </div>
-            </div>
-            @endif
-
-            <button wire:click="closeModal"
-                    class="w-full py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
-                    style="color:#374151;border-color:#d1d5db;">Close</button>
-        </div>
-    </div>
-</div>
-@endif
-
-{{-- ══════════════════════════════════════════════════════════
-     UPDATE ALUMNI EMAIL MODAL
-     ══════════════════════════════════════════════════════════ --}}
-@if($activeModal === 'updateAlumniEmail' && $ueId)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm"
-     @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-
-        {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-5" style="background:#c2410c;">
-            <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
-                <i class="fas fa-envelope-open-text text-lg"></i> Update Email Address
-            </h2>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white text-2xl transition">
-                <i class="fas fa-xmark"></i>
-            </button>
-        </div>
-
-        {{-- Alumni chip --}}
-        <div class="px-6 pt-5">
-            <div class="flex items-center gap-3 p-4 rounded-xl" style="background:#fff7ed;border:1px solid #fed7aa;">
-                <i class="fas fa-user-graduate text-orange-600 text-lg shrink-0"></i>
+            <div class="space-y-5">
                 <div>
-                    <p class="text-base font-bold leading-tight" style="color:#9a3412;">{{ $ueName }}</p>
-                    <p class="text-sm font-semibold mt-0.5" style="color:#b45309;">Alumni Account</p>
-                </div>
-            </div>
-        </div>
-
-        {{-- Validation Errors --}}
-        @if(count($ueErrors))
-        <div class="mx-6 mt-4 p-4 rounded-xl bg-red-50 border border-red-200 space-y-2">
-            @foreach($ueErrors as $msgs)
-                @foreach($msgs as $msg)
-                <p class="text-base font-semibold text-red-700 flex items-start gap-2.5 leading-snug">
-                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-base"></i>
-                    <span>{{ $msg }}</span>
-                </p>
-                @endforeach
-            @endforeach
-        </div>
-        @endif
-
-        <div class="p-6 space-y-5">
-
-            {{-- Input --}}
-            <div>
-                <label class="block text-base font-bold mb-2.5" style="color:#1a1a1a;">
-                    New Email Address <span class="text-red-500">*</span>
-                </label>
-                <div class="relative">
-                    <i class="fas fa-envelope absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
-                    <input wire:model.defer="ueEmail" type="email"
-                           placeholder="e.g. alumni@email.com"
-                           class="w-full pl-11 pr-4 py-3.5 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
-                           style="border-color:#d1d5db;color:#111;" autocomplete="off">
-                </div>
-            </div>
-
-            {{-- Warning boxes --}}
-            <div class="space-y-3">
-                <div class="flex items-start gap-3 p-4 rounded-xl" style="background:#fef2f2;border:1px solid #fecaca;">
-                    <i class="fas fa-triangle-exclamation text-red-500 text-base mt-0.5 shrink-0"></i>
-                    <p class="text-sm font-semibold leading-snug" style="color:#991b1b;">
-                        This will overwrite the current email address on file for this alumni.
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">
+                        Full Name <span class="text-red-500">*</span>
                     </p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <input wire:model.defer="dFn" type="text" placeholder="First Name" class="mu-filter-input w-full" autocomplete="off">
+                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">First Name <span class="text-red-400">*</span></p>
+                        </div>
+                        <div>
+                            <input wire:model.defer="dLn" type="text" placeholder="Last Name" class="mu-filter-input w-full" autocomplete="off">
+                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">Last Name <span class="text-red-400">*</span></p>
+                        </div>
+                        <div>
+                            <input wire:model.defer="dMn" type="text" placeholder="Middle Name" class="mu-filter-input w-full" autocomplete="off">
+                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">Middle Name <span class="text-red-400">*</span></p>
+                        </div>
+                        <div>
+                            <input wire:model.defer="dSfx" type="text" placeholder="e.g. Jr., Sr., III" class="mu-filter-input w-full" autocomplete="off">
+                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">Suffix <span class="font-normal" style="color:#000000;">(optional)</span></p>
+                        </div>
+                    </div>
                 </div>
-                <div class="flex items-start gap-3 p-4 rounded-xl" style="background:#fffbeb;border:1px solid #fde68a;">
-                    <i class="fas fa-key text-amber-500 text-base mt-0.5 shrink-0"></i>
-                    <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
-                        The alumni's password will be <strong>reset</strong> and they will be required to set a new one on their next login.
-                    </p>
-                </div>
-            </div>
 
-            {{-- Actions --}}
-            <div class="flex gap-3 pt-1">
-                <button type="button" wire:click="closeModal"
-                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold border transition hover:bg-gray-50"
-                        style="color:#374151;border-color:#d1d5db;">
-                    <i class="fas fa-xmark mr-1.5"></i>Cancel
-                </button>
-                <button wire:click="saveUpdateEmail"
-                        wire:loading.attr="disabled"
-                        wire:target="saveUpdateEmail"
-                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
-                        style="background:#c2410c;">
-                    <span wire:loading wire:target="saveUpdateEmail">
-                        <i class="fas fa-spinner animate-spin"></i> Updating…
-                    </span>
-                    <span wire:loading.remove wire:target="saveUpdateEmail">
-                        <i class="fas fa-check mr-1"></i>Confirm Update
-                    </span>
-                </button>
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-2" style="color:#000000;">
+                        Username <span class="text-red-500">*</span>
+                        <span class="font-normal normal-case ml-1" style="color:#000000;">— used to log in</span>
+                    </p>
+                    <input wire:model.defer="dUsername" type="text" placeholder="e.g. jdelacruz2024" class="mu-filter-input w-full" autocomplete="off">
+                </div>
+
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-2" style="color:#000000;">
+                        Email Address <span class="text-red-500">*</span>
+                        <span class="font-normal normal-case ml-1" style="color:#000000;">— for records &amp; credentials</span>
+                    </p>
+                    <div class="relative">
+                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                        <input wire:model.defer="dEmail" type="email" placeholder="e.g. director@email.com"
+                               class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                    </div>
+                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-circle-info text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
+                            A secure password will be <strong>auto-generated</strong> and sent to this email.
+                            The director logs in using their <strong>username</strong>.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 pt-1">
+                    <button type="button" wire:click="closeModal"
+                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
+                            style="color:#000000;border-color:#E8E0F0;">Cancel</button>
+                    <button wire:click="createDirector" wire:loading.attr="disabled" wire:target="createDirector"
+                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
+                            style="background:#7A3F91;">
+                        <span wire:loading wire:target="createDirector"><i class="fas fa-spinner animate-spin text-xs"></i> Creating…</span>
+                        <span wire:loading.remove wire:target="createDirector"><i class="fas fa-user-tie text-xs"></i> Create Director</span>
+                    </button>
+                </div>
             </div>
+            @endif
+
         </div>
     </div>
 </div>
 @endif
 
-{{-- ══════════════════════════════════════════════════════════
-     CHANGE PASSWORD MODAL
-     ══════════════════════════════════════════════════════════ --}}
-@if($activeModal === 'changePassword' && $cpId)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm"
-     @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
 
-        {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-5" style="background:#c2410c;">
-            <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
-                <i class="fas fa-key text-lg"></i> Change Password
-            </h2>
-            <button wire:click="closeModal" class="text-white/60 hover:text-white text-2xl transition">
-                <i class="fas fa-xmark"></i>
-            </button>
-        </div>
-
-        {{-- User chip --}}
-        <div class="px-6 pt-5 pb-2">
-            <div class="flex items-center gap-3 p-4 rounded-xl" style="background:#fff7ed;border:1px solid #fed7aa;">
-                <i class="fas fa-user text-orange-600 text-lg shrink-0"></i>
-                <p class="text-base font-bold" style="color:#9a3412;">{{ $cpName }}</p>
-            </div>
-        </div>
-
-        {{-- Errors --}}
-        @if(count($cpErrs))
-        <div class="mx-6 mt-3 p-4 rounded-xl bg-red-50 border border-red-200 space-y-2">
-            @foreach($cpErrs as $msgs)
-                @foreach($msgs as $msg)
-                <p class="text-base font-semibold text-red-700 flex items-start gap-2.5 leading-snug">
-                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-base"></i>
-                    <span>{{ $msg }}</span>
-                </p>
-                @endforeach
-            @endforeach
-        </div>
-        @endif
-
-        <div class="p-6 space-y-5">
-
-            {{-- Warning box --}}
-            <div class="flex items-start gap-3 p-4 rounded-xl" style="background:#fffbeb;border:1px solid #fde68a;">
-                <i class="fas fa-rotate-left text-amber-500 text-base mt-0.5 shrink-0"></i>
-                <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
-                    After saving, this user will be required to <strong>change their password</strong> on their next login.
-                </p>
-            </div>
-
-            <div>
-                <label class="block text-base font-bold mb-2.5" style="color:#1a1a1a;">
-                    New Password <span class="text-red-500">*</span>
-                </label>
-                <input wire:model.defer="cpNew" type="password" placeholder="Min. 8 characters"
-                       class="w-full px-4 py-3.5 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
-                       style="border-color:#d1d5db;color:#111;" autocomplete="new-password">
-            </div>
-
-            <div>
-                <label class="block text-base font-bold mb-2.5" style="color:#1a1a1a;">
-                    Confirm New Password <span class="text-red-500">*</span>
-                </label>
-                <input wire:model.defer="cpConfirm" type="password" placeholder="Repeat new password"
-                       class="w-full px-4 py-3.5 border rounded-xl text-base bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/15 focus:border-orange-500 transition"
-                       style="border-color:#d1d5db;color:#111;" autocomplete="new-password">
-            </div>
-
-            <div class="flex gap-3 pt-1">
-                <button type="button" wire:click="closeModal"
-                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold border transition hover:bg-gray-50"
-                        style="color:#374151;border-color:#d1d5db;">Cancel</button>
-                <button wire:click="saveChangePassword"
-                        wire:loading.attr="disabled"
-                        wire:target="saveChangePassword"
-                        class="flex-1 px-5 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
-                        style="background:#c2410c;">
-                    <span wire:loading wire:target="saveChangePassword">
-                        <i class="fas fa-spinner animate-spin"></i> Saving…
-                    </span>
-                    <span wire:loading.remove wire:target="saveChangePassword">
-                        <i class="fas fa-key"></i> Update Password
-                    </span>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-@endif
-
-{{-- ══════════════════════════════════════════════════════════
+{{-- ═══════════════════════════════════════════════════════════
      TOGGLE CONFIRM MODAL
-     ══════════════════════════════════════════════════════════ --}}
+     ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'toggleConfirm' && $tId)
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-[#E8E0F0]"
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
         <div class="p-6">
             <div class="flex items-center gap-4 mb-4">
-                <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0
-                            {{ $tAction==='deactivate' ? 'bg-red-100' : 'bg-green-100' }}">
-                    <i class="{{ $tAction==='deactivate' ? 'fas fa-ban text-red-600 text-lg' : 'fas fa-circle-check text-green-600 text-lg' }}"></i>
+                <div class="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0
+                            {{ $tAction==='deactivate' ? 'bg-red-100' : 'bg-emerald-100' }}">
+                    <i class="{{ $tAction==='deactivate' ? 'fas fa-ban text-red-600 text-lg' : 'fas fa-circle-check text-emerald-600 text-lg' }}"></i>
                 </div>
                 <div>
-                    <p class="font-bold text-base" style="color:#111827;">
+                    <p class="font-semibold text-base" style="color:#000000;">
                         {{ $tAction==='deactivate' ? 'Deactivate' : 'Activate' }} User?
                     </p>
-                    <p class="text-sm mt-0.5 font-medium" style="color:#6b7280;">{{ $tName }}</p>
+                    <p class="text-sm mt-0.5 font-semibold" style="color:#000000;">{{ $tName }}</p>
                 </div>
             </div>
-            <p class="text-sm mb-5 leading-relaxed" style="color:#4b5563;">
+            <p class="text-sm mb-5 leading-relaxed font-medium" style="color:#000000;">
                 @if($tAction==='deactivate')
                     This user will be marked as <strong>Inactive</strong>. You can reactivate them anytime.
                 @else
                     This user will be marked as <strong>Active</strong> and regain system access.
                 @endif
             </p>
-            <div class="flex gap-3">
+            <div class="flex gap-2">
                 <button wire:click="closeModal"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
-                        style="color:#374151;border-color:#d1d5db;">Cancel</button>
+                        style="color:#000000;border-color:#E8E0F0;">Cancel</button>
                 <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition flex items-center justify-center gap-2
-                               {{ $tAction==='deactivate' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700' }}">
-                    <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner animate-spin"></i></span>
+                               {{ $tAction==='deactivate' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700' }}">
+                    <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                     <span wire:loading.remove wire:target="executeToggle">
                         {{ $tAction==='deactivate' ? 'Yes, Deactivate' : 'Yes, Activate' }}
                     </span>
@@ -1600,5 +1514,28 @@ new class extends Component {
     </div>
 </div>
 @endif
+
+
+<script>
+(function () {
+    var tip = document.getElementById('mu-hover-tip');
+    function bindRows() {
+        document.querySelectorAll('[data-mu-row]').forEach(function (row) {
+            if (row._muTipBound) return;
+            row._muTipBound = true;
+            row.addEventListener('mousemove', function (e) {
+                if (!tip) return;
+                tip.style.left = e.clientX + 'px';
+                tip.style.top  = e.clientY + 'px';
+                tip.classList.add('visible');
+            });
+            row.addEventListener('mouseleave', function () { if (tip) tip.classList.remove('visible'); });
+            row.addEventListener('click',      function () { if (tip) tip.classList.remove('visible'); });
+        });
+    }
+    bindRows();
+    document.addEventListener('livewire:updated', bindRows);
+})();
+</script>
 
 </div>

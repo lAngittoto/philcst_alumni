@@ -22,7 +22,7 @@ new class extends Component {
     public string $activeModal = '';
     public string $coordSearch  = '';
     public string $coordCollege = '';
-    public string $coordSort    = 'recent';
+    public string $coordStatus  = '';
     public string $coordFirstName         = '';
     public string $coordMiddleInitial     = '';
     public string $coordLastName          = '';
@@ -49,8 +49,9 @@ new class extends Component {
     public string $pendingToggleName   = '';
     public ?int   $viewingProfileId     = null;
     public        $viewingProfile       = null;
-    public        $updatingProfilePhoto = null;
-    public bool   $updatingProfile      = false;
+    public bool   $editingProfileEmail  = false;
+    public string $profileEmailInput    = '';
+    public bool   $savingProfileEmail   = false;
 
     protected array $validSuffixes = [
         'Jr', 'Jr.', 'Sr', 'Sr.',
@@ -77,7 +78,7 @@ new class extends Component {
 
     public function updatingCoordSearch()  { $this->resetPage('coordPage'); }
     public function updatingCoordCollege() { $this->resetPage('coordPage'); }
-    public function updatingCoordSort()    { $this->resetPage('coordPage'); }
+    public function updatingCoordStatus()  { $this->resetPage('coordPage'); }
 
     #[Computed]
     public function coordinatorRecords()
@@ -92,7 +93,8 @@ new class extends Component {
                 ->orWhere('id_number',  'like', $term));
         }
         if ($this->coordCollege) $q->where('department', $this->coordCollege);
-        $q->when($this->coordSort === 'oldest', fn($q) => $q->orderBy('created_at'), fn($q) => $q->orderByDesc('created_at'));
+        if ($this->coordStatus)  $q->where('status', $this->coordStatus);
+        $q->orderByDesc('created_at');
         return $q->paginate(10, ['*'], 'coordPage');
     }
 
@@ -185,14 +187,15 @@ new class extends Component {
         $this->pendingToggleAction  = '';
         $this->pendingToggleName    = '';
         $this->viewingProfileId     = null;
-        $this->updatingProfilePhoto = null;
+        $this->editingProfileEmail  = false;
+        $this->profileEmailInput    = '';
         $this->coordinatorSuccess   = '';
     }
 
     public function resetCoordFilters(): void
     {
         $this->coordSearch = $this->coordCollege = '';
-        $this->coordSort   = 'recent';
+        $this->coordStatus = '';
         $this->resetPage('coordPage');
     }
 
@@ -282,6 +285,13 @@ new class extends Component {
             }
 
             $this->coordinatorSuccess = "Coordinator '{$fullName}' registered! Login credentials sent to {$coordinator->email}.";
+
+            $this->dispatch('dir-coordinator-updated',
+                id: $coordinator->id,
+                name: $fullName,
+                action: 'created'
+            );
+
             $this->resetCoordForm();
 
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -453,6 +463,13 @@ new class extends Component {
             $coordinator->update(['status' => $newStatus]);
             $verb = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
             $this->flash('success', "{$coordinator->getFullName()} has been {$verb}.");
+
+            $this->dispatch('dir-coordinator-updated',
+                id: $coordinator->id,
+                name: $coordinator->getFullName(),
+                action: $verb
+            );
+
         } catch (\Exception $e) {
             $this->flash('error', 'Could not update status: ' . $e->getMessage());
         } finally {
@@ -466,32 +483,82 @@ new class extends Component {
     public function viewProfile(int $id): void
     {
         try {
-            $this->viewingProfile   = Organizer::findOrFail($id)->toArray();
-            $this->viewingProfileId = $id;
-            $this->activeModal      = 'viewProfile';
+            $this->viewingProfile     = Organizer::findOrFail($id)->toArray();
+            $this->viewingProfileId   = $id;
+            $this->editingProfileEmail = false;
+            $this->profileEmailInput   = '';
+            $this->activeModal        = 'viewProfile';
         } catch (\Exception) {
             $this->flash('error', 'Failed to load profile.');
         }
     }
 
-    public function updateProfilePhoto(): void
+    public function startEditingProfileEmail(): void
     {
-        if (!$this->updatingProfilePhoto || !$this->viewingProfileId) return;
-        $this->updatingProfile = true;
+        if (!$this->viewingProfileId) return;
+        $this->profileEmailInput   = $this->viewingProfile['email'] ?? '';
+        $this->editingProfileEmail = true;
+        $this->resetErrorBag('profileEmailInput');
+    }
+
+    public function cancelEditingProfileEmail(): void
+    {
+        $this->editingProfileEmail = false;
+        $this->profileEmailInput   = '';
+        $this->resetErrorBag('profileEmailInput');
+    }
+
+    public function updateProfileEmail(): void
+    {
+        if (!$this->viewingProfileId) return;
+        $this->savingProfileEmail = true;
+
         try {
-            $coord = Organizer::findOrFail($this->viewingProfileId);
-            if ($coord->profile_photo && !str_contains($coord->profile_photo, 'default.png')) {
-                Storage::disk('public')->delete($coord->profile_photo);
+            $newEmail = trim($this->profileEmailInput);
+
+            $this->validate([
+                'profileEmailInput' => [
+                    'required',
+                    'email',
+                    'max:255',
+                    'unique:organizer,email,' . $this->viewingProfileId,
+                ],
+            ], [
+                'profileEmailInput.required' => 'Email address is required.',
+                'profileEmailInput.email'    => 'Please enter a valid email address.',
+                'profileEmailInput.unique'   => 'This email address is already taken.',
+            ]);
+
+            $coordinator = Organizer::findOrFail($this->viewingProfileId);
+
+            if (User::where('email', $newEmail)->where('id', '!=', $coordinator->user_id)->exists()) {
+                throw new \Exception('This email address is already taken.');
             }
-            $p = $this->storeCoordinatorPhoto($this->updatingProfilePhoto);
-            $coord->update(['profile_photo' => $p]);
-            $this->viewingProfile['profile_photo'] = $p;
-            $this->updatingProfilePhoto = null;
-            $this->flash('success', 'Photo updated!');
-        } catch (\Exception) {
-            $this->flash('error', 'Failed to update photo.');
+
+            $coordinator->update(['email' => $newEmail]);
+
+            if ($coordinator->user_id) {
+                User::where('id', $coordinator->user_id)->update(['email' => $newEmail]);
+            }
+
+            $this->viewingProfile['email'] = $newEmail;
+            $this->editingProfileEmail     = false;
+            $this->profileEmailInput       = '';
+
+            $this->flash('success', 'Email address updated successfully.');
+
+            $this->dispatch('dir-coordinator-updated',
+                id: $coordinator->id,
+                name: $coordinator->getFullName(),
+                action: 'email_updated'
+            );
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            $this->flash('error', $e->getMessage());
         } finally {
-            $this->updatingProfile = false;
+            $this->savingProfileEmail = false;
         }
     }
 };
@@ -507,7 +574,6 @@ new class extends Component {
         <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/>
     </svg>
     View Profile
-    {{-- Arrow down --}}
     <span class="absolute top-full left-1/2 -translate-x-1/2 border-[6px] border-transparent border-t-gray-900"></span>
 </div>
 
@@ -558,33 +624,27 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Header action buttons — tooltip BELOW --}}
         <div class="flex items-center gap-2 shrink-0">
-
-            {{-- Register Coordinator --}}
             <div class="relative group">
                 <button wire:click="openModal('registerCoordinator')"
                         class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#7a3f91] hover:bg-[#5e2f72] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95"
                         aria-label="Register Coordinator">
                     <i class="fas fa-user-plus text-white text-sm"></i>
                 </button>
-                {{-- Tooltip BELOW --}}
-                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                    <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
+                <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-[100]">
+                    <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative shadow-lg">
+                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></span>
                         Register Coordinator
                     </div>
                 </div>
             </div>
 
-            {{-- Manage Colleges --}}
             <div class="relative group">
                 <button wire:click="openModal('manageOrgCourses')"
                         class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm hover:shadow-md transition-all duration-150 active:scale-95"
                         aria-label="Manage Colleges">
                     <i class="fas fa-building-columns text-gray-700 text-sm"></i>
                 </button>
-                {{-- Tooltip BELOW --}}
                 <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
@@ -592,7 +652,6 @@ new class extends Component {
                     </div>
                 </div>
             </div>
-
         </div>
     </div>
 
@@ -603,20 +662,18 @@ new class extends Component {
         <div class="bg-gray-100 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
-            {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{ q: '', init() { this.q = $wire.coordSearch ?? ''; $wire.$watch('coordSearch', val => { if (val !== this.q) this.q = val; }); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.80ms="$wire.set('coordSearch', q)"
                        placeholder="Search name, ID, email..."
-                       class="w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                       class="w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-300 transition"
                        autocomplete="off" spellcheck="false">
             </div>
 
-            {{-- College filter --}}
             <select wire:model.live="coordCollege"
-                    class="py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer appearance-none bg-no-repeat"
+                    class="py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-300 transition cursor-pointer appearance-none bg-no-repeat"
                     style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
                 <option value="">All Colleges</option>
                 @foreach($this->orgColleges as $col)
@@ -624,23 +681,22 @@ new class extends Component {
                 @endforeach
             </select>
 
-            {{-- Sort --}}
-            <select wire:model.live="coordSort"
-                    class="py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer appearance-none bg-no-repeat"
+            <select wire:model.live="coordStatus"
+                    class="py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-300 transition cursor-pointer appearance-none bg-no-repeat"
                     style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
-                <option value="recent">Recent First</option>
-                <option value="oldest">Oldest First</option>
+                <option value="">All Status</option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
             </select>
 
-            {{-- Reset --}}
             <button wire:click="resetCoordFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetCoordFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 transition active:scale-95 cursor-pointer">
+                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer">
                 <span wire:loading.remove wire:target="resetCoordFilters"><i class="fas fa-rotate-left text-xs"></i></span>
                 <span wire:loading wire:target="resetCoordFilters">
-                    <svg class="animate-spin w-3.5 h-3.5 text-[#7a3f91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg class="animate-spin w-3.5 h-3.5 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
                     </svg>
@@ -650,13 +706,12 @@ new class extends Component {
         </div>
 
         {{-- TABLE BODY --}}
-        <div class="bg-gray-100 flex-1 min-h-0 relative" x-data="{ showTop: false }">
+        <div class="bg-gray-100 flex-1 flex flex-col relative" x-data="{ showTop: false }">
 
             <div id="coord-scroll"
-                 @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="h-full overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
+                 class="flex-1"
                  wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="coordSearch,coordCollege,coordSort,resetCoordFilters,executeToggleCoordinatorStatus">
+                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,executeToggleCoordinatorStatus">
 
                 @if($this->coordinatorRecords->count() > 0)
                 <table class="w-full border-collapse bg-white">
@@ -724,7 +779,6 @@ new class extends Component {
                             </td>
                             <td class="px-4 sm:px-5 py-4 text-center">
                                 <div class="flex items-center justify-center" data-coord-actions>
-                                    {{-- Tooltip BELOW the button --}}
                                     @if($item->status === 'ACTIVE')
                                         <div class="relative group/btn">
                                             <button type="button"
@@ -766,18 +820,18 @@ new class extends Component {
                 </table>
 
                 @else
-                <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-20 h-full bg-white">
+                <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-20 bg-white">
                     <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-[#f5eef9]">
                         <i class="fas fa-users-gear text-xl text-[#c49dd8]"></i>
                     </div>
                     <div>
                         <p class="font-semibold text-base text-gray-700">No coordinators found</p>
                         <p class="text-sm mt-1 text-gray-500">
-                            @if($coordCollege || $coordSearch) Try adjusting your filters or clearing them.
+                            @if($coordCollege || $coordSearch || $coordStatus) Try adjusting your filters or clearing them.
                             @else Register a new coordinator to get started. @endif
                         </p>
                     </div>
-                    @if($coordCollege || $coordSearch)
+                    @if($coordCollege || $coordSearch || $coordStatus)
                     <button wire:click="resetCoordFilters"
                             class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                         Clear Filters
@@ -787,14 +841,6 @@ new class extends Component {
                 @endif
 
             </div>
-
-            {{-- Scroll-to-top --}}
-            <button x-show="showTop"
-                    @click="document.getElementById('coord-scroll').scrollTo({ top: 0, behavior: 'smooth' })"
-                    class="absolute bottom-4 right-4 z-20 w-9 h-9 rounded-full flex items-center justify-center shadow-lg bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition"
-                    style="display:none">
-                <i class="fas fa-arrow-up text-sm"></i>
-            </button>
         </div>
 
         {{-- PAGINATION BAR --}}
@@ -813,7 +859,7 @@ new class extends Component {
                 Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
                 of <strong class="text-white font-bold">{{ $total }}</strong>
                 coordinator{{ $total !== 1 ? 's' : '' }}
-                @if($coordCollege || $coordSearch)<span class="text-white/50 text-xs ml-1">(filtered)</span>@endif
+                @if($coordCollege || $coordSearch || $coordStatus)<span class="text-white/50 text-xs ml-1">(filtered)</span>@endif
             </p>
             <div class="flex items-center gap-1 flex-wrap">
                 <button wire:click="previousPage('coordPage')"
@@ -858,7 +904,6 @@ new class extends Component {
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-50"
      @keydown.escape.window="$wire.closeModal()">
 
-    {{-- Top bar --}}
     <div class="flex items-center justify-between px-6 lg:px-10 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] shrink-0 shadow-lg gap-4">
         <div class="flex items-center gap-3 flex-1 min-w-0">
             <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
@@ -866,7 +911,6 @@ new class extends Component {
             </div>
             <span class="text-white font-semibold text-sm truncate">Register Coordinator</span>
         </div>
-        {{-- Close button — tooltip BELOW --}}
         <div class="relative group/close">
             <button wire:click="closeModal"
                     class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95"
@@ -884,11 +928,9 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- Scrollable body --}}
     <div class="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-7 space-y-5">
 
-            {{-- Success banner --}}
             @if($coordinatorSuccess)
             <div class="flex items-start gap-4 p-5 rounded-2xl bg-emerald-50 border border-emerald-200 shadow-sm">
                 <div class="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
@@ -905,12 +947,9 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Error banner --}}
             @if(count($coordinatorErrors) > 0)
             <div class="p-4 rounded-2xl bg-red-50 border border-red-200 shadow-sm">
-                <p class="font-semibold text-sm text-red-900 mb-2 flex items-center gap-2">
-                    <i class="fas fa-triangle-exclamation text-red-500"></i>Please fix the following:
-                </p>
+                <p class="font-semibold text-sm text-red-900 mb-2">Please fix the following:</p>
                 <ul class="text-sm space-y-1 text-red-800">
                     @foreach($coordinatorErrors as $ms)
                         @foreach($ms as $m)
@@ -923,26 +962,23 @@ new class extends Component {
 
             <form wire:submit="registerCoordinator" class="space-y-5">
 
-                {{-- Personal Information --}}
                 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                     <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50">
-                        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fas fa-user text-[#7a3f91] text-xs"></i> Personal Information
-                        </h3>
+                        <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Personal Information</h3>
                     </div>
                     <div class="p-6">
                         <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-
-                            {{-- Photo upload --}}
                             <div class="lg:col-span-1 flex flex-col items-center gap-3">
-                                <div class="border-2 border-dashed border-gray-300 rounded-2xl p-5 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#f5eef9] transition w-full"
+                                <div class="border-2 border-dashed border-gray-300 rounded-2xl p-5 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition w-full"
                                      onclick="document.getElementById('coordPhotoInput').click()">
                                     @if($coordPhoto)
                                         <img src="{{ $coordPhoto->temporaryUrl() }}" class="w-20 h-20 rounded-xl mx-auto mb-2 object-cover shadow-md">
-                                        <p class="text-xs text-emerald-600 font-semibold"><i class="fas fa-check mr-1"></i>Selected</p>
+                                        <p class="text-xs text-emerald-600 font-semibold">Selected</p>
                                     @else
-                                        <i class="fas fa-cloud-arrow-up text-3xl text-gray-300 block mb-2"></i>
-                                        <p class="text-sm text-gray-600 font-semibold">Profile Photo</p>
+                                        <svg class="w-8 h-8 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+                                        </svg>
+                                        <p class="text-sm text-gray-700 font-semibold">Profile Photo</p>
                                         <p class="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP · 5 MB</p>
                                     @endif
                                     <input type="file" id="coordPhotoInput" wire:model="coordPhoto" accept="image/jpeg,image/png,image/webp" class="hidden">
@@ -950,30 +986,29 @@ new class extends Component {
                                 <p class="text-xs text-gray-400 text-center">Optional — leave blank for default</p>
                             </div>
 
-                            {{-- Name fields --}}
                             <div class="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                                 <div class="sm:col-span-1 xl:col-span-2">
-                                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">First Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">First Name <span class="text-red-500">*</span></label>
                                     <input wire:model.defer="coordFirstName" type="text" placeholder="e.g. Juan"
-                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('coordFirstName') border-red-400 @enderror">
+                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordFirstName') border-red-400 @enderror">
                                     @error('coordFirstName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
                                 </div>
                                 <div class="sm:col-span-1 xl:col-span-2">
-                                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Last Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Last Name <span class="text-red-500">*</span></label>
                                     <input wire:model.defer="coordLastName" type="text" placeholder="e.g. dela Cruz"
-                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('coordLastName') border-red-400 @enderror">
+                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordLastName') border-red-400 @enderror">
                                     @error('coordLastName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
                                 </div>
                                 <div class="sm:col-span-1 xl:col-span-2">
-                                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Middle Name</label>
+                                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Middle Name</label>
                                     <input wire:model.defer="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
-                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('coordMiddleInitial') border-red-400 @enderror">
+                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordMiddleInitial') border-red-400 @enderror">
                                     @error('coordMiddleInitial')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                                 </div>
                                 <div class="sm:col-span-1 xl:col-span-2">
-                                    <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Suffix</label>
+                                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Suffix</label>
                                     <input wire:model.defer="coordSuffix" type="text" placeholder="e.g. Jr., Sr., III" maxlength="10"
-                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('coordSuffix') border-red-400 @enderror">
+                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordSuffix') border-red-400 @enderror">
                                     <p class="text-xs text-gray-400 mt-1">Jr., Sr., II, III, IV, MD, PhD…</p>
                                     @error('coordSuffix')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                                 </div>
@@ -982,27 +1017,24 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Account Credentials --}}
                 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                     <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50">
-                        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fas fa-id-card text-[#7a3f91] text-xs"></i> Account Credentials
-                        </h3>
+                        <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Account Credentials</h3>
                     </div>
                     <div class="p-6">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                             <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Teacher ID <span class="text-red-500">*</span></label>
+                                <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Teacher ID <span class="text-red-500">*</span></label>
                                 <input wire:model.defer="coordTeacherId" type="text" placeholder="e.g. 20240001" maxlength="8"
                                        inputmode="numeric" pattern="\d{8}" oninput="this.value=this.value.replace(/\D/g,'')"
-                                       class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 font-mono focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('coordTeacherId') border-red-400 @enderror">
+                                       class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 font-mono focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordTeacherId') border-red-400 @enderror">
                                 <p class="text-xs text-gray-400 mt-1">Must be exactly 8 digits</p>
                                 @error('coordTeacherId')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                             </div>
                             <div>
-                                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Email Address <span class="text-red-500">*</span></label>
+                                <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Email Address <span class="text-red-500">*</span></label>
                                 <input wire:model.defer="coordEmail" type="email" placeholder="coordinator@example.com"
-                                       class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('coordEmail') border-red-400 @enderror">
+                                       class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordEmail') border-red-400 @enderror">
                                 <p class="text-xs text-gray-400 mt-1">Login credentials will be sent here</p>
                                 @error('coordEmail')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                             </div>
@@ -1010,17 +1042,18 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- College Assignment --}}
                 <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                     <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50">
-                        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                            <i class="fas fa-building-columns text-[#7a3f91] text-xs"></i> College Assignment <span class="text-red-500 text-xs">*</span>
+                        <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            College Assignment <span class="text-red-500">*</span>
                         </h3>
                     </div>
                     <div class="p-6">
                         @if($this->orgDepartmentsGrouped->isEmpty())
-                            <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 text-sm flex items-start gap-2">
-                                <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
+                            <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 text-sm flex items-start gap-2">
+                                <svg class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                                </svg>
                                 <span class="text-gray-700">No colleges configured yet. Set up colleges via <strong>Manage Colleges</strong>.</span>
                             </div>
                         @else
@@ -1033,10 +1066,11 @@ new class extends Component {
                             @endphp
                             <div x-data="{ map: {{ Js::from($collegeDeptsMap) }}, get depts() { return $wire.coordCollegeSelect ? (this.map[$wire.coordCollegeSelect] ?? []) : []; } }"
                                  class="space-y-4">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
-                                    <div class="xl:col-span-1">
+                                <div class="flex flex-col gap-4">
+                                    <div class="flex-1">
+                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Select College</label>
                                         <select wire:model.live="coordCollegeSelect"
-                                                class="w-full px-3.5 py-3 pr-8 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition appearance-none bg-no-repeat @error('coordCollegeSelect') border-red-400 @enderror"
+                                                class="w-full px-3.5 py-3 pr-8 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition appearance-none bg-no-repeat cursor-pointer @error('coordCollegeSelect') border-red-400 @enderror"
                                                 style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
                                             <option value="">Select College</option>
                                             @foreach($this->orgDepartmentsGrouped->keys() as $cN)
@@ -1047,21 +1081,26 @@ new class extends Component {
                                             @endforeach
                                         </select>
                                         @error('coordCollegeSelect')
-                                            <p class="text-xs text-red-500 mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
+                                            <p class="text-xs text-red-500 mt-1">{{ $message }}</p>
                                         @enderror
                                     </div>
-                                    <div class="xl:col-span-2" x-show="depts.length > 0" x-cloak>
-                                        <p class="text-xs text-gray-500 font-semibold mb-2 uppercase tracking-wide">Departments under this college:</p>
-                                        <div class="flex flex-wrap gap-1.5">
-                                            <template x-for="code in depts" :key="code">
-                                                <span class="inline-block px-3 py-1.5 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-semibold font-mono" x-text="code"></span>
-                                            </template>
+                                    <div class="flex-1 min-w-0">
+                                        <div x-show="depts.length > 0" x-cloak>
+                                            <p class="text-xs text-gray-500 font-semibold mb-2 uppercase tracking-wide">Departments under this college:</p>
+                                            <div class="flex flex-wrap gap-1.5">
+                                                <template x-for="code in depts" :key="code">
+                                                    <span class="inline-block px-3 py-1.5 bg-gray-100 text-gray-700 border border-gray-300 rounded-full text-xs font-semibold font-mono" x-text="code"></span>
+                                                </template>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div class="xl:col-span-2" x-show="!$wire.coordCollegeSelect" x-cloak>
-                                        <div class="flex items-center gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl">
-                                            <i class="fas fa-hand-pointer text-gray-300 text-base shrink-0"></i>
-                                            <p class="text-xs text-gray-400">Select a college to preview its departments.</p>
+                                        <div x-show="!$wire.coordCollegeSelect" x-cloak>
+                                            <p class="text-xs text-gray-400 font-semibold mb-2 uppercase tracking-wide">&nbsp;</p>
+                                            <div class="flex items-center gap-2 p-3 bg-white border border-gray-300 rounded-xl">
+                                                <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zm-7.518-.267A8.25 8.25 0 1120.25 10.5M8.288 14.212A5.25 5.25 0 1117.25 10.5"/>
+                                                </svg>
+                                                <p class="text-xs text-gray-600">Select a college to preview its departments.</p>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1070,20 +1109,25 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Action Buttons --}}
                 <div class="flex flex-wrap gap-3 pb-2">
                     <button type="button" wire:click="closeModal"
                             class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition">
-                        <i class="fas fa-xmark mr-2"></i>Cancel
+                        Cancel
                     </button>
                     <button type="button" wire:click="resetCoordFormPublic"
                             class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition">
-                        <i class="fas fa-rotate-left mr-2"></i>Reset
+                        Reset
                     </button>
                     <button type="submit" wire:loading.attr="disabled" wire:target="registerCoordinator"
                             class="flex-1 px-6 py-3.5 rounded-xl text-sm font-semibold bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50">
-                        <span wire:loading wire:target="registerCoordinator"><i class="fas fa-spinner animate-spin"></i> Registering...</span>
-                        <span wire:loading.remove wire:target="registerCoordinator"><i class="fas fa-user-plus"></i> Register Coordinator</span>
+                        <span wire:loading wire:target="registerCoordinator">
+                            <svg class="animate-spin w-4 h-4 text-white inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                            </svg>
+                            Registering...
+                        </span>
+                        <span wire:loading.remove wire:target="registerCoordinator">Register Coordinator</span>
                     </button>
                 </div>
 
@@ -1094,7 +1138,7 @@ new class extends Component {
 @endif
 
 
-{{-- ── VIEW PROFILE — FULL SCREEN (NO SCROLL / CLEAN LAYOUT) ──── --}}
+{{-- ── VIEW PROFILE — FULL SCREEN — PURPLE HEADER + GLASSMORPHISM X ── --}}
 @if($activeModal === 'viewProfile' && $viewingProfile)
 @php
     $profileStatus   = $viewingProfile['status'] ?? 'INACTIVE';
@@ -1107,168 +1151,249 @@ new class extends Component {
         $viewingProfile['last_name'] ?? '',
         $viewingProfile['suffix'] ?? ''
     );
-    $statusBadge = match($profileStatus) {
-        'ACTIVE'    => 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        'INACTIVE'  => 'bg-amber-50 text-amber-700 border-amber-200',
-        'SUSPENDED' => 'bg-red-50 text-red-700 border-red-200',
-        default     => 'bg-gray-50 text-gray-600 border-gray-200',
+    $statusCls = match($profileStatus) {
+        'ACTIVE'   => 'bg-emerald-500 text-white',
+        'INACTIVE' => 'bg-amber-400 text-white',
+        default    => 'bg-gray-400 text-white',
     };
 @endphp
-<div class="fixed inset-0 z-[9000] flex flex-col bg-gray-50 font-sans"
-     style="animation: fadeIn .18s ease both;"
+<div class="fixed inset-0 z-[9000] flex flex-col font-sans"
+     style="background:#f8f7fb; animation: vpFadeIn .18s ease both;"
      @keydown.escape.window="$wire.closeModal()">
 
-    <style>@keyframes fadeIn{from{opacity:0}to{opacity:1}}</style>
+<style>
+@keyframes vpFadeIn { from { opacity:0; } to { opacity:1; } }
 
-    {{-- Top bar --}}
-    <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
+.vp-detail-card {
+    background: #ffffff;
+    border: 1px solid #e8e0f0;
+    border-radius: 1rem;
+    overflow: hidden;
+}
+.vp-detail-card-header {
+    padding: 0.625rem 1.25rem;
+    border-bottom: 1px solid #f0eaf7;
+    background: #faf7fd;
+}
+.vp-detail-card-header p {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #7a3f91;
+}
+.vp-field-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #9b8aab;
+    margin-bottom: 2px;
+}
+.vp-field-value {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+.vp-dept-chip {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 0.5rem 0.75rem;
+    background: #faf7fd;
+    border: 1px solid #ddd0f0;
+    border-radius: 0.75rem;
+    min-width: 80px;
+}
+</style>
+
+    {{-- Top bar — purple gradient, glassmorphism X --}}
+    <div class="flex items-center justify-between px-6 lg:px-10 h-[56px] shrink-0 gap-4"
+         style="background: linear-gradient(to right, #7a3f91, #9b59b6); box-shadow: 0 2px 12px rgba(122,63,145,0.25);">
+
+        {{-- Left: photo + name --}}
         <div class="flex items-center gap-3 flex-1 min-w-0">
-            <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-user text-white text-xs"></i>
+            <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
+                 alt="{{ $viewingProfile['first_name'] ?? '' }}"
+                 class="w-9 h-9 rounded-xl object-cover shrink-0 ring-2 ring-white/30">
+            <div class="min-w-0">
+                <p class="text-white font-bold text-sm leading-snug truncate uppercase">{{ $fullDisplayName }}</p>
+                <p class="text-white/60 text-xs font-mono truncate">ID {{ $viewingProfile['id_number'] ?? '—' }}</p>
             </div>
-            <span class="text-white font-semibold text-sm truncate">Coordinator Profile</span>
         </div>
-        {{-- Close button — tooltip BELOW --}}
-        <div class="relative group/close">
-            <button type="button" wire:click="closeModal"
-                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95"
-                    aria-label="Close">
-                <svg class="w-3.5 h-3.5 stroke-white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14" fill="none">
-                    <path d="M2 2L12 12M12 2L2 12"/>
-                </svg>
-            </button>
-            <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
-                <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
+
+        {{-- Right: glassmorphism close button --}}
+        <button type="button" wire:click="closeModal"
+                class="relative group/x inline-flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-95 shrink-0"
+                style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(8px);"
+                onmouseover="this.style.background='rgba(255,255,255,0.28)'; this.style.borderColor='rgba(255,255,255,0.5)';"
+                onmouseout="this.style.background='rgba(255,255,255,0.15)'; this.style.borderColor='rgba(255,255,255,0.25)';"
+                aria-label="Close">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14">
+                <path d="M2 2L12 12M12 2L2 12"/>
+            </svg>
+            {{-- Tooltip below --}}
+            <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/x:opacity-100 transition-opacity duration-150 z-50">
+                <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative shadow-lg">
                     <span class="absolute bottom-full right-3 border-4 border-transparent border-b-gray-900"></span>
                     Close
                 </div>
             </div>
-        </div>
+        </button>
     </div>
 
-    {{-- Main content — two column layout, no scroll --}}
-    <div class="flex-1 overflow-hidden flex flex-col lg:flex-row gap-0">
+    {{-- Main scrollable body --}}
+    <div class="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-6 flex flex-col lg:flex-row gap-5">
 
-        {{-- LEFT — Photo + Identity card --}}
-        <div class="w-full lg:w-80 xl:w-96 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col flex-shrink-0">
-            {{-- Photo area --}}
-            <div class="bg-gradient-to-b from-[#f5eef9] to-white px-8 pt-8 pb-6 flex flex-col items-center text-center gap-3 border-b border-gray-100">
-                @if($updatingProfilePhoto)
-                    <img src="{{ $updatingProfilePhoto->temporaryUrl() }}" class="w-28 h-28 rounded-2xl object-cover shadow-lg ring-4 ring-[#7a3f91]/20">
-                @else
-                    <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
-                         alt="{{ $viewingProfile['first_name'] ?? '' }}"
-                         class="w-28 h-28 rounded-2xl object-cover shadow-lg ring-4 ring-[#d4aaeb]">
-                @endif
-                <div>
-                    <p class="font-bold text-gray-900 text-base leading-tight">{{ $fullDisplayName }}</p>
-                    <p class="text-gray-500 text-sm mt-0.5">{{ $viewingProfile['email'] ?? '' }}</p>
-                    <p class="text-gray-400 text-xs mt-0.5 font-mono">ID {{ $viewingProfile['id_number'] ?? '—' }}</p>
+            {{-- ── LEFT SIDEBAR ── --}}
+            <div class="w-full lg:w-72 xl:w-80 flex flex-col gap-4 flex-shrink-0">
+
+                {{-- Profile card --}}
+                <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
+                    {{-- Photo + identity --}}
+                    <div class="px-6 pt-7 pb-5 flex flex-col items-center text-center gap-3"
+                         style="background: linear-gradient(180deg, #faf7fd 0%, #ffffff 100%);">
+                        <div class="relative">
+                            <img src="{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}"
+                                 alt="{{ $viewingProfile['first_name'] ?? '' }}"
+                                 class="w-24 h-24 rounded-2xl object-cover shadow-md ring-4 ring-white">
+                            {{-- Status dot --}}
+                            <span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white shadow {{ $isProfileActive ? 'bg-emerald-400' : 'bg-amber-400' }}"></span>
+                        </div>
+                        <div>
+                            <p class="font-bold text-gray-900 text-sm leading-tight">{{ $fullDisplayName }}</p>
+                            <p class="text-gray-500 text-xs mt-0.5 font-mono">{{ $viewingProfile['id_number'] ?? '—' }}</p>
+                        </div>
+                        {{-- Status badge --}}
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold {{ $statusCls }}">
+                            <span class="w-1.5 h-1.5 rounded-full bg-white/70"></span>
+                            {{ $profileStatus }}
+                        </span>
+                    </div>
+
+                    {{-- College badge --}}
+                    <div class="px-5 py-3 border-t border-[#f0eaf7] bg-[#faf7fd]">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-[#9b8aab] mb-1">College</p>
+                        <p class="text-sm font-semibold text-gray-800">{{ $collegeName }}</p>
+                    </div>
+
+                    {{-- Status action --}}
+                    <div class="px-5 py-4 border-t border-[#f0eaf7]">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-[#9b8aab] mb-1.5">Account Access</p>
+                        <p class="text-xs text-gray-500 mb-3 leading-relaxed">
+                            @if($isProfileActive)
+                                Active · can log in and manage their college.
+                            @else
+                                Inactive · login access is disabled.
+                            @endif
+                        </p>
+                        @if($isProfileActive)
+                            <button type="button"
+                                    wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"
+                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 transition active:scale-95">
+                                <i class="fas fa-ban text-xs"></i> Deactivate
+                            </button>
+                        @else
+                            <button type="button"
+                                    wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"
+                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95">
+                                <i class="fas fa-circle-check text-xs"></i> Activate
+                            </button>
+                        @endif
+                    </div>
+
+                    {{-- Registered date --}}
+                    <div class="px-5 py-3 border-t border-[#f0eaf7]">
+                        <p class="text-xs text-gray-400 text-center">
+                            Registered {{ isset($viewingProfile['created_at']) ? \Carbon\Carbon::parse($viewingProfile['created_at'])->format('M d, Y \a\t g:i A') : '—' }}
+                        </p>
+                    </div>
                 </div>
-                <div class="flex flex-wrap gap-1.5 justify-center mt-1">
-                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold {{ $statusBadge }}">
-                        @if($isProfileActive)<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>@else<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>@endif
-                        {{ $profileStatus }}
-                    </span>
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-violet-200 bg-violet-50 text-violet-700 text-xs font-semibold">{{ $collegeName }}</span>
-                </div>
+
             </div>
 
-            {{-- Update photo --}}
-            <div class="px-5 py-4 border-b border-gray-100 flex-shrink-0">
-                <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">Update Photo</p>
-                <div class="border-2 border-dashed border-gray-200 rounded-xl py-3 px-4 text-center cursor-pointer hover:border-[#7a3f91] hover:bg-[#f9f5ff] transition"
-                     @click="document.getElementById('profilePhotoInput').click()">
-                    <i class="fas fa-camera text-gray-300 mb-1 block"></i>
-                    <p class="text-xs text-gray-500">{{ $updatingProfilePhoto ? 'Change photo' : 'Click to upload' }}</p>
-                    <input type="file" id="profilePhotoInput" wire:model="updatingProfilePhoto" accept="image/jpeg,image/png,image/webp" class="hidden">
-                </div>
-                @if($updatingProfilePhoto)
-                <button wire:click="updateProfilePhoto" wire:loading.attr="disabled" wire:target="updateProfilePhoto"
-                        class="mt-2 w-full bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-2">
-                    <span wire:loading wire:target="updateProfilePhoto"><i class="fas fa-spinner animate-spin"></i></span>
-                    <span wire:loading.remove wire:target="updateProfilePhoto"><i class="fas fa-floppy-disk"></i> Save Photo</span>
-                </button>
-                @endif
-            </div>
-
-            {{-- Status action --}}
-            <div class="px-5 py-4 flex-shrink-0">
-                <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-3">Account Status</p>
-                <p class="text-xs text-gray-500 mb-3">
-                    @if($isProfileActive) This coordinator can currently log in and manage their college.
-                    @else This coordinator cannot log in. Activate to restore access. @endif
-                </p>
-                @if($isProfileActive)
-                    <button type="button"
-                            wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"
-                            class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 transition active:scale-95">
-                        <i class="fas fa-ban text-xs"></i> Deactivate
-                    </button>
-                @else
-                    <button type="button"
-                            wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"
-                            class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 transition active:scale-95">
-                        <i class="fas fa-circle-check text-xs"></i> Activate
-                    </button>
-                @endif
-            </div>
-
-            {{-- Registered date --}}
-            <div class="mt-auto px-5 py-3 border-t border-gray-100">
-                <p class="text-xs text-gray-400 text-center">
-                    Registered {{ isset($viewingProfile['created_at']) ? \Carbon\Carbon::parse($viewingProfile['created_at'])->format('M d, Y \a\t g:i A') : '—' }}
-                </p>
-            </div>
-        </div>
-
-        {{-- RIGHT — Details grid --}}
-        <div class="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-200 [&::-webkit-scrollbar-thumb]:rounded-full px-6 py-6">
-            <div class="max-w-2xl space-y-5">
+            {{-- ── RIGHT CONTENT ── --}}
+            <div class="flex-1 min-w-0 flex flex-col gap-4">
 
                 {{-- Name breakdown --}}
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Name Details</p>
+                <div class="vp-detail-card">
+                    <div class="vp-detail-card-header">
+                        <p>Name Details</p>
                     </div>
-                    <div class="grid grid-cols-2 divide-x divide-y divide-gray-100">
+                    <div class="grid grid-cols-2 divide-x divide-y divide-[#f0eaf7]">
                         <div class="px-5 py-4">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">First Name</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $viewingProfile['first_name'] ?? '—' }}</p>
+                            <p class="vp-field-label">First Name</p>
+                            <p class="vp-field-value">{{ $viewingProfile['first_name'] ?? '—' }}</p>
                         </div>
                         <div class="px-5 py-4">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Last Name</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $viewingProfile['last_name'] ?? '—' }}</p>
+                            <p class="vp-field-label">Last Name</p>
+                            <p class="vp-field-value">{{ $viewingProfile['last_name'] ?? '—' }}</p>
                         </div>
                         <div class="px-5 py-4">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Middle Name</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $viewingProfile['middle_initial'] ?? '—' }}</p>
+                            <p class="vp-field-label">Middle Name</p>
+                            <p class="vp-field-value">{{ $viewingProfile['middle_initial'] ?? '—' }}</p>
                         </div>
                         <div class="px-5 py-4">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Suffix</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $viewingProfile['suffix'] ?: '—' }}</p>
+                            <p class="vp-field-label">Suffix</p>
+                            <p class="vp-field-value">{{ $viewingProfile['suffix'] ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
                 {{-- Account details --}}
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Account Details</p>
+                <div class="vp-detail-card">
+                    <div class="vp-detail-card-header">
+                        <p>Account Details</p>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 divide-x divide-y divide-gray-100">
+                    <div class="divide-y divide-[#f0eaf7]">
+
                         <div class="px-5 py-4">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Teacher ID</p>
-                            <p class="text-sm font-semibold text-gray-900 font-mono">{{ $viewingProfile['id_number'] ?? '—' }}</p>
+                            <p class="vp-field-label">Teacher ID</p>
+                            <p class="vp-field-value font-mono">{{ $viewingProfile['id_number'] ?? '—' }}</p>
                         </div>
+
+                        {{-- Editable Email --}}
                         <div class="px-5 py-4">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Email Address</p>
-                            <p class="text-sm font-semibold text-gray-900">{{ $viewingProfile['email'] ?? '—' }}</p>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <p class="vp-field-label" style="margin-bottom:0;">Email Address</p>
+                                @if(!$editingProfileEmail)
+                                <button type="button" wire:click="startEditingProfileEmail"
+                                        class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#7a3f91] border border-[#d4aaeb] bg-[#faf5ff] rounded-md px-2 py-1 hover:bg-[#ead5f5] hover:border-[#b47fd4] transition">
+                                    <i class="fas fa-pen text-[9px]"></i> Edit
+                                </button>
+                                @endif
+                            </div>
+
+                            @if($editingProfileEmail)
+                                <div class="flex flex-col sm:flex-row gap-2 mt-2">
+                                    <input wire:model.defer="profileEmailInput" type="email" autofocus
+                                           class="flex-1 px-3 py-2.5 border border-[#d4aaeb] rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition @error('profileEmailInput') border-red-400 @enderror"
+                                           @keydown.enter.prevent="$wire.updateProfileEmail()">
+                                    <div class="flex gap-2 shrink-0">
+                                        <button type="button" wire:click="cancelEditingProfileEmail"
+                                                class="px-3 py-2.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
+                                            Cancel
+                                        </button>
+                                        <button type="button" wire:click="updateProfileEmail"
+                                                wire:loading.attr="disabled" wire:target="updateProfileEmail"
+                                                class="px-3 py-2.5 rounded-lg text-xs font-semibold bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition disabled:opacity-50 flex items-center gap-1.5">
+                                            <span wire:loading wire:target="updateProfileEmail"><i class="fas fa-spinner animate-spin"></i></span>
+                                            <span wire:loading.remove wire:target="updateProfileEmail">Save</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                @error('profileEmailInput')<p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>@enderror
+                            @else
+                                <p class="vp-field-value mt-1">{{ $viewingProfile['email'] ?? '—' }}</p>
+                            @endif
                         </div>
-                        <div class="px-5 py-4 sm:col-span-2">
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-violet-500 mb-1">College</p>
-                            <p class="text-sm font-semibold text-[#7a3f91]">{{ $collegeName }}</p>
+
+                        <div class="px-5 py-4">
+                            <p class="vp-field-label">College Assignment</p>
+                            <p class="vp-field-value">{{ $collegeName }}</p>
                         </div>
+
                     </div>
                 </div>
 
@@ -1277,25 +1402,24 @@ new class extends Component {
                     $deptCodesForProfile = \App\Models\Course::where('college', $collegeName)->orderBy('code')->get();
                 @endphp
                 @if($deptCodesForProfile->count())
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Departments Under This College</p>
+                <div class="vp-detail-card">
+                    <div class="vp-detail-card-header">
+                        <p>Departments Under This College</p>
                     </div>
                     <div class="px-5 py-4 flex flex-wrap gap-2">
                         @foreach($deptCodesForProfile as $dept)
-                            <div class="flex flex-col items-start px-3 py-2 bg-[#f5eef9] border border-[#d4aaeb] rounded-xl min-w-[80px]">
+                            <div class="vp-dept-chip">
                                 <span class="text-xs font-bold text-[#7a3f91] font-mono">{{ $dept->code }}</span>
-                                <span class="text-[10px] text-[#9b59b6] mt-0.5 leading-tight">{{ $dept->name }}</span>
+                                <span class="text-[10px] text-gray-500 mt-0.5 leading-tight">{{ $dept->name }}</span>
                             </div>
                         @endforeach
                     </div>
                 </div>
                 @endif
 
-            </div>
-        </div>
-
-    </div>
+            </div>{{-- /right --}}
+        </div>{{-- /flex row --}}
+    </div>{{-- /scrollable body --}}
 
 </div>
 @endif
@@ -1306,7 +1430,6 @@ new class extends Component {
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-50"
      @keydown.escape.window="$wire.closeModal()">
 
-    {{-- Top bar --}}
     <div class="flex items-center justify-between px-6 lg:px-10 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] shrink-0 shadow-lg gap-4">
         <div class="flex items-center gap-3 flex-1 min-w-0">
             <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
@@ -1314,7 +1437,6 @@ new class extends Component {
             </div>
             <span class="text-white font-semibold text-sm truncate">Manage Colleges &amp; Departments</span>
         </div>
-        {{-- Close button — tooltip BELOW --}}
         <div class="relative group/close">
             <button wire:click="closeModal"
                     class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95"
@@ -1332,13 +1454,11 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- Scrollable body --}}
     <div id="org-modal-scroll"
          class="flex-1 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
          @org-modal-scroll-top.window="$nextTick(() => $el.scrollTo({ top: 0, behavior: 'smooth' }))">
         <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-7 space-y-5">
 
-            {{-- Alert --}}
             @if($orgCourseAlert)
             <div class="flex items-start gap-2.5 p-4 rounded-2xl shadow-sm {{ $orgCourseAlertType === 'success' ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200' }}">
                 <i class="fas mt-0.5 text-base {{ $orgCourseAlertType === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-red-500' }}"></i>
@@ -1346,7 +1466,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Rename College Panel --}}
             @if($orgRenamingCollege)
             <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden">
                 <div class="px-6 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9]">
@@ -1365,7 +1484,7 @@ new class extends Component {
                             <button wire:click="renameCollege" wire:loading.attr="disabled" wire:target="renameCollege"
                                     class="px-5 py-3 bg-[#7a3f91] hover:bg-[#5e2f72] text-white rounded-xl text-sm font-semibold transition flex items-center gap-2 disabled:opacity-50">
                                 <span wire:loading wire:target="renameCollege"><i class="fas fa-spinner animate-spin"></i></span>
-                                <span wire:loading.remove wire:target="renameCollege"><i class="fas fa-floppy-disk"></i> Save</span>
+                                <span wire:loading.remove wire:target="renameCollege">Save</span>
                             </button>
                         </div>
                     </div>
@@ -1373,7 +1492,6 @@ new class extends Component {
             </div>
             @endif
 
-            {{-- Assign Departments Panel --}}
             @if($orgAddingToCollege)
             <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden">
                 <div class="px-6 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9] flex items-center justify-between">
@@ -1418,24 +1536,20 @@ new class extends Component {
                         <button wire:click="saveCollegeCourses" wire:loading.attr="disabled" wire:target="saveCollegeCourses"
                                 class="flex-1 bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-50">
                             <span wire:loading wire:target="saveCollegeCourses"><i class="fas fa-spinner animate-spin"></i> Saving...</span>
-                            <span wire:loading.remove wire:target="saveCollegeCourses"><i class="fas fa-floppy-disk"></i> Save Departments</span>
+                            <span wire:loading.remove wire:target="saveCollegeCourses">Save Departments</span>
                         </button>
                     </div>
                 </div>
             </div>
             @endif
 
-            {{-- Main layout: Add College + Table --}}
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-                {{-- Add New College (left panel) --}}
                 @if(!$orgAddingToCollege && !$orgRenamingCollege)
                 <div class="lg:col-span-1">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden lg:sticky lg:top-5">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
-                            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                                <i class="fas fa-plus-circle text-[#7a3f91] text-xs"></i> Add New College
-                            </h3>
+                            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Add New College</h3>
                         </div>
                         <div class="p-5 space-y-3">
                             <input wire:model.defer="orgNewCollegeName" type="text"
@@ -1452,17 +1566,14 @@ new class extends Component {
                 </div>
                 @endif
 
-                {{-- Colleges & Departments Table — fixed height, vertically scrollable --}}
                 <div class="{{ (!$orgAddingToCollege && !$orgRenamingCollege) ? 'lg:col-span-2' : 'lg:col-span-3' }}">
-                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="height: 600px;">
+                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="min-height: 700px; max-height: calc(100vh - 220px);">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
-                            <i class="fas fa-list text-gray-400 text-xs"></i>
                             <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Colleges &amp; Departments</h3>
-                            <span class="ml-auto text-xs font-semibold text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full border border-gray-200">{{ count($orgCoursesList) }}</span>
+                            <span class="ml-auto text-xs font-semibold text-[#7a3f91] bg-[#f5eef9] px-2.5 py-1 rounded-full border border-[#d4aaeb]">{{ count($orgCoursesList) }}</span>
                         </div>
 
-                        {{-- Scrollable content area --}}
-                        <div class="flex-1 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full min-h-0">
+                        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
                             @if(count($orgCoursesList) === 0)
                             <div class="flex flex-col items-center justify-center h-full text-center py-16">
                                 <i class="fas fa-building-columns text-4xl text-gray-200 block mb-3"></i>
@@ -1475,25 +1586,22 @@ new class extends Component {
                                 @php $occupied = $this->occupiedColleges(); $coordName = $occupied[$college] ?? null; @endphp
                                 <div class="bg-white hover:bg-[#faf7fd] transition-colors duration-100 px-5 py-4">
                                     <div class="flex items-start justify-between gap-3">
-                                        {{-- Left: College name + departments + coordinator --}}
                                         <div class="flex items-start gap-3 flex-1 min-w-0">
-                                            <div class="w-8 h-8 rounded-lg bg-[#e9d5f3] flex items-center justify-center shrink-0 mt-0.5">
-                                                <i class="fas fa-building-columns text-xs text-[#7a3f91]"></i>
+                                            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7a3f91] to-[#9b59b6] flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                                                <i class="fas fa-building-columns text-xs text-white"></i>
                                             </div>
                                             <div class="flex-1 min-w-0">
                                                 <p class="font-semibold text-gray-800 text-sm leading-snug">{{ $college }}</p>
-                                                {{-- Departments --}}
                                                 @if(count($departments) > 0)
                                                     <div class="flex flex-wrap gap-1 mt-1.5">
                                                         @foreach($departments as $dept)
-                                                            <span class="inline-block px-2 py-1 bg-gray-100 text-gray-800 border border-gray-300 rounded-md text-xs font-mono">{{ $dept['code'] }}</span>
+                                                            <span class="inline-block px-2 py-1 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-md text-xs font-mono font-semibold">{{ $dept['code'] }}</span>
                                                         @endforeach
                                                     </div>
                                                     <p class="text-xs text-gray-400 mt-1">{{ count($departments) }} department{{ count($departments) !== 1 ? 's' : '' }}</p>
                                                 @else
                                                     <span class="text-xs text-gray-400 mt-1 block">No departments</span>
                                                 @endif
-                                                {{-- Coordinator --}}
                                                 @if($coordName)
                                                     <div class="flex items-center gap-1.5 mt-1.5">
                                                         <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
@@ -1504,13 +1612,11 @@ new class extends Component {
                                                 @endif
                                             </div>
                                         </div>
-                                        {{-- Right: Action buttons --}}
                                         @if(!$orgAddingToCollege && !$orgRenamingCollege)
                                         <div class="flex items-center gap-1.5 shrink-0">
-                                            {{-- Rename --}}
                                             <div class="relative group/a">
                                                 <button wire:click="startRenamingCollege('{{ addslashes($college) }}')"
-                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 border border-gray-300 text-gray-700 hover:bg-gray-200 transition-all duration-150 active:scale-95"
+                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 hover:border-blue-400 transition-all duration-150 active:scale-95"
                                                         aria-label="Rename">
                                                     <i class="fas fa-pen-to-square text-xs"></i>
                                                 </button>
@@ -1521,10 +1627,9 @@ new class extends Component {
                                                     </div>
                                                 </div>
                                             </div>
-                                            {{-- Edit Departments --}}
                                             <div class="relative group/b">
                                                 <button wire:click="startEditingCollege('{{ addslashes($college) }}')"
-                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 border border-gray-300 text-gray-700 hover:bg-gray-200 transition-all duration-150 active:scale-95"
+                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[#f5eef9] border border-[#d4aaeb] text-[#7a3f91] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95"
                                                         aria-label="Edit Departments">
                                                     <i class="fas fa-pencil text-xs"></i>
                                                 </button>
@@ -1603,8 +1708,6 @@ new class extends Component {
     </div>
 </div>
 @endif
-
-</div>{{-- end root --}}
 
 {{-- ── Mouse-following cursor label logic ── --}}
 <script>
@@ -1689,3 +1792,5 @@ new class extends Component {
     else init();
 })();
 </script>
+
+</div>{{-- end root --}}

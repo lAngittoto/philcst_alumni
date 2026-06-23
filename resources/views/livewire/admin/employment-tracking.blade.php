@@ -1,3 +1,4 @@
+{{-- resources/views/livewire/admin/employment-tracking.blade.php --}}
 <?php
 
 use Livewire\Volt\Component;
@@ -10,6 +11,7 @@ new class extends Component {
     public string $filterBatch   = '';
     public string $filterCollege = '';
     public string $filterCourse  = '';
+    public string $filterStatus  = '';
 
     // ── Comparison Mode ───────────────────────────────────────────────────────
     public string $compareMode       = 'college';
@@ -96,14 +98,45 @@ new class extends Component {
             $q->whereIn('a.course_code', $codes);
         }
         if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
+
+        if ($this->filterStatus === 'not_filled') {
+            $q->whereNotExists(function ($sub) {
+                $sub->from('employment_trackings as et_f')
+                    ->whereColumn('et_f.alumni_id', 'a.id')
+                    ->whereNull('et_f.deleted_at');
+            });
+        } elseif ($this->filterStatus !== '') {
+            $status = $this->filterStatus;
+            $q->whereExists(function ($sub) use ($status) {
+                $sub->from('employment_trackings as et_f')
+                    ->whereColumn('et_f.alumni_id', 'a.id')
+                    ->whereNull('et_f.deleted_at')
+                    ->where('et_f.employment_status', $status);
+            });
+        }
+
         return $q;
     }
 
     private function empQ(): \Illuminate\Database\Query\Builder
     {
-        return (clone $this->baseQ())
+        $q = (clone $this->baseQ())
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('et.deleted_at');
+
+        if ($this->filterStatus !== '' && $this->filterStatus !== 'not_filled') {
+            $q->where('et.employment_status', $this->filterStatus);
+        }
+
+        return $q;
+    }
+
+    // ── Helper: build display name from alumni row ────────────────────────────
+    private function buildName(object $r): string
+    {
+        $mi = !empty($r->middle_initial) ? ' ' . strtoupper(substr(trim($r->middle_initial), 0, 1)) . '.' : '';
+        $suffix = !empty($r->suffix) ? ', ' . $r->suffix : '';
+        return $r->last_name . ', ' . $r->first_name . $mi . $suffix;
     }
 
     // ── Modal Methods ─────────────────────────────────────────────────────────
@@ -129,6 +162,10 @@ new class extends Component {
                 'partially'   => 'Partially Related Alumni',
                 'yes_partial' => 'Course-Related & Partial Alumni',
                 'no'          => 'Not Related Alumni',
+            ],
+            'location' => [
+                'local'  => 'Local Alumni',
+                'abroad' => 'Abroad / OFW Alumni',
             ],
         ];
 
@@ -161,30 +198,37 @@ new class extends Component {
                 $q->whereIn('a.course_code', $codes);
             }
             if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
+
+            if ($this->filterStatus && $this->filterStatus !== 'not_filled') {
+                $q->whereRaw('1 = 0');
+            }
+
             if ($this->modalBatch)    $q->where('a.batch', $this->modalBatch);
             if ($this->modalSearch) {
                 $s = '%' . $this->modalSearch . '%';
                 $q->where(function ($sq) use ($s) {
-                    $sq->where('a.first_name', 'like', $s)
+                    $sq->where('a.first_name',  'like', $s)
                        ->orWhere('a.last_name',  'like', $s)
-                       ->orWhere('a.id_number',  'like', $s);
+                       ->orWhere('a.student_id', 'like', $s);
                 });
             }
 
             $this->modalTotal = (clone $q)->count();
-            $rows = $q->select('a.first_name', 'a.last_name', 'a.middle_name', 'a.id_number', 'a.course_code', 'a.batch')
+            $rows = $q->select(
+                    'a.first_name', 'a.last_name', 'a.middle_initial', 'a.suffix',
+                    'a.student_id', 'a.course_code', 'a.batch'
+                )
                 ->orderBy('a.last_name')->orderBy('a.first_name')->limit(100)->get();
 
             $this->modalAlumni = $rows->map(fn($r) => [
-                'name'       => $r->last_name . ', ' . $r->first_name . ($r->middle_name ? ' ' . substr($r->middle_name, 0, 1) . '.' : ''),
-                'id_number'  => $r->id_number ?? '—',
+                'name'       => $this->buildName($r),
+                'id_number'  => $r->student_id ?? '—',
                 'course'     => $r->course_code ?? '—',
                 'batch'      => $r->batch,
                 'status'     => 'No Record',
                 'status_key' => 'not_filled',
                 'type'       => null,
                 'company'    => null,
-                'position'   => null,
                 'location'   => null,
                 'relevance'  => null,
             ])->toArray();
@@ -202,6 +246,13 @@ new class extends Component {
             $q->whereIn('a.course_code', $codes);
         }
         if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
+
+        if ($this->filterStatus === 'not_filled') {
+            $q->whereRaw('1 = 0');
+        } elseif ($this->filterStatus !== '') {
+            $q->where('et.employment_status', $this->filterStatus);
+        }
+
         if ($this->modalBatch)    $q->where('a.batch', $this->modalBatch);
 
         if ($this->modalFilterType === 'status') {
@@ -212,22 +263,25 @@ new class extends Component {
             } else {
                 $q->where('et.course_relevance', $this->modalFilter);
             }
+        } elseif ($this->modalFilterType === 'location') {
+            $q->where('et.work_location', $this->modalFilter);
         }
 
         if ($this->modalSearch) {
             $s = '%' . $this->modalSearch . '%';
             $q->where(function ($sq) use ($s) {
                 $sq->where('a.first_name',      'like', $s)
-                   ->orWhere('a.last_name',     'like', $s)
-                   ->orWhere('a.id_number',     'like', $s)
-                   ->orWhere('et.company_name', 'like', $s);
+                   ->orWhere('a.last_name',      'like', $s)
+                   ->orWhere('a.student_id',     'like', $s)
+                   ->orWhere('et.company_name',  'like', $s);
             });
         }
 
         $this->modalTotal = (clone $q)->count();
         $rows = $q->select(
-            'a.first_name', 'a.last_name', 'a.middle_name', 'a.id_number', 'a.course_code', 'a.batch',
-            'et.employment_status', 'et.employment_type', 'et.company_name', 'et.position',
+            'a.first_name', 'a.last_name', 'a.middle_initial', 'a.suffix',
+            'a.student_id', 'a.course_code', 'a.batch',
+            'et.employment_status', 'et.employment_type', 'et.company_name',
             'et.work_location', 'et.course_relevance'
         )->orderBy('a.last_name')->orderBy('a.first_name')->limit(100)->get();
 
@@ -237,15 +291,14 @@ new class extends Component {
 
         $this->modalAlumni = $rows->map(function ($r) use ($sLabel, $tLabel) {
             return [
-                'name'       => $r->last_name . ', ' . $r->first_name . ($r->middle_name ? ' ' . substr($r->middle_name, 0, 1) . '.' : ''),
-                'id_number'  => $r->id_number ?? '—',
+                'name'       => $this->buildName($r),
+                'id_number'  => $r->student_id ?? '—',
                 'course'     => $r->course_code ?? '—',
                 'batch'      => $r->batch,
                 'status'     => $sLabel[$r->employment_status] ?? ucfirst($r->employment_status ?? ''),
                 'status_key' => $r->employment_status ?? 'unknown',
                 'type'       => $tLabel[$r->employment_type ?? ''] ?? null,
                 'company'    => $r->company_name,
-                'position'   => $r->position,
                 'location'   => $r->work_location,
                 'relevance'  => $r->course_relevance,
             ];
@@ -494,7 +547,7 @@ new class extends Component {
         $this->chartCompareSideBySide = '{}';
     }
 
-    public function resetCompare(): void          { $this->compareA = ''; $this->compareB = ''; $this->chartCompareSideBySide = '{}'; }
+    public function resetCompare(): void           { $this->compareA = ''; $this->compareB = ''; $this->chartCompareSideBySide = '{}'; }
     public function toggleCompareFullscreen(): void { $this->compareFullscreen = !$this->compareFullscreen; }
 
     public function updatedCompareMode(): void { $this->buildCompareOptions(); }
@@ -504,10 +557,11 @@ new class extends Component {
     public function updatedFilterBatch(): void   { $this->refreshAll(); }
     public function updatedFilterCollege(): void { $this->filterCourse = ''; $this->refreshAll(); }
     public function updatedFilterCourse(): void  { $this->refreshAll(); }
+    public function updatedFilterStatus(): void  { $this->refreshAll(); }
 
     public function clearFilters(): void
     {
-        $this->filterBatch = $this->filterCollege = $this->filterCourse = '';
+        $this->filterBatch = $this->filterCollege = $this->filterCourse = $this->filterStatus = '';
         $this->refreshAll();
     }
 
@@ -515,979 +569,570 @@ new class extends Component {
 };
 ?>
 
-<div class="min-h-screen emp-admin-root">
-
-{{-- ══ STYLES ══════════════════════════════════════════════════════════════════ --}}
+{{-- Tiny keyframes — Tailwind has no utility for defining new @keyframes, everything else below is pure Tailwind --}}
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
-
-.emp-admin-root {
-    font-family: 'DM Sans', sans-serif;
-    background: #f4f3f8;
-    color: #1a1a2e;
-    min-height: 100vh;
-}
-
-:root {
-    --P:  #7a3f91;
-    --P2: #5c2d6e;
-    --PL: #f3e8ff;
-    --PM: #e9d5ff;
-    --ink:    #333333;
-    --muted:  #666666;
-    --border: #E8E0F0;
-    --card:   #ffffff;
-    --bg:     #f4f3f8;
-    --green:  #10b981;
-    --blue:   #3b82f6;
-    --amber:  #f59e0b;
-    --red:    #ef4444;
-}
-
-.adm-header {
-    background: transparent;
-    border-bottom: 1px solid var(--border);
-    padding: 20px 32px;
-}
-
-/* ── Stat cards ── */
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
-.stat-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 18px 18px 14px;
-    position: relative;
-    overflow: hidden;
-    cursor: default;
-}
-.stat-card::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 3px;
-    border-radius: 0 0 16px 16px;
-}
-.stat-card.c-purple::after { background: var(--P); }
-.stat-card.c-green::after  { background: var(--green); }
-.stat-card.c-blue::after   { background: var(--blue); }
-.stat-card.c-amber::after  { background: var(--amber); }
-.stat-card.c-gray::after   { background: #9ca3af; }
-.stat-card.c-teal::after   { background: #14b8a6; }
-.stat-card.c-rose::after   { background: #f43f5e; }
-.stat-card.c-orange::after { background: #f97316; }
-
-.stat-icon {
-    width: 40px; height: 40px; border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    margin-bottom: 12px;
-}
-.stat-num { font-size: 2rem; font-weight: 800; line-height: 1; color: var(--ink); }
-.stat-lbl { font-size: .8rem; font-weight: 600; color: var(--muted); margin-top: 4px; letter-spacing: .01em; }
-.stat-pct { font-size: .75rem; font-weight: 600; color: var(--P); margin-top: 3px; }
-
-/* ── Chart cards ── */
-.chart-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow: 0 1px 4px rgba(0,0,0,.04);
-}
-.chart-head {
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border);
-    background: #F9F7FC;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px;
-}
-.chart-head-left { display: flex; align-items: center; gap: 8px; }
-.chart-dot  { width: 8px; height: 8px; border-radius: 50%; background: var(--P); flex-shrink: 0; }
-.chart-ttl  { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ink); }
-.chart-sub  { font-size: .72rem; color: var(--muted); font-weight: 500; }
-.chart-body { padding: 16px; }
-
-/* ── Clickable chart cards ── */
-.chart-clickable { cursor: pointer; transition: box-shadow .15s, border-color .15s; }
-.chart-clickable:hover { border-color: var(--PM); box-shadow: 0 4px 18px rgba(122,63,145,.12); }
-.chart-clickable:hover .chart-head { background: #f5effc; }
-.chart-clickable canvas { cursor: pointer; }
-
-/* ── Filter bar ── */
-.filter-bar {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 14px 16px;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-}
-.f-select {
-    padding: 8px 12px; border: 1.5px solid var(--border); border-radius: 10px;
-    font-size: .85rem; font-family: inherit; font-weight: 500;
-    background: #fff; color: var(--ink);
-    transition: border-color .15s, box-shadow .15s;
-    cursor: pointer;
-}
-.f-select:focus { outline: none; border-color: var(--P); box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
-.f-label { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-
-/* ── Compare panel ── */
-.compare-panel { background: var(--card); border: 2px solid var(--PM); border-radius: 18px; overflow: hidden; }
-.compare-head  { background: #F9F7FC; padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
-.compare-body  { padding: 18px 20px; }
-
-.mode-pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 14px; border: 1.5px solid var(--border); border-radius: 99px;
-    font-size: .8rem; font-weight: 600; color: var(--muted);
-    cursor: pointer; transition: border-color .15s, background .15s, color .15s; background: #fff;
-}
-.mode-pill:hover, .mode-pill.active { border-color: var(--P); background: var(--PL); color: var(--P); }
-
-.vs-badge {
-    width: 36px; height: 36px; border-radius: 50%;
-    background: var(--P); color: #fff;
-    font-size: .75rem; font-weight: 700;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    box-shadow: 0 2px 10px rgba(122,63,145,.35);
-}
-
-.insight-pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 6px 12px; border-radius: 99px; font-size: .78rem; font-weight: 600;
-    border: 1px solid;
-}
-
-.prog { height: 5px; border-radius: 99px; background: #ede9fe; overflow: hidden; margin-top: 5px; }
-.prog-fill { height: 100%; border-radius: 99px; transition: width .6s; }
-
-.rank-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 9px 0;
-    border-bottom: 1px solid #f5f5f5;
-}
-.rank-row:last-child { border-bottom: none; }
-.rank-num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 600; flex-shrink: 0; }
-
-/* ── Compare fullscreen overlay ── */
-.compare-fs-overlay {
-    position: fixed; inset: 0; z-index: 60;
-    background: rgba(27, 6, 46, 0.55);
-    backdrop-filter: blur(6px);
-    display: flex; align-items: center; justify-content: center;
-    padding: 16px;
-    animation: fadeInOverlay .2s ease both;
-}
-@keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
-.compare-fs-panel {
-    background: #fff;
-    border-radius: 20px;
-    width: 100%; max-width: 900px;
-    max-height: 92vh;
-    display: flex; flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 24px 80px rgba(74,25,110,.22);
-    animation: slideUpPanel .22s cubic-bezier(.4,0,.2,1) both;
-}
-@keyframes slideUpPanel { from { opacity: 0; transform: translateY(20px) scale(.98); } to { opacity: 1; transform: none; } }
-.compare-fs-head {
-    background: #7a3f91;
-    padding: 16px 22px;
-    display: flex; align-items: center; gap: 12px;
-    flex-shrink: 0;
-}
-.compare-fs-body { flex: 1; overflow-y: auto; padding: 22px; }
-
-.btn-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px; border-radius: 9px;
-    border: 1.5px solid var(--P);
-    background: var(--PL); color: var(--P);
-    font-size: .75rem;
-    cursor: pointer; transition: border-color .15s, color .15s, background .15s;
-    flex-shrink: 0;
-}
-.btn-icon:hover { border-color: var(--P2); color: var(--P2); background: var(--PM); }
-
-.btn-reset {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 14px; border-radius: 99px;
-    border: 1.5px solid #fca5a5;
-    background: #fff5f5; color: #dc2626;
-    font-size: .8rem; font-weight: 600;
-    cursor: pointer; transition: background .15s, border-color .15s;
-}
-.btn-reset:hover { background: #fee2e2; border-color: #ef4444; }
-
-@media(max-width:640px) {
-    .adm-header { padding: 16px; }
-    .stat-num   { font-size: 1.6rem; }
-}
-
-.wire-loading { opacity: .4; pointer-events: none; transition: opacity .2s; }
-
-.chart-nodata {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 100%; gap: 8px; color: var(--muted);
-}
-.chart-nodata i { font-size: 1.8rem; opacity: .25; }
-.chart-nodata p { font-size: .8rem; font-weight: 600; opacity: .6; }
-
-/* ══ EMPLOYMENT DETAIL MODAL ══════════════════════════════════════════════════ */
-.emp-modal-overlay {
-    position: fixed; inset: 0; z-index: 80;
-    background: rgba(18, 4, 35, 0.62);
-    backdrop-filter: blur(8px);
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px;
-    animation: fadeInOverlay .18s ease both;
-}
-.emp-modal-panel {
-    background: #fff;
-    border-radius: 22px;
-    width: 100%; max-width: 1040px;
-    height: 90vh;
-    max-height: 90vh;
-    display: flex; flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 30px 90px rgba(60,15,100,.28);
-    animation: slideUpPanel .2s cubic-bezier(.4,0,.2,1) both;
-}
-.emp-modal-hd {
-    background: linear-gradient(135deg, #7a3f91 0%, #5c2d6e 100%);
-    padding: 18px 24px;
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    flex-shrink: 0;
-}
-.emp-modal-close {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 18px; border-radius: 12px;
-    background: rgba(255,255,255,.15);
-    color: #fff; font-size: .82rem; font-weight: 600;
-    border: 1px solid rgba(255,255,255,.25);
-    cursor: pointer; flex-shrink: 0;
-    transition: background .15s;
-}
-.emp-modal-close:hover { background: rgba(255,255,255,.25); }
-
-.emp-modal-filters {
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    flex-shrink: 0;
-    background: #faf7fc;
-}
-.emp-modal-search {
-    flex: 1; min-width: 200px;
-    padding: 8px 12px 8px 34px;
-    border: 1.5px solid var(--border); border-radius: 10px;
-    font-size: .85rem; font-family: 'DM Sans', sans-serif; font-weight: 500;
-    color: var(--ink); background: #fff;
-    transition: border-color .15s, box-shadow .15s;
-    position: relative;
-}
-.emp-modal-search:focus { outline: none; border-color: var(--P); box-shadow: 0 0 0 3px rgba(122,63,145,.10); }
-.emp-modal-search-wrap { position: relative; flex: 1; min-width: 200px; }
-.emp-modal-search-wrap i { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: .75rem; color: var(--muted); pointer-events: none; }
-
-.emp-modal-body {
-    flex: 1; overflow-y: auto;
-    padding: 0;
-}
-.emp-modal-table { width: 100%; border-collapse: collapse; }
-.emp-modal-table thead tr {
-    background: #f8f5fc;
-    border-bottom: 1.5px solid var(--border);
-    position: sticky; top: 0; z-index: 2;
-}
-.emp-modal-table thead th {
-    padding: 10px 14px;
-    text-align: left;
-    font-size: .72rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: .06em;
-    color: var(--muted); white-space: nowrap;
-}
-.emp-modal-table thead th:first-child { padding-left: 24px; }
-.emp-modal-table thead th:last-child  { padding-right: 24px; text-align: right; }
-.emp-modal-table tbody tr { border-bottom: 1px solid #f3f0f9; transition: background .1s; }
-.emp-modal-table tbody tr:hover { background: #faf7ff; }
-.emp-modal-table tbody td { padding: 11px 14px; vertical-align: middle; }
-.emp-modal-table tbody td:first-child { padding-left: 24px; }
-.emp-modal-table tbody td:last-child  { padding-right: 24px; }
-
-.alum-avatar {
-    width: 34px; height: 34px; border-radius: 50%;
-    background: #f3f0f9; border: 1.5px solid #e4dff0;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-}
-.status-pill {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 9px; border-radius: 99px;
-    font-size: .71rem; font-weight: 600;
-    border: 1px solid; white-space: nowrap;
-}
+@keyframes admFadeIn  { from { opacity:0; } to { opacity:1; } }
+@keyframes admSlideUp { from { opacity:0; transform: translateY(20px) scale(.98); } to { opacity:1; transform:none; } }
 </style>
 
-{{-- ══ PAGE HEADER ══════════════════════════════════════════════════════════════ --}}
-<div class="adm-header">
-    <div class="max-w-screen-2xl mx-auto flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-sm shrink-0" style="background:#7a3f91;">
-                <i class="fa-solid fa-chart-column text-white text-base"></i>
+@php
+    $inputBase     = 'border border-[#E8E0F0] rounded-lg text-sm font-medium bg-white text-[#333333] px-3 py-2 outline-none transition-colors duration-150 placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10';
+    $selectBase    = $inputBase . ' appearance-none cursor-pointer pr-9 bg-no-repeat';
+    $activeSelect  = 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold';
+    $selectArrow   = "background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.6rem center;background-size:1.25em 1.25em;";
+
+    $statCard      = 'bg-white border border-[#E8E0F0] rounded-xl px-3.5 py-3 flex flex-row items-center gap-3 cursor-pointer transition-all duration-150 hover:border-[#c4b5d4] hover:shadow-[0_3px_10px_rgba(122,63,145,0.10)]';
+    $statIcon      = 'w-[46px] h-[46px] rounded-xl flex items-center justify-center flex-shrink-0';
+
+    $chartCard     = 'bg-white border border-[#E8E0F0] rounded-2xl overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.04)]';
+    $chartHead     = 'px-[18px] py-3 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center justify-between gap-2';
+    $chartDot      = 'w-2 h-2 rounded-full bg-[#7a3f91] flex-shrink-0';
+    $chartTtl      = 'text-[0.8rem] font-bold uppercase tracking-[0.06em] text-[#333333]';
+    $chartSub      = 'text-[0.72rem] text-[#666666] font-medium';
+
+    $rankRow       = 'flex items-center gap-2.5 py-[9px] border-b border-[#f5f5f5] last:border-b-0';
+    $progTrack     = 'h-[5px] rounded-full bg-[#ede9fe] overflow-hidden mt-[5px]';
+    $progFill      = 'h-full rounded-full transition-[width] duration-500';
+
+    $statusPill    = 'inline-flex items-center gap-1 px-[9px] py-[3px] rounded-full text-[0.71rem] font-semibold border whitespace-nowrap';
+
+    $modePillBase  = 'inline-flex items-center gap-1.5 px-3.5 py-[7px] border-[1.5px] border-[#E8E0F0] rounded-full text-[0.8rem] font-semibold text-[#666666] cursor-pointer transition-colors duration-150 bg-white hover:border-[#7a3f91] hover:bg-purple-100 hover:text-[#7a3f91]';
+    $modePillActive= 'border-[#7a3f91] bg-purple-100 text-[#7a3f91]';
+
+    $thBase        = 'px-3.5 py-2.5 text-left text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-[#666666] whitespace-nowrap first:pl-6 last:pr-6 last:text-right';
+    $tdBase        = 'px-3.5 py-[11px] align-middle first:pl-6 last:pr-6';
+
+    $wireFade      = 'opacity-40 pointer-events-none transition-opacity duration-200';
+
+    $catIconBg = ['bg-emerald-100','bg-blue-100','bg-amber-100','bg-teal-100','bg-orange-100','bg-purple-100'];
+    $catIconTx = ['text-emerald-600','text-blue-600','text-amber-600','text-teal-600','text-orange-600','text-[#7a3f91]'];
+    $catFillBg = ['bg-emerald-500','bg-blue-500','bg-amber-500','bg-teal-500','bg-orange-500','bg-[#7a3f91]'];
+@endphp
+
+<div class="flex flex-col h-[90vh] overflow-hidden">
+
+{{-- ══ MAIN LAYOUT ══ --}}
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full h-[90vh] overflow-y-auto overflow-x-hidden
+            [&::-webkit-scrollbar]:w-[5px] [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
+            [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[#7a3f91]">
+
+    {{-- ── PAGE HEADER ── --}}
+    <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+        <div class="flex items-center gap-4">
+            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
+                <i class="fa-solid fa-chart-column text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-3xl font-semibold text-[#333333] leading-tight">Employment Analytics</h1>
-                <p class="text-sm text-[#666666] font-normal mt-0.5">System-wide employment intelligence &amp; comparison tool</p>
+                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Analytics</h1>
+                <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">
+                    System-wide employment intelligence &amp; comparison tool
+                </p>
             </div>
         </div>
-        <span class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-[#E8E0F0] bg-[#F9F7FC] text-[#7a3f91]">
-            <i class="fa-solid fa-users text-xs"></i>
-            {{ number_format($totalAlumni) }} alumni tracked
-        </span>
+
+        {{-- Compare Button — icon only + tooltip --}}
+        <div class="relative inline-flex group">
+            <button wire:click="toggleCompareFullscreen"
+                    class="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-[#7a3f91] to-[#9b59b6] text-white border-none cursor-pointer shadow-[0_2px_8px_rgba(122,63,145,0.35)] transition-all duration-150 flex-shrink-0 hover:opacity-90 hover:shadow-[0_4px_16px_rgba(122,63,145,0.45)] hover:-translate-y-px"
+                    aria-label="Compare Tool">
+                <i class="fa-solid fa-code-compare text-[0.95rem]"></i>
+            </button>
+            <span class="absolute bottom-[calc(100%+8px)] right-0 whitespace-nowrap bg-[#1a0a2e] text-white text-[0.72rem] font-semibold px-2.5 py-[5px] rounded-lg pointer-events-none opacity-0 translate-y-1 transition-all duration-150 z-[99] shadow-[0_4px_12px_rgba(0,0,0,0.25)] group-hover:opacity-100 group-hover:translate-y-0 after:content-[''] after:absolute after:top-full after:right-[10px] after:border-[5px] after:border-transparent after:border-t-[#1a0a2e]">
+                Compare Tool
+            </span>
+        </div>
     </div>
-</div>
 
-<div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    {{-- ── FILTER BAR ── --}}
+    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-[0_1px_4px_rgba(0,0,0,0.06)] min-h-0 flex-shrink-0"
+         wire:loading.class="{{ $wireFade }}"
+         wire:target="updatedFilterBatch,updatedFilterCollege,updatedFilterCourse,updatedFilterStatus,clearFilters">
+        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 relative z-50 overflow-visible flex flex-wrap gap-2 items-center">
 
-{{-- ══ FILTER BAR ══════════════════════════════════════════════════════════════ --}}
-<div class="filter-bar"
-     wire:loading.class="wire-loading"
-     wire:target="updatedFilterBatch,updatedFilterCollege,updatedFilterCourse,clearFilters">
-    <i class="fa-solid fa-sliders text-sm" style="color:var(--P);"></i>
-    <span class="f-label">Filter:</span>
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
+                Filters
+            </div>
 
-    <select wire:model.live="filterBatch" class="f-select">
-        <option value="">All Batches</option>
-        @foreach($batches as $b)
-            <option value="{{ $b }}">Batch {{ $b }}</option>
-        @endforeach
-    </select>
+            <select wire:model.live="filterBatch" style="{{ $selectArrow }}"
+                    class="{{ $selectBase }} {{ $filterBatch ? $activeSelect : '' }}">
+                <option value="">All Batches</option>
+                @foreach($batches as $b)
+                    <option value="{{ $b }}">Batch {{ $b }}</option>
+                @endforeach
+            </select>
 
-    <select wire:model.live="filterCollege" class="f-select">
-        <option value="">All Colleges</option>
-        @foreach($colleges as $c)
-            <option value="{{ $c }}">{{ $c }}</option>
-        @endforeach
-    </select>
+            <select wire:model.live="filterCollege" style="{{ $selectArrow }}"
+                    class="{{ $selectBase }} {{ $filterCollege ? $activeSelect : '' }}">
+                <option value="">All Colleges</option>
+                @foreach($colleges as $c)
+                    <option value="{{ $c }}">{{ $c }}</option>
+                @endforeach
+            </select>
 
-    @if($filterCollege)
-    <select wire:model.live="filterCourse" class="f-select">
-        <option value="">All Courses in College</option>
-        @foreach($courses as $c)
-            @if($c['college'] === $filterCollege)
-                <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
+            @if($filterCollege)
+            <select wire:model.live="filterCourse" style="{{ $selectArrow }}"
+                    class="{{ $selectBase }} {{ $filterCourse ? $activeSelect : '' }}">
+                <option value="">All Courses in College</option>
+                @foreach($courses as $c)
+                    @if($c['college'] === $filterCollege)
+                        <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
+                    @endif
+                @endforeach
+            </select>
+            @else
+            <select wire:model.live="filterCourse" style="{{ $selectArrow }}"
+                    class="{{ $selectBase }} {{ $filterCourse ? $activeSelect : '' }}">
+                <option value="">All Courses</option>
+                @foreach($courses as $c)
+                    <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
+                @endforeach
+            </select>
             @endif
-        @endforeach
-    </select>
-    @else
-    <select wire:model.live="filterCourse" class="f-select">
-        <option value="">All Courses</option>
-        @foreach($courses as $c)
-            <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
-        @endforeach
-    </select>
-    @endif
 
-    @if($filterBatch || $filterCollege || $filterCourse)
-        <button wire:click="clearFilters"
-                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border border-red-200 bg-red-50 text-red-600 transition">
-            <i class="fa-solid fa-rotate-left text-xs"></i> Reset
-        </button>
-        <span class="text-xs font-semibold px-3 py-1.5 rounded-lg" style="background:var(--PL);color:var(--P);">
-            <i class="fa-solid fa-filter text-xs mr-1"></i> Filtered view
-        </span>
-    @endif
+            <select wire:model.live="filterStatus" style="{{ $selectArrow }}"
+                    class="{{ $selectBase }} {{ $filterStatus ? $activeSelect : '' }}">
+                <option value="">All Status</option>
+                <option value="employed">Employed</option>
+                <option value="self_employed">Self-Employed</option>
+                <option value="unemployed">Unemployed</option>
+                <option value="not_filled">Not Filled</option>
+            </select>
 
-    <div class="ml-auto" wire:loading wire:target="filterBatch,filterCollege,filterCourse,clearFilters">
-        <i class="fa-solid fa-circle-notch fa-spin text-sm" style="color:var(--P);"></i>
-    </div>
-</div>
+            @if($filterBatch || $filterCollege || $filterCourse || $filterStatus)
+                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-purple-100 text-[#7a3f91] border border-purple-200">
+                    <i class="fa-solid fa-filter text-[9px]"></i> Filtered view
+                </span>
+            @endif
 
-{{-- ══ STAT CARDS ══════════════════════════════════════════════════════════════ --}}
-<div class="stat-grid"
-     wire:loading.class="wire-loading"
-     wire:target="filterBatch,filterCollege,filterCourse,clearFilters">
-
-    <div class="stat-card c-purple">
-        <div class="stat-icon" style="background:var(--PL);">
-            <i class="fa-solid fa-users" style="color:var(--P);font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalAlumni) }}</p>
-        <p class="stat-lbl">Total Alumni</p>
-        <p class="stat-pct">
-            @if($totalAlumni > 0){{ round($totalFilled / $totalAlumni * 100) }}% have records
-            @else No data yet @endif
-        </p>
-    </div>
-
-    <div class="stat-card c-green">
-        <div class="stat-icon" style="background:#d1fae5;">
-            <i class="fa-solid fa-briefcase" style="color:#059669;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalEmployed) }}</p>
-        <p class="stat-lbl">Employed</p>
-        @if($totalAlumni > 0)
-            <div class="prog"><div class="prog-fill" style="width:{{ round($totalEmployed/$totalAlumni*100) }}%;background:#10b981;"></div></div>
-            <p class="stat-pct">{{ round($totalEmployed/$totalAlumni*100) }}% of total</p>
-        @endif
-    </div>
-
-    <div class="stat-card c-blue">
-        <div class="stat-icon" style="background:#dbeafe;">
-            <i class="fa-solid fa-store" style="color:#2563eb;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalSelf) }}</p>
-        <p class="stat-lbl">Self-Employed</p>
-        @if($totalAlumni > 0)
-            <div class="prog"><div class="prog-fill" style="width:{{ round($totalSelf/$totalAlumni*100) }}%;background:#3b82f6;"></div></div>
-            <p class="stat-pct">{{ round($totalSelf/$totalAlumni*100) }}% of total</p>
-        @endif
-    </div>
-
-    <div class="stat-card c-amber">
-        <div class="stat-icon" style="background:#fef3c7;">
-            <i class="fa-solid fa-circle-pause" style="color:#d97706;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalUnemployed) }}</p>
-        <p class="stat-lbl">Unemployed</p>
-        @if($totalAlumni > 0)
-            <div class="prog"><div class="prog-fill" style="width:{{ round($totalUnemployed/$totalAlumni*100) }}%;background:#f59e0b;"></div></div>
-            <p class="stat-pct">{{ round($totalUnemployed/$totalAlumni*100) }}% of total</p>
-        @endif
-    </div>
-
-    <div class="stat-card c-gray">
-        <div class="stat-icon" style="background:#f3f4f6;">
-            <i class="fa-solid fa-circle-question" style="color:#9ca3af;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalNotFilled) }}</p>
-        <p class="stat-lbl">Not Filled</p>
-        @if($totalAlumni > 0)
-            <div class="prog"><div class="prog-fill" style="width:{{ round($totalNotFilled/$totalAlumni*100) }}%;background:#9ca3af;"></div></div>
-        @endif
-    </div>
-
-    <div class="stat-card c-teal">
-        <div class="stat-icon" style="background:#ccfbf1;">
-            <i class="fa-solid fa-house" style="color:#0d9488;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalLocal) }}</p>
-        <p class="stat-lbl">Local Workers</p>
-        @if(($totalLocal + $totalAbroad) > 0)
-            <p class="stat-pct">{{ round($totalLocal/($totalLocal+$totalAbroad)*100) }}% of employed</p>
-        @endif
-    </div>
-
-    <div class="stat-card c-orange">
-        <div class="stat-icon" style="background:#ffedd5;">
-            <i class="fa-solid fa-plane-departure" style="color:#ea580c;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ number_format($totalAbroad) }}</p>
-        <p class="stat-lbl">Abroad / OFW</p>
-        @if(($totalLocal + $totalAbroad) > 0)
-            <p class="stat-pct">{{ round($totalAbroad/($totalLocal+$totalAbroad)*100) }}% of employed</p>
-        @endif
-    </div>
-
-    @php
-        $fillRate = $totalAlumni > 0 ? round($totalFilled/$totalAlumni*100) : 0;
-        $empRate  = $totalFilled  > 0 ? round(($totalEmployed+$totalSelf)/$totalFilled*100) : 0;
-    @endphp
-    <div class="stat-card c-rose">
-        <div class="stat-icon" style="background:#ffe4e6;">
-            <i class="fa-solid fa-chart-pie" style="color:#e11d48;font-size:1.1rem;"></i>
-        </div>
-        <p class="stat-num">{{ $empRate }}%</p>
-        <p class="stat-lbl">Employment Rate</p>
-        <div class="prog"><div class="prog-fill" style="width:{{ $empRate }}%;background:#f43f5e;"></div></div>
-        <p class="stat-pct">of those with records</p>
-    </div>
-
-</div>
-
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     ROW 1 — Status / Location / Relevance / Unemployment Reason
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
-     wire:loading.class="wire-loading"
-     wire:target="filterBatch,filterCollege,filterCourse,clearFilters">
-
-    <div class="chart-card chart-clickable" title="Click a segment to view alumni">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot"></div>
-                <span class="chart-ttl">Employment Status</span>
-            </div>
-            <i class="fa-solid fa-arrow-pointer text-xs" style="color:var(--muted);opacity:.5;"></i>
-        </div>
-        <div class="chart-body flex items-center justify-center" style="height:220px;" wire:ignore>
-            <canvas id="chartStatus"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#e879f9;"></div>
-                <span class="chart-ttl">Work Location</span>
-            </div>
-        </div>
-        <div class="chart-body flex items-center justify-center" style="height:220px;" wire:ignore>
-            <canvas id="chartLocation"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card chart-clickable" title="Click green for Related only • Click background for Related + Partial">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#10b981;"></div>
-                <span class="chart-ttl">Job-Course Relevance</span>
-            </div>
-            <i class="fa-solid fa-arrow-pointer text-xs" style="color:var(--muted);opacity:.5;"></i>
-        </div>
-        <div class="chart-body flex items-center justify-center" style="height:220px;" wire:ignore>
-            <canvas id="chartRelevance"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#f59e0b;"></div>
-                <span class="chart-ttl">Unemployed — Why?</span>
-            </div>
-        </div>
-        <div class="chart-body flex items-center justify-center" style="height:220px;" wire:ignore>
-            <canvas id="chartUnemployed"></canvas>
-            <div id="chartUnemployedNoData" class="chart-nodata" style="display:none;">
-                <i class="fa-solid fa-circle-info"></i>
-                <p>No unemployment data yet</p>
-            </div>
-        </div>
-    </div>
-
-</div>
-
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     ROW 2 — Employment Type / Career Path / Education Status / Top Courses
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"
-     wire:loading.class="wire-loading"
-     wire:target="filterBatch,filterCollege,filterCourse,clearFilters">
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#a855f7;"></div>
-                <span class="chart-ttl">Employment Type</span>
-            </div>
-        </div>
-        <div class="chart-body flex items-center justify-center" style="height:220px;" wire:ignore>
-            <canvas id="chartEmpType"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#14b8a6;"></div>
-                <span class="chart-ttl">Career Path Labels</span>
-            </div>
-        </div>
-        <div class="chart-body" style="height:220px;" wire:ignore>
-            <canvas id="chartCareerPath"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#3b82f6;"></div>
-                <span class="chart-ttl">Further Education</span>
-            </div>
-        </div>
-        <div class="chart-body flex items-center justify-center" style="height:220px;" wire:ignore>
-            <canvas id="chartEduStatus"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#7a3f91;"></div>
-                <span class="chart-ttl">Top Courses (Employed)</span>
-            </div>
-        </div>
-        <div class="chart-body" style="height:220px;" wire:ignore>
-            <canvas id="chartCourse"></canvas>
-        </div>
-    </div>
-
-</div>
-
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     ROW 3 — By Batch + By College (FIXED: horizontal bar so labels don't rotate)
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="grid grid-cols-1 xl:grid-cols-2 gap-4"
-     wire:loading.class="wire-loading"
-     wire:target="filterBatch,filterCollege,filterCourse,clearFilters">
-
-    {{-- Batch chart — vertical stacked, paginated --}}
-    <div class="chart-card">
-        <div class="chart-head" style="justify-content:space-between;">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#f59e0b;"></div>
-                <div>
-                    <div class="chart-ttl">Employment by Batch Year</div>
-                    <div class="chart-sub">Stacked across all years</div>
-                </div>
-            </div>
-            <div id="batchNavControls" class="flex items-center gap-1.5" style="display:none!important;">
-                <button id="batchPrev"
-                        class="w-7 h-7 rounded-lg border border-gray-200 bg-white flex items-center justify-center text-xs transition disabled:opacity-30 disabled:cursor-not-allowed"
-                        style="color:var(--P);">
-                    <i class="fa-solid fa-chevron-left" style="font-size:.6rem;"></i>
-                </button>
-                <span id="batchPageInfo" class="text-xs font-semibold" style="color:var(--muted);white-space:nowrap;min-width:36px;text-align:center;"></span>
-                <button id="batchNext"
-                        class="w-7 h-7 rounded-lg border border-gray-200 bg-white flex items-center justify-center text-xs transition disabled:opacity-30 disabled:cursor-not-allowed"
-                        style="color:var(--P);">
-                    <i class="fa-solid fa-chevron-right" style="font-size:.6rem;"></i>
-                </button>
-            </div>
-        </div>
-        <div class="chart-body" style="height:270px;" wire:ignore>
-            <canvas id="chartBatch"></canvas>
-        </div>
-    </div>
-
-    {{-- ════════════════════════════════════════════════════════════════════════
-         College chart — HORIZONTAL stacked bar (FIX: no more sideways labels)
-    ══════════════════════════════════════════════════════════════════════════ --}}
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#06b6d4;"></div>
-                <div>
-                    <div class="chart-ttl">Employment by College</div>
-                    <div class="chart-sub">Across all departments</div>
-                </div>
-            </div>
-        </div>
-        {{-- Height grows with number of colleges so bars are never cramped --}}
-        <div class="chart-body" style="height:270px;" wire:ignore>
-            <canvas id="chartCollege"></canvas>
-        </div>
-    </div>
-
-</div>
-
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     INSIGHTS SUMMARY
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="grid grid-cols-1 sm:grid-cols-3 gap-4"
-     wire:loading.class="wire-loading"
-     wire:target="filterBatch,filterCollege,filterCourse,clearFilters">
-
-    @php
-        $allColleges = collect($colleges)->map(function($col) {
-            $codes    = DB::table('courses')->where('college',$col)->pluck('code');
-            $total    = DB::table('alumni')->whereNull('deleted_at')->whereIn('course_code',$codes)->count();
-            $employed = DB::table('alumni as a')
-                ->join('employment_trackings as et','a.id','=','et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                ->whereIn('a.course_code',$codes)
-                ->whereIn('et.employment_status',['employed','self_employed'])->count();
-            return ['name'=>$col,'total'=>$total,'employed'=>$employed,'rate'=>$total>0?round($employed/$total*100):0];
-        })->sortByDesc('rate')->values();
-
-        $topCourses = DB::table('alumni as a')
-            ->join('employment_trackings as et','a.id','=','et.alumni_id')
-            ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-            ->whereIn('et.employment_status',['employed','self_employed'])
-            ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('a.course_code')->orderByDesc('cnt')->limit(5)->get();
-
-        $topBatches = DB::table('alumni as a')
-            ->join('employment_trackings as et','a.id','=','et.alumni_id')
-            ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-            ->whereIn('et.employment_status',['employed','self_employed'])
-            ->select('a.batch', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('a.batch')->orderByDesc('cnt')->limit(5)->get();
-    @endphp
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#7a3f91;"></div>
-                <div>
-                    <div class="chart-ttl">Colleges — Employment Rate</div>
-                    <div class="chart-sub">Highest employment rate first</div>
-                </div>
-            </div>
-            <i class="fa-solid fa-trophy text-sm" style="color:#f59e0b;"></i>
-        </div>
-        <div class="chart-body space-y-0">
-            @forelse($allColleges->take(6) as $i => $col)
-            @php
-                $medals = ['🥇','🥈','🥉'];
-                $medal  = $medals[$i] ?? null;
-                $pct    = $col['rate'];
-                $fillColor = $pct >= 70 ? '#10b981' : ($pct >= 40 ? '#f59e0b' : '#ef4444');
-            @endphp
-            <div class="rank-row">
-                <div class="rank-num" style="background:{{ $i===0?'#fef3c7':($i===1?'#f3f4f6':($i===2?'#fde8d8':'#f9fafb')) }};color:{{ $i===0?'#b45309':($i===1?'#6b7280':'#c2410c') }}">
-                    {{ $medal ?? ($i+1) }}
-                </div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-xs font-semibold truncate" style="color:var(--ink);">{{ $col['name'] }}</p>
-                    <div class="prog" style="margin-top:4px;">
-                        <div class="prog-fill" style="width:{{ $pct }}%;background:{{ $fillColor }};"></div>
-                    </div>
-                </div>
-                <span class="text-xs font-semibold flex-shrink-0 ml-2" style="color:{{ $fillColor }};">{{ $pct }}%</span>
-            </div>
-            @empty
-                <p class="text-sm text-center py-6" style="color:var(--muted);">No college data available.</p>
-            @endforelse
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#3b82f6;"></div>
-                <div>
-                    <div class="chart-ttl">Top Courses by Employed</div>
-                    <div class="chart-sub">Most alumni employed</div>
-                </div>
-            </div>
-            <i class="fa-solid fa-graduation-cap text-sm" style="color:#3b82f6;"></i>
-        </div>
-        <div class="chart-body space-y-0">
-            @php $maxCourse = $topCourses->max('cnt') ?: 1; @endphp
-            @forelse($topCourses as $i => $c)
-            <div class="rank-row">
-                <div class="rank-num" style="background:var(--PL);color:var(--P);">{{ $i+1 }}</div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-xs font-semibold" style="color:var(--ink);">{{ $c->course_code }}</p>
-                    <div class="prog" style="margin-top:4px;">
-                        <div class="prog-fill" style="width:{{ round($c->cnt/$maxCourse*100) }}%;background:var(--P);"></div>
-                    </div>
-                </div>
-                <span class="text-xs font-semibold flex-shrink-0 ml-2" style="color:var(--P);">{{ $c->cnt }}</span>
-            </div>
-            @empty
-                <p class="text-sm text-center py-6" style="color:var(--muted);">No course data available.</p>
-            @endforelse
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-head">
-            <div class="chart-head-left">
-                <div class="chart-dot" style="background:#f59e0b;"></div>
-                <div>
-                    <div class="chart-ttl">Top Batches by Employed</div>
-                    <div class="chart-sub">Most alumni working</div>
-                </div>
-            </div>
-            <i class="fa-solid fa-calendar-check text-sm" style="color:#f59e0b;"></i>
-        </div>
-        <div class="chart-body space-y-0">
-            @php $maxBatch = $topBatches->max('cnt') ?: 1; @endphp
-            @forelse($topBatches as $i => $b)
-            <div class="rank-row">
-                <div class="rank-num" style="background:#fef3c7;color:#b45309;">{{ $i+1 }}</div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-xs font-semibold" style="color:var(--ink);">Batch {{ $b->batch }}</p>
-                    <div class="prog" style="margin-top:4px;">
-                        <div class="prog-fill" style="width:{{ round($b->cnt/$maxBatch*100) }}%;background:#f59e0b;"></div>
-                    </div>
-                </div>
-                <span class="text-xs font-semibold flex-shrink-0 ml-2" style="color:#d97706;">{{ $b->cnt }}</span>
-            </div>
-            @empty
-                <p class="text-sm text-center py-6" style="color:var(--muted);">No batch data available.</p>
-            @endforelse
-        </div>
-    </div>
-
-</div>
-
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     COMPARE PANEL
-══════════════════════════════════════════════════════════════════════════════ --}}
-<div class="compare-panel">
-
-    <div class="compare-head">
-        <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:var(--P);">
-            <i class="fa-solid fa-code-compare text-white text-sm"></i>
-        </div>
-        <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold" style="color:var(--ink);">Compare Tool</p>
-            <p class="text-xs" style="color:var(--muted);">Select two entities to compare employment side-by-side</p>
-        </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-            @if($compareA && $compareB)
-            <button wire:click="resetCompare" class="btn-reset" title="Reset comparison">
-                <i class="fa-solid fa-rotate-left text-xs"></i>
+            <button wire:click="clearFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="clearFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer text-[#333333]">
+                <span wire:loading.remove wire:target="clearFilters">
+                    <i class="fa-solid fa-rotate-left text-sm"></i>
+                </span>
+                <span wire:loading wire:target="clearFilters">
+                    <svg class="animate-spin w-3.5 h-3.5 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                    </svg>
+                </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
-            @endif
-            <button wire:click="toggleCompareFullscreen" class="btn-icon" title="Open fullscreen compare">
-                <i class="fa-solid fa-expand text-xs"></i>
-            </button>
+
+            <div class="ml-auto" wire:loading wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+                <svg class="animate-spin w-3.5 h-3.5 text-[#7a3f91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                </svg>
+            </div>
         </div>
     </div>
 
-    <div class="compare-body">
-
-        <div class="flex flex-wrap gap-2 mb-4">
-            <label class="mode-pill {{ $compareMode==='college' ? 'active' : '' }}">
-                <input wire:model.live="compareMode" type="radio" value="college" class="sr-only">
-                <i class="fa-solid fa-building-columns text-xs"></i> By College
-            </label>
-            <label class="mode-pill {{ $compareMode==='course' ? 'active' : '' }}">
-                <input wire:model.live="compareMode" type="radio" value="course" class="sr-only">
-                <i class="fa-solid fa-book text-xs"></i> By Course
-            </label>
-            <label class="mode-pill {{ $compareMode==='batch' ? 'active' : '' }}">
-                <input wire:model.live="compareMode" type="radio" value="batch" class="sr-only">
-                <i class="fa-solid fa-calendar text-xs"></i> By Batch Year
-            </label>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-3 mb-4">
-            <div class="flex-1 min-w-[140px]">
-                <p class="f-label mb-1.5"><i class="fa-solid fa-a text-xs mr-1" style="color:var(--P);"></i> Entity A</p>
-                <select wire:model.live="compareA" class="f-select w-full">
-                    <option value=""> Select </option>
-                    @foreach($compareOptions as $opt)
-                        <option value="{{ $opt }}">{{ $opt }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="vs-badge mt-5">VS</div>
-            <div class="flex-1 min-w-[140px]">
-                <p class="f-label mb-1.5"><i class="fa-solid fa-b text-xs mr-1" style="color:#3b82f6;"></i> Entity B</p>
-                <select wire:model.live="compareB" class="f-select w-full">
-                    <option value=""> Select </option>
-                    @foreach($compareOptions as $opt)
-                        @if($opt !== $compareA)
-                            <option value="{{ $opt }}">{{ $opt }}</option>
-                        @endif
-                    @endforeach
-                </select>
-            </div>
-        </div>
-
-        @if($compareA && $compareB && $chartCompareSideBySide !== '{}')
+    {{-- ── STAT CARDS (Emp Rate removed · Local/Abroad now clickable) ── --}}
+    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0"
+         wire:loading.class="{{ $wireFade }}"
+         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
 
         @php
-            $cmp    = json_decode($chartCompareSideBySide, true);
-            $totalA = $cmp['totalA'] ?? 0;
-            $totalB = $cmp['totalB'] ?? 0;
-            $dA     = $cmp['dataA'] ?? [];
-            $dB     = $cmp['dataB'] ?? [];
-            $cats   = $cmp['categories'] ?? [];
-            $catIcons  = ['fa-briefcase','fa-store','fa-circle-pause','fa-house','fa-plane-departure','fa-graduation-cap'];
-            $catColors = ['#10b981','#3b82f6','#f59e0b','#14b8a6','#f97316','#7a3f91'];
+            $fillRate = $totalAlumni > 0 ? round($totalFilled/$totalAlumni*100) : 0;
         @endphp
 
-        <div class="grid grid-cols-2 gap-3 mb-4 p-4 rounded-2xl" style="background:var(--bg);">
-            <div class="text-center">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-1" style="color:var(--P);">{{ $cmp['labelA'] ?? '' }}</p>
-                <p class="text-2xl font-black" style="color:var(--ink);">{{ number_format($totalA) }}</p>
-                <p class="text-xs" style="color:var(--muted);">total alumni</p>
+        {{-- Total --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','all')" title="View all alumni">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#6d2f84] to-[#9b59b6]">
+                <i class="fas fa-users text-white text-[1.15rem]"></i>
             </div>
-            <div class="text-center">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-1" style="color:#3b82f6;">{{ $cmp['labelB'] ?? '' }}</p>
-                <p class="text-2xl font-black" style="color:var(--ink);">{{ number_format($totalB) }}</p>
-                <p class="text-xs" style="color:var(--muted);">total alumni</p>
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalAlumni) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Total Alumni</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ $fillRate }}% have records</div>
             </div>
         </div>
 
-        <div class="space-y-3 mb-4">
-            @foreach($cats as $idx => $cat)
-            @php
-                $vA     = $dA[$idx] ?? 0;
-                $vB     = $dB[$idx] ?? 0;
-                $maxV   = max($vA, $vB, 1);
-                $pctA   = round($vA / $maxV * 100);
-                $pctB   = round($vB / $maxV * 100);
-                $winner = $vA > $vB ? 'A' : ($vB > $vA ? 'B' : null);
-                $color  = $catColors[$idx] ?? '#7a3f91';
-                $icon   = $catIcons[$idx] ?? 'fa-circle';
-            @endphp
-            <div class="p-3 rounded-xl border" style="border-color:#ede9fe;background:#faf7ff;">
-                <div class="flex items-center gap-2 mb-2">
-                    <i class="fa-solid {{ $icon }} text-xs" style="color:{{ $color }};"></i>
-                    <span class="text-xs font-semibold" style="color:var(--ink);">{{ $cat }}</span>
-                    @if($winner === 'A')
-                        <span class="ml-auto insight-pill text-xs" style="color:var(--P);background:var(--PL);border-color:var(--PM);">
-                            <i class="fa-solid fa-chevron-up text-[9px]"></i> {{ $cmp['labelA'] ?? 'A' }} leads
-                        </span>
-                    @elseif($winner === 'B')
-                        <span class="ml-auto insight-pill text-xs" style="color:#2563eb;background:#dbeafe;border-color:#bfdbfe;">
-                            <i class="fa-solid fa-chevron-up text-[9px]"></i> {{ $cmp['labelB'] ?? 'B' }} leads
-                        </span>
-                    @else
-                        <span class="ml-auto insight-pill text-xs" style="color:#6b7280;background:#f3f4f6;border-color:#e5e7eb;">Tied</span>
-                    @endif
-                </div>
-                <div class="grid grid-cols-2 gap-2">
-                    <div>
-                        <div class="flex items-center justify-between mb-1">
-                            <span class="text-xs font-semibold" style="color:var(--muted);">{{ $cmp['labelA'] ?? 'A' }}</span>
-                            <span class="text-xs font-semibold" style="color:var(--ink);">{{ $vA }}</span>
-                        </div>
-                        <div class="prog"><div class="prog-fill" style="width:{{ $pctA }}%;background:{{ $color }};"></div></div>
-                    </div>
-                    <div>
-                        <div class="flex items-center justify-between mb-1">
-                            <span class="text-xs font-semibold" style="color:var(--muted);">{{ $cmp['labelB'] ?? 'B' }}</span>
-                            <span class="text-xs font-semibold" style="color:var(--ink);">{{ $vB }}</span>
-                        </div>
-                        <div class="prog"><div class="prog-fill" style="width:{{ $pctB }}%;background:{{ $color }};opacity:.5;"></div></div>
-                    </div>
-                </div>
+        {{-- Employed --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','employed')" title="View Employed">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#027a4f] to-[#059669]">
+                <i class="fas fa-briefcase text-white text-[1.15rem]"></i>
             </div>
-            @endforeach
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalEmployed) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Employed</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ $totalAlumni > 0 ? round($totalEmployed/$totalAlumni*100) : 0 }}% of total</div>
+            </div>
         </div>
 
-        <div wire:ignore style="height:240px;">
-            <canvas id="chartCompare"></canvas>
+        {{-- Self-Employed --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','self_employed')" title="View Self-Employed">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#1a4db5] to-[#2563eb]">
+                <i class="fas fa-store text-white text-[1.15rem]"></i>
+            </div>
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalSelf) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Self-Employed</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ $totalAlumni > 0 ? round($totalSelf/$totalAlumni*100) : 0 }}% of total</div>
+            </div>
         </div>
 
-        @elseif($compareA || $compareB)
-        <div class="flex flex-col items-center justify-center py-10" style="color:var(--muted);">
-            <i class="fa-solid fa-arrow-right-arrow-left text-3xl mb-3 opacity-30"></i>
-            <p class="text-sm font-semibold">Select both Entity A and Entity B to compare.</p>
+        {{-- Unemployed --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','unemployed')" title="View Unemployed">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#b55a05] to-[#d97706]">
+                <i class="fas fa-circle-pause text-white text-[1.15rem]"></i>
+            </div>
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalUnemployed) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Unemployed</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ $totalAlumni > 0 ? round($totalUnemployed/$totalAlumni*100) : 0 }}% of total</div>
+            </div>
         </div>
-        @else
-        <div class="flex flex-col items-center justify-center py-10" style="color:var(--muted);">
-            <i class="fa-solid fa-code-compare text-3xl mb-3 opacity-20"></i>
-            <p class="text-sm font-semibold">Choose two {{ $compareMode === 'college' ? 'colleges' : ($compareMode === 'course' ? 'courses' : 'batch years') }} above to compare.</p>
+
+        {{-- Not Filled --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','not_filled')" title="View Not Filled">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#4b5563] to-[#6b7280]">
+                <i class="fas fa-circle-question text-white text-[1.15rem]"></i>
+            </div>
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalNotFilled) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Not Filled</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ $totalAlumni > 0 ? round($totalNotFilled/$totalAlumni*100) : 0 }}% of total</div>
+            </div>
         </div>
-        @endif
+
+        {{-- Local — now clickable --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('location','local')" title="View Local">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#0d7377] to-[#14b8a6]">
+                <i class="fas fa-house text-white text-[1.15rem]"></i>
+            </div>
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalLocal) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Local</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ ($totalLocal + $totalAbroad) > 0 ? round($totalLocal/($totalLocal+$totalAbroad)*100) : 0 }}% of employed</div>
+            </div>
+        </div>
+
+        {{-- Abroad / OFW — now clickable --}}
+        <div class="{{ $statCard }}" onclick="window.admDispatchModal('location','abroad')" title="View Abroad / OFW">
+            <div class="{{ $statIcon }} bg-gradient-to-br from-[#b84c05] to-[#f97316]">
+                <i class="fas fa-plane-departure text-white text-[1.15rem]"></i>
+            </div>
+            <div class="flex flex-col gap-[1px] min-w-0">
+                <div class="text-[1.45rem] font-extrabold leading-none tracking-[-0.01em] text-black">{{ number_format($totalAbroad) }}</div>
+                <div class="text-[0.68rem] font-bold mt-0.5 text-black">Abroad / OFW</div>
+                <div class="text-[0.62rem] font-medium mt-px text-[#555555]">{{ ($totalLocal + $totalAbroad) > 0 ? round($totalAbroad/($totalLocal+$totalAbroad)*100) : 0 }}% of employed</div>
+            </div>
+        </div>
 
     </div>
-</div>
 
-</div>{{-- end page container --}}
+    {{-- ── ROW 1 — Status / Location / Relevance / Unemployed Reason ── --}}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0"
+         wire:loading.class="{{ $wireFade }}"
+         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
 
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     COMPARE FULLSCREEN MODAL
-══════════════════════════════════════════════════════════════════════════════ --}}
+        <div class="{{ $chartCard }} cursor-pointer transition-shadow duration-150 hover:border-[#e9d5ff] hover:shadow-[0_4px_18px_rgba(122,63,145,0.12)] group" title="Click a segment to view alumni">
+            <div class="{{ $chartHead }} group-hover:bg-[#f5effc]">
+                <div class="flex items-center gap-2">
+                    <div class="{{ $chartDot }}"></div>
+                    <span class="{{ $chartTtl }}">Employment Status</span>
+                </div>
+                <i class="fa-solid fa-arrow-pointer text-xs text-[#999999] opacity-50"></i>
+            </div>
+            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+                <canvas id="admChartStatus"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-[#e879f9] flex-shrink-0"></div>
+                    <span class="{{ $chartTtl }}">Work Location</span>
+                </div>
+            </div>
+            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+                <canvas id="admChartLocation"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }} cursor-pointer transition-shadow duration-150 hover:border-[#e9d5ff] hover:shadow-[0_4px_18px_rgba(122,63,145,0.12)] group" title="Click green for Related only">
+            <div class="{{ $chartHead }} group-hover:bg-[#f5effc]">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></div>
+                    <span class="{{ $chartTtl }}">Job-Course Relevance</span>
+                </div>
+                <i class="fa-solid fa-arrow-pointer text-xs text-[#999999] opacity-50"></i>
+            </div>
+            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+                <canvas id="admChartRelevance"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></div>
+                    <span class="{{ $chartTtl }}">Unemployed — Why?</span>
+                </div>
+            </div>
+            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
+                <canvas id="admChartUnemployed"></canvas>
+                <div id="admChartUnemployedNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-circle-info text-[1.8rem] opacity-25"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No unemployment data yet</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    {{-- ── ROW 2 — Emp Type / Career Path / Education / Top Courses ── --}}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0"
+         wire:loading.class="{{ $wireFade }}"
+         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0"></div>
+                    <span class="{{ $chartTtl }}">Employment Type</span>
+                </div>
+            </div>
+            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+                <canvas id="admChartEmpType"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-teal-500 flex-shrink-0"></div>
+                    <span class="{{ $chartTtl }}">Career Path Labels</span>
+                </div>
+            </div>
+            <div class="p-4" style="height:220px;" wire:ignore>
+                <canvas id="admChartCareerPath"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+                    <span class="{{ $chartTtl }}">Further Education</span>
+                </div>
+            </div>
+            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+                <canvas id="admChartEduStatus"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="{{ $chartDot }}"></div>
+                    <span class="{{ $chartTtl }}">Top Courses (Employed)</span>
+                </div>
+            </div>
+            <div class="p-4" style="height:220px;" wire:ignore>
+                <canvas id="admChartCourse"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    {{-- ── ROW 3 — By Batch + By College ── --}}
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-shrink-0"
+         wire:loading.class="{{ $wireFade }}"
+         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></div>
+                    <div>
+                        <div class="{{ $chartTtl }}">Employment by Batch Year</div>
+                        <div class="{{ $chartSub }}">Stacked across all years</div>
+                    </div>
+                </div>
+                <div id="admBatchNavControls" class="flex items-center gap-1.5" style="display:none!important;">
+                    <button id="admBatchPrev"
+                            class="w-7 h-7 rounded-lg border border-gray-200 bg-white flex items-center justify-center text-xs transition disabled:opacity-30 disabled:cursor-not-allowed text-[#7a3f91]">
+                        <i class="fa-solid fa-chevron-left text-[0.6rem]"></i>
+                    </button>
+                    <span id="admBatchPageInfo" class="text-xs font-semibold text-[#666666] whitespace-nowrap min-w-[36px] text-center"></span>
+                    <button id="admBatchNext"
+                            class="w-7 h-7 rounded-lg border border-gray-200 bg-white flex items-center justify-center text-xs transition disabled:opacity-30 disabled:cursor-not-allowed text-[#7a3f91]">
+                        <i class="fa-solid fa-chevron-right text-[0.6rem]"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-4" style="height:270px;" wire:ignore>
+                <canvas id="admChartBatch"></canvas>
+            </div>
+        </div>
+
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-cyan-500 flex-shrink-0"></div>
+                    <div>
+                        <div class="{{ $chartTtl }}">Employment by College</div>
+                        <div class="{{ $chartSub }}">Across all departments</div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4" style="height:270px;" wire:ignore>
+                <canvas id="admChartCollege"></canvas>
+            </div>
+        </div>
+
+    </div>
+
+    {{-- ── INSIGHTS / RANKINGS ── --}}
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-shrink-0"
+         wire:loading.class="{{ $wireFade }}"
+         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+
+        @php
+            $allColleges = collect($colleges)->map(function($col) {
+                $codes    = DB::table('courses')->where('college',$col)->pluck('code');
+                $total    = DB::table('alumni')->whereNull('deleted_at')->whereIn('course_code',$codes)->count();
+                $employed = DB::table('alumni as a')
+                    ->join('employment_trackings as et','a.id','=','et.alumni_id')
+                    ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
+                    ->whereIn('a.course_code',$codes)
+                    ->whereIn('et.employment_status',['employed','self_employed'])->count();
+                return ['name'=>$col,'total'=>$total,'employed'=>$employed,'rate'=>$total>0?round($employed/$total*100):0];
+            })->sortByDesc('rate')->values();
+
+            $topCourses = DB::table('alumni as a')
+                ->join('employment_trackings as et','a.id','=','et.alumni_id')
+                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
+                ->whereIn('et.employment_status',['employed','self_employed'])
+                ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
+                ->groupBy('a.course_code')->orderByDesc('cnt')->limit(5)->get();
+
+            $topBatches = DB::table('alumni as a')
+                ->join('employment_trackings as et','a.id','=','et.alumni_id')
+                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
+                ->whereIn('et.employment_status',['employed','self_employed'])
+                ->select('a.batch', DB::raw('COUNT(*) as cnt'))
+                ->groupBy('a.batch')->orderByDesc('cnt')->limit(5)->get();
+        @endphp
+
+        {{-- College Employment Rate --}}
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="{{ $chartDot }}"></div>
+                    <div>
+                        <div class="{{ $chartTtl }}">Colleges — Employment Rate</div>
+                        <div class="{{ $chartSub }}">Highest rate first</div>
+                    </div>
+                </div>
+                <i class="fa-solid fa-trophy text-sm text-amber-500"></i>
+            </div>
+            <div class="p-4 space-y-0">
+                @forelse($allColleges->take(6) as $i => $col)
+                @php
+                    $medals    = ['🥇','🥈','🥉'];
+                    $medal     = $medals[$i] ?? null;
+                    $pct       = $col['rate'];
+                    $fillColor = $pct >= 70 ? 'bg-emerald-500' : ($pct >= 40 ? 'bg-amber-500' : 'bg-red-500');
+                    $fillText  = $pct >= 70 ? 'text-emerald-500' : ($pct >= 40 ? 'text-amber-500' : 'text-red-500');
+                    $rankBg    = $i===0 ? 'bg-amber-100' : ($i===1 ? 'bg-gray-100' : ($i===2 ? 'bg-orange-100' : 'bg-gray-50'));
+                    $rankTx    = $i===0 ? 'text-amber-700' : ($i===1 ? 'text-gray-500' : 'text-orange-700');
+                @endphp
+                <div class="{{ $rankRow }}">
+                    <div class="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[0.72rem] font-semibold flex-shrink-0 {{ $rankBg }} {{ $rankTx }}">
+                        {{ $medal ?? ($i+1) }}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-semibold truncate text-[#333333]">{{ $col['name'] }}</p>
+                        <div class="{{ $progTrack }}"><div class="{{ $progFill }} {{ $fillColor }}" style="width:{{ $pct }}%;"></div></div>
+                    </div>
+                    <span class="text-xs font-semibold flex-shrink-0 ml-2 {{ $fillText }}">{{ $pct }}%</span>
+                </div>
+                @empty
+                    <p class="text-sm text-center py-6 text-[#666666]">No college data available.</p>
+                @endforelse
+            </div>
+        </div>
+
+        {{-- Top Courses --}}
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+                    <div>
+                        <div class="{{ $chartTtl }}">Top Courses by Employed</div>
+                        <div class="{{ $chartSub }}">Most alumni employed</div>
+                    </div>
+                </div>
+                <i class="fa-solid fa-graduation-cap text-sm text-blue-500"></i>
+            </div>
+            <div class="p-4 space-y-0">
+                @php $maxCourse = $topCourses->max('cnt') ?: 1; @endphp
+                @forelse($topCourses as $i => $c)
+                <div class="{{ $rankRow }}">
+                    <div class="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[0.72rem] font-semibold flex-shrink-0 bg-purple-100 text-[#7a3f91]">{{ $i+1 }}</div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-semibold text-[#333333]">{{ $c->course_code }}</p>
+                        <div class="{{ $progTrack }}"><div class="{{ $progFill }} bg-[#7a3f91]" style="width:{{ round($c->cnt/$maxCourse*100) }}%;"></div></div>
+                    </div>
+                    <span class="text-xs font-semibold flex-shrink-0 ml-2 text-[#7a3f91]">{{ $c->cnt }}</span>
+                </div>
+                @empty
+                    <p class="text-sm text-center py-6 text-[#666666]">No course data available.</p>
+                @endforelse
+            </div>
+        </div>
+
+        {{-- Top Batches --}}
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
+                <div class="flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></div>
+                    <div>
+                        <div class="{{ $chartTtl }}">Top Batches by Employed</div>
+                        <div class="{{ $chartSub }}">Most alumni working</div>
+                    </div>
+                </div>
+                <i class="fa-solid fa-calendar-check text-sm text-amber-500"></i>
+            </div>
+            <div class="p-4 space-y-0">
+                @php $maxBatch = $topBatches->max('cnt') ?: 1; @endphp
+                @forelse($topBatches as $i => $b)
+                <div class="{{ $rankRow }}">
+                    <div class="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[0.72rem] font-semibold flex-shrink-0 bg-amber-100 text-amber-700">{{ $i+1 }}</div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-semibold text-[#333333]">Batch {{ $b->batch }}</p>
+                        <div class="{{ $progTrack }}"><div class="{{ $progFill }} bg-amber-500" style="width:{{ round($b->cnt/$maxBatch*100) }}%;"></div></div>
+                    </div>
+                    <span class="text-xs font-semibold flex-shrink-0 ml-2 text-amber-600">{{ $b->cnt }}</span>
+                </div>
+                @empty
+                    <p class="text-sm text-center py-6 text-[#666666]">No batch data available.</p>
+                @endforelse
+            </div>
+        </div>
+
+    </div>
+
+</div>{{-- /main layout --}}
+
+{{-- ══ COMPARE FULLSCREEN MODAL ══ --}}
 @if($compareFullscreen)
-<div class="compare-fs-overlay" @keydown.escape.window="$wire.toggleCompareFullscreen()">
-    <div class="compare-fs-panel">
-        <div class="compare-fs-head">
-            <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(255,255,255,.18);">
-                <i class="fa-solid fa-code-compare text-white text-sm"></i>
+<div class="fixed inset-0 z-[60] bg-[rgba(27,6,46,0.55)] backdrop-blur-md flex items-center justify-center p-4 animate-[admFadeIn_0.2s_ease_both]"
+     @keydown.escape.window="$wire.toggleCompareFullscreen()">
+    <div class="bg-white rounded-[20px] w-full max-w-[960px] max-h-[94vh] flex flex-col overflow-hidden shadow-[0_24px_80px_rgba(74,25,110,0.22)] animate-[admSlideUp_0.22s_cubic-bezier(0.4,0,0.2,1)_both]">
+
+        {{-- Header --}}
+        <div class="bg-gradient-to-br from-[#7a3f91] to-[#5c2d6e] px-6 py-[18px] flex items-center gap-3 flex-shrink-0">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/[0.18]">
+                <i class="fa-solid fa-code-compare text-white text-base"></i>
             </div>
             <div class="flex-1 min-w-0">
                 <p class="text-base font-semibold text-white leading-tight">Compare Tool</p>
@@ -1499,51 +1144,56 @@ new class extends Component {
             <div class="flex items-center gap-2 flex-shrink-0">
                 @if($compareA && $compareB)
                 <button wire:click="resetCompare"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition"
-                        style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.25);">
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-white/15 text-white border border-white/25">
                     <i class="fa-solid fa-rotate-left text-xs"></i> Reset
                 </button>
                 @endif
                 <button wire:click="toggleCompareFullscreen"
-                        class="w-9 h-9 rounded-xl flex items-center justify-center transition"
-                        style="background:rgba(255,255,255,.12);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.18);"
-                        title="Close fullscreen">
-                    <i class="fa-solid fa-compress text-sm"></i>
+                        class="w-9 h-9 rounded-xl flex items-center justify-center transition bg-white/[0.12] text-white/80 border border-white/20">
+                    <i class="fa-solid fa-xmark text-base"></i>
                 </button>
             </div>
         </div>
 
-        <div class="compare-fs-body">
+        {{-- Body --}}
+        <div class="flex-1 overflow-y-auto p-6 [&::-webkit-scrollbar]:w-[5px] [&::-webkit-scrollbar-thumb]:bg-[#d4b8e8] [&::-webkit-scrollbar-thumb]:rounded-full">
+
+            {{-- Mode pills --}}
             <div class="flex flex-wrap gap-2 mb-5">
-                <label class="mode-pill {{ $compareMode==='college' ? 'active' : '' }}">
+                <label class="{{ $modePillBase }} {{ $compareMode==='college' ? $modePillActive : '' }}">
                     <input wire:model.live="compareMode" type="radio" value="college" class="sr-only">
                     <i class="fa-solid fa-building-columns text-xs"></i> By College
                 </label>
-                <label class="mode-pill {{ $compareMode==='course' ? 'active' : '' }}">
+                <label class="{{ $modePillBase }} {{ $compareMode==='course' ? $modePillActive : '' }}">
                     <input wire:model.live="compareMode" type="radio" value="course" class="sr-only">
                     <i class="fa-solid fa-book text-xs"></i> By Course
                 </label>
-                <label class="mode-pill {{ $compareMode==='batch' ? 'active' : '' }}">
+                <label class="{{ $modePillBase }} {{ $compareMode==='batch' ? $modePillActive : '' }}">
                     <input wire:model.live="compareMode" type="radio" value="batch" class="sr-only">
                     <i class="fa-solid fa-calendar text-xs"></i> By Batch Year
                 </label>
             </div>
 
-            <div class="flex flex-wrap items-center gap-3 mb-5 p-4 rounded-2xl" style="background:#f9f7fc;border:1.5px solid var(--PM);">
+            {{-- Entity selectors --}}
+            <div class="flex flex-wrap items-center gap-3 mb-6 p-4 rounded-2xl bg-[#f9f7fc] border-[1.5px] border-purple-200">
                 <div class="flex-1 min-w-[160px]">
-                    <p class="f-label mb-1.5"><i class="fa-solid fa-a text-xs mr-1" style="color:var(--P);"></i> Entity A</p>
-                    <select wire:model.live="compareA" class="f-select w-full">
-                        <option value="">Select</option>
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-1.5 text-[#333333]">
+                        <i class="fa-solid fa-a text-xs mr-1 text-[#7a3f91]"></i> Entity A
+                    </p>
+                    <select wire:model.live="compareA" style="{{ $selectArrow }}" class="{{ $selectBase }} w-full">
+                        <option value="">Select…</option>
                         @foreach($compareOptions as $opt)
                             <option value="{{ $opt }}">{{ $opt }}</option>
                         @endforeach
                     </select>
                 </div>
-                <div class="vs-badge mt-5">VS</div>
+                <div class="w-9 h-9 rounded-full bg-[#7a3f91] text-white text-[0.75rem] font-bold flex items-center justify-center flex-shrink-0 shadow-[0_2px_10px_rgba(122,63,145,0.35)] mt-5">VS</div>
                 <div class="flex-1 min-w-[160px]">
-                    <p class="f-label mb-1.5"><i class="fa-solid fa-b text-xs mr-1" style="color:#3b82f6;"></i> Entity B</p>
-                    <select wire:model.live="compareB" class="f-select w-full">
-                        <option value="">Select</option>
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-1.5 text-[#333333]">
+                        <i class="fa-solid fa-b text-xs mr-1 text-blue-500"></i> Entity B
+                    </p>
+                    <select wire:model.live="compareB" style="{{ $selectArrow }}" class="{{ $selectBase }} w-full">
+                        <option value="">Select…</option>
                         @foreach($compareOptions as $opt)
                             @if($opt !== $compareA)
                                 <option value="{{ $opt }}">{{ $opt }}</option>
@@ -1561,71 +1211,73 @@ new class extends Component {
                 $dAFs     = $cmpFs['dataA'] ?? [];
                 $dBFs     = $cmpFs['dataB'] ?? [];
                 $catsFs   = $cmpFs['categories'] ?? [];
-                $catIconsFs  = ['fa-briefcase','fa-store','fa-circle-pause','fa-house','fa-plane-departure','fa-graduation-cap'];
-                $catColorsFs = ['#10b981','#3b82f6','#f59e0b','#14b8a6','#f97316','#7a3f91'];
+                $catIconsFs = ['fa-briefcase','fa-store','fa-circle-pause','fa-house','fa-plane-departure','fa-graduation-cap'];
             @endphp
 
-            <div class="grid grid-cols-2 gap-4 mb-5 p-4 rounded-2xl" style="background:#f4f3f8;">
-                <div class="text-center p-3 bg-white rounded-xl border" style="border-color:var(--PM);">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-1" style="color:var(--P);">{{ $cmpFs['labelA'] ?? '' }}</p>
-                    <p class="text-3xl font-black" style="color:var(--ink);">{{ number_format($totalAFs) }}</p>
-                    <p class="text-xs mt-0.5" style="color:var(--muted);">total alumni</p>
+            {{-- Totals --}}
+            <div class="grid grid-cols-2 gap-4 mb-6 p-4 rounded-2xl bg-[#f4f3f8]">
+                <div class="text-center p-3 bg-white rounded-xl border border-purple-200">
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-1 text-[#7a3f91]">{{ $cmpFs['labelA'] ?? '' }}</p>
+                    <p class="text-3xl font-black text-[#333333]">{{ number_format($totalAFs) }}</p>
+                    <p class="text-xs mt-0.5 text-[#666666]">total alumni</p>
                 </div>
-                <div class="text-center p-3 bg-white rounded-xl border" style="border-color:#bfdbfe;">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-1" style="color:#3b82f6;">{{ $cmpFs['labelB'] ?? '' }}</p>
-                    <p class="text-3xl font-black" style="color:var(--ink);">{{ number_format($totalBFs) }}</p>
-                    <p class="text-xs mt-0.5" style="color:var(--muted);">total alumni</p>
+                <div class="text-center p-3 bg-white rounded-xl border border-blue-200">
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-1 text-blue-500">{{ $cmpFs['labelB'] ?? '' }}</p>
+                    <p class="text-3xl font-black text-[#333333]">{{ number_format($totalBFs) }}</p>
+                    <p class="text-xs mt-0.5 text-[#666666]">total alumni</p>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+            {{-- Category breakdown --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
                 @foreach($catsFs as $idx => $cat)
                 @php
-                    $vAFs   = $dAFs[$idx] ?? 0;
-                    $vBFs   = $dBFs[$idx] ?? 0;
-                    $maxVFs = max($vAFs, $vBFs, 1);
-                    $pctAFs = round($vAFs / $maxVFs * 100);
-                    $pctBFs = round($vBFs / $maxVFs * 100);
-                    $winFs  = $vAFs > $vBFs ? 'A' : ($vBFs > $vAFs ? 'B' : null);
-                    $colorFs = $catColorsFs[$idx] ?? '#7a3f91';
-                    $iconFs  = $catIconsFs[$idx] ?? 'fa-circle';
+                    $vAFs    = $dAFs[$idx] ?? 0;
+                    $vBFs    = $dBFs[$idx] ?? 0;
+                    $maxVFs  = max($vAFs, $vBFs, 1);
+                    $pctAFs  = round($vAFs / $maxVFs * 100);
+                    $pctBFs  = round($vBFs / $maxVFs * 100);
+                    $winFs   = $vAFs > $vBFs ? 'A' : ($vBFs > $vAFs ? 'B' : null);
+                    $iconBgFs = $catIconBg[$idx] ?? 'bg-purple-100';
+                    $iconTxFs = $catIconTx[$idx] ?? 'text-[#7a3f91]';
+                    $fillBgFs = $catFillBg[$idx] ?? 'bg-[#7a3f91]';
+                    $iconFs   = $catIconsFs[$idx] ?? 'fa-circle';
                 @endphp
-                <div class="p-4 rounded-xl border" style="border-color:#ede9fe;background:#faf7ff;">
+                <div class="p-4 rounded-xl border border-purple-100 bg-[#faf7ff]">
                     <div class="flex items-center gap-2 mb-3">
-                        <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                             style="background:{{ $colorFs }}18;color:{{ $colorFs }};">
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 {{ $iconBgFs }} {{ $iconTxFs }}">
                             <i class="fa-solid {{ $iconFs }} text-xs"></i>
                         </div>
-                        <span class="text-sm font-semibold flex-1" style="color:var(--ink);">{{ $cat }}</span>
+                        <span class="text-sm font-semibold flex-1 text-[#333333]">{{ $cat }}</span>
                         @if($winFs === 'A')
-                            <span class="insight-pill text-xs" style="color:var(--P);background:var(--PL);border-color:var(--PM);">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-purple-100 text-[#7a3f91] border-purple-200">
                                 <i class="fa-solid fa-chevron-up text-[9px]"></i> {{ $cmpFs['labelA'] ?? 'A' }}
                             </span>
                         @elseif($winFs === 'B')
-                            <span class="insight-pill text-xs" style="color:#2563eb;background:#dbeafe;border-color:#bfdbfe;">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-blue-100 text-blue-600 border-blue-200">
                                 <i class="fa-solid fa-chevron-up text-[9px]"></i> {{ $cmpFs['labelB'] ?? 'B' }}
                             </span>
                         @else
-                            <span class="insight-pill text-xs" style="color:#6b7280;background:#f3f4f6;border-color:#e5e7eb;">Tied</span>
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-gray-100 text-gray-500 border-gray-200">Tied</span>
                         @endif
                     </div>
                     <div class="space-y-2">
                         <div>
                             <div class="flex justify-between mb-1">
-                                <span class="text-xs font-semibold" style="color:var(--P);">{{ $cmpFs['labelA'] ?? 'A' }}</span>
-                                <span class="text-sm font-semibold" style="color:var(--ink);">{{ $vAFs }}</span>
+                                <span class="text-xs font-semibold text-[#7a3f91]">{{ $cmpFs['labelA'] ?? 'A' }}</span>
+                                <span class="text-sm font-semibold text-[#333333]">{{ $vAFs }}</span>
                             </div>
-                            <div class="prog" style="height:7px;">
-                                <div class="prog-fill" style="width:{{ $pctAFs }}%;background:{{ $colorFs }};height:7px;border-radius:99px;"></div>
+                            <div class="{{ $progTrack }}" style="height:7px;">
+                                <div class="{{ $progFill }} {{ $fillBgFs }}" style="width:{{ $pctAFs }}%;height:7px;border-radius:99px;"></div>
                             </div>
                         </div>
                         <div>
                             <div class="flex justify-between mb-1">
-                                <span class="text-xs font-semibold" style="color:#3b82f6;">{{ $cmpFs['labelB'] ?? 'B' }}</span>
-                                <span class="text-sm font-semibold" style="color:var(--ink);">{{ $vBFs }}</span>
+                                <span class="text-xs font-semibold text-blue-500">{{ $cmpFs['labelB'] ?? 'B' }}</span>
+                                <span class="text-sm font-semibold text-[#333333]">{{ $vBFs }}</span>
                             </div>
-                            <div class="prog" style="height:7px;">
-                                <div class="prog-fill" style="width:{{ $pctBFs }}%;background:{{ $colorFs }};opacity:.45;height:7px;border-radius:99px;"></div>
+                            <div class="{{ $progTrack }}" style="height:7px;">
+                                <div class="{{ $progFill }} {{ $fillBgFs }} opacity-45" style="width:{{ $pctBFs }}%;height:7px;border-radius:99px;"></div>
                             </div>
                         </div>
                     </div>
@@ -1633,40 +1285,34 @@ new class extends Component {
                 @endforeach
             </div>
 
+            {{-- Chart --}}
             <div wire:ignore style="height:280px;">
-                <canvas id="chartCompareFs"></canvas>
+                <canvas id="admChartCompareFs"></canvas>
             </div>
 
-            @elseif($compareA || $compareB)
-            <div class="flex flex-col items-center justify-center py-16" style="color:var(--muted);">
-                <i class="fa-solid fa-arrow-right-arrow-left text-4xl mb-3 opacity-30"></i>
-                <p class="text-sm font-semibold">Select both Entity A and Entity B to compare.</p>
-            </div>
             @else
-            <div class="flex flex-col items-center justify-center py-16" style="color:var(--muted);">
-                <i class="fa-solid fa-code-compare text-4xl mb-3 opacity-20"></i>
+            <div class="flex flex-col items-center justify-center py-20 text-[#666666]">
+                <i class="fa-solid fa-code-compare text-5xl mb-4 opacity-20"></i>
                 <p class="text-base font-semibold">Choose two {{ $compareMode === 'college' ? 'colleges' : ($compareMode === 'course' ? 'courses' : 'batch years') }} above to compare.</p>
+                <p class="text-sm mt-1 opacity-60">Select Entity A and Entity B from the dropdowns above.</p>
             </div>
             @endif
-        </div>
-    </div>
+
+        </div>{{-- /fs-body --}}
+    </div>{{-- /fs-panel --}}
 </div>
 @endif
 
-{{-- ═══════════════════════════════════════════════════════════════════════════
-     EMPLOYMENT DETAIL MODAL
-══════════════════════════════════════════════════════════════════════════════ --}}
+{{-- ══ EMPLOYMENT DETAIL MODAL ══ --}}
 @if($modalOpen)
-<div class="emp-modal-overlay"
+<div class="fixed inset-0 z-[80] bg-[rgba(18,4,35,0.62)] backdrop-blur-lg flex items-center justify-center p-5 animate-[admFadeIn_0.18s_ease_both]"
      wire:click.self="closeModal"
      @keydown.escape.window="$wire.closeModal()">
+    <div class="bg-white rounded-[22px] w-full max-w-[1040px] h-[90vh] max-h-[90vh] flex flex-col overflow-hidden shadow-[0_30px_90px_rgba(60,15,100,0.28)] animate-[admSlideUp_0.2s_cubic-bezier(0.4,0,0.2,1)_both]">
 
-    <div class="emp-modal-panel">
-
-        <div class="emp-modal-hd">
+        <div class="bg-gradient-to-br from-[#7a3f91] to-[#5c2d6e] px-6 py-[18px] flex items-center justify-between gap-3 flex-shrink-0">
             <div class="flex items-center gap-3 min-w-0">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                     style="background:rgba(255,255,255,.18);">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/[0.18]">
                     @php
                         $mIcon = match($modalFilter) {
                             'employed'      => 'fa-briefcase',
@@ -1677,6 +1323,8 @@ new class extends Component {
                             'yes_partial'   => 'fa-adjust',
                             'partially'     => 'fa-adjust',
                             'no'            => 'fa-times-circle',
+                            'local'         => 'fa-house',
+                            'abroad'        => 'fa-plane-departure',
                             default         => 'fa-users',
                         };
                     @endphp
@@ -1695,139 +1343,137 @@ new class extends Component {
                     </p>
                 </div>
             </div>
-            <button wire:click="closeModal" class="emp-modal-close">
+            <button wire:click="closeModal" class="inline-flex items-center gap-1.5 px-[18px] py-2 rounded-xl bg-white/15 text-white text-[0.82rem] font-semibold border border-white/25 cursor-pointer flex-shrink-0 transition-colors duration-150 hover:bg-white/25">
                 <i class="fa-solid fa-xmark text-sm"></i> Close
             </button>
         </div>
 
-        <div class="emp-modal-filters">
-            <div class="emp-modal-search-wrap">
-                <i class="fa-solid fa-magnifying-glass"></i>
+        <div class="px-6 py-3 border-b border-[#E8E0F0] flex items-center gap-2.5 flex-wrap flex-shrink-0 bg-[#faf7fc]">
+            <div class="relative flex-1 min-w-[200px]">
+                <i class="fa-solid fa-magnifying-glass absolute left-[11px] top-1/2 -translate-y-1/2 text-[0.75rem] text-[#666666] pointer-events-none"></i>
                 <input wire:model.live.debounce.350ms="modalSearch"
                        type="text"
                        placeholder="Search name, ID, course, company…"
-                       class="emp-modal-search w-full">
+                       class="w-full pl-[34px] pr-3 py-2 border-[1.5px] border-[#E8E0F0] rounded-[10px] text-[0.85rem] font-medium text-[#333333] bg-white outline-none transition-all duration-150 focus:border-[#7a3f91] focus:ring-[3px] focus:ring-[#7a3f91]/10">
             </div>
-            <select wire:model.live="modalBatch" class="f-select" style="min-width:150px;">
+            <select wire:model.live="modalBatch" style="{{ $selectArrow }}" class="{{ $selectBase }}" style="min-width:150px;{{ $selectArrow }}">
                 <option value="">All Batch Years</option>
                 @foreach($batches as $b)
                     <option value="{{ $b }}">Batch {{ $b }}</option>
                 @endforeach
             </select>
             @if($modalBatch)
-                <button wire:click="$set('modalBatch','')" class="text-xs font-semibold px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-600 transition hover:bg-red-100">
-                    <i class="fa-solid fa-rotate-left text-xs mr-1"></i>Clear Batch
+                <button wire:click="$set('modalBatch','')"
+                        class="text-xs font-semibold px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-600 transition hover:bg-red-100">
+                    <i class="fa-solid fa-rotate-left text-xs mr-1"></i>Clear
                 </button>
             @endif
         </div>
 
-        <div class="emp-modal-body"
-             wire:loading.class="wire-loading"
+        <div class="flex-1 overflow-y-auto"
+             wire:loading.class="{{ $wireFade }}"
              wire:target="openEmploymentModal,updatedModalBatch,updatedModalSearch">
 
             @if(count($modalAlumni) > 0)
-            <table class="emp-modal-table">
+            <table class="w-full border-collapse">
                 <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Alumni</th>
-                        <th>Status</th>
-                        <th>Company / Position</th>
-                        <th>Location</th>
-                        <th>Relevance</th>
-                        <th style="text-align:right;">Batch</th>
+                    <tr class="bg-[#f8f5fc] border-b-[1.5px] border-[#E8E0F0] sticky top-0 z-[2]">
+                        <th class="{{ $thBase }}">#</th>
+                        <th class="{{ $thBase }}">Alumni</th>
+                        <th class="{{ $thBase }}">Status</th>
+                        <th class="{{ $thBase }}">Company</th>
+                        <th class="{{ $thBase }}">Location</th>
+                        <th class="{{ $thBase }}">Relevance</th>
+                        <th class="{{ $thBase }}">Batch</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach($modalAlumni as $i => $alum)
                     @php
                         $sk  = $alum['status_key'];
-                        $sc  = match($sk) { 'employed' => '#059669', 'self_employed' => '#7a3f91', 'unemployed' => '#d97706', default => '#9ca3af' };
-                        $sbg = match($sk) { 'employed' => '#d1fae5', 'self_employed' => '#f3e8ff', 'unemployed' => '#fef3c7', default => '#f3f4f6' };
-                        $si  = match($sk) { 'employed' => 'fa-briefcase', 'self_employed' => 'fa-store', 'unemployed' => 'fa-circle-pause', default => 'fa-circle-question' };
+                        $sc  = match($sk) { 'employed'=>'text-emerald-600','self_employed'=>'text-[#7a3f91]','unemployed'=>'text-amber-600', default=>'text-gray-400' };
+                        $sbg = match($sk) { 'employed'=>'bg-emerald-100','self_employed'=>'bg-purple-100','unemployed'=>'bg-amber-100', default=>'bg-gray-100' };
+                        $sbd = match($sk) { 'employed'=>'border-emerald-600/30','self_employed'=>'border-[#7a3f91]/30','unemployed'=>'border-amber-600/30', default=>'border-gray-400/30' };
+                        $si  = match($sk) { 'employed'=>'fa-briefcase','self_employed'=>'fa-store','unemployed'=>'fa-circle-pause', default=>'fa-circle-question' };
                     @endphp
-                    <tr>
-                        <td>
-                            <span class="text-sm font-semibold" style="color:var(--muted);">
-                                {{ str_pad($i + 1, 2, '0', STR_PAD_LEFT) }}
-                            </span>
+                    <tr class="border-b border-[#f3f0f9] transition-colors duration-100 hover:bg-[#faf7ff]">
+                        <td class="{{ $tdBase }}">
+                            <span class="text-sm font-semibold text-[#666666]">{{ str_pad($i+1,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
-                        <td>
+                        <td class="{{ $tdBase }}">
                             <div class="flex items-center gap-2.5">
-                                <div class="alum-avatar">
-                                    <i class="fa-solid fa-user text-xs" style="color:var(--muted);"></i>
+                                <div class="w-[34px] h-[34px] rounded-full bg-[#f3f0f9] border-[1.5px] border-[#e4dff0] flex items-center justify-center flex-shrink-0">
+                                    <i class="fa-solid fa-user text-xs text-[#666666]"></i>
                                 </div>
                                 <div>
-                                    <p class="text-sm font-semibold" style="color:var(--ink);">{{ $alum['name'] }}</p>
-                                    <p class="text-xs font-normal" style="color:var(--muted);">{{ $alum['id_number'] }} &bull; {{ $alum['course'] }}</p>
+                                    <p class="text-sm font-semibold text-[#333333]">{{ $alum['name'] }}</p>
+                                    <p class="text-xs font-normal text-[#666666]">{{ $alum['id_number'] }} &bull; {{ $alum['course'] }}</p>
                                 </div>
                             </div>
                         </td>
-                        <td>
-                            <div class="status-pill" style="background:{{ $sbg }};color:{{ $sc }};border-color:{{ $sc }}30;">
+                        <td class="{{ $tdBase }}">
+                            <div class="{{ $statusPill }} {{ $sbg }} {{ $sc }} {{ $sbd }}">
                                 <i class="fa-solid {{ $si }} text-[9px]"></i>
                                 {{ $alum['status'] }}
                             </div>
                             @if($alum['type'])
-                                <p class="text-xs font-normal mt-1" style="color:var(--muted);">{{ $alum['type'] }}</p>
+                                <p class="text-xs font-normal mt-1 text-[#666666]">{{ $alum['type'] }}</p>
                             @endif
                         </td>
-                        <td>
+                        <td class="{{ $tdBase }}">
                             @if($alum['company'])
-                                <p class="text-sm font-semibold" style="color:var(--ink);">{{ $alum['company'] }}</p>
-                                @if($alum['position'])
-                                    <p class="text-xs font-normal" style="color:var(--muted);">{{ $alum['position'] }}</p>
-                                @endif
+                                <p class="text-sm font-semibold text-[#333333]">{{ $alum['company'] }}</p>
                             @else
-                                <span class="text-xs" style="color:var(--muted);">—</span>
+                                <span class="text-xs text-[#cccccc]">—</span>
                             @endif
                         </td>
-                        <td>
+                        <td class="{{ $tdBase }}">
                             @if($alum['location'])
-                                @php
-                                    $lc  = $alum['location'] === 'local' ? '#0d9488' : '#ea580c';
-                                    $lbg = $alum['location'] === 'local' ? '#ccfbf1' : '#ffedd5';
-                                    $li  = $alum['location'] === 'local' ? 'fa-house' : 'fa-plane-departure';
-                                    $ll  = $alum['location'] === 'local' ? 'Local' : 'Abroad';
-                                @endphp
-                                <div class="status-pill" style="background:{{ $lbg }};color:{{ $lc }};border-color:{{ $lc }}30;">
+                            @php
+                                $lc  = $alum['location']==='local' ? 'text-teal-600' : 'text-orange-600';
+                                $lbg = $alum['location']==='local' ? 'bg-teal-100'  : 'bg-orange-100';
+                                $lbd = $alum['location']==='local' ? 'border-teal-600/30' : 'border-orange-600/30';
+                                $li  = $alum['location']==='local' ? 'fa-house' : 'fa-plane-departure';
+                                $ll  = $alum['location']==='local' ? 'Local' : 'Abroad';
+                            @endphp
+                                <div class="{{ $statusPill }} {{ $lbg }} {{ $lc }} {{ $lbd }}">
                                     <i class="fa-solid {{ $li }} text-[9px]"></i> {{ $ll }}
                                 </div>
                             @else
-                                <span class="text-xs" style="color:var(--muted);">—</span>
+                                <span class="text-xs text-[#cccccc]">—</span>
                             @endif
                         </td>
-                        <td>
+                        <td class="{{ $tdBase }}">
                             @if($alum['relevance'])
-                                @php
-                                    $rel = $alum['relevance'];
-                                    $rc  = $rel === 'yes' ? '#059669' : ($rel === 'partially' ? '#d97706' : '#dc2626');
-                                    $rbg = $rel === 'yes' ? '#d1fae5' : ($rel === 'partially' ? '#fef3c7' : '#fee2e2');
-                                    $rl  = $rel === 'yes' ? 'Related' : ($rel === 'partially' ? 'Partial' : 'Not Rel.');
-                                    $ri  = $rel === 'yes' ? 'fa-circle-check' : ($rel === 'partially' ? 'fa-circle-half-stroke' : 'fa-circle-xmark');
-                                @endphp
-                                <div class="status-pill" style="background:{{ $rbg }};color:{{ $rc }};border-color:{{ $rc }}30;">
+                            @php
+                                $rel = $alum['relevance'];
+                                $rc  = $rel==='yes' ? 'text-emerald-600' : ($rel==='partially' ? 'text-amber-600' : 'text-red-600');
+                                $rbg = $rel==='yes' ? 'bg-emerald-100'  : ($rel==='partially' ? 'bg-amber-100'  : 'bg-red-100');
+                                $rbd = $rel==='yes' ? 'border-emerald-600/30' : ($rel==='partially' ? 'border-amber-600/30' : 'border-red-600/30');
+                                $rl  = $rel==='yes' ? 'Related' : ($rel==='partially' ? 'Partial' : 'Not Rel.');
+                                $ri  = $rel==='yes' ? 'fa-circle-check' : ($rel==='partially' ? 'fa-circle-half-stroke' : 'fa-circle-xmark');
+                            @endphp
+                                <div class="{{ $statusPill }} {{ $rbg }} {{ $rc }} {{ $rbd }}">
                                     <i class="fa-solid {{ $ri }} text-[9px]"></i> {{ $rl }}
                                 </div>
                             @else
-                                <span class="text-xs" style="color:var(--muted);">—</span>
+                                <span class="text-xs text-[#cccccc]">—</span>
                             @endif
                         </td>
-                        <td style="text-align:right;">
-                            <span class="text-sm font-semibold" style="color:var(--ink);">{{ $alum['batch'] }}</span>
+                        <td class="{{ $tdBase }}">
+                            <span class="text-sm font-semibold text-[#333333]">{{ $alum['batch'] }}</span>
                         </td>
                     </tr>
                     @endforeach
                 </tbody>
             </table>
             @else
-            <div class="flex flex-col items-center justify-center py-20" style="color:var(--muted);">
+            <div class="flex flex-col items-center justify-center py-20 text-[#666666]">
                 <i class="fa-solid fa-inbox text-5xl mb-4 opacity-20"></i>
                 <p class="text-sm font-semibold">No alumni found matching your criteria.</p>
                 @if($modalSearch || $modalBatch)
                     <button wire:click="$set('modalSearch',''); $set('modalBatch','')"
-                            class="mt-3 text-xs font-semibold px-4 py-2 rounded-xl border transition"
-                            style="border-color:var(--border);color:var(--P);">
+                            class="mt-3 text-xs font-semibold px-4 py-2 rounded-xl border border-[#E8E0F0] text-[#7a3f91] transition">
                         Clear filters
                     </button>
                 @endif
@@ -1839,7 +1485,7 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ══ CHART DATA BRIDGE ══════════════════════════════════════════════════════ --}}
+{{-- ══ CHART DATA BRIDGE ══ --}}
 <div id="__adm_emp_data" style="display:none"
      data-status="{{ $chartStatusData }}"
      data-location="{{ $chartLocationData }}"
@@ -1854,7 +1500,7 @@ new class extends Component {
      data-unemployed="{{ $chartUnemployedData }}">
 </div>
 
-{{-- ══ SCRIPT ══════════════════════════════════════════════════════════════════ --}}
+{{-- ══ CHART SCRIPT (unchanged — Chart.js colors are canvas config, not CSS) ══ --}}
 <script>
 (function(){
     'use strict';
@@ -1863,6 +1509,11 @@ new class extends Component {
     var batchIdx   = 0;
     var batchAll   = null;
     var registry   = {};
+
+    window.admDispatchModal = function(filterType, filter) {
+        if (filter === 'all') return;
+        if (window.Livewire) Livewire.dispatch('openEmploymentModal', { filterType: filterType, filter: filter });
+    };
 
     function loadChartJs(cb){
         if(window.Chart){ cb(); return; }
@@ -1892,23 +1543,17 @@ new class extends Component {
         } catch(e){ return null; }
     }
 
-    function kill(id){
-        if(registry[id]){ registry[id].destroy(); delete registry[id]; }
-    }
-
-    function allZero(arr){
-        return !arr || arr.every(function(v){ return !v || v === 0; });
-    }
+    function kill(id){ if(registry[id]){ registry[id].destroy(); delete registry[id]; } }
+    function allZero(arr){ return !arr || arr.every(function(v){ return !v || v===0; }); }
 
     function toggleNoData(canvasId, isEmpty){
         var noDataId = canvasId + 'NoData';
         var canvas   = document.getElementById(canvasId);
         var noData   = document.getElementById(noDataId);
-        if(canvas)  canvas.style.display = isEmpty ? 'none' : '';
-        if(noData)  noData.style.display = isEmpty ? 'flex' : 'none';
+        if(canvas) canvas.style.display = isEmpty ? 'none' : '';
+        if(noData) noData.style.display = isEmpty ? 'flex' : 'none';
     }
 
-    /* ── Donut ── */
     function donut(id, data, clickHandler){
         if(!data || !data.labels) return;
         var empty = allZero(data.data);
@@ -1916,104 +1561,61 @@ new class extends Component {
         if(empty){ kill(id); return; }
         var c = document.getElementById(id); if(!c) return;
         kill(id);
-
         var opts = {
             responsive: true, maintainAspectRatio: false, cutout: '66%',
             plugins: {
                 legend: {
-                    position: 'bottom',
-                    onClick: function(){},
-                    labels: { font: { size: 11, weight: '600' }, color: '#333', padding: 10, usePointStyle: true, pointStyleWidth: 8 }
+                    position: 'bottom', onClick: function(){},
+                    labels: { font:{size:11,weight:'600'}, color:'#333', padding:10, usePointStyle:true, pointStyleWidth:8 }
                 },
                 tooltip: { callbacks: { label: function(ctx){
-                    var t = ctx.dataset.data.reduce(function(a,b){ return a+b; }, 0);
-                    var p = t ? Math.round(ctx.parsed / t * 100) : 0;
-                    return ' ' + ctx.label + ': ' + ctx.parsed + ' (' + p + '%)';
+                    var t = ctx.dataset.data.reduce(function(a,b){ return a+b; },0);
+                    var p = t ? Math.round(ctx.parsed/t*100) : 0;
+                    return ' '+ctx.label+': '+ctx.parsed+' ('+p+'%)';
                 }}}
             }
         };
-
-        if(typeof clickHandler === 'function'){
-            opts.onClick = clickHandler;
-        }
-
+        if(typeof clickHandler === 'function') opts.onClick = clickHandler;
         registry[id] = new Chart(c, {
             type: 'doughnut',
-            data: {
-                labels: data.labels,
-                datasets: [{
-                    data: data.data,
-                    backgroundColor: data.colors,
-                    borderWidth: 2,
-                    borderColor: '#fff',
-                    hoverOffset: 8
-                }]
-            },
+            data: { labels: data.labels, datasets: [{ data: data.data, backgroundColor: data.colors, borderWidth:2, borderColor:'#fff', hoverOffset:8 }] },
             options: opts
         });
     }
 
-    /* ── Horizontal bar (e.g. top courses) ── */
     function hbar(id, data){
         if(!data || !data.labels) return;
         var c = document.getElementById(id); if(!c) return;
         kill(id);
         registry[id] = new Chart(c, {
             type: 'bar',
-            data: {
-                labels: data.labels,
-                datasets: [{
-                    label: 'Alumni', data: data.data,
-                    backgroundColor: 'rgba(122,63,145,.75)',
-                    borderColor: '#7a3f91', borderWidth: 1, borderRadius: 5
-                }]
-            },
+            data: { labels: data.labels, datasets: [{ label:'Alumni', data:data.data, backgroundColor:'rgba(122,63,145,.75)', borderColor:'#7a3f91', borderWidth:1, borderRadius:5 }] },
             options: {
-                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: function(ctx){ return ' ' + ctx.parsed.x + ' alumni'; }}}
-                },
+                indexAxis:'y', responsive:true, maintainAspectRatio:false,
+                plugins: { legend:{display:false}, tooltip:{callbacks:{label:function(ctx){ return ' '+ctx.parsed.x+' alumni'; }}} },
                 scales: {
-                    x: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11, weight: '600' }, color: '#9ca3af', precision: 0 }, beginAtZero: true },
-                    y: { grid: { display: false }, ticks: { font: { size: 11, weight: '600' }, color: '#333' }}
+                    x: { grid:{color:'#f3f4f6'}, ticks:{font:{size:11,weight:'600'},color:'#9ca3af',precision:0}, beginAtZero:true },
+                    y: { grid:{display:false}, ticks:{font:{size:11,weight:'600'},color:'#333'} }
                 }
             }
         });
     }
 
-    /* ── Polar area ── */
     function polar(id, data){
         if(!data || !data.labels) return;
         var c = document.getElementById(id); if(!c) return;
         kill(id);
         registry[id] = new Chart(c, {
             type: 'polarArea',
-            data: {
-                labels: data.labels,
-                datasets: [{
-                    data: data.data,
-                    backgroundColor: data.colors.map(function(x){ return x + 'cc'; }),
-                    borderColor: data.colors,
-                    borderWidth: 1.5
-                }]
-            },
+            data: { labels:data.labels, datasets:[{ data:data.data, backgroundColor:data.colors.map(function(x){ return x+'cc'; }), borderColor:data.colors, borderWidth:1.5 }] },
             options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        onClick: function(){},
-                        labels: { font: { size: 10, weight: '600' }, color: '#333', padding: 8, usePointStyle: true, pointStyleWidth: 7 }
-                    },
-                    tooltip: { callbacks: { label: function(ctx){ return ' ' + ctx.label + ': ' + ctx.parsed.r; }}}
-                },
-                scales: { r: { ticks: { display: false }, grid: { color: '#f3f4f6' }}}
+                responsive:true, maintainAspectRatio:false,
+                plugins: { legend:{ position:'bottom', onClick:function(){}, labels:{font:{size:10,weight:'600'},color:'#333',padding:8,usePointStyle:true,pointStyleWidth:7} }, tooltip:{callbacks:{label:function(ctx){ return ' '+ctx.label+': '+ctx.parsed.r; }}} },
+                scales: { r:{ ticks:{display:false}, grid:{color:'#f3f4f6'} } }
             }
         });
     }
 
-    /* ── Vertical stacked bar (for Batch chart) ── */
     function stackedBar(id, labels, employed, self_emp, unemployed){
         var c = document.getElementById(id); if(!c) return;
         if(registry[id]){
@@ -2026,38 +1628,23 @@ new class extends Component {
         }
         kill(id);
         registry[id] = new Chart(c, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    { label: 'Employed',      data: employed,   backgroundColor: '#10b981', borderRadius: 3, stack: 'a' },
-                    { label: 'Self-Employed', data: self_emp,   backgroundColor: '#3b82f6', borderRadius: 3, stack: 'a' },
-                    { label: 'Unemployed',    data: unemployed, backgroundColor: '#f59e0b', borderRadius: 3, stack: 'a' },
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, animation: { duration: 350 },
-                plugins: {
-                    legend: {
-                        position: 'top', align: 'end',
-                        onClick: function(){},
-                        labels: { font: { size: 11, weight: '600' }, color: '#333', padding: 12, usePointStyle: true }
-                    }
-                },
-                scales: {
-                    x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#666', maxRotation: 35 }},
-                    y: { stacked: true, grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 }, beginAtZero: true }
+            type:'bar',
+            data:{ labels:labels, datasets:[
+                { label:'Employed',      data:employed,   backgroundColor:'#10b981', borderRadius:3, stack:'a' },
+                { label:'Self-Employed', data:self_emp,   backgroundColor:'#3b82f6', borderRadius:3, stack:'a' },
+                { label:'Unemployed',    data:unemployed, backgroundColor:'#f59e0b', borderRadius:3, stack:'a' },
+            ]},
+            options:{
+                responsive:true, maintainAspectRatio:false, animation:{duration:350},
+                plugins:{ legend:{ position:'top', align:'end', onClick:function(){}, labels:{font:{size:11,weight:'600'},color:'#333',padding:12,usePointStyle:true} } },
+                scales:{
+                    x:{ stacked:true, grid:{display:false}, ticks:{font:{size:10,weight:'600'},color:'#666',maxRotation:35} },
+                    y:{ stacked:true, grid:{color:'#f3f4f6'}, ticks:{font:{size:10},color:'#9ca3af',precision:0}, beginAtZero:true }
                 }
             }
         });
     }
 
-    /*
-     * ════════════════════════════════════════════════════════════════════════
-     * FIX: stackedBarH — HORIZONTAL stacked bar for College chart
-     * Labels go on the Y-axis → no more sideways/diagonal text
-     * ════════════════════════════════════════════════════════════════════════
-     */
     function stackedBarH(id, labels, employed, self_emp, unemployed){
         var c = document.getElementById(id); if(!c) return;
         if(registry[id]){
@@ -2069,240 +1656,151 @@ new class extends Component {
             ch.update('active'); return;
         }
         kill(id);
-
-        /*
-         * Truncate long college names so they fit neatly on the Y-axis.
-         * Full name is still shown in the tooltip.
-         */
         var fullLabels = labels;
         var shortLabels = labels.map(function(l){
-            // Strip common "College of" prefix to save space
-            var s = l.replace(/^College of\s+/i, '').replace(/^College\s+/i, '');
-            return s.length > 22 ? s.slice(0, 20) + '…' : s;
+            var s = l.replace(/^College of\s+/i,'').replace(/^College\s+/i,'');
+            return s.length>22 ? s.slice(0,20)+'…' : s;
         });
-
         registry[id] = new Chart(c, {
-            type: 'bar',
-            data: {
-                labels: shortLabels,
-                datasets: [
-                    { label: 'Employed',      data: employed,   backgroundColor: '#10b981', borderRadius: 3, stack: 'a' },
-                    { label: 'Self-Employed', data: self_emp,   backgroundColor: '#3b82f6', borderRadius: 3, stack: 'a' },
-                    { label: 'Unemployed',    data: unemployed, backgroundColor: '#f59e0b', borderRadius: 3, stack: 'a' },
-                ]
-            },
-            options: {
-                /* KEY: indexAxis:'y' flips to horizontal — labels on Y-axis, values on X */
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 350 },
-                plugins: {
-                    legend: {
-                        position: 'top', align: 'end',
-                        onClick: function(){},
-                        labels: { font: { size: 11, weight: '600' }, color: '#333', padding: 12, usePointStyle: true }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            /* Show full college name in tooltip, not the truncated version */
-                            title: function(items){
-                                var idx = items[0].dataIndex;
-                                return fullLabels[idx] || shortLabels[idx];
-                            },
-                            label: function(ctx){
-                                return ' ' + ctx.dataset.label + ': ' + ctx.parsed.x;
-                            }
-                        }
-                    }
+            type:'bar',
+            data:{ labels:shortLabels, datasets:[
+                { label:'Employed',      data:employed,   backgroundColor:'#10b981', borderRadius:3, stack:'a' },
+                { label:'Self-Employed', data:self_emp,   backgroundColor:'#3b82f6', borderRadius:3, stack:'a' },
+                { label:'Unemployed',    data:unemployed, backgroundColor:'#f59e0b', borderRadius:3, stack:'a' },
+            ]},
+            options:{
+                indexAxis:'y', responsive:true, maintainAspectRatio:false, animation:{duration:350},
+                plugins:{
+                    legend:{ position:'top', align:'end', onClick:function(){}, labels:{font:{size:11,weight:'600'},color:'#333',padding:12,usePointStyle:true} },
+                    tooltip:{ callbacks:{
+                        title:function(items){ var idx=items[0].dataIndex; return fullLabels[idx]||shortLabels[idx]; },
+                        label:function(ctx){ return ' '+ctx.dataset.label+': '+ctx.parsed.x; }
+                    }}
                 },
-                scales: {
-                    /* X axis = values (numbers) */
-                    x: {
-                        stacked: true,
-                        grid: { color: '#f3f4f6' },
-                        ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 },
-                        beginAtZero: true
-                    },
-                    /* Y axis = category labels — no rotation needed, they're already upright */
-                    y: {
-                        stacked: true,
-                        grid: { display: false },
-                        ticks: {
-                            font: { size: 10, weight: '600' },
-                            color: '#333',
-                            /* Never rotate Y-axis labels */
-                            maxRotation: 0,
-                            minRotation: 0
-                        }
-                    }
+                scales:{
+                    x:{ stacked:true, grid:{color:'#f3f4f6'}, ticks:{font:{size:10},color:'#9ca3af',precision:0}, beginAtZero:true },
+                    y:{ stacked:true, grid:{display:false}, ticks:{font:{size:10,weight:'600'},color:'#333',maxRotation:0,minRotation:0} }
                 }
             }
         });
     }
 
-    /* ── Grouped bar (compare) ── */
     function groupedBar(id, data){
         if(!data || !data.labelA || !data.labelB) return;
         var c = document.getElementById(id); if(!c) return;
         kill(id);
         registry[id] = new Chart(c, {
-            type: 'bar',
-            data: {
-                labels: data.categories,
-                datasets: [
-                    { label: data.labelA, data: data.dataA, backgroundColor: 'rgba(122,63,145,.8)', borderColor: '#7a3f91', borderWidth: 1, borderRadius: 4 },
-                    { label: data.labelB, data: data.dataB, backgroundColor: 'rgba(59,130,246,.7)',  borderColor: '#3b82f6', borderWidth: 1, borderRadius: 4 },
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
-                plugins: {
-                    legend: {
-                        position: 'top', align: 'end',
-                        onClick: function(){},
-                        labels: { font: { size: 11, weight: '600' }, color: '#333', padding: 12, usePointStyle: true }
-                    }
-                },
-                scales: {
-                    x: { grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#333' }},
-                    y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 }, color: '#9ca3af', precision: 0 }, beginAtZero: true }
+            type:'bar',
+            data:{ labels:data.categories, datasets:[
+                { label:data.labelA, data:data.dataA, backgroundColor:'rgba(122,63,145,.8)', borderColor:'#7a3f91', borderWidth:1, borderRadius:4 },
+                { label:data.labelB, data:data.dataB, backgroundColor:'rgba(59,130,246,.7)',  borderColor:'#3b82f6', borderWidth:1, borderRadius:4 },
+            ]},
+            options:{
+                responsive:true, maintainAspectRatio:false, animation:{duration:300},
+                plugins:{ legend:{ position:'top', align:'end', onClick:function(){}, labels:{font:{size:11,weight:'600'},color:'#333',padding:12,usePointStyle:true} } },
+                scales:{
+                    x:{ grid:{display:false}, ticks:{font:{size:10,weight:'600'},color:'#333'} },
+                    y:{ grid:{color:'#f3f4f6'}, ticks:{font:{size:10},color:'#9ca3af',precision:0}, beginAtZero:true }
                 }
             }
         });
     }
 
-    /* ── Batch pagination helpers ── */
     function sliceBatch(data, start){
         var end = start + BATCH_PAGE;
-        return {
-            labels:     data.labels.slice(start, end),
-            employed:   data.employed.slice(start, end),
-            self_emp:   data.self_emp.slice(start, end),
-            unemployed: data.unemployed.slice(start, end)
-        };
+        return { labels:data.labels.slice(start,end), employed:data.employed.slice(start,end), self_emp:data.self_emp.slice(start,end), unemployed:data.unemployed.slice(start,end) };
     }
 
     function drawBatch(data, start){
         if(!data || !data.labels || !data.labels.length) return;
         var sl = sliceBatch(data, start);
-        stackedBar('chartBatch', sl.labels, sl.employed, sl.self_emp, sl.unemployed);
-        var total = data.labels.length, pages = Math.ceil(total / BATCH_PAGE), cur = Math.floor(start / BATCH_PAGE) + 1;
-        var nav  = document.getElementById('batchNavControls');
-        var prev = document.getElementById('batchPrev');
-        var next = document.getElementById('batchNext');
-        var info = document.getElementById('batchPageInfo');
-        if(nav && pages > 1){
-            nav.style.display = 'flex';
-            if(info) info.textContent = cur + ' / ' + pages;
-            if(prev) prev.disabled = (start <= 0);
-            if(next) next.disabled = (start + BATCH_PAGE >= total);
-        } else if(nav) { nav.style.display = 'none'; }
+        stackedBar('admChartBatch', sl.labels, sl.employed, sl.self_emp, sl.unemployed);
+        var total=data.labels.length, pages=Math.ceil(total/BATCH_PAGE), cur=Math.floor(start/BATCH_PAGE)+1;
+        var nav=document.getElementById('admBatchNavControls');
+        var prev=document.getElementById('admBatchPrev');
+        var next=document.getElementById('admBatchNext');
+        var info=document.getElementById('admBatchPageInfo');
+        if(nav && pages>1){
+            nav.style.display='flex';
+            if(info) info.textContent=cur+' / '+pages;
+            if(prev) prev.disabled=(start<=0);
+            if(next) next.disabled=(start+BATCH_PAGE>=total);
+        } else if(nav){ nav.style.display='none'; }
     }
 
     function bindBatchNav(){
-        var prev = document.getElementById('batchPrev');
-        var next = document.getElementById('batchNext');
-        if(!prev || !next) return;
-        var np = prev.cloneNode(true); var nn = next.cloneNode(true);
-        prev.parentNode.replaceChild(np, prev);
-        next.parentNode.replaceChild(nn, next);
-        np.addEventListener('click', function(){
-            if(!batchAll) return;
-            batchIdx = Math.max(0, batchIdx - BATCH_PAGE);
-            drawBatch(batchAll, batchIdx);
-        });
-        nn.addEventListener('click', function(){
-            if(!batchAll) return;
-            var mx = batchAll.labels.length - BATCH_PAGE;
-            batchIdx = Math.min(mx, batchIdx + BATCH_PAGE);
-            drawBatch(batchAll, batchIdx);
-        });
+        var prev=document.getElementById('admBatchPrev');
+        var next=document.getElementById('admBatchNext');
+        if(!prev||!next) return;
+        var np=prev.cloneNode(true); var nn=next.cloneNode(true);
+        prev.parentNode.replaceChild(np,prev);
+        next.parentNode.replaceChild(nn,next);
+        np.addEventListener('click',function(){ if(!batchAll)return; batchIdx=Math.max(0,batchIdx-BATCH_PAGE); drawBatch(batchAll,batchIdx); });
+        nn.addEventListener('click',function(){ if(!batchAll)return; var mx=batchAll.labels.length-BATCH_PAGE; batchIdx=Math.min(mx,batchIdx+BATCH_PAGE); drawBatch(batchAll,batchIdx); });
     }
 
-    /* ── Modal dispatcher ── */
     function dispatchModal(filterType, filter){
-        if(window.Livewire){
-            Livewire.dispatch('openEmploymentModal', { filterType: filterType, filter: filter });
-        }
+        if(window.Livewire) Livewire.dispatch('openEmploymentModal',{filterType:filterType,filter:filter});
     }
 
-    /* ── Master init ── */
     function initAll(){
         var d = bridge(); if(!d) return;
 
-        /* Employment Status: click segment → modal */
-        donut('chartStatus', d.status, function(event, elements){
-            if(!elements || !elements.length) return;
-            var statusMap = ['employed', 'self_employed', 'unemployed', 'not_filled'];
-            var filter    = statusMap[elements[0].index];
+        donut('admChartStatus', d.status, function(event, elements){
+            if(!elements||!elements.length) return;
+            var statusMap=['employed','self_employed','unemployed','not_filled'];
+            var filter=statusMap[elements[0].index];
             if(filter) dispatchModal('status', filter);
         });
 
-        donut('chartLocation', d.location);
+        donut('admChartLocation', d.location);
 
-        /* Relevance: green segment = YES only, anything else = YES+PARTIAL */
-        donut('chartRelevance', d.relevance, function(event, elements){
-            var isGreen = elements && elements.length > 0 && elements[0].index === 0;
-            dispatchModal('relevance', isGreen ? 'yes' : 'yes_partial');
+        donut('admChartRelevance', d.relevance, function(event, elements){
+            var isGreen = elements && elements.length>0 && elements[0].index===0;
+            dispatchModal('relevance', isGreen?'yes':'yes_partial');
         });
 
-        donut('chartUnemployed', d.unemployed);
-        donut('chartEmpType',    d.emptype);
-        donut('chartEduStatus',  d.edu);
-        hbar( 'chartCourse',     d.course);
-        polar('chartCareerPath', d.career);
+        donut('admChartUnemployed', d.unemployed);
+        donut('admChartEmpType',    d.emptype);
+        donut('admChartEduStatus',  d.edu);
+        hbar( 'admChartCourse',     d.course);
+        polar('admChartCareerPath', d.career);
 
-        /* ── College chart: use HORIZONTAL stacked bar ── */
         if(d.college && d.college.labels){
-            stackedBarH(
-                'chartCollege',
-                d.college.labels,
-                d.college.employed,
-                d.college.self_emp,
-                d.college.unemployed
-            );
+            stackedBarH('admChartCollege', d.college.labels, d.college.employed, d.college.self_emp, d.college.unemployed);
         }
 
-        /* Batch chart: vertical stacked, paginated */
         if(d.batch && d.batch.labels){
-            var changed = !batchAll || JSON.stringify(d.batch.labels) !== JSON.stringify(batchAll.labels);
-            if(changed){
-                batchAll = d.batch;
-                batchIdx = Math.max(0, batchAll.labels.length - BATCH_PAGE);
-                kill('chartBatch');
-            }
+            var changed = !batchAll || JSON.stringify(d.batch.labels)!==JSON.stringify(batchAll.labels);
+            if(changed){ batchAll=d.batch; batchIdx=Math.max(0,batchAll.labels.length-BATCH_PAGE); kill('admChartBatch'); }
             drawBatch(batchAll, batchIdx);
         }
         bindBatchNav();
 
         if(d.compare && d.compare.labelA && d.compare.labelB){
-            groupedBar('chartCompare',   d.compare);
-            groupedBar('chartCompareFs', d.compare);
+            groupedBar('admChartCompareFs', d.compare);
         } else {
-            kill('chartCompare');
-            kill('chartCompareFs');
+            kill('admChartCompareFs');
         }
     }
 
-    /* ── Bootstrap ── */
     loadChartJs(function(){
-        if(document.readyState === 'loading'){
+        if(document.readyState==='loading'){
             document.addEventListener('DOMContentLoaded', function(){ requestAnimationFrame(initAll); });
         } else {
             requestAnimationFrame(initAll);
         }
 
         document.addEventListener('livewire:navigated', function(){
-            kill('chartBatch'); kill('chartCollege');
-            kill('chartCompare'); kill('chartCompareFs');
+            kill('admChartBatch'); kill('admChartCollege');
+            kill('admChartCompareFs');
             requestAnimationFrame(initAll);
         });
 
         if(window.Livewire){
             Livewire.hook('commit', function(p){
                 var ok = p.succeed || (p.component && p.respond);
-                if(typeof ok === 'function'){ ok(function(){ requestAnimationFrame(initAll); }); }
+                if(typeof ok==='function'){ ok(function(){ requestAnimationFrame(initAll); }); }
                 else { requestAnimationFrame(initAll); }
             });
         } else {

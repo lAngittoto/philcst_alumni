@@ -331,22 +331,22 @@ new class extends Component {
 .dir-mini-card:hover .dir-mini-tip { opacity: 1; }
 
 /* ── Main grid (same proportions as organizer .org-main-grid) ── */
-.dir-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: stretch; }
+.dir-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
 @media (max-width: 1023px) { .dir-main-grid { grid-template-columns: 1fr; } }
 
 /* ── Account column & card (same as organizer .org-account-col / .org-account-card) ── */
 .dir-account-col { display: flex; flex-direction: column; }
-.dir-account-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dir-account-card { display: flex; flex-direction: column; }
 
 /* ── Right col (same as organizer .org-right-col) ── */
 .dir-right-col { display: flex; flex-direction: column; gap: 1rem; }
 
 /* ── 2x2 stat grid (same as organizer .org-stat-grid) ── */
-.dir-stat-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0.75rem; }
-.dir-stat-grid .dir-stat-card { height: 100%; display: flex; flex-direction: column; justify-content: center; }
+.dir-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.dir-stat-grid .dir-stat-card { display: flex; flex-direction: column; justify-content: center; }
 
 /* ── Info body fills space (same as organizer .org-info-body) ── */
-.dir-info-body { flex: 1; display: flex; flex-direction: column; overflow-y: auto; min-height: 0; }
+.dir-info-body { display: flex; flex-direction: column; overflow-y: auto; }
 
 /* ── Info rows (same as organizer .org-info-row / label / value) ── */
 .dir-info-row {
@@ -441,7 +441,7 @@ new class extends Component {
      data-job="{{ $chartJobData }}">
 </div>
 
-<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto">
+<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-10 max-w-screen-2xl mx-auto">
 
     {{-- PAGE HEADER (same style as organizer) --}}
     <div class="flex items-center gap-3 mb-5">
@@ -543,21 +543,21 @@ new class extends Component {
 
                 {{-- Active Coordinators --}}
                 <button wire:click="openCoordsModal('ACTIVE')"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
+                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
                                hover:shadow-lg hover:border-[#7A3F91]/40 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
                     <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Active Coordinators</span>
-                    <div class="flex items-start justify-between mb-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow"
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
                              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                            <i class="fas fa-user-tie text-white text-lg"></i>
+                            <i class="fas fa-user-tie text-white text-sm"></i>
                         </div>
                         <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-[#333333]
                                      border border-[#E8E0F0] bg-[#F9F7FC] text-[0.75rem]">Coordinators</span>
                     </div>
-                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($activeCoordinators) }}</p>
-                    <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Active Coordinators</p>
-                    <p class="font-semibold mt-1 flex items-center gap-1 text-[0.85rem]" style="color:#7A3F91;">
+                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($activeCoordinators) }}</p>
+                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Active Coordinators</p>
+                    <p class="font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]" style="color:#7A3F91;">
                         <i class="fas fa-users text-xs"></i> {{ $totalCoordinators }} total
                         @if(($totalCoordinators - $activeCoordinators) > 0)
                             <span class="text-[#555555] font-normal">· {{ $totalCoordinators - $activeCoordinators }} inactive</span>
@@ -567,21 +567,21 @@ new class extends Component {
 
                 {{-- Total Events --}}
                 <button wire:click="openTotalEventsModal"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
+                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
                                hover:shadow-lg hover:border-emerald-300 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
                     <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Events</span>
-                    <div class="flex items-start justify-between mb-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
-                            <i class="fas fa-calendar-days text-white text-lg"></i>
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-emerald-600">
+                            <i class="fas fa-calendar-days text-white text-sm"></i>
                         </div>
                         <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700
                                      border border-emerald-200 bg-emerald-50 text-[0.75rem]">Events</span>
                     </div>
-                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($totalEvents) }}</p>
-                    <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Total Events</p>
+                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalEvents) }}</p>
+                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Total Events</p>
                     @if($approvedEvents > 0)
-                        <p class="text-emerald-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                        <p class="text-emerald-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
                             <i class="fas fa-circle-check text-xs"></i> {{ $approvedEvents }} Approved
                         </p>
                     @endif
@@ -589,44 +589,44 @@ new class extends Component {
 
                 {{-- Pending Events --}}
                 <button wire:click="openPendingEventsModal"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
+                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
                                hover:shadow-lg hover:border-amber-300 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
                     <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Pending Events</span>
-                    <div class="flex items-start justify-between mb-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
-                            <i class="fas fa-hourglass-end text-white text-lg"></i>
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-amber-500">
+                            <i class="fas fa-hourglass-end text-white text-sm"></i>
                         </div>
                         <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700
                                      border border-amber-200 bg-amber-50 text-[0.75rem]">Pending</span>
                     </div>
-                    <p class="text-amber-600 font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($pendingEvents) }}</p>
-                    <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Pending Review</p>
+                    <p class="text-amber-600 font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($pendingEvents) }}</p>
+                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Pending Review</p>
                     @if($pendingEvents > 0)
-                        <p class="text-amber-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                        <p class="text-amber-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
                             <i class="fas fa-circle-exclamation text-xs"></i> Needs attention
                         </p>
                     @else
-                        <p class="text-[#555555] font-normal mt-1 text-[0.85rem]">All clear</p>
+                        <p class="text-[#555555] font-normal mt-0.5 text-[0.78rem]">All clear</p>
                     @endif
                 </button>
 
                 {{-- Job Postings --}}
                 <button wire:click="openJobsModal"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
+                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
                                hover:shadow-lg hover:border-blue-300 transition-all duration-200
                                active:scale-[.985] text-left cursor-pointer w-full">
                     <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Job Postings</span>
-                    <div class="flex items-start justify-between mb-4">
-                        <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
-                            <i class="fas fa-briefcase text-white text-lg"></i>
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-blue-600">
+                            <i class="fas fa-briefcase text-white text-sm"></i>
                         </div>
                         <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700
                                      border border-blue-200 bg-blue-50 text-[0.75rem]">Jobs</span>
                     </div>
-                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($totalJobs) }}</p>
-                    <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Job Postings</p>
-                    <p class="text-emerald-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalJobs) }}</p>
+                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Job Postings</p>
+                    <p class="text-emerald-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
                         <i class="fas fa-circle text-[8px]"></i> {{ $activeJobs }} Active
                         <span class="text-[#555555] font-normal">· {{ $inactiveJobs }} Inactive</span>
                     </p>
