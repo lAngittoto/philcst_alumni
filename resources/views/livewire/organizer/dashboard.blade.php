@@ -1,440 +1,462 @@
-{{-- resources/views/livewire/admin/admin-dashboard.blade.php --}}
+{{-- resources/views/livewire/organizer/dashboard.blade.php --}}
+
 <?php
 
 use Livewire\Volt\Component;
-use Livewire\Attributes\Layout;
-use App\Models\Alumni;
-use App\Models\Course;
-use App\Models\AdminEvent;
-use App\Models\JobPosting;
+use Livewire\Attributes\Computed;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use App\Models\Alumni;
+use App\Models\OrganizerEvent;
+use App\Models\JobPosting;
+use Carbon\Carbon;
 
-new #[Layout('app')] class extends Component {
+new class extends Component {
 
-    public array  $stats        = [];
-    public array  $courseStats  = [];
-    public string $greeting     = '';
-    public string $adminName    = '';
+    public string $greeting    = '';
+    public string $currentDate = '';
 
-    // Employment
-    public int    $empTotal      = 0;
-    public int    $empEmployed   = 0;
-    public int    $empSelf       = 0;
-    public int    $empUnemployed = 0;
-    public int    $empNotFilled  = 0;
-    public int    $empRate       = 0;
-    public string $chartEmpSnapshotData = '{}';
+    // ── Stats ──
+    public int $totalAlumni      = 0;
+    public int $verifiedAlumni   = 0;
+    public int $pendingAlumni    = 0;
 
-    // Events
-    public int    $eventsTotal     = 0;
-    public int    $eventsPending   = 0;
-    public int    $eventsApproved  = 0;
-    public int    $eventsCompleted = 0;
-    public int    $eventsRejected  = 0;
-    public string $chartEventsSnapshotData = '{}';
+    public int $totalEvents      = 0;
+    public int $pendingEvents    = 0;
+    public int $approvedEvents   = 0;
+    public int $completedEvents  = 0;
+    public int $rejectedEvents   = 0;
 
-    // Job Postings
-    public int    $jobsTotal    = 0;
-    public int    $jobsActive   = 0;
-    public int    $jobsInactive = 0;
-    public int    $jobsExpiring = 0;
-    public string $chartJobsSnapshotData = '{}';
+    public int $totalJobs        = 0;
+    public int $activeJobs       = 0;
+    public int $inactiveJobs     = 0;
+
+    public int $empEmployed      = 0;
+    public int $empSelf          = 0;
+    public int $empUnemployed    = 0;
+    public int $empNotFilled     = 0;
+
+    // ── Course breakdown ──
+    public array $courseStats = [];
 
     public function mount(): void
     {
-        if (Auth::user()?->role !== 'admin') {
-            $this->redirect(route('login'));
+        $user = Auth::user();
+        if (! $user || ! $user->organizer) {
+            abort(403, 'Access denied.');
         }
 
-        $this->adminName = 'Admin';
-
-        $hour = now()->setTimezone('Asia/Manila')->hour;
+        $this->currentDate = now('Asia/Manila')->format('l, F j, Y');
+        $hour = (int) now('Asia/Manila')->format('H');
         $this->greeting = match(true) {
-            $hour < 12 => 'Good morning',
-            $hour < 18 => 'Good afternoon',
-            default    => 'Good evening',
+            $hour < 12 => 'Good Morning',
+            $hour < 17 => 'Good Afternoon',
+            default    => 'Good Evening',
         };
 
         $this->loadStats();
-        $this->loadCourseStats();
-        $this->loadEmploymentSnapshot();
-        $this->loadEventsSnapshot();
-        $this->loadJobsSnapshot();
     }
 
-    // ── Navigate actions (organizer-style, with auto-filter) ───────────────
-    public function goToAlumni(string $filter = ''): void
+    #[Computed]
+    public function organizerDepartment(): string
     {
-        session()->put('admin_alumni_filter', $filter);
-        $this->redirect(route('user.management'));
+        return Auth::user()?->organizer?->department ?? '';
     }
 
-    public function goToEmployment(string $filter = ''): void
+    #[Computed]
+    public function organizerName(): string
     {
-        $mapped = match($filter) {
-            'employed'      => 'employed',
-            'self_employed' => 'self_employed',
-            'unemployed'    => 'unemployed',
-            'no_record'     => 'not_filled',
-            default         => '',
-        };
-        session()->put('admin_employment_filter', $mapped);
-        $this->redirect(route('employment.tracking'));
+        return Auth::user()?->organizer?->name ?? Auth::user()?->name ?? '';
     }
 
-    public function goToEvents(string $filter = ''): void
+    #[Computed]
+    public function organizerEmail(): string
     {
-        session()->put('admin_events_filter', $filter);
-        $this->redirect(route('events'));
+        return Auth::user()?->organizer?->email ?? Auth::user()?->email ?? '';
     }
 
-    public function goToJobs(string $filter = ''): void
+    #[Computed]
+    public function organizerId(): ?int
     {
-        session()->put('admin_jobs_filter', $filter);
-        $this->redirect(route('job.posts'));
+        return Auth::user()?->organizer?->id;
     }
 
     private function loadStats(): void
     {
-        $this->stats = Cache::remember('dashboard_stats', 60, function () {
-            $totalAlumni  = Alumni::count();
-            $verified     = Alumni::where('status', 'verified')->count();
-            $pending      = Alumni::where('status', 'pending')->count();
-            $totalCourses = Course::count();
-            $thisMonth    = Alumni::whereMonth('created_at', now()->month)
-                                   ->whereYear('created_at',  now()->year)
-                                   ->count();
-            $lastMonth    = Alumni::whereMonth('created_at', now()->subMonth()->month)
-                                   ->whereYear('created_at',  now()->subMonth()->year)
-                                   ->count();
-            $growth = $lastMonth > 0
-                ? round((($thisMonth - $lastMonth) / $lastMonth) * 100, 1)
-                : ($thisMonth > 0 ? 100 : 0);
+        $dept  = $this->organizerDepartment;
+        $orgId = $this->organizerId;
 
-            return compact(
-                'totalAlumni','verified','pending',
-                'totalCourses','thisMonth','growth'
-            );
-        });
-    }
+        // ── Alumni counts (filtered by department) ──
+        $alumniBase = Alumni::whereNull('deleted_at');
+        if ($dept) {
+            $alumniBase->whereHas('course', fn($q) => $q->where('college', $dept));
+        }
 
-    private function loadCourseStats(): void
-    {
-        // Load ALL courses (no take limit) — blade will scroll
-        $this->courseStats = Course::select('courses.id','courses.code','courses.name')
-            ->withCount('alumni')
+        $this->totalAlumni    = (clone $alumniBase)->count();
+        $this->verifiedAlumni = (clone $alumniBase)->where('status', 'verified')->count();
+        $this->pendingAlumni  = (clone $alumniBase)->where('status', 'pending')->count();
+
+        // ── Events (this organizer's own events) ──
+        $evBase = OrganizerEvent::where('organizer_id', $orgId)
+            ->where('status', '!=', 'ORGANIZER_DELETED');
+
+        $this->totalEvents     = (clone $evBase)->count();
+        $this->pendingEvents   = (clone $evBase)->where('status', 'PENDING')->count();
+        $this->approvedEvents  = (clone $evBase)->where('status', 'APPROVED')->count();
+        $this->completedEvents = (clone $evBase)->where('status', 'COMPLETED')->count();
+        $this->rejectedEvents  = (clone $evBase)->where('status', 'REJECTED')->count();
+
+        // ── Jobs (this organizer's own jobs) ──
+        $jobBase = JobPosting::where('organizer_id', $orgId)
+            ->whereNotIn('status', ['ORGANIZER_DELETED']);
+
+        $this->totalJobs   = (clone $jobBase)->count();
+        $this->activeJobs  = (clone $jobBase)->where('status', 'ACTIVE')->count();
+        $this->inactiveJobs = (clone $jobBase)->where('status', 'INACTIVE')->count();
+
+        // ── Employment tracking (dept alumni) ──
+        $empQ = DB::table('alumni as a')
+            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
+            ->whereNull('a.deleted_at')
+            ->whereNull('et.deleted_at');
+        if ($dept) {
+            $empQ->join('courses as c', 'a.course_code', '=', 'c.code')
+                 ->where('c.college', $dept);
+        }
+
+        $this->empEmployed   = (clone $empQ)->where('et.employment_status', 'employed')->count();
+        $this->empSelf       = (clone $empQ)->where('et.employment_status', 'self_employed')->count();
+        $this->empUnemployed = (clone $empQ)->where('et.employment_status', 'unemployed')->count();
+
+        $filled = $this->empEmployed + $this->empSelf + $this->empUnemployed;
+        $this->empNotFilled = max(0, $this->totalAlumni - $filled);
+
+        // ── Course breakdown (alumni count per course) ──
+        $courseQ = DB::table('alumni as a')
+            ->join('courses as c', 'a.course_code', '=', 'c.code')
+            ->whereNull('a.deleted_at')
+            ->select('c.code', 'c.name', DB::raw('COUNT(a.id) as alumni_count'));
+
+        if ($dept) {
+            $courseQ->where('c.college', $dept);
+        }
+
+        $this->courseStats = $courseQ
+            ->groupBy('c.code', 'c.name')
             ->orderByDesc('alumni_count')
             ->get()
             ->toArray();
     }
+};
+?>
 
-    private function loadEmploymentSnapshot(): void
-    {
-        $snap = Cache::remember('dashboard_emp_snapshot', 60, function () {
-            $total = DB::table('alumni')->whereNull('deleted_at')->count();
-
-            $empQ = DB::table('alumni as a')
-                ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at');
-
-            $employed   = (clone $empQ)->where('et.employment_status', 'employed')->count();
-            $selfEmp    = (clone $empQ)->where('et.employment_status', 'self_employed')->count();
-            $unemployed = (clone $empQ)->where('et.employment_status', 'unemployed')->count();
-
-            $filled    = $employed + $selfEmp + $unemployed;
-            $notFilled = max(0, $total - $filled);
-            $rate      = $filled > 0 ? round((($employed + $selfEmp) / $filled) * 100) : 0;
-
-            return compact('total', 'employed', 'selfEmp', 'unemployed', 'notFilled', 'rate');
-        });
-
-        $this->empTotal      = $snap['total'];
-        $this->empEmployed   = $snap['employed'];
-        $this->empSelf       = $snap['selfEmp'];
-        $this->empUnemployed = $snap['unemployed'];
-        $this->empNotFilled  = $snap['notFilled'];
-        $this->empRate       = $snap['rate'];
-
-        $this->chartEmpSnapshotData = json_encode([
-            'labels' => ['Employed', 'Self-Employed', 'Unemployed', 'Not Filled'],
-            'data'   => [$this->empEmployed, $this->empSelf, $this->empUnemployed, $this->empNotFilled],
-            'colors' => ['#10b981', '#3b82f6', '#f59e0b', '#d1d5db'],
-        ]);
-    }
-
-    private function loadEventsSnapshot(): void
-    {
-        $snap = Cache::remember('dashboard_events_snapshot', 60, function () {
-            $base = AdminEvent::withoutTrashed()->where('status', '!=', 'ORGANIZER_DELETED');
-
-            return [
-                'total'     => (clone $base)->count(),
-                'pending'   => (clone $base)->where('status', 'PENDING')->count(),
-                'approved'  => (clone $base)->where('status', 'APPROVED')->count(),
-                'completed' => (clone $base)->where('status', 'COMPLETED')->count(),
-                'rejected'  => (clone $base)->where('status', 'REJECTED')->count(),
-            ];
-        });
-
-        $this->eventsTotal     = $snap['total'];
-        $this->eventsPending   = $snap['pending'];
-        $this->eventsApproved  = $snap['approved'];
-        $this->eventsCompleted = $snap['completed'];
-        $this->eventsRejected  = $snap['rejected'];
-
-        $this->chartEventsSnapshotData = json_encode([
-            'labels' => ['Pending', 'Approved', 'Completed', 'Rejected'],
-            'data'   => [$this->eventsPending, $this->eventsApproved, $this->eventsCompleted, $this->eventsRejected],
-            'colors' => ['#f59e0b', '#10b981', '#16a34a', '#ef4444'],
-        ]);
-    }
-
-    private function loadJobsSnapshot(): void
-    {
-        $snap = Cache::remember('dashboard_jobs_snapshot', 60, function () {
-            return [
-                'total'    => JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])->count(),
-                'active'   => JobPosting::where('status', 'ACTIVE')->count(),
-                'inactive' => JobPosting::where('status', 'INACTIVE')->count(),
-                'expiring' => JobPosting::where('status', 'ACTIVE')
-                                ->whereBetween('deadline', [
-                                    now('Asia/Manila')->toDateString(),
-                                    now('Asia/Manila')->addDays(7)->toDateString(),
-                                ])
-                                ->count(),
-            ];
-        });
-
-        $this->jobsTotal    = $snap['total'];
-        $this->jobsActive   = $snap['active'];
-        $this->jobsInactive = $snap['inactive'];
-        $this->jobsExpiring = $snap['expiring'];
-
-        $this->chartJobsSnapshotData = json_encode([
-            'labels' => ['Active', 'Inactive'],
-            'data'   => [$this->jobsActive, $this->jobsInactive],
-            'colors' => ['#10b981', '#f59e0b'],
-        ]);
-    }
-}; ?>
-
-<div class="flex flex-col" style="height:95vh; overflow:hidden;">
+<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full">
 
 <style>
-/* ── Tooltips (organizer-style) ── */
-.adm-stat-card { position: relative; overflow: visible; }
-.adm-stat-card .stat-tooltip {
+/* ── Stat card tooltip ── */
+.org-stat-card { position: relative; overflow: visible; }
+.org-stat-card .org-card-tip {
     position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
     background: #000; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
     padding: 5px 11px; border-radius: 7px; white-space: nowrap;
     pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 9999;
 }
-.adm-stat-card .stat-tooltip::after {
+.org-stat-card .org-card-tip::after {
     content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
     border: 5px solid transparent; border-top-color: #000;
 }
-.adm-stat-card:hover .stat-tooltip { opacity: 1; }
+.org-stat-card:hover .org-card-tip { opacity: 1; }
 
-/* ── Cards ── */
-.adm-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 16px; }
-.adm-card-hover { transition: transform .15s cubic-bezier(.25,.8,.25,1), box-shadow .15s; }
-.adm-card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(122,63,145,.12), 0 2px 6px rgba(0,0,0,.05); }
-
-.adm-panel-head {
-    padding: 12px 18px; border-bottom: 1px solid #E8E0F0;
-    background: linear-gradient(to right,#F9F7FC,#ffffff);
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+/* ── Mini cards (clickable stat tiles) ── */
+.org-mini-card { position: relative; overflow: visible; cursor: pointer; transition: transform .12s ease, box-shadow .15s ease; }
+.org-mini-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.10); }
+.org-mini-card:active { transform: scale(.97); }
+.org-mini-card .org-mini-tip {
+    position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%);
+    background: #000; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 9999;
 }
-.adm-panel-icon {
-    width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg,#7A3F91,#9b59b6); flex-shrink: 0;
+.org-mini-card .org-mini-tip::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 4px solid transparent; border-top-color: #000;
 }
-.adm-panel-ttl { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #333333; line-height: 1; }
-.adm-panel-sub { font-size: .67rem; color: #333333; font-weight: 500; margin-top: 2px; }
+.org-mini-card:hover .org-mini-tip { opacity: 1; }
 
-/* ── Animations ── */
-@keyframes adm-fadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:none } }
-.adm-fade-up { animation: adm-fadeUp .4s cubic-bezier(.25,.8,.25,1) both; }
-.adm-fade-1 { animation-delay:.04s } .adm-fade-2 { animation-delay:.08s }
-.adm-fade-3 { animation-delay:.12s } .adm-fade-4 { animation-delay:.16s }
+/* ── Main grid ── */
+.org-main-grid { display: grid; grid-template-columns: 290px 1fr; gap: 1rem; align-items: start; }
+@media (max-width: 1023px) { .org-main-grid { grid-template-columns: 1fr; } }
+
+/* ── Account column ── */
+.org-account-card { display: flex; flex-direction: column; }
+
+/* ── Right col ── */
+.org-right-col { display: flex; flex-direction: column; gap: 1rem; }
+
+/* ── 2x2 stat grid ── */
+.org-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.org-stat-grid .org-stat-card { display: flex; flex-direction: column; justify-content: center; }
+
+/* ── Info rows ── */
+.org-info-body { display: flex; flex-direction: column; }
+.org-info-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.6rem 1rem; border-bottom: 1px solid #EDE0F5; gap: 0.5rem;
+}
+.org-info-row:last-child { border-bottom: none; }
+.org-info-label { font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #555555; flex-shrink: 0; }
+.org-info-value { font-size: 0.875rem; font-weight: 600; color: #111111; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.org-info-value-sm { font-size: 0.80rem; font-weight: 600; color: #111111; text-align: right; word-break: break-all; max-width: 160px; }
+
+/* ── Chips ── */
+.org-chips-section { padding: 0.65rem 1rem; }
+.org-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #777777; margin-bottom: 0.4rem; }
+.org-chip { font-size: 0.72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: #F0E6F8; color: #333333; border: 1px solid #D8BEF0; display: inline-block; margin: 2px 2px 2px 0; }
+
+/* ── Avatar ── */
+.org-avatar { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.22); border: 2px solid rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center; font-size: 1.15rem; font-weight: 700; color: #ffffff; flex-shrink: 0; letter-spacing: 0.04em; }
 
 /* ── Scrollbar ── */
-.adm-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
-.adm-scroll::-webkit-scrollbar { width: 4px; }
-.adm-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+.org-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
+.org-scroll::-webkit-scrollbar { width: 4px; }
+.org-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
 
-/* ── KPI / Stat grid (organizer-style 2x2) ── */
-.adm-stat-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 0.75rem; }
-@media (max-width: 640px) { .adm-stat-grid { grid-template-columns: 1fr; grid-template-rows: auto; } }
-
-.adm-stat-card { height: 100%; display: flex; flex-direction: column; justify-content: center; }
-
-/* ── Snap cards (clickable, organizer-style) ── */
-.adm-snap-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-@media (max-width: 1023px) { .adm-snap-grid3 { grid-template-columns: 1fr; } }
-
-.adm-snap-card {
-    cursor: pointer;
-    transition: transform .13s ease, box-shadow .15s ease, border-color .15s;
-}
-.adm-snap-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(122,63,145,.13), 0 2px 6px rgba(0,0,0,.05); }
-.adm-snap-card:active { transform: scale(.98); }
-
-.adm-snap-link {
-    font-size: .68rem; font-weight: 700; padding: 4px 10px; border-radius: 999px;
-    background: #f5eef9; color: #7A3F91; border: 1px solid #d4aaeb; white-space: nowrap;
-    transition: background .15s; pointer-events: none;
-}
-.adm-snap-card:hover .adm-snap-link { background: #ecdcf5; }
-
-.adm-snap-mini-chart { display: flex; align-items: center; justify-content: center; padding: 14px 14px 4px; }
-.adm-snap-mini-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 8px 14px 14px; }
-.adm-snap-mini-tile { border-radius: 10px; padding: 8px 10px; border: 1px solid #E8E0F0; background: #FBF9FD; }
-.adm-snap-mini-num { font-size: 1.05rem; font-weight: 800; color: #333333; line-height: 1; }
-.adm-snap-mini-lbl { font-size: .62rem; font-weight: 700; color: #333333; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
-
-[x-cloak] { display:none !important }
+/* ── Animations ── */
+@keyframes orgFadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:none } }
+.org-fade-up { animation: orgFadeUp .4s cubic-bezier(.25,.8,.25,1) both; }
+.org-fade-1 { animation-delay:.04s } .org-fade-2 { animation-delay:.08s }
+.org-fade-3 { animation-delay:.12s } .org-fade-4 { animation-delay:.16s }
 </style>
 
-{{-- Single scroll container --}}
-<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full adm-scroll"
-     style="height:95vh; overflow-y:auto; overflow-x:hidden;">
+{{-- ── PAGE HEADER ── --}}
+<div class="flex items-center gap-3 mb-5 org-fade-up">
+    <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+        <i class="fas fa-gauge-high text-white text-base"></i>
+    </div>
+    <div>
+        <h1 class="text-2xl font-semibold text-[#111111] leading-tight">
+            {{ $greeting }}, {{ $this->organizerName }}
+        </h1>
+        <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+            <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
+            <span>{{ $currentDate }}</span>
+            <span class="text-[#c0a0d8]">·</span>
+            <span class="font-semibold text-[#7A3F91]">Coordinator Portal</span>
+        </p>
+    </div>
+</div>
 
-    {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex items-center justify-between gap-3 mb-5 adm-fade-up">
-        <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+<div class="org-main-grid">
+
+    {{-- ══ LEFT: Account Card ══ --}}
+    <div>
+        <div class="org-account-card rounded-2xl overflow-hidden shadow-md border border-[#E8E0F0] bg-white">
+
+            {{-- Header --}}
+            <div class="px-4 py-4 shrink-0 flex items-center gap-3"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-gauge-high text-white text-base"></i>
+                <div class="org-avatar">
+                    <i class="fas fa-user-tie"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="text-[0.60rem] font-bold uppercase tracking-[0.14em] text-white/60 leading-none mb-0.5">COORDINATOR ACCOUNT</p>
+                    <p class="text-[0.95rem] font-bold text-white leading-snug truncate">{{ $this->organizerName }}</p>
+                    <p class="text-[0.72rem] text-white/70 font-normal truncate mt-0.5">{{ $this->organizerDepartment ?: 'Event Coordinator' }}</p>
+                </div>
             </div>
-            <div>
-                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">
-                    {{ $greeting }}, {{ $adminName }}
-                </h1>
-                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
-                    <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
-                    <span>{{ now()->setTimezone('Asia/Manila')->format('l, F j, Y · g:i A') }}</span>
-                    <span class="text-[#c0a0d8]">·</span>
-                    <span class="font-semibold text-[#7A3F91]">Admin Panel</span>
-                </p>
+
+            {{-- Info rows --}}
+            <div class="org-info-body org-scroll">
+
+                <div class="org-info-row">
+                    <span class="org-info-label">Name</span>
+                    <span class="org-info-value">{{ $this->organizerName }}</span>
+                </div>
+
+                <div class="org-info-row" style="align-items:flex-start;">
+                    <span class="org-info-label" style="margin-top:2px;">Email</span>
+                    <span class="org-info-value-sm">{{ $this->organizerEmail ?: '—' }}</span>
+                </div>
+
+                <div class="org-info-row">
+                    <span class="org-info-label">College</span>
+                    <span class="org-info-value text-[#7A3F91] font-bold">{{ $this->organizerDepartment ?: '—' }}</span>
+                </div>
+
+                <div class="org-info-row">
+                    <span class="org-info-label">Total Alumni</span>
+                    <span class="org-info-value">
+                        {{ number_format($totalAlumni) }}
+                        <span class="text-[#999999] font-normal text-xs ml-1">total</span>
+                    </span>
+                </div>
+
+                <div class="org-info-row">
+                    <span class="org-info-label">Verified</span>
+                    <span class="org-info-value text-emerald-700">{{ number_format($verifiedAlumni) }}</span>
+                </div>
+
+                {{-- Quick chips --}}
+                <div class="org-chips-section">
+                    <p class="org-chips-label">Events Overview</p>
+                    <div>
+                        <span class="org-chip">Approved · {{ $approvedEvents }}</span>
+                        <span class="org-chip">Pending · {{ $pendingEvents }}</span>
+                        <span class="org-chip">Completed · {{ $completedEvents }}</span>
+                        @if($rejectedEvents > 0)
+                            <span class="org-chip">Rejected · {{ $rejectedEvents }}</span>
+                        @endif
+                    </div>
+                </div>
+
+                <div class="org-chips-section">
+                    <p class="org-chips-label">Job Postings</p>
+                    <div>
+                        <span class="org-chip">Active · {{ $activeJobs }}</span>
+                        <span class="org-chip">Inactive · {{ $inactiveJobs }}</span>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 
-    {{-- ══ DASHBOARD COLUMN (full width — no profile card) ══ --}}
-    <div class="flex flex-col gap-4">
+    {{-- ══ RIGHT: Stats + Course Breakdown ══ --}}
+    <div class="org-right-col">
 
-        {{-- ── Stat Cards (organizer-style 2x2, with tooltip + auto-filter) ── --}}
-        <div class="adm-stat-grid adm-fade-up adm-fade-1">
+        {{-- 2x2 Stat Cards --}}
+        <div class="org-stat-grid org-fade-up org-fade-1">
 
             {{-- Total Alumni --}}
-            <button wire:click="goToAlumni"
-                    class="adm-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-lg hover:border-[#7A3F91]/40 transition-all duration-200
-                           active:scale-[.985] text-left cursor-pointer w-full">
-                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View All Alumni</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow"
+            <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+               class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
+                      hover:shadow-lg hover:border-[#7A3F91]/40 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block">
+                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employment Tracking</span>
+                <div class="flex items-start justify-between mb-2">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
                          style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        <i class="fas fa-users text-white text-lg"></i>
+                        <i class="fas fa-users text-white text-sm"></i>
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-[#333333]
                                  border border-[#E8E0F0] bg-[#F9F7FC] text-[0.75rem]">Alumni</span>
                 </div>
-                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($stats['totalAlumni'] ?? 0) }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Total Alumni</p>
-                <p class="text-[#555555] font-normal mt-1 text-[0.85rem]">{{ $stats['totalCourses'] ?? 0 }} courses · {{ $stats['totalAlumni'] > 0 ? round((($stats['verified']??0)/$stats['totalAlumni'])*100) : 0 }}% verified</p>
-            </button>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalAlumni) }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Total Alumni</p>
+                <p class="font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem] text-emerald-600">
+                    <i class="fas fa-circle-check text-xs"></i> {{ number_format($verifiedAlumni) }} verified
+                    @if($pendingAlumni > 0)
+                        <span class="text-amber-500 font-normal">· {{ $pendingAlumni }} pending</span>
+                    @endif
+                </p>
+            </a>
 
-            {{-- Verified --}}
-            <button wire:click="goToAlumni('verified')"
-                    class="adm-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-lg hover:border-emerald-300 transition-all duration-200
-                           active:scale-[.985] text-left cursor-pointer w-full">
-                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Verified Alumni</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
-                        <i class="fas fa-circle-check text-white text-lg"></i>
+            {{-- Total Events --}}
+            <a href="{{ route('organizer.event/organizer') }}" wire:navigate
+               class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
+                      hover:shadow-lg hover:border-emerald-300 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block">
+                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Events</span>
+                <div class="flex items-start justify-between mb-2">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-emerald-600">
+                        <i class="fas fa-calendar-days text-white text-sm"></i>
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700
-                                 border border-emerald-200 bg-emerald-50 text-[0.75rem]">Verified</span>
+                                 border border-emerald-200 bg-emerald-50 text-[0.75rem]">Events</span>
                 </div>
-                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($stats['verified'] ?? 0) }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Verified Alumni</p>
-                <p class="text-emerald-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
-                    <i class="fas fa-circle text-[8px]"></i> {{ $stats['totalAlumni'] > 0 ? round((($stats['verified']??0)/$stats['totalAlumni'])*100) : 0 }}% of total
-                </p>
-            </button>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalEvents) }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Total Events</p>
+                @if($approvedEvents > 0)
+                    <p class="text-emerald-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
+                        <i class="fas fa-circle-check text-xs"></i> {{ $approvedEvents }} Approved
+                    </p>
+                @elseif($pendingEvents > 0)
+                    <p class="text-amber-500 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
+                        <i class="fas fa-hourglass-half text-xs"></i> {{ $pendingEvents }} Pending
+                    </p>
+                @else
+                    <p class="text-[#555555] font-normal mt-0.5 text-[0.78rem]">No active events</p>
+                @endif
+            </a>
 
-            {{-- Pending --}}
-            <button wire:click="goToAlumni('pending')"
-                    class="adm-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-lg hover:border-amber-300 transition-all duration-200
-                           active:scale-[.985] text-left cursor-pointer w-full">
-                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>Review Pending Alumni</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
-                        <i class="fas fa-clock text-white text-lg"></i>
-                    </div>
-                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700
-                                 border border-amber-200 bg-amber-50 text-[0.75rem]">Pending</span>
-                </div>
-                <p class="text-amber-600 font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($stats['pending'] ?? 0) }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Pending Review</p>
-                <p class="text-[#555555] font-normal mt-1 text-[0.85rem]">{{ $stats['totalAlumni'] > 0 ? round((($stats['pending']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</p>
-            </button>
-
-            {{-- This Month --}}
-            <button wire:click="goToAlumni('this_month')"
-                    class="adm-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-lg hover:border-blue-300 transition-all duration-200
-                           active:scale-[.985] text-left cursor-pointer w-full">
-                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View New Registrations</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
-                        <i class="fas fa-calendar-plus text-white text-lg"></i>
+            {{-- Job Postings --}}
+            <a href="{{ route('organizer.job/management') }}" wire:navigate
+               class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
+                      hover:shadow-lg hover:border-blue-300 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block">
+                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Job Postings</span>
+                <div class="flex items-start justify-between mb-2">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-blue-600">
+                        <i class="fas fa-briefcase text-white text-sm"></i>
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700
-                                 border border-blue-200 bg-blue-50 text-[0.75rem]">New</span>
+                                 border border-blue-200 bg-blue-50 text-[0.75rem]">Jobs</span>
                 </div>
-                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ number_format($stats['thisMonth'] ?? 0) }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">This Month</p>
-                <p class="text-blue-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
-                    <i class="fas fa-circle text-[8px]"></i> {{ ($stats['growth'] ?? 0) >= 0 ? '+' : '' }}{{ $stats['growth'] ?? 0 }}% vs last mo.
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalJobs) }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Job Postings</p>
+                <p class="text-emerald-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
+                    <i class="fas fa-circle text-[8px]"></i> {{ $activeJobs }} Active
+                    <span class="text-[#555555] font-normal">· {{ $inactiveJobs }} Inactive</span>
                 </p>
-            </button>
+            </a>
+
+            {{-- Employment --}}
+            <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+               class="org-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
+                      hover:shadow-lg hover:border-amber-300 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block">
+                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employment</span>
+                <div class="flex items-start justify-between mb-2">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-amber-500">
+                        <i class="fas fa-chart-line text-white text-sm"></i>
+                    </div>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700
+                                 border border-amber-200 bg-amber-50 text-[0.75rem]">Employment</span>
+                </div>
+                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($empEmployed + $empSelf) }}</p>
+                <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Employed</p>
+                @php $filled = $empEmployed + $empSelf + $empUnemployed; $rate = $filled > 0 ? round((($empEmployed + $empSelf) / $filled) * 100) : 0; @endphp
+                <p class="text-amber-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
+                    <i class="fas fa-circle text-[8px]"></i> {{ $rate }}% emp. rate
+                    @if($empNotFilled > 0)
+                        <span class="text-[#555555] font-normal">· {{ $empNotFilled }} not filled</span>
+                    @endif
+                </p>
+            </a>
 
         </div>
 
-        {{-- ── Top Courses (Scrollable) ── --}}
-        <div class="adm-card overflow-hidden adm-fade-up adm-fade-2">
-            <div class="adm-panel-head">
+        {{-- Course Breakdown Panel --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden org-fade-up org-fade-2">
+            <div class="px-5 py-3 border-b border-[#E8E0F0] flex items-center justify-between"
+                 style="background:linear-gradient(to right,#F9F7FC,#ffffff);">
                 <div class="flex items-center gap-2">
-                    <div class="adm-panel-icon"><i class="fas fa-ranking-star text-white text-[10px]"></i></div>
-                    <div>
-                        <p class="adm-panel-ttl">All Courses</p>
-                        <p class="adm-panel-sub">Alumni count per course — scroll to see all</p>
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center"
+                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        <i class="fas fa-ranking-star text-white text-[10px]"></i>
                     </div>
+                    <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Alumni per Course</p>
+                    <span class="text-[10px] text-[#999999] font-normal hidden sm:inline">— {{ $this->organizerDepartment ?: 'your college' }}</span>
                 </div>
-                <a href="{{ route('course') }}"
-                   class="text-[.68rem] font-bold px-2.5 py-1 rounded-full bg-[#f5eef9] text-[#7A3F91] border border-[#d4aaeb] whitespace-nowrap hover:bg-[#ecdcf5] transition-colors">
-                    Manage <i class="fas fa-arrow-right text-[9px] ml-1"></i>
+                <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+                   class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                    Employment <i class="fas fa-arrow-right text-xs"></i>
                 </a>
             </div>
 
-            {{-- Scrollable course list (max-height = ~5 rows, then scroll) --}}
-            <div class="adm-scroll" style="max-height: 260px; overflow-y: auto;">
-                <div class="p-4 space-y-3">
+            <div class="p-4">
+                @if(count($courseStats) > 0)
+                @php
+                    $maxCount = max(array_column($courseStats, 'alumni_count') ?: [1]);
+                    $maxCount = $maxCount < 1 ? 1 : $maxCount;
+                    $palette  = ['#7A3F91','#9b59b6','#c0a0d8','#2563eb','#059669','#d97706','#ef4444','#0891b2','#65a30d','#db2777'];
+                @endphp
+                <div class="space-y-3">
+                    @foreach($courseStats as $idx => $cs)
                     @php
-                        $maxAlumni = max(array_column($courseStats, 'alumni_count') ?: [1]);
-                        $maxAlumni = $maxAlumni < 1 ? 1 : $maxAlumni;
-                        $palette   = ['#7A3F91','#9b59b6','#c0a0d8','#2563eb','#059669','#d97706','#ef4444','#0891b2','#65a30d','#db2777'];
-                    @endphp
-                    @forelse($courseStats as $idx => $cs)
-                    @php
-                        $pct   = round(($cs['alumni_count'] / $maxAlumni) * 100);
+                        $pct   = round(($cs->alumni_count / $maxCount) * 100);
                         $color = $palette[$idx % count($palette)];
                     @endphp
                     <div>
@@ -442,299 +464,73 @@ new #[Layout('app')] class extends Component {
                             <div class="flex items-center gap-2 min-w-0">
                                 <div class="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 text-[.58rem] font-bold text-white"
                                      style="background:{{ $color }};">{{ $idx + 1 }}</div>
-                                <span class="text-[.78rem] font-semibold text-[#333333] font-mono uppercase truncate">{{ $cs['code'] }}</span>
+                                <span class="text-[.78rem] font-bold text-[#333333] font-mono uppercase truncate">{{ $cs->code }}</span>
+                                <span class="text-[.68rem] text-[#777777] truncate hidden sm:inline">{{ $cs->name }}</span>
                             </div>
-                            <span class="text-[.72rem] font-bold text-[#333333] ml-2 flex-shrink-0">{{ $cs['alumni_count'] }}</span>
+                            <span class="text-[.78rem] font-bold text-[#333333] ml-2 flex-shrink-0">
+                                {{ number_format($cs->alumni_count) }}
+                                <span class="text-[#999999] font-normal text-[.68rem]">alumni</span>
+                            </span>
                         </div>
                         <div class="w-full h-2 rounded-full overflow-hidden" style="background:#F0E8F8;">
                             <div class="h-full rounded-full transition-all duration-700" style="width:{{ $pct }}%; background:{{ $color }};"></div>
                         </div>
-                        <p class="text-[.62rem] text-[#333333] mt-0.5 truncate">{{ $cs['name'] }}</p>
                     </div>
-                    @empty
-                    <div class="py-10 text-center">
-                        <div class="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:#f5eef9;">
-                            <i class="fas fa-book text-[#d4aaeb] text-xl"></i>
-                        </div>
-                        <p class="text-sm font-semibold text-[#333333]">No courses yet</p>
-                    </div>
-                    @endforelse
+                    @endforeach
                 </div>
-            </div>
 
-            @if(count($courseStats) > 0)
-            <div class="px-5 py-2.5 border-t border-[#E8E0F0] bg-[#FAFBFF] flex items-center justify-between">
-                <p class="text-[.72rem] font-semibold text-[#7A3F91]">
-                    {{ $stats['totalCourses'] ?? 0 }} courses registered
-                    @if(count($courseStats) > 5)
-                        <span class="text-[#c0a0d8] font-normal">· scroll to see all</span>
-                    @endif
-                </p>
-                <p class="text-[.68rem] text-[#999999] font-normal">
-                    Total alumni: {{ number_format($stats['totalAlumni'] ?? 0) }}
-                </p>
+                <div class="mt-4 pt-3 border-t border-[#E8E0F0] flex items-center justify-between">
+                    <p class="text-[.72rem] font-semibold text-[#7A3F91]">
+                        {{ count($courseStats) }} course{{ count($courseStats) !== 1 ? 's' : '' }} total
+                    </p>
+                    <p class="text-[.68rem] text-[#999999] font-normal">
+                        Total alumni: {{ number_format($totalAlumni) }}
+                    </p>
+                </div>
+
+                @else
+                <div class="py-10 text-center">
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style="background:#f5eef9;">
+                        <i class="fas fa-users text-[#d4aaeb] text-xl"></i>
+                    </div>
+                    <p class="text-sm font-semibold text-[#333333]">No alumni registered yet</p>
+                    <p class="text-xs text-[#777777] mt-1">Alumni enrolled in {{ $this->organizerDepartment ?: 'your college' }} will appear here.</p>
+                </div>
+                @endif
             </div>
-            @endif
         </div>
 
-        {{-- ── Snapshot Cards: Employment / Events / Jobs (Clickable) ── --}}
-        <div class="adm-snap-grid3 adm-fade-up adm-fade-3">
-
-            {{-- Employment Snapshot --}}
-            <div wire:click="goToEmployment"
-                 class="adm-card adm-snap-card overflow-hidden">
-                <div class="adm-panel-head">
-                    <div class="flex items-center gap-2">
-                        <div class="adm-panel-icon"><i class="fas fa-briefcase text-white text-[10px]"></i></div>
-                        <div>
-                            <p class="adm-panel-ttl">Employment</p>
-                            <p class="adm-panel-sub">Quick snapshot</p>
-                        </div>
+        {{-- Employment Breakdown Mini-tiles --}}
+        <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden org-fade-up org-fade-3">
+            <div class="px-5 py-3 border-b border-[#E8E0F0] flex items-center justify-between"
+                 style="background:linear-gradient(to right,#F9F7FC,#ffffff);">
+                <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-lg flex items-center justify-center bg-amber-500">
+                        <i class="fas fa-chart-pie text-white text-[10px]"></i>
                     </div>
-                    <span class="adm-snap-link">
-                        Full <i class="fas fa-arrow-right text-[9px] ml-1"></i>
-                    </span>
+                    <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Employment Snapshot</p>
                 </div>
-                <div class="adm-snap-mini-chart" style="height:120px;" wire:ignore>
-                    <canvas id="adm_chartEmpSnapshot"></canvas>
-                </div>
-                <div class="adm-snap-mini-tiles">
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($empEmployed) }}</p>
-                        <p class="adm-snap-mini-lbl">Employed</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#2563eb;">{{ number_format($empSelf) }}</p>
-                        <p class="adm-snap-mini-lbl">Self-Employed</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($empUnemployed) }}</p>
-                        <p class="adm-snap-mini-lbl">Unemployed</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#7a3f91;">{{ $empRate }}%</p>
-                        <p class="adm-snap-mini-lbl">Emp. Rate</p>
-                    </div>
-                </div>
-                {{-- Hover hint --}}
-                <div class="px-4 pb-3 pt-1">
-                    <p class="text-[.62rem] text-[#c0a0d8] font-semibold text-center flex items-center justify-center gap-1">
-                        <i class="fas fa-hand-pointer text-[9px]"></i> Click to view full employment page
-                    </p>
-                </div>
+                <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+                   class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                    Full View <i class="fas fa-arrow-right text-xs"></i>
+                </a>
             </div>
-
-            {{-- Events Snapshot --}}
-            <div wire:click="goToEvents"
-                 class="adm-card adm-snap-card overflow-hidden">
-                <div class="adm-panel-head">
-                    <div class="flex items-center gap-2">
-                        <div class="adm-panel-icon"><i class="fas fa-calendar-days text-white text-[10px]"></i></div>
-                        <div>
-                            <p class="adm-panel-ttl">Events</p>
-                            <p class="adm-panel-sub">Quick snapshot</p>
-                        </div>
-                    </div>
-                    <span class="adm-snap-link">
-                        Full <i class="fas fa-arrow-right text-[9px] ml-1"></i>
-                    </span>
+            <div class="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                @foreach([
+                    ['label' => 'Employed',     'count' => $empEmployed,   'color' => 'text-emerald-700', 'bg' => 'bg-emerald-50 border-emerald-200'],
+                    ['label' => 'Self-Employed', 'count' => $empSelf,       'color' => 'text-blue-700',    'bg' => 'bg-blue-50 border-blue-200'],
+                    ['label' => 'Unemployed',    'count' => $empUnemployed, 'color' => 'text-amber-700',   'bg' => 'bg-amber-50 border-amber-200'],
+                    ['label' => 'Not Filled',    'count' => $empNotFilled,  'color' => 'text-gray-500',    'bg' => 'bg-gray-50 border-gray-200'],
+                ] as $tile)
+                <div class="rounded-xl border p-3 {{ $tile['bg'] }}">
+                    <p class="text-2xl font-extrabold leading-none {{ $tile['color'] }}">{{ number_format($tile['count']) }}</p>
+                    <p class="text-xs font-bold text-[#333333] uppercase tracking-wide mt-1.5">{{ $tile['label'] }}</p>
                 </div>
-                <div class="adm-snap-mini-chart" style="height:120px;" wire:ignore>
-                    <canvas id="adm_chartEventsSnapshot"></canvas>
-                </div>
-                <div class="adm-snap-mini-tiles">
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($eventsPending) }}</p>
-                        <p class="adm-snap-mini-lbl">Pending</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($eventsApproved) }}</p>
-                        <p class="adm-snap-mini-lbl">Approved</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#16a34a;">{{ number_format($eventsCompleted) }}</p>
-                        <p class="adm-snap-mini-lbl">Completed</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#dc2626;">{{ number_format($eventsRejected) }}</p>
-                        <p class="adm-snap-mini-lbl">Rejected</p>
-                    </div>
-                </div>
-                <div class="px-4 pb-3 pt-1">
-                    <p class="text-[.62rem] text-[#c0a0d8] font-semibold text-center flex items-center justify-center gap-1">
-                        <i class="fas fa-hand-pointer text-[9px]"></i> Click to view full events page
-                    </p>
-                </div>
+                @endforeach
             </div>
+        </div>
 
-            {{-- Jobs Snapshot --}}
-            <div wire:click="goToJobs"
-                 class="adm-card adm-snap-card overflow-hidden">
-                <div class="adm-panel-head">
-                    <div class="flex items-center gap-2">
-                        <div class="adm-panel-icon"><i class="fas fa-suitcase text-white text-[10px]"></i></div>
-                        <div>
-                            <p class="adm-panel-ttl">Job Postings</p>
-                            <p class="adm-panel-sub">Quick snapshot</p>
-                        </div>
-                    </div>
-                    <span class="adm-snap-link">
-                        Full <i class="fas fa-arrow-right text-[9px] ml-1"></i>
-                    </span>
-                </div>
-                <div class="adm-snap-mini-chart" style="height:120px;" wire:ignore>
-                    <canvas id="adm_chartJobsSnapshot"></canvas>
-                </div>
-                <div class="adm-snap-mini-tiles">
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($jobsActive) }}</p>
-                        <p class="adm-snap-mini-lbl">Active</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($jobsInactive) }}</p>
-                        <p class="adm-snap-mini-lbl">Inactive</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#f97316;">{{ number_format($jobsExpiring) }}</p>
-                        <p class="adm-snap-mini-lbl">Expiring Soon</p>
-                    </div>
-                    <div class="adm-snap-mini-tile">
-                        <p class="adm-snap-mini-num" style="color:#7a3f91;">{{ number_format($jobsTotal) }}</p>
-                        <p class="adm-snap-mini-lbl">Total Postings</p>
-                    </div>
-                </div>
-                <div class="px-4 pb-3 pt-1">
-                    <p class="text-[.62rem] text-[#c0a0d8] font-semibold text-center flex items-center justify-center gap-1">
-                        <i class="fas fa-hand-pointer text-[9px]"></i> Click to view full job postings page
-                    </p>
-                </div>
-            </div>
-
-        </div>{{-- end snap grid --}}
-
-    </div>{{-- end dashboard column --}}
-
-</div>{{-- end 95vh scroll wrapper --}}
-
-{{-- ══ CHART DATA BRIDGE ══ --}}
-<div id="__dash_chart_data" style="display:none"
-     data-empsnapshot="{{ $chartEmpSnapshotData }}"
-     data-eventssnapshot="{{ $chartEventsSnapshotData }}"
-     data-jobssnapshot="{{ $chartJobsSnapshotData }}">
+    </div>
 </div>
 
-<script>
-(function(){
-    'use strict';
-
-    var registry = {};
-
-    function loadChartJs(cb){
-        if(window.Chart){ cb(); return; }
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
-        s.onload = cb;
-        document.head.appendChild(s);
-    }
-
-    function bridge(){
-        var el = document.getElementById('__dash_chart_data');
-        if(!el) return null;
-        try {
-            return {
-                empSnapshot:    JSON.parse(el.getAttribute('data-empsnapshot')    || 'null'),
-                eventsSnapshot: JSON.parse(el.getAttribute('data-eventssnapshot') || 'null'),
-                jobsSnapshot:   JSON.parse(el.getAttribute('data-jobssnapshot')   || 'null'),
-            };
-        } catch(e){ return null; }
-    }
-
-    function kill(id){ if(registry[id]){ registry[id].destroy(); delete registry[id]; } }
-    function allZero(arr){ return !arr || arr.every(function(v){ return !v || v === 0; }); }
-
-    function donut(id, data){
-        if(!data || !data.labels || allZero(data.data)){ kill(id); return; }
-        var c = document.getElementById(id); if(!c) return;
-        kill(id);
-        registry[id] = new Chart(c, {
-            type: 'doughnut',
-            data: {
-                labels: data.labels,
-                datasets: [{
-                    data: data.data,
-                    backgroundColor: data.colors,
-                    borderWidth: 2,
-                    borderColor: '#fff',
-                    hoverOffset: 8
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '64%',
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        onClick: function(){},
-                        labels: {
-                            font: { size: 9, weight: '600' },
-                            color: '#333333',
-                            padding: 6,
-                            usePointStyle: true,
-                            pointStyleWidth: 6,
-                            boxHeight: 6
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(ctx){
-                                var t = ctx.dataset.data.reduce(function(a,b){ return a+b; }, 0);
-                                var p = t ? Math.round(ctx.parsed / t * 100) : 0;
-                                return ' ' + ctx.label + ': ' + ctx.parsed + ' (' + p + '%)';
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function initAll(){
-        var d = bridge(); if(!d) return;
-        donut('adm_chartEmpSnapshot',    d.empSnapshot);
-        donut('adm_chartEventsSnapshot', d.eventsSnapshot);
-        donut('adm_chartJobsSnapshot',   d.jobsSnapshot);
-    }
-
-    loadChartJs(function(){
-        if(document.readyState === 'loading'){
-            document.addEventListener('DOMContentLoaded', function(){ requestAnimationFrame(initAll); });
-        } else {
-            requestAnimationFrame(initAll);
-        }
-        document.addEventListener('livewire:navigated', function(){
-            kill('adm_chartEmpSnapshot');
-            kill('adm_chartEventsSnapshot');
-            kill('adm_chartJobsSnapshot');
-            requestAnimationFrame(initAll);
-        });
-        if(window.Livewire){
-            Livewire.hook('commit', function(p){
-                var ok = p.succeed || (p.component && p.respond);
-                if(typeof ok === 'function'){ ok(function(){ requestAnimationFrame(initAll); }); }
-                else { requestAnimationFrame(initAll); }
-            });
-        } else {
-            document.addEventListener('livewire:initialized', function(){
-                Livewire.hook('commit', function(p){
-                    var ok = p.succeed || function(cb){ cb({}); };
-                    ok(function(){ requestAnimationFrame(initAll); });
-                });
-            });
-        }
-    });
-})();
-</script>
-
 </div>
-{{-- ✅ END single root wrapper --}}

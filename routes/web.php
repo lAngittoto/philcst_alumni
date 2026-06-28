@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdminNotificationController;
 use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\AlumniInformationController;
 use App\Http\Controllers\AlumniNotificationController;
@@ -178,6 +179,12 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::put('/organizer/{organizer}',          [OrganizerController::class, 'update'])       ->name('organizer.update');
     Route::delete('/organizer/{organizer}',       [OrganizerController::class, 'destroy'])      ->name('organizer.destroy');
     Route::patch('/organizer/{organizer}/status', [OrganizerController::class, 'updateStatus']) ->name('organizer.status');
+
+    // ── Admin Notification API ──────────────────────────────────────────────
+    Route::get('/admin/notifications',                       [AdminNotificationController::class, 'index'])      ->name('admin.notifications.index');
+    Route::post('/admin/notifications',                      [AdminNotificationController::class, 'store'])      ->name('admin.notifications.store');
+    Route::patch('/admin/notifications/read-all',            [AdminNotificationController::class, 'markAllRead'])->name('admin.notifications.read-all');
+    Route::patch('/admin/notifications/{notification}/read', [AdminNotificationController::class, 'markRead'])   ->name('admin.notifications.read');
 });
 
 // ===================================

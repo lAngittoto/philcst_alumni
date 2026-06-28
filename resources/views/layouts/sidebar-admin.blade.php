@@ -99,14 +99,14 @@
     //  ROUTE MAP
     // ─────────────────────────────────────────────────────────────────────────
     window.__adminRouteMap = {
-        'admin.dashboard':       '/admin/dashboard',
+        'admin.dashboard':      '/admin/dashboard',
         'user.management':      '/user/management',
         'employment.tracking':  '/employment/tracking',
         'admin.yearbook':       '/yearbook',
         'job.posts':            '/job/posts',
-        'events':                '/events',
-        'audit.logs':            '/audit/logs',
-        'course':                '/course',
+        'events':               '/events',
+        'audit.logs':           '/audit/logs',
+        'course':               '/course',
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -148,15 +148,24 @@
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
                     .forEach(function (n) {
-                        var day = n.created_at
+                        var day      = n.created_at
                             ? new Date(n.created_at).toISOString().slice(0, 10)
                             : 'unknown';
                         var rawDedup = n.dedup_key || '';
 
+                        // ── event type flags ───────────────────────────────
+
+                        // USER MANAGEMENT — separate-per-action types (never grouped)
+                        var isUserCreatedEvent  = rawDedup.startsWith('user-created::');
+                        var isUserToggledEvent  = rawDedup.startsWith('user-toggled::');
+                        var isUserEmailEvent    = rawDedup.startsWith('user-email::');
+
+                        // Generic user management update (still groups by day)
                         var isUserEvent = (
                             rawDedup.startsWith('user-management::') ||
                             n.icon === 'users'
-                        );
+                        ) && !isUserCreatedEvent && !isUserToggledEvent && !isUserEmailEvent;
+
                         var isEmploymentEvent = (
                             rawDedup.startsWith('employment-tracking::') ||
                             n.icon === 'chart-line'
@@ -165,11 +174,22 @@
                             rawDedup.startsWith('yearbook::') ||
                             n.icon === 'book-open'
                         );
-                        var isJobEvent = (
-                            rawDedup.startsWith('job-posted::') ||
+
+                        // NEW JOB POST — dedup prefix: job-posted::
+                        var isNewJobEvent = rawDedup.startsWith('job-posted::');
+
+                        // Job edits/updates — dedup prefix: job-management::
+                        var isJobUpdateEvent = (
                             rawDedup.startsWith('job-management::') ||
-                            n.icon === 'briefcase'
+                            (!isNewJobEvent && n.icon === 'briefcase')
                         );
+
+                        // NEW EVENT SUBMITTED (pending review) — dedup prefix: event-pending::
+                        var isPendingEvent = rawDedup.startsWith('event-pending::');
+
+                        // EVENT APPROVED — dedup prefix: event-approved::
+                        var isApprovedEvent = rawDedup.startsWith('event-approved::');
+
                         var isEventEvent = (
                             rawDedup.startsWith('event-management::') ||
                             rawDedup.startsWith('event-announced::')  ||
@@ -178,21 +198,28 @@
                         );
                         var isAuditEvent = (
                             rawDedup.startsWith('audit-log::') ||
-                            n.icon === 'clipboard-list' && n.title === 'Audit Log Update'
+                            (n.icon === 'clipboard-list' && n.title === 'Audit Log Update')
                         );
                         var isCourseEvent = (
                             rawDedup.startsWith('course::') ||
-                            n.icon === 'clipboard-list' && n.title === 'Course Update'
+                            (n.icon === 'clipboard-list' && n.title === 'Course Update')
                         );
 
+                        // ── group key ──────────────────────────────────────
                         var groupKey;
-                        if (isUserEvent)        { groupKey = 'user_day::' + day; }
-                        else if (isEmploymentEvent) { groupKey = 'employment_day::' + day; }
-                        else if (isYearbookEvent)   { groupKey = 'yearbook_day::' + day; }
-                        else if (isJobEvent)        { groupKey = 'job_day::' + day; }
-                        else if (isEventEvent)      { groupKey = 'event_day::' + day; }
-                        else if (isAuditEvent)      { groupKey = 'audit_day::' + day; }
-                        else if (isCourseEvent)     { groupKey = 'course_day::' + day; }
+                        if (isUserCreatedEvent)      { groupKey = rawDedup; }           // per-creation, no collapsing
+                        else if (isUserToggledEvent) { groupKey = rawDedup; }           // per-toggle, no collapsing
+                        else if (isUserEmailEvent)   { groupKey = rawDedup; }           // per-email-update, no collapsing
+                        else if (isUserEvent)         { groupKey = 'user_day::' + day; }
+                        else if (isEmploymentEvent)  { groupKey = 'employment_day::' + day; }
+                        else if (isYearbookEvent)    { groupKey = 'yearbook_day::' + day; }
+                        else if (isNewJobEvent)      { groupKey = rawDedup; }
+                        else if (isJobUpdateEvent)   { groupKey = 'job_update_day::' + day; }
+                        else if (isPendingEvent)     { groupKey = rawDedup; }
+                        else if (isApprovedEvent)    { groupKey = rawDedup; }
+                        else if (isEventEvent)       { groupKey = 'event_day::' + day; }
+                        else if (isAuditEvent)       { groupKey = 'audit_day::' + day; }
+                        else if (isCourseEvent)      { groupKey = 'course_day::' + day; }
                         else { groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id); }
 
                         if (map.has(groupKey)) {
@@ -201,33 +228,53 @@
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
 
-                            if (isUserEvent)        { g.message = g.count + ' user account update(s) today.';   g.title = 'User Management Update'; }
-                            else if (isEmploymentEvent) { g.message = g.count + ' employment record update(s) today.'; g.title = 'Employment Tracking Update'; }
-                            else if (isYearbookEvent)   { g.message = g.count + ' yearbook update(s) today.';        g.title = 'Yearbook Update'; }
-                            else if (isJobEvent)        { g.message = g.count + ' job posting update(s) today.';     g.title = 'Job Posting Update'; }
-                            else if (isEventEvent)      { g.message = g.count + ' event update(s) today.';           g.title = 'Event Update'; }
-                            else if (isAuditEvent)      { g.message = g.count + ' audit log entry(ies) today.';      g.title = 'Audit Log Update'; }
-                            else if (isCourseEvent)     { g.message = g.count + ' course update(s) today.';          g.title = 'Course Update'; }
+                            // Update group titles for collapsible types only
+                            if (isUserEvent)         { g.title = 'User Management Update'; }
+                            else if (isEmploymentEvent)  { g.title = 'Employment Tracking Update'; }
+                            else if (isYearbookEvent)    { g.title = 'Yearbook Update'; }
+                            else if (isJobUpdateEvent)   { g.title = 'Job Posting Update'; }
+                            else if (isEventEvent)       { g.title = 'Event Update'; }
+                            else if (isAuditEvent)       { g.title = 'Audit Log Update'; }
+                            else if (isCourseEvent)      { g.title = 'Course Update'; }
                         } else {
                             map.set(groupKey, Object.assign({}, n, {
                                 count: n.count || 1,
                                 _ids:  [n.id],
-                                title: isUserEvent        ? (n.title || 'User Management Update')
-                                     : isEmploymentEvent  ? (n.title || 'Employment Tracking Update')
-                                     : isYearbookEvent    ? (n.title || 'Yearbook Update')
-                                     : isJobEvent         ? (n.title || 'Job Posting Update')
-                                     : isEventEvent       ? (n.title || 'Event Update')
-                                     : isAuditEvent       ? (n.title || 'Audit Log Update')
-                                     : isCourseEvent      ? (n.title || 'Course Update')
+                                title: isUserCreatedEvent  ? (n.title || 'New Director Created')
+                                     : isUserToggledEvent  ? (n.title || 'Account Status Changed')
+                                     : isUserEmailEvent    ? (n.title || 'Alumni Email Updated')
+                                     : isUserEvent         ? (n.title || 'User Management Update')
+                                     : isEmploymentEvent   ? (n.title || 'Employment Tracking Update')
+                                     : isYearbookEvent     ? (n.title || 'Yearbook Update')
+                                     : isNewJobEvent       ? (n.title || 'New Job Posting')
+                                     : isJobUpdateEvent    ? (n.title || 'Job Posting Update')
+                                     : isPendingEvent      ? (n.title || 'New Event Submitted')
+                                     : isApprovedEvent     ? (n.title || 'Event Approved')
+                                     : isEventEvent        ? (n.title || 'Event Update')
+                                     : isAuditEvent        ? (n.title || 'Audit Log Update')
+                                     : isCourseEvent       ? (n.title || 'Course Update')
                                      : n.title,
-                                icon:  isUserEvent        ? 'users'
-                                     : isEmploymentEvent  ? 'chart-line'
-                                     : isYearbookEvent    ? 'book-open'
-                                     : isJobEvent         ? 'briefcase'
-                                     : isEventEvent       ? 'calendar-check'
-                                     : isAuditEvent       ? 'clipboard-list'
-                                     : isCourseEvent      ? 'clipboard-list'
+                                icon:  isUserCreatedEvent  ? 'user-tie'
+                                     : isUserToggledEvent  ? 'circle-check'
+                                     : isUserEmailEvent    ? 'envelope'
+                                     : isUserEvent         ? 'users'
+                                     : isEmploymentEvent   ? 'chart-line'
+                                     : isYearbookEvent     ? 'book-open'
+                                     : isNewJobEvent       ? 'briefcase'
+                                     : isJobUpdateEvent    ? 'briefcase'
+                                     : isPendingEvent      ? 'calendar-day'
+                                     : isApprovedEvent     ? 'calendar-check'
+                                     : isEventEvent        ? 'calendar-check'
+                                     : isAuditEvent        ? 'clipboard-list'
+                                     : isCourseEvent       ? 'clipboard-list'
                                      : (n.icon || 'bell'),
+                                // Carry flags so the template knows what kind of row this is
+                                _isNewJob:        isNewJobEvent,
+                                _isPendingEvent:  isPendingEvent,
+                                _isApprovedEvent: isApprovedEvent,
+                                _isUserCreated:   isUserCreatedEvent,
+                                _isUserToggled:   isUserToggledEvent,
+                                _isUserEmail:     isUserEmailEvent,
                             }));
                         }
                     });
@@ -425,7 +472,34 @@
     };
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  TIMESTAMP HELPER — "Today, 5:07 PM" vs "Jun 23, 5:07 PM"
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__adminFormatNotifTime = function (isoStr) {
+        if (!isoStr) return '';
+        var d       = new Date(isoStr);
+        var now     = new Date();
+        var isToday = d.getFullYear() === now.getFullYear() &&
+                      d.getMonth()    === now.getMonth()    &&
+                      d.getDate()     === now.getDate();
+        var timePart = d.toLocaleString('en-PH', { hour: '2-digit', minute: '2-digit' });
+        if (isToday) {
+            return 'Today, ' + timePart;
+        }
+        var datePart = d.toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+        return datePart + ', ' + timePart;
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  NOTIFICATION EVENT LISTENERS
+    //
+    //  user-created:: = new director created    → separate row per creation
+    //  user-toggled:: = activate / deactivate   → separate row per action
+    //  user-email::   = alumni email updated    → separate row per update
+    //
+    //  job-posted::   = brand-new job post      → separate row per job
+    //  job-management:: = edits/updates         → grouped by day
+    //  event-pending::  = new event submitted   → separate row per event
+    //  event-approved:: = event approved        → separate row per event
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstAdminNotifListeners) {
         window.__philcstAdminNotifListeners = true;
@@ -435,6 +509,25 @@
             if (!d) return {};
             if (!Array.isArray(d)) return d;
             return d[0] || {};
+        }
+
+        function _courseChangeMessage(d) {
+            var code    = (d.new_code || d.code    || '').trim();
+            var oldCode = (d.old_code || '').trim();
+            var name    = (d.new_name || d.name    || '').trim();
+            var oldName = (d.old_name || '').trim();
+
+            if (d.action === 'created') {
+                return 'New course added: ' + code;
+            }
+            var codeChanged = oldCode && code && oldCode !== code;
+            var nameChanged = oldName && name && oldName !== name;
+            if (codeChanged && nameChanged) {
+                return oldCode + ' → ' + code + ' (' + oldName + ' → ' + name + ')';
+            }
+            if (codeChanged) { return oldCode + ' → ' + code; }
+            if (nameChanged) { return oldCode + ': ' + oldName + ' → ' + name; }
+            return (code || 'A course') + ' was re-saved with no changes.';
         }
 
         async function _saveAdminNotif(payload) {
@@ -458,6 +551,65 @@
             } catch (e) { /* ignore */ }
         }
 
+        // ── NEW DIRECTOR CREATED ─────────────────────────────────────────────
+        // Fired by manage-users.blade.php via __admin-user-created-rich.
+        // dedup_key: user-created::{uid} — separate row per creation, never grouped.
+        // Message: "Full Name account has been created. (Username: username)"
+        window.addEventListener('__admin-user-created-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.uid) return;
+            _saveAdminNotif({
+                icon:       'user-tie',
+                title:      'New Director Created',
+                message:    (d.name || 'A new director') + ' account has been created.'
+                            + (d.username ? ' (Username: ' + d.username + ')' : ''),
+                link_route: 'user.management',
+                link_label: 'View Users',
+                dedup_key:  'user-created::' + d.uid,
+            });
+        });
+
+        // ── DIRECTOR / REGISTRAR ACTIVATE | DEACTIVATE ───────────────────────
+        // Fired by manage-users.blade.php via __admin-user-toggled-rich.
+        // dedup_key: user-toggled::{uid}::{minute} — separate row per action.
+        // Message: "Full Name has been activated/deactivated. (Director)"
+        window.addEventListener('__admin-user-toggled-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.uid) return;
+            var actionLabel = d.action === 'activate' ? 'activated' : 'deactivated';
+            var roleLabel   = d.role
+                ? d.role.charAt(0).toUpperCase() + d.role.slice(1)
+                : '';
+            _saveAdminNotif({
+                icon:       d.action === 'activate' ? 'circle-check' : 'ban',
+                title:      'Account ' + (d.action === 'activate' ? 'Activated' : 'Deactivated'),
+                message:    (d.name || 'A user') + ' has been ' + actionLabel + '.'
+                            + (roleLabel ? ' (' + roleLabel + ')' : ''),
+                link_route: 'user.management',
+                link_label: 'View Users',
+                dedup_key:  'user-toggled::' + d.uid + '::' + Math.floor(Date.now() / 60000),
+            });
+        });
+
+        // ── ALUMNI EMAIL UPDATED ──────────────────────────────────────────────
+        // Fired by manage-users.blade.php via __admin-user-email-rich.
+        // dedup_key: user-email::{uid}::{minute} — separate row per update.
+        // Message: "Full Name email has been updated. New email: newemail@x.com"
+        window.addEventListener('__admin-user-email-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.uid) return;
+            _saveAdminNotif({
+                icon:       'envelope',
+                title:      'Alumni Email Updated',
+                message:    (d.name || 'An alumni') + ' email has been updated.'
+                            + (d.email ? ' New email: ' + d.email : ''),
+                link_route: 'user.management',
+                link_label: 'View Users',
+                dedup_key:  'user-email::' + d.uid + '::' + Math.floor(Date.now() / 60000),
+            });
+        });
+
+        // ── user (generic grouped) ────────────────────────────────────────────
         window.addEventListener('admin-user-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -470,6 +622,7 @@
             });
         });
 
+        // ── employment ──────────────────────────────────────────────────────
         window.addEventListener('admin-employment-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -482,6 +635,7 @@
             });
         });
 
+        // ── yearbook ────────────────────────────────────────────────────────
         window.addEventListener('admin-yearbook-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -494,6 +648,7 @@
             });
         });
 
+        // ── job UPDATE (edits only — NOT new posts) ─────────────────────────
         window.addEventListener('admin-job-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -506,6 +661,54 @@
             });
         });
 
+        // ── NEW JOB POST ─────────────────────────────────────────────────────
+        window.addEventListener('__admin-job-posted-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.id) return;
+
+            var message = (d.title || 'A new job posting')
+                + (d.company ? ' at ' + d.company : '')
+                + ' — Posted by: ' + (d.poster || 'Alumni Director');
+
+            _saveAdminNotif({
+                icon:       'briefcase',
+                title:      'New Job Posting',
+                message:    message,
+                link_route: 'job.posts',
+                link_label: 'View Jobs',
+                dedup_key:  'job-posted::' + d.id,
+            });
+        });
+
+        // ── NEW EVENT SUBMITTED (pending review) ────────────────────────────
+        window.addEventListener('__admin-event-pending-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.id) return;
+            _saveAdminNotif({
+                icon:       'calendar-day',
+                title:      'New Event Submitted',
+                message:    d.message,
+                link_route: 'events',
+                link_label: 'View Events',
+                dedup_key:  'event-pending::' + d.id,
+            });
+        });
+
+        // ── EVENT APPROVED ───────────────────────────────────────────────────
+        window.addEventListener('__admin-event-approved-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.id) return;
+            _saveAdminNotif({
+                icon:       'calendar-check',
+                title:      'Event Approved',
+                message:    d.message,
+                link_route: 'events',
+                link_label: 'View Events',
+                dedup_key:  'event-approved::' + d.id,
+            });
+        });
+
+        // ── event (generic updates) ──────────────────────────────────────────
         window.addEventListener('admin-event-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -518,6 +721,7 @@
             });
         });
 
+        // ── audit ────────────────────────────────────────────────────────────
         window.addEventListener('admin-audit-logged', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -530,18 +734,20 @@
             });
         });
 
+        // ── course ────────────────────────────────────────────────────────────
         window.addEventListener('admin-course-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
                 icon:       'clipboard-list',
                 title:      'Course Update',
-                message:    (d.name || 'A course') + ' has been updated.',
+                message:    _courseChangeMessage(d),
                 link_route: 'course',
                 link_label: 'View Courses',
                 dedup_key:  'course::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
 
+        // ── generic refresh ──────────────────────────────────────────────────
         window.addEventListener('admin-notif-refresh', function () {
             var s = window.__safeAdminNotifsStore();
             if (s) {
@@ -729,7 +935,7 @@
                 <button type="submit"
                         class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
                                transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
+                        style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                     <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
                 </button>
             </form>
@@ -878,9 +1084,15 @@
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
 
-                                {{-- Count badge --}}
+                                {{-- Count badge (only for collapsed/grouped types) --}}
                                 <span
-                                    x-show="Number(notif.count) > 1"
+                                    x-show="Number(notif.count) > 1
+                                            && !notif._isNewJob
+                                            && !notif._isPendingEvent
+                                            && !notif._isApprovedEvent
+                                            && !notif._isUserCreated
+                                            && !notif._isUserToggled
+                                            && !notif._isUserEmail"
                                     x-cloak
                                     class="inline-flex items-center justify-center
                                            min-w-[22px] h-5 rounded-full px-1.5
@@ -889,7 +1101,87 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
-                                {{-- User badge --}}
+                                {{-- NEW DIRECTOR badge (indigo) --}}
+                                <span
+                                    x-show="notif._isUserCreated && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#4f46e5,#3730a3);">
+                                    NEW DIR
+                                </span>
+
+                                {{-- ACTIVATED badge (green) --}}
+                                <span
+                                    x-show="notif._isUserToggled && !notif.read && notif.icon === 'circle-check'"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    ACTIVATED
+                                </span>
+
+                                {{-- DEACTIVATED badge (red) --}}
+                                <span
+                                    x-show="notif._isUserToggled && !notif.read && notif.icon === 'ban'"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#dc2626,#b91c1c);">
+                                    DEACTIVATED
+                                </span>
+
+                                {{-- EMAIL UPDATED badge (blue) --}}
+                                <span
+                                    x-show="notif._isUserEmail && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    EMAIL
+                                </span>
+
+                                {{-- NEW JOB badge (green) --}}
+                                <span
+                                    x-show="notif._isNewJob && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    NEW JOB
+                                </span>
+
+                                {{-- PENDING EVENT badge (amber) --}}
+                                <span
+                                    x-show="notif._isPendingEvent && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#d97706,#b45309);">
+                                    PENDING
+                                </span>
+
+                                {{-- APPROVED EVENT badge (green) --}}
+                                <span
+                                    x-show="notif._isApprovedEvent && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    APPROVED
+                                </span>
+
+                                {{-- JOB UPDATE badge (blue) --}}
+                                <span
+                                    x-show="notif.icon === 'briefcase' && !notif._isNewJob && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    JOB
+                                </span>
+
+                                {{-- User badge (generic grouped) --}}
                                 <span
                                     x-show="notif.icon === 'users' && !notif.read"
                                     x-cloak
@@ -919,19 +1211,9 @@
                                     YEARBOOK
                                 </span>
 
-                                {{-- Job badge --}}
+                                {{-- Event badge (generic) --}}
                                 <span
-                                    x-show="notif.icon === 'briefcase' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
-                                    JOB
-                                </span>
-
-                                {{-- Event badge --}}
-                                <span
-                                    x-show="notif.icon === 'calendar-check' && !notif.read"
+                                    x-show="notif.icon === 'calendar-check' && !notif._isApprovedEvent && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -973,15 +1255,11 @@
                            x-text="notif.message">
                         </p>
 
+                        {{-- Timestamp --}}
                         <div class="flex items-center gap-1 mt-2">
                             <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
                             <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                  x-text="notif.created_at
-                                      ? new Date(notif.created_at).toLocaleString('en-PH',{
-                                          month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit'
-                                        })
-                                      : ''">
+                                  x-text="window.__adminFormatNotifTime(notif.created_at)">
                             </span>
                         </div>
                     </div>

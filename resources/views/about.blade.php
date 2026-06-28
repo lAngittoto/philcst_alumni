@@ -4,14 +4,14 @@
 
 <style>
     html { scroll-behavior: smooth; }
-    body { background-color: #F5F5F5; margin: 0; padding: 0; overflow-x: hidden; }
+    body { background-color: #FFFFFF; margin: 0; padding: 0; overflow-x: hidden; }
 
     [data-aos] {
         transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1) !important;
     }
 
     ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: #F5F5F5; }
+    ::-webkit-scrollbar-track { background: #FFFFFF; }
     ::-webkit-scrollbar-thumb { background: #333333; border-radius: 10px; }
 
     /* Timeline */
@@ -49,7 +49,7 @@
 <div class="w-full mt-10">
 
     {{-- ══════════ MISSION & VISION ══════════ --}}
-    <section class="pt-16 px-6 bg-[#F5F5F5]">
+    <section class="pt-16 px-6 bg-white">
         <div class="max-w-5xl mx-auto">
 
             <div class="text-center mb-12" data-aos="fade-up" data-aos-duration="800">
@@ -60,17 +60,17 @@
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
 
-                <div class="bg-white border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="0">
+                <div class="bg-[#FAFAFA] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="0">
                     <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-4">Mission</span>
                     <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                        PhilCST provides quality education to students who are imbued with strong moral character through a well-balanced research and community-oriented learning environment that develops critical thinking for the maximum development of an individual's talents and capabilities.
+                        PhilCST provides quality education to students who are imbued with strong moral character through a well-balanced research and community oriented learning environment that develops critical thinking for maximum development of an individual's talents and capabilities.
                     </p>
                 </div>
 
-                <div class="bg-white border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
+                <div class="bg-[#FAFAFA] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
                     <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-4">Vision</span>
                     <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                        PhilCST envisions producing graduates fully equipped with knowledge, values, and skills, who are globally competitive in their profession and ever ready to render quality services to society.
+                        PhilCST envisions to produce graduates fully equipped with knowledge, values, and skills, and who are globally competitive in their profession ever ready to render quality services.
                     </p>
                 </div>
 
@@ -79,12 +79,12 @@
     </section>
 
     {{-- ══════════ SUBTLE DIVIDER ══════════ --}}
-    <div class="px-6 bg-[#F5F5F5]">
+    <div class="px-6 bg-white">
         <div class="max-w-5xl mx-auto border-t-2 border-[#e0e0e0] mt-12"></div>
     </div>
 
     {{-- ══════════ HISTORY ══════════ --}}
-    <section class="py-12 pb-24 px-6 bg-[#F5F5F5]">
+    <section class="py-12 pb-24 px-6 bg-white">
         <div class="max-w-5xl mx-auto">
 
             <div class="mb-10" data-aos="fade-up" data-aos-duration="800">
@@ -94,7 +94,7 @@
                 </h2>
             </div>
 
-            <div class="bg-white border-l-4 border-[#7a3f91] rounded-r-xl p-8 mb-12"
+            <div class="bg-[#FAFAFA] border-l-4 border-[#7a3f91] rounded-r-xl p-8 mb-12"
                  data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
                 <p class="font-sans font-normal text-xl text-[#333333] italic leading-relaxed m-0">
                     "The Philippine College of Science and Technology is a private, non-sectarian institution of higher learning — established as a beacon of hope after one of the most devastating disasters in Pangasinan's history."
@@ -115,7 +115,7 @@
                             The Earthquake That Changed Everything
                         </h4>
                         <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                            A powerful earthquake devastated Dagupan City, heavily damaging leading educational institutions and business establishments. The massive destruction on public and private properties was likened to the devastations of historic wars — leaving thousands of families in desperate need of a fresh start.
+                            A powerful earthquake devastated Dagupan City where leading educational institutions and business establishments were heavily damaged. Massive destruction on public and private properties was described as similar to destructions encountered by thousands of people during historic wars.
                         </p>
                     </div>
                 </div>
@@ -131,7 +131,7 @@
                             Mrs. Lourdes S. Fernandez — The Founder
                         </h4>
                         <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                            These disastrous circumstances convinced <strong>Mrs. Lourdes S. Fernandez</strong> to establish a school outside Dagupan City to serve students, parents, and professionals. Her vision was equally inspired by President Fidel V. Ramos' <em>"Philippines 2000"</em> program — which aimed at transforming the country into a highly industrialized nation by the turn of the century.
+                            These disastrous circumstances convinced <strong>Mrs. Lourdes S. Fernandez</strong>, the PhilCST Founder, to put up a school outside Dagupan City to cater the needs of the students, parents, and professionals. This dream of the Founder was equally influenced by Fidel V. Ramos' marching program called <em>"Philippines 2000"</em> which aimed at transforming the country into a highly industrialized nation by the end of the century.
                         </p>
                     </div>
                 </div>
@@ -147,7 +147,7 @@
                             The Building Rises in Calasiao
                         </h4>
                         <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                            The Founder constructed a four-storey building in Nalsian, Calasiao, Pangasinan — officially named the <strong>Philippine College of Science and Technology (PhilCST)</strong>. This became the first college institution in the Municipality of Calasiao, just five kilometers from Dagupan City proper.
+                            The Founder built a four-storey building in Nalsian, Calasiao, Pangasinan which was named the <strong>Philippine College of Science and Technology (PhilCST)</strong>. This was the first College Institution built in the Municipality of Calasiao, which is just five (5) kilometers away from Dagupan City proper.
                         </p>
                     </div>
                 </div>
@@ -162,7 +162,7 @@
                             Doors Open to the Public
                         </h4>
                         <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                            PhilCST formally started its overall operations, offering various degree and non-degree courses anchored on the mission of recognizing every human being as a potential agent of positive change. The primary aim was to provide high-quality education to children of residents across the province of Pangasinan and neighboring communities.
+                            PhilCST formally started its overall operations, offering to the public various degree and non-degree courses anchored on the mission of recognizing every human being as a potential agent of positive change. The primary aim of PhilCST was to provide high-quality education to children of the residents in the province of Pangasinan and the neighboring towns, cities, and provinces.
                         </p>
                     </div>
                 </div>
@@ -177,7 +177,7 @@
                 <div class="photo-side">
                     <img src="{{ asset('images/school-1.jpg') }}" alt="PhilCST Campus">
                 </div>
-                <div class="photo-side bg-[#F5F5F5] flex items-center justify-center">
+                <div class="photo-side bg-[#FAFAFA] flex items-center justify-center">
                     <div class="text-center">
                         <p class="font-sans font-bold text-5xl text-[#7a3f91] m-0">1995</p>
                         <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#333333] block mt-3">Year Established</span>
@@ -189,52 +189,21 @@
     </section>
 
     {{-- ══════════ EXCELLENCE ══════════ --}}
-    <section class="py-24 px-6 bg-white">
+    <section class="py-24 px-6 bg-[#FAFAFA]">
         <div class="max-w-5xl mx-auto">
 
-            <div class="text-center mb-16" data-aos="fade-up" data-aos-duration="800">
+            <div class="mb-10" data-aos="fade-up" data-aos-duration="800">
                 <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-3">Continuing Legacy</span>
-                <h2 class="font-sans font-bold text-3xl md:text-4xl uppercase leading-tight text-[#333333] mb-6">
-                    A Tradition of <span class="text-[#7a3f91]">Excellence Continues</span>
+                <h2 class="font-sans font-bold text-3xl md:text-5xl uppercase leading-tight text-[#333333]">
+                    A Tradition of <br><span class="text-[#7a3f91]">Excellence Continues</span>
                 </h2>
-                <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed max-w-2xl mx-auto">
-                    PhilCST stands out as a regional leader — renowned for high-quality education, innovation, and producing graduates ready for the world.
-                </p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed"
+               data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
+                The Philippine College of Science and Technology (PhilCST) is a premier higher education institution in the North. Renowned for its unwavering commitment to high-quality education and comprehensive student development, PhilCST stands out as a leader in the region. With innovative academic programs, groundbreaking research initiatives, and robust partnerships with industry, it empowers students to thrive in their chosen careers. By focusing on science and technology, PhilCST is dedicated to shaping skilled professionals who are well-equipped to drive progress and contribute meaningfully to national development and beyond.
+            </p>
 
-                <div class="bg-[#F5F5F5] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="0">
-                    <div class="w-12 h-12 rounded-full bg-white flex items-center justify-center mb-5 border-2 border-[#7a3f91]">
-                        <span class="font-sans font-bold text-xl text-[#7a3f91]">01</span>
-                    </div>
-                    <h4 class="font-sans font-bold text-2xl uppercase text-[#333333] mb-3">Premier Institution</h4>
-                    <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                        A leading higher education institution in the North, known for its unwavering commitment to quality education and comprehensive student development.
-                    </p>
-                </div>
-
-                <div class="bg-[#F5F5F5] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
-                    <div class="w-12 h-12 rounded-full bg-white flex items-center justify-center mb-5 border-2 border-[#7a3f91]">
-                        <span class="font-sans font-bold text-xl text-[#7a3f91]">02</span>
-                    </div>
-                    <h4 class="font-sans font-bold text-2xl uppercase text-[#333333] mb-3">Innovation &amp; Research</h4>
-                    <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                        Innovative academic programs, groundbreaking research, and strong industry partnerships help PhilCST graduates thrive in today's competitive landscape.
-                    </p>
-                </div>
-
-                <div class="bg-[#F5F5F5] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="200">
-                    <div class="w-12 h-12 rounded-full bg-white flex items-center justify-center mb-5 border-2 border-[#7a3f91]">
-                        <span class="font-sans font-bold text-xl text-[#7a3f91]">03</span>
-                    </div>
-                    <h4 class="font-sans font-bold text-2xl uppercase text-[#333333] mb-3">Global Competitiveness</h4>
-                    <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
-                        Focused on science and technology, PhilCST molds skilled professionals equipped to drive national progress and contribute meaningfully on the global stage.
-                    </p>
-                </div>
-
-            </div>
         </div>
     </section>
 

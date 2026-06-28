@@ -280,13 +280,13 @@ new class extends Component {
     }
 
     // ─── Batch chart data (all, for JS-side pagination) ───────
-
     #[Computed(persist: true)]
     public function allBatches()
     {
         return DB::table('alumni')
             ->select('batch', DB::raw('COUNT(*) as total'))
             ->groupBy('batch')
+            ->havingRaw('COUNT(*) > 0')
             ->orderBy('batch', 'asc')
             ->get();
     }
@@ -379,6 +379,9 @@ new class extends Component {
 
     <div id="__dash_batch_data" class="hidden"
          data-batches="{{ $this->allBatches->toJson() }}"
+         data-latest-batch="{{ $this->latestBatch }}"
+         data-emp-counts="{{ json_encode($this->empCounts) }}"
+         data-total-alumni="{{ $this->totalAlumni }}"
          data-alumni-route="{{ route('registrar.alumni') }}"
          data-emp-route="{{ route('registrar.employment.tracking') }}">
     </div>
@@ -386,7 +389,7 @@ new class extends Component {
     <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-4 max-w-screen-2xl mx-auto">
 
         {{-- PAGE HEADER --}}
-        <div class="flex items-center gap-3 mb-5">
+        <div class="flex items-center gap-3 mb-4">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-gauge-high text-white text-base"></i>
@@ -502,15 +505,13 @@ new class extends Component {
                     <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                         <i class="fas fa-book-open text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">Courses</span>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Courses</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
                 <p class="text-sm text-[#333333] mt-1 font-normal">Active Courses</p>
-                @if($this->latestBatch)
-                    <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
-                        <i class="fas fa-calendar-check text-sm"></i> Latest batch: {{ $this->latestBatch }}
-                    </p>
-                @endif
+                <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
+                    More on Courses <i class="fas fa-chevron-right text-[10px]"></i>
+                </p>
             </div>
 
         </div>
@@ -518,67 +519,26 @@ new class extends Component {
         {{-- ─── MAIN GRID ───────────────────────────────────────── --}}
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4" style="align-items:stretch;">
 
-            {{-- Employment Overview --}}
+            {{-- ── Employment Overview — PIE CHART ── --}}
             @php
                 $ec           = $this->empCounts;
                 $submitted    = $ec['submitted'];
                 $total        = $this->totalAlumni;
                 $submittedPct = $total > 0 ? round(($submitted / $total) * 100) : 0;
-
-                $empRows = [
-                    [
-                        'label'       => 'Employed',
-                        'count'       => $ec['employed'],
-                        'color'       => '#7A3F91',
-                        'light'       => '#F9F7FC',
-                        'border'      => '#E8E0F0',
-                        'filter'      => 'employed',
-                        'tooltip'     => 'View All Employed',
-                        'hoverBorder' => '#7A3F91',
-                    ],
-                    [
-                        'label'       => 'Self-Employed',
-                        'count'       => $ec['self'],
-                        'color'       => '#2563eb',
-                        'light'       => '#EFF6FF',
-                        'border'      => '#BFDBFE',
-                        'filter'      => 'self_employed',
-                        'tooltip'     => 'View All Self-Employed',
-                        'hoverBorder' => '#2563eb',
-                    ],
-                    [
-                        'label'       => 'Unemployed',
-                        'count'       => $ec['unemployed'],
-                        'color'       => '#d97706',
-                        'light'       => '#FFFBEB',
-                        'border'      => '#FCD34D',
-                        'filter'      => 'unemployed',
-                        'tooltip'     => 'View All Unemployed',
-                        'hoverBorder' => '#d97706',
-                    ],
-                    [
-                        'label'       => 'No Record',
-                        'count'       => $ec['noRecord'],
-                        'color'       => '#374151',
-                        'light'       => '#F9FAFB',
-                        'border'      => '#E5E7EB',
-                        'filter'      => 'no_record',
-                        'tooltip'     => 'View All Without Record',
-                        'hoverBorder' => '#374151',
-                    ],
-                ];
             @endphp
 
             <div class="lg:col-span-1 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-visible flex flex-col">
-                <div class="px-5 py-3.5 border-b border-[#E8E0F0]" style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                    <div class="flex items-center gap-2">
-                        <div class="w-6 h-6 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                            <i class="fas fa-briefcase text-white" style="font-size:11px;"></i>
-                        </div>
-                        <p class="text-sm font-semibold text-[#111111] uppercase tracking-wide">Employment Overview</p>
+                <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
+                    <div class="flex items-center gap-[7px]">
+                        <div class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
+                        <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Employment Overview</span>
                     </div>
+                    <span class="text-[.68rem] text-[#555555] font-medium flex items-center gap-[3px] pointer-events-none">
+                        <i class="fas fa-hand-pointer"></i> Click slice to view
+                    </span>
                 </div>
                 <div class="p-4 flex flex-col gap-3 flex-1">
+                    {{-- Submission progress bar --}}
                     <div class="bg-[#F9F7FC] border border-[#E8E0F0] rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
                             <p class="text-xs font-semibold text-[#111111] uppercase tracking-wide">Submitted Employment Info</p>
@@ -593,24 +553,38 @@ new class extends Component {
                             <strong class="text-[#111111] font-semibold">{{ number_format($total) }}</strong> alumni submitted
                         </p>
                     </div>
-                    <div class="space-y-2">
-                        @foreach($empRows as $row)
-                        <div wire:click="openEmpModal('{{ $row['filter'] }}')"
-                             class="relative overflow-visible rounded-xl border p-3 flex items-center justify-between
-                                    transition-all duration-150 hover:shadow-md active:scale-[.98] cursor-pointer group"
-                             style="background:{{ $row['light'] }}; border-color:{{ $row['border'] }};">
 
-                            <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
+                    {{-- PIE CHART CANVAS --}}
+                    <div class="relative flex items-center justify-center" wire:ignore
+                         style="width:100%; height:200px;">
+                        <canvas id="dashEmpPieChart" style="max-width:100%; max-height:100%;"></canvas>
+                    </div>
+
+                    {{-- Legend --}}
+                    <div class="grid grid-cols-2 gap-1.5" id="dashEmpPieLegend">
+                        @php
+                            $legendRows = [
+                                ['label'=>'Employed',      'count'=>$ec['employed'],   'color'=>'#7A3F91', 'filter'=>'employed',      'tip'=>'View Employed'],
+                                ['label'=>'Self-Employed', 'count'=>$ec['self'],        'color'=>'#2563eb', 'filter'=>'self_employed',  'tip'=>'View Self-Employed'],
+                                ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'color'=>'#d97706', 'filter'=>'unemployed',     'tip'=>'View Unemployed'],
+                                ['label'=>'No Record',     'count'=>$ec['noRecord'],   'color'=>'#b0b7c3', 'filter'=>'no_record',      'tip'=>'View No Record'],
+                            ];
+                        @endphp
+                        @foreach($legendRows as $leg)
+                        <div wire:click="openEmpModal('{{ $leg['filter'] }}')"
+                             class="relative overflow-visible flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer
+                                    hover:bg-gray-50 active:scale-95 transition-all duration-100 group">
+                            <span class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2
                                          bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
-                                         px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
+                                         px-[10px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
                                          opacity-0 group-hover:opacity-100 z-50 shadow-lg transition-opacity duration-150
                                          before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                                          before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]">
-                                <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>{{ $row['tooltip'] }}
+                                <i class="fas fa-eye mr-1" style="font-size:.6rem;"></i>{{ $leg['tip'] }}
                             </span>
-
-                            <span class="text-sm font-semibold text-[#111111]">{{ $row['label'] }}</span>
-                            <span class="text-2xl font-semibold" style="color:{{ $row['color'] }};">{{ number_format($row['count']) }}</span>
+                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $leg['color'] }};"></span>
+                            <span class="text-[11px] font-semibold text-[#111111] truncate">{{ $leg['label'] }}</span>
+                            <span class="text-[11px] font-bold ml-auto shrink-0" style="color:{{ $leg['color'] }};">{{ number_format($leg['count']) }}</span>
                         </div>
                         @endforeach
                     </div>
@@ -731,10 +705,8 @@ new class extends Component {
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
             <div class="flex flex-wrap gap-2 items-center">
 
-                {{-- FILTERS label --}}
-                <span class="text-[10px] font-bold tracking-widest uppercase text-[#888] shrink-0 mr-1">FILTERS</span>
+                <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
 
-                {{-- Tab pills --}}
                 @if($alumniModalFilter !== 'courses')
                     @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
                     <button
@@ -750,7 +722,6 @@ new class extends Component {
                     @endforeach
                 @endif
 
-                {{-- Search --}}
                 <div class="relative" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.alumniModalSearch ?? ''; $wire.$watch('alumniModalSearch', v => { if(v!==this.q) this.q=v; }); } }">
                     <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none">
@@ -766,7 +737,6 @@ new class extends Component {
 
                 @if($alumniModalFilter !== 'courses')
 
-                {{-- Batch Year dropdown --}}
                 @if(!$alumniModalBatchLocked)
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniModalBatch', val===''?null:parseInt(val)); this.close(); } }"
@@ -806,7 +776,6 @@ new class extends Component {
                 </span>
                 @endif
 
-                {{-- Course dropdown --}}
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniModalCourseFilter',val); this.close(); } }"
                      @click.outside="close()">
@@ -839,7 +808,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Reset button --}}
                 @if($alumniModalBatch || $alumniModalCourseFilter || $alumniModalSearch)
                 <button wire:click="clearAlumniModalFilters"
                         class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-full text-xs font-semibold border
@@ -849,7 +817,7 @@ new class extends Component {
                 </button>
                 @endif
 
-                @endif {{-- end if not courses --}}
+                @endif
 
             </div>
         </div>
@@ -1105,10 +1073,8 @@ new class extends Component {
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
             <div class="flex flex-wrap gap-2 items-center">
 
-                {{-- FILTERS label --}}
-                <span class="text-[10px] font-bold tracking-widest uppercase text-[#888] shrink-0 mr-1">FILTERS</span>
+                <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
 
-                {{-- Tab pills --}}
                 @foreach($visibleEmpTabs as [$val, $lbl, $icon])
                 <button
                     @if(!$empTabsLocked) wire:click="$set('empFilter','{{ $val }}')" @endif
@@ -1122,7 +1088,6 @@ new class extends Component {
                 </button>
                 @endforeach
 
-                {{-- Search --}}
                 <div class="relative" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.empSearch ?? ''; $wire.$watch('empSearch', v => { if(v!==this.q) this.q=v; }); } }">
                     <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none">
@@ -1136,7 +1101,6 @@ new class extends Component {
                            autocomplete="off">
                 </div>
 
-                {{-- Batch Year dropdown --}}
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('empBatchFilter',val); this.close(); } }"
                      @click.outside="close()">
@@ -1168,7 +1132,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Course dropdown --}}
                 <div class="relative"
                      x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('empCourseFilter',val); this.close(); } }"
                      @click.outside="close()">
@@ -1200,7 +1163,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Reset button --}}
                 @if($empHasSecondaryFilter)
                 <button wire:click="clearEmpModalFilters"
                         class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-full text-xs font-semibold border
@@ -1219,10 +1181,9 @@ new class extends Component {
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
                         <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Alumni</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
-                        <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Status</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider hidden md:table-cell">{{ $dynColLabel }}</th>
                         <th class="pl-4 pr-6 lg:pr-10 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider hidden sm:table-cell">Email</th>
                     </tr>
@@ -1269,17 +1230,6 @@ new class extends Component {
                         <td class="px-4 py-3">
                             <span class="text-sm font-semibold text-[#111111]">{{ $row->course_code ?? '—' }}</span>
                         </td>
-                        <td class="px-4 py-3 text-center">
-                            @if($isNoRecord)
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border text-[#333333] bg-gray-50 border-gray-200">
-                                    No Record
-                                </span>
-                            @else
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {{ $badge[1] }}">
-                                    {{ $badge[0] }}
-                                </span>
-                            @endif
-                        </td>
                         <td class="px-4 py-3 hidden md:table-cell">
                             @if($dynCellValue)
                                 <p class="{{ $dynCellClass }}">{{ $dynCellValue }}</p>
@@ -1294,7 +1244,7 @@ new class extends Component {
                         </td>
                     </tr>
                     @empty
-                    <tr><td colspan="7" class="py-20 text-center">
+                    <tr><td colspan="6" class="py-20 text-center">
                         <div class="flex flex-col items-center gap-3">
                             <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
                                 <i class="fas fa-briefcase text-xl" style="color:#c89de0;"></i>
@@ -1375,6 +1325,8 @@ new class extends Component {
 (function () {
     'use strict';
 
+    // ─── BATCH BAR CHART ─────────────────────────────────────────────────────
+
     var BAR_COLORS = [
         { bg: 'rgba(122,63,145,0.82)',  border: '#7A3F91' },
         { bg: 'rgba(37,99,235,0.80)',   border: '#2563eb' },
@@ -1386,6 +1338,10 @@ new class extends Component {
         { bg: 'rgba(20,184,166,0.80)',  border: '#14b8a6' },
     ];
 
+    var LATEST_BATCH_COLOR = { bg: 'rgba(255,179,0,0.95)', border: '#FF8F00' };
+    var LOW_COUNT_COLOR    = { bg: 'rgba(236,72,153,0.88)', border: '#db2777' };
+    var LOW_COUNT_THRESHOLD = 2;
+
     var BATCH_PAGE_SIZE = 8;
     var dashBatchIndex  = 0;
     var dashBatchAll    = null;
@@ -1395,6 +1351,13 @@ new class extends Component {
         if (!el) return null;
         try { return JSON.parse(el.getAttribute('data-batches') || 'null'); }
         catch (e) { return null; }
+    }
+
+    function getLatestBatch() {
+        var el = document.getElementById('__dash_batch_data');
+        if (!el) return null;
+        var v = el.getAttribute('data-latest-batch');
+        return (v === null || v === '') ? null : v;
     }
 
     function getAlumniRoute() {
@@ -1421,8 +1384,28 @@ new class extends Component {
             if (existing) existing.destroy();
         }
 
-        var bgColors     = slice.labels.map(function(_, i){ return BAR_COLORS[i % BAR_COLORS.length].bg; });
-        var borderColors = slice.labels.map(function(_, i){ return BAR_COLORS[i % BAR_COLORS.length].border; });
+        var latestBatch = getLatestBatch();
+        var bgColors = [], borderColors = [], borderWidths = [];
+
+        slice.labels.forEach(function (lbl, i) {
+            var count = parseInt(slice.totals[i], 10);
+            var isLowCount = !isNaN(count) && count < LOW_COUNT_THRESHOLD;
+            var isLatest   = !isLowCount && latestBatch !== null && String(lbl) === String(latestBatch);
+
+            if (isLowCount) {
+                bgColors.push(LOW_COUNT_COLOR.bg);
+                borderColors.push(LOW_COUNT_COLOR.border);
+                borderWidths.push(2.5);
+            } else if (isLatest) {
+                bgColors.push(LATEST_BATCH_COLOR.bg);
+                borderColors.push(LATEST_BATCH_COLOR.border);
+                borderWidths.push(3);
+            } else {
+                bgColors.push(BAR_COLORS[i % BAR_COLORS.length].bg);
+                borderColors.push(BAR_COLORS[i % BAR_COLORS.length].border);
+                borderWidths.push(1.5);
+            }
+        });
 
         new Chart(canvas, {
             type: 'bar',
@@ -1433,8 +1416,9 @@ new class extends Component {
                     data:  slice.totals,
                     backgroundColor: bgColors,
                     borderColor:     borderColors,
-                    borderWidth: 1.5,
+                    borderWidth:     borderWidths,
                     borderRadius: 5,
+                    minBarLength: 6,
                 }],
             },
             options: {
@@ -1446,7 +1430,13 @@ new class extends Component {
                     tooltip: {
                         callbacks: {
                             title: function (items) { return 'Batch ' + items[0].label; },
-                            label: function (ctx)   { return ' ' + ctx.parsed.y + ' alumni — click to view'; },
+                            label: function (ctx) {
+                                var count = ctx.parsed.y;
+                                var suffix = count < LOW_COUNT_THRESHOLD
+                                    ? ' alumni (new batch!) — click to view'
+                                    : ' alumni — click to view';
+                                return ' ' + count + suffix;
+                            },
                         },
                     },
                 },
@@ -1485,9 +1475,9 @@ new class extends Component {
         if (navEl && totalPages > 1) {
             navEl.classList.remove('hidden');
             navEl.classList.add('flex');
-            infoEl.textContent     = curPage + ' / ' + totalPages;
-            prevBtn.disabled       = (startIdx <= 0);
-            nextBtn.disabled       = (startIdx + BATCH_PAGE_SIZE >= total);
+            infoEl.textContent = curPage + ' / ' + totalPages;
+            prevBtn.disabled   = (startIdx <= 0);
+            nextBtn.disabled   = (startIdx + BATCH_PAGE_SIZE >= total);
         } else if (navEl) {
             navEl.classList.add('hidden');
             navEl.classList.remove('flex');
@@ -1536,6 +1526,150 @@ new class extends Component {
         bindDashBatchNav();
     }
 
+    // ─── EMPLOYMENT PIE CHART ────────────────────────────────────────────────
+
+    var PIE_FILTERS = ['employed', 'self_employed', 'unemployed', 'no_record'];
+    var PIE_LABELS  = ['Employed', 'Self-Employed', 'Unemployed', 'No Record'];
+    var PIE_COLORS  = [
+        'rgba(122,63,145,0.88)',
+        'rgba(37,99,235,0.85)',
+        'rgba(217,119,6,0.88)',
+        'rgba(176,183,195,0.75)',
+    ];
+    var PIE_BORDERS = ['#7A3F91','#2563eb','#d97706','#b0b7c3'];
+
+    // Minimum visible arc in degrees for any non-zero slice
+    var MIN_SLICE_DEG = 15;
+
+    function readEmpCounts() {
+        var el = document.getElementById('__dash_batch_data');
+        if (!el) return null;
+        try { return JSON.parse(el.getAttribute('data-emp-counts') || 'null'); }
+        catch (e) { return null; }
+    }
+
+    function getEmpRoute() {
+        var el = document.getElementById('__dash_batch_data');
+        return el ? (el.getAttribute('data-emp-route') || '') : '';
+    }
+
+    /**
+     * Compute arc sizes that guarantee MIN_SLICE_DEG for every non-zero segment,
+     * while keeping the total at exactly 360 degrees.
+     *
+     * Strategy:
+     *  1. Give every non-zero slice its minimum floor (MIN_SLICE_DEG).
+     *  2. Compute how many degrees are left for proportional distribution.
+     *  3. Distribute the remainder proportionally among non-zero slices.
+     *  4. Zero slices stay at 0.
+     */
+    function computeAdjustedSlices(rawData) {
+        var total        = rawData.reduce(function (a, b) { return a + b; }, 0);
+        var nonZeroCount = rawData.filter(function (v) { return v > 0; }).length;
+
+        // If nothing to show or only one non-zero slice filling everything
+        if (total === 0 || nonZeroCount === 0) {
+            return rawData.map(function () { return 0; });
+        }
+
+        var floorDeg     = MIN_SLICE_DEG * nonZeroCount;   // degrees reserved for minimums
+        var remainDeg    = 360 - floorDeg;                 // leftover for proportional dist
+        if (remainDeg < 0) remainDeg = 0;                  // safety clamp
+
+        var nonZeroSum = rawData.reduce(function (acc, v) { return acc + (v > 0 ? v : 0); }, 0);
+
+        return rawData.map(function (v) {
+            if (v === 0) return 0;
+            var proportional = nonZeroSum > 0 ? (v / nonZeroSum) * remainDeg : 0;
+            return MIN_SLICE_DEG + proportional;
+        });
+    }
+
+    function buildEmpPieChart() {
+        var counts = readEmpCounts();
+        if (!counts) return;
+        var canvas = document.getElementById('dashEmpPieChart');
+        if (!canvas) return;
+
+        if (window.Chart && Chart.getChart) {
+            var existing = Chart.getChart(canvas);
+            if (existing) existing.destroy();
+        }
+
+        var rawData = [
+            counts.employed   || 0,
+            counts.self       || 0,
+            counts.unemployed || 0,
+            counts.noRecord   || 0,
+        ];
+
+        var total = rawData.reduce(function (a, b) { return a + b; }, 0);
+        if (total === 0) return; // nothing to draw
+
+        // Compute visually adjusted arc sizes
+        var adjustedDeg = computeAdjustedSlices(rawData);
+
+        // Convert degrees to Chart.js circumference/offset values
+        // Chart.js uses radians internally but accepts them via circumference (degrees * PI/180)
+        // We'll pass adjusted values as the dataset data — Chart.js doughnut uses them as weights
+        // so we pass the DEGREE values directly as data (they sum to 360, Chart.js normalises).
+        // To show correct real values in tooltips, we store rawData separately.
+
+        new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels: PIE_LABELS,
+                datasets: [{
+                    // Use adjusted arc degrees so tiny slices stay visible
+                    data:            adjustedDeg,
+                    // Store real counts for tooltip use
+                    realData:        rawData,
+                    backgroundColor: PIE_COLORS,
+                    borderColor:     PIE_BORDERS,
+                    borderWidth:     2,
+                    hoverOffset:     6,
+                    hoverBorderWidth: 3,
+                }],
+            },
+            options: {
+                responsive:          true,
+                maintainAspectRatio: false,
+                cutout:              '62%',
+                animation:           { duration: 500, easing: 'easeInOutQuart' },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: true,
+                        callbacks: {
+                            // Show real counts, not the adjusted arc degrees
+                            label: function (ctx) {
+                                var real  = ctx.dataset.realData[ctx.dataIndex];
+                                var pct   = total > 0 ? ((real / total) * 100).toFixed(1) : '0.0';
+                                return '  ' + ctx.label + ': ' + real.toLocaleString() + ' (' + pct + '%)';
+                            },
+                            title: function () { return ''; },
+                        },
+                        displayColors: true,
+                        padding: 10,
+                        bodyFont: { size: 12, weight: '600' },
+                    },
+                },
+                onClick: function (event, elements) {
+                    if (!elements || !elements.length) return;
+                    var idx    = elements[0].index;
+                    // Only trigger if the real count is > 0
+                    if (rawData[idx] === 0) return;
+                    var filter = PIE_FILTERS[idx];
+                    window.dispatchEvent(new CustomEvent('dash-open-emp', {
+                        detail: { filter: filter }
+                    }));
+                },
+            },
+        });
+    }
+
+    // ─── INIT & LIVEWIRE HOOKS ───────────────────────────────────────────────
+
     function loadChartJs(cb) {
         if (window.Chart) { cb(); return; }
         var s    = document.createElement('script');
@@ -1545,18 +1679,23 @@ new class extends Component {
     }
 
     loadChartJs(function () {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function () {
-                requestAnimationFrame(initDashCharts);
+        function initAll() {
+            requestAnimationFrame(function () {
+                initDashCharts();
+                buildEmpPieChart();
             });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initAll);
         } else {
-            requestAnimationFrame(initDashCharts);
+            initAll();
         }
 
         document.addEventListener('livewire:navigated', function () {
             dashBatchAll   = null;
             dashBatchIndex = 0;
-            requestAnimationFrame(initDashCharts);
+            initAll();
         });
 
         function hookLivewire() {
@@ -1565,7 +1704,10 @@ new class extends Component {
                 var succeed = payload.succeed || function (cb) { cb({}); };
                 if (typeof succeed === 'function') {
                     succeed(function () {
-                        requestAnimationFrame(initDashCharts);
+                        requestAnimationFrame(function () {
+                            initDashCharts();
+                            buildEmpPieChart();
+                        });
                     });
                 }
             });

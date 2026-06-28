@@ -16,48 +16,39 @@ new class extends Component {
 
     protected function queryString(): array { return []; }
 
-    // ── Tab / Filter ──────────────────────────────────────────────────────────
     public string $activeRole   = 'all';
     public string $search       = '';
     public string $statusFilter = '';
     public string $activeModal  = '';
 
-    // ── Create Director ───────────────────────────────────────────────────────
     public string $dFn='', $dMn='', $dLn='', $dSfx='';
     public string $dUsername='', $dEmail='';
     public array  $dErrs = [];
     public string $dOk   = '';
     public bool   $dSave = false;
 
-    // ── View ──────────────────────────────────────────────────────────────────
     public ?array  $vData = null;
 
-    // ── Photo Upload ──────────────────────────────────────────────────────────
     public $vPhoto       = null;
     public bool $vPhotoSave = false;
 
-    // ── Alumni Email ──────────────────────────────────────────────────────────
     public ?int   $ueId     = null;
     public string $ueName   = '';
     public string $ueEmail  = '';
     public array  $ueErrors = [];
     public bool   $ueSave   = false;
 
-    // ── Change Password ───────────────────────────────────────────────────────
     public ?int   $cpId     = null;
     public string $cpName   = '';
     public string $cpNew    = '', $cpConfirm = '';
     public array  $cpErrs   = [];
     public bool   $cpSave   = false;
 
-    // ── Toggle confirm ────────────────────────────────────────────────────────
     public ?int   $tId      = null;
     public string $tName='', $tAction='', $tRole='';
 
-    // ── Manual page tracker ───────────────────────────────────────────────────
     public int $currentPage = 1;
 
-    // ─────────────────────────────────────────────────────────────────────────
     public function mount(): void {
         $filter = session()->pull('admin_alumni_filter', '');
         if ($filter) {
@@ -69,8 +60,6 @@ new class extends Component {
                 default      => '',
             };
         }
-
-        // Check for tab filter from dashboard role strip
         $tab = session()->pull('admin_users_tab', '');
         if ($tab) {
             $this->activeRole   = $tab;
@@ -102,7 +91,6 @@ new class extends Component {
     public function nextPage(): void        { $this->currentPage++; }
     public function previousPage(): void    { if ($this->currentPage > 1) $this->currentPage--; }
 
-    // ── Stats ─────────────────────────────────────────────────────────────────
     #[Computed]
     public function stats(): array
     {
@@ -120,28 +108,27 @@ new class extends Component {
         $regActive   = DB::table('users')->where('role','registrar')->where('user_status','ACTIVE')->count();
         $regInactive = DB::table('users')->where('role','registrar')->where('user_status','INACTIVE')->count();
 
-        $alumniTotal   = $rows->get('alumni', 0);
+        $alumniTotal    = $rows->get('alumni', 0);
         $alumniVerified = DB::table('alumni')->whereNotNull('password_changed_at')->count();
         $alumniPending  = $alumniTotal - $alumniVerified;
 
         return [
-            'total'           => $rows->sum(),
-            'alumni'          => $alumniTotal,
-            'alumniVerified'  => $alumniVerified,
-            'alumniPending'   => $alumniPending,
-            'director'        => $rows->get('director',  0),
-            'dirActive'       => $dirActive,
-            'dirInactive'     => $dirInactive,
-            'coordinator'     => $rows->get('organizer', 0),
-            'coordActive'     => $coordActive,
-            'coordInactive'   => $coordInactive,
-            'registrar'       => $rows->get('registrar', 0),
-            'regActive'       => $regActive,
-            'regInactive'     => $regInactive,
+            'total'          => $rows->sum(),
+            'alumni'         => $alumniTotal,
+            'alumniVerified' => $alumniVerified,
+            'alumniPending'  => $alumniPending,
+            'director'       => $rows->get('director',  0),
+            'dirActive'      => $dirActive,
+            'dirInactive'    => $dirInactive,
+            'coordinator'    => $rows->get('organizer', 0),
+            'coordActive'    => $coordActive,
+            'coordInactive'  => $coordInactive,
+            'registrar'      => $rows->get('registrar', 0),
+            'regActive'      => $regActive,
+            'regInactive'    => $regInactive,
         ];
     }
 
-    // ── Main query ────────────────────────────────────────────────────────────
     #[Computed]
     public function users()
     {
@@ -204,7 +191,6 @@ new class extends Component {
         ];
     }
 
-    // ── Modal helpers ─────────────────────────────────────────────────────────
     public function openModal(string $m): void {
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
@@ -220,7 +206,6 @@ new class extends Component {
         $this->vPhoto=null; $this->vPhotoSave=false;
     }
 
-    // ── Create Director ───────────────────────────────────────────────────────
     public function createDirector(): void {
         $this->dErrs=[]; $this->dOk=''; $this->dSave=true;
         try {
@@ -282,13 +267,19 @@ new class extends Component {
                 . "|Auto-generated password: <code class='font-mono bg-yellow-100 px-1.5 py-0.5 rounded text-yellow-800'>{$autoPassword}</code>"
                 . "|<span class='text-amber-700 font-medium'>⚠ Please share the password with the director and advise them to change it upon first login.</span>";
 
+            // ── DISPATCH: new director created notification ──────────────────
+            $this->dispatch('__admin-user-created-rich', [
+                'uid'      => $uid,
+                'name'     => $full,
+                'username' => $uname,
+            ]);
+
             $this->flash('success', "Director '{$full}' registered successfully!");
         } catch (\Exception $e) {
             $this->dErrs = ['general' => [$e->getMessage()]];
         } finally { $this->dSave = false; }
     }
 
-    // ── View Profile ──────────────────────────────────────────────────────────
     public function showProfile(int $id): void {
         $r = DB::table('users')
             ->select([
@@ -346,7 +337,6 @@ new class extends Component {
         $this->activeModal = 'viewProfile';
     }
 
-    // ── Upload Profile Photo ──────────────────────────────────────────────────
     public function savePhoto(): void {
         $this->vPhotoSave = true;
         try {
@@ -380,7 +370,6 @@ new class extends Component {
         } finally { $this->vPhotoSave = false; }
     }
 
-    // ── Save Email ────────────────────────────────────────────────────────────
     public function saveUpdateEmail(): void {
         $this->ueErrors = []; $this->ueSave = true;
         try {
@@ -396,6 +385,14 @@ new class extends Component {
                 ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
             if ($this->vData) $this->vData['record_email'] = $email;
             $this->ueErrors = [];
+
+            // ── DISPATCH: alumni email updated notification ──────────────────
+            $this->dispatch('__admin-user-email-rich', [
+                'uid'   => $this->ueId,
+                'name'  => $this->ueName,
+                'email' => $email,
+            ]);
+
             $this->flash('success', "Email updated for {$this->ueName}. They will be required to reset their password on next login.");
         } catch (\Illuminate\Database\QueryException $e) {
             $this->ueErrors = ($e->errorInfo[1] ?? null) === 1062
@@ -406,7 +403,6 @@ new class extends Component {
         } finally { $this->ueSave = false; }
     }
 
-    // ── Change Password ───────────────────────────────────────────────────────
     public function saveChangePassword(): void {
         $this->cpErrs = []; $this->cpSave = true;
         try {
@@ -428,7 +424,6 @@ new class extends Component {
         } finally { $this->cpSave = false; }
     }
 
-    // ── Toggle ────────────────────────────────────────────────────────────────
     public function confirmToggle(int $id, string $a): void {
         $u = DB::table('users')->find($id);
         if (!$u) { $this->flash('error','User not found.'); return; }
@@ -441,12 +436,20 @@ new class extends Component {
             $s = $this->tAction==='activate' ? 'ACTIVE' : 'INACTIVE';
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
+
+            // ── DISPATCH: activate / deactivate notification ─────────────────
+            $this->dispatch('__admin-user-toggled-rich', [
+                'uid'    => $this->tId,
+                'name'   => $this->tName,
+                'action' => $this->tAction,   // 'activate' | 'deactivate'
+                'role'   => $this->tRole,
+            ]);
+
             $this->flash('success', $this->tName.' has been '.($s==='ACTIVE'?'activated':'deactivated').'.');
         } catch (\Exception $e) { $this->flash('error','Failed: '.$e->getMessage()); }
         finally { $this->closeModal(); }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     private function flash(string $t, string $m): void { $this->dispatch('flash-message', type:$t, message:$m); }
 
     public function roleBadge(string $r): string {
@@ -459,12 +462,18 @@ new class extends Component {
             default     => 'bg-gray-100 text-gray-700 border-gray-200',
         };
     }
+
     public function roleLabel(string $r): string {
         return match($r) {
-            'organizer'=>'Coordinator','director'=>'Director','registrar'=>'Registrar',
-            'alumni'=>'Alumni','admin'=>'Admin',default=>ucfirst($r),
+            'organizer' => 'Coordinator',
+            'director'  => 'Director',
+            'registrar' => 'Registrar',
+            'alumni'    => 'Alumni',
+            'admin'     => 'Admin',
+            default     => ucfirst($r),
         };
     }
+
     public function statusBadge(string $s): string {
         return match($s) {
             'ACTIVE','VERIFIED' => 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -473,17 +482,20 @@ new class extends Component {
             default             => 'bg-gray-50 text-gray-600 border-gray-200',
         };
     }
+
     public function photoUrl(?string $p): string {
         if (!$p) return asset('storage/alumni-photos/default.png');
         if (str_starts_with($p,'alumni-photos/')||str_starts_with($p,'organizers/')||str_starts_with($p,'directors/')||str_starts_with($p,'registrars/'))
             return Storage::disk('public')->exists($p) ? asset('storage/'.$p) : asset('storage/alumni-photos/default.png');
         return asset('storage/alumni-photos/default.png');
     }
+
     public function displayEmail(string $role, string $email, string $recordEmail): string {
         if ($role === 'alumni')
             return ($recordEmail && !str_contains($recordEmail,'@pending.local')) ? $recordEmail : '—';
         return str_ends_with($email, '.internal') ? '—' : $email;
     }
+
     public function adminUsername(string $email, string $name): string {
         if (str_ends_with($email, '.internal')) return explode('@', $email)[0];
         return $name ?: explode('@', $email)[0];
@@ -493,9 +505,7 @@ new class extends Component {
 
 <div class="flex flex-col" style="height:90vh; overflow:hidden;">
 
-{{-- ══ STYLES ══ --}}
 <style>
-/* ── Filter inputs ── */
 .mu-filter-input {
     border: 1px solid #E8E0F0;
     transition: border-color .15s, box-shadow .15s;
@@ -521,7 +531,6 @@ select.mu-filter-input.mu-active {
     border-color: #7a3f91; background-color: #f5f0fa; color: #7a3f91; font-weight: 600;
 }
 
-/* ── KPI Stat grid — 4 cards, icon LEFT, text RIGHT ── */
 .mu-stat-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -539,20 +548,17 @@ select.mu-filter-input.mu-active {
     display: flex; flex-direction: row; align-items: center; gap: 12px;
     min-height: 72px;
 }
-
 .mu-stat-icon-lg {
     width: 46px; height: 46px; border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
 }
 .mu-stat-icon-lg i { font-size: 1.15rem; }
-
 .mu-stat-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .mu-stat-num  { font-size: 1.45rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; color: #000000; }
 .mu-stat-lbl  { font-size: .68rem; font-weight: 700; margin-top: 2px; color: #000000; }
 .mu-stat-sub  { font-size: .62rem; font-weight: 600; margin-top: 1px; color: #000000; }
 
-/* ── Table block ── */
 .mu-table-block {
     display: flex; flex-direction: column;
     border-radius: 1rem; overflow: hidden;
@@ -579,28 +585,50 @@ select.mu-filter-input.mu-active {
 }
 .mu-tbl-row:hover { background-color: #f5f0fa !important; }
 
-/* ── Hover tooltip on table rows ── */
-.mu-hover-tip {
-    position: fixed; background: #1a1a1a; color: #fff;
-    font-size: 11px; font-weight: 600; letter-spacing: .05em;
-    padding: 6px 12px; border-radius: 7px; white-space: nowrap;
-    pointer-events: none; opacity: 0; transition: opacity .15s ease;
-    z-index: 99999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
-    transform: translate(12px, -110%);
+/* ── Hover tooltip ── */
+#mu-hover-tip {
+    position: fixed;
+    background: #1a1a1a;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding: 7px 14px 7px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s ease;
+    z-index: 99999;
+    box-shadow: 0 6px 24px rgba(0,0,0,.40);
+    transform: translate(14px, -120%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
-.mu-hover-tip.visible { opacity: 1; }
-.mu-hover-tip::after {
-    content: ''; position: absolute; top: 100%; left: 14px;
-    border: 5px solid transparent; border-top-color: #1a1a1a;
+#mu-hover-tip.visible { opacity: 1; }
+#mu-hover-tip::after {
+    content: '';
+    position: absolute;
+    top: 100%; left: 18px;
+    border: 5px solid transparent;
+    border-top-color: #1a1a1a;
+}
+#mu-hover-tip .tip-dot {
+    width: 20px; height: 20px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-size: 10px;
 }
 
-/* ── Scrollbar ── */
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Tab pills ── */
 .mu-tab-pill {
     display: inline-flex; align-items: center; gap: 0.375rem;
     padding: 0.375rem 0.75rem; border-radius: 0.5rem;
@@ -612,7 +640,6 @@ select.mu-filter-input.mu-active {
 .mu-tab-pill.mu-tab-active   { background: #fff; color: #7a3f91; border-color: #d4b8e8; box-shadow: 0 1px 3px rgba(122,63,145,.12); }
 .mu-tab-pill.mu-tab-inactive { color: #000000; }
 
-/* ── Close tooltip on modals ── */
 .mu-close-tooltip { position: relative; }
 .mu-close-tooltip::after {
     content: 'Close'; position: absolute; top: calc(100% + 6px); left: 50%;
@@ -629,13 +656,27 @@ select.mu-filter-input.mu-active {
 }
 .mu-close-tooltip:hover::after, .mu-close-tooltip:hover::before { opacity: 1; }
 
-/* ── Table text all black ── */
-.mu-tbl-text { color: #000000; }
+/* ── Role badge — status style ── */
+.mu-role-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 11px;
+    border-radius: 9999px;
+    border-width: 1px;
+    border-style: solid;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
 </style>
 
 {{-- Row hover tooltip --}}
-<div id="mu-hover-tip" class="mu-hover-tip">
-    <i class="fas fa-eye mr-1.5"></i>View &amp; Edit Details
+<div id="mu-hover-tip">
+    <span class="tip-dot"><i class="fas fa-eye"></i></span>
+    <span>View &amp; Edit Details</span>
 </div>
 
 {{-- FLASH TOAST --}}
@@ -676,8 +717,6 @@ select.mu-filter-input.mu-active {
             <h1 class="text-xl font-semibold tracking-tight" style="color:#000000;">User Management</h1>
             <p class="text-xs leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
         </div>
-
-        {{-- New Director icon button --}}
         <div class="ml-auto relative" x-data="{tip:false}">
             <button wire:click="openModal('createDirector')"
                     @mouseenter="tip=true" @mouseleave="tip=false"
@@ -698,11 +737,9 @@ select.mu-filter-input.mu-active {
         </div>
     </div>
 
-    {{-- ══ 4 KPI STAT CARDS (display only — not clickable) ══ --}}
+    {{-- KPI STAT CARDS --}}
     @php $s = $this->stats; @endphp
     <div class="mu-stat-grid">
-
-        {{-- Total Alumni --}}
         <div class="mu-stat-card">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white"></i>
@@ -713,8 +750,6 @@ select.mu-filter-input.mu-active {
                 <div class="mu-stat-sub">{{ number_format($s['alumniVerified']) }} verified · {{ number_format($s['alumniPending']) }} pending</div>
             </div>
         </div>
-
-        {{-- Directors --}}
         <div class="mu-stat-card">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#3730a3,#6366f1);">
                 <i class="fas fa-user-tie text-white"></i>
@@ -725,8 +760,6 @@ select.mu-filter-input.mu-active {
                 <div class="mu-stat-sub">{{ $s['dirActive'] }} active · {{ $s['dirInactive'] }} inactive</div>
             </div>
         </div>
-
-        {{-- Coordinators --}}
         <div class="mu-stat-card">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#7a3f91,#b07cc6);">
                 <i class="fas fa-users-gear text-white"></i>
@@ -737,8 +770,6 @@ select.mu-filter-input.mu-active {
                 <div class="mu-stat-sub">{{ $s['coordActive'] }} active · {{ $s['coordInactive'] }} inactive</div>
             </div>
         </div>
-
-        {{-- Registrars --}}
         <div class="mu-stat-card">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#027a4f,#10b981);">
                 <i class="fas fa-user-clock text-white"></i>
@@ -749,8 +780,7 @@ select.mu-filter-input.mu-active {
                 <div class="mu-stat-sub">{{ $s['regActive'] }} active · {{ $s['regInactive'] }} inactive</div>
             </div>
         </div>
-
-    </div>{{-- /mu-stat-grid --}}
+    </div>
 
     {{-- UNIFIED TABLE BLOCK --}}
     <div class="mu-table-block min-h-0">
@@ -760,7 +790,6 @@ select.mu-filter-input.mu-active {
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">Filters</div>
 
-            {{-- Tab pills --}}
             <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
                     ['all','All','fa-globe'],
@@ -777,7 +806,6 @@ select.mu-filter-input.mu-active {
                 @endforeach
             </div>
 
-            {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -788,7 +816,6 @@ select.mu-filter-input.mu-active {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            {{-- Smart Status Filter --}}
             @if($activeRole === 'alumni')
                 <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
                     <option value="">All Statuses</option>
@@ -811,7 +838,6 @@ select.mu-filter-input.mu-active {
                 </select>
             @endif
 
-            {{-- Reset --}}
             <button wire:click="switchTab('all')"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
                            bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer"
@@ -844,13 +870,15 @@ select.mu-filter-input.mu-active {
                     <tbody class="divide-y divide-[#F5F5F5]">
                         @foreach($pu->items as $index => $u)
                         @php
-                            $rowStatus = $u->computed_status ?? $u->user_status ?? 'ACTIVE';
-                            $rowNum    = ($pu->currentPage - 1) * $pu->perPage + $index + 1;
+                            $rowStatus  = $u->computed_status ?? $u->user_status ?? 'ACTIVE';
+                            $rowNum     = ($pu->currentPage - 1) * $pu->perPage + $index + 1;
                             $identifier = match($u->role) {
                                 'alumni'    => $u->student_id ?: '—',
                                 'organizer' => $u->id_number  ?: '—',
                                 default     => $this->adminUsername($u->email, $u->name),
                             };
+                            $roleDisplay = $this->roleLabel($u->role);
+                            $roleCss     = $this->roleBadge($u->role);
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
                             wire:key="mu-row-{{ $u->id }}" data-mu-row>
@@ -865,7 +893,6 @@ select.mu-filter-input.mu-active {
                                         <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#000000;">
                                             {{ $u->role === 'admin' ? $this->adminUsername($u->email, $u->name) : $u->name }}
                                         </p>
-                                        <p class="text-xs font-mono mt-0.5" style="color:#000000;">{{ $u->role }}</p>
                                     </div>
                                 </div>
                             </td>
@@ -880,8 +907,8 @@ select.mu-filter-input.mu-active {
                                 </p>
                             </td>
                             <td class="px-4 py-3.5 text-center">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border {{ $this->roleBadge($u->role) }}">
-                                    {{ $this->roleLabel($u->role) }}
+                                <span class="mu-role-badge {{ $roleCss }}">
+                                    {{ $roleDisplay }}
                                 </span>
                             </td>
                             <td class="px-4 py-3.5 text-center">
@@ -915,7 +942,7 @@ select.mu-filter-input.mu-active {
                 </div>
                 @if($search || $statusFilter)
                 <button wire:click="switchTab('all')"
-                        class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition cursor-pointer"
+                        class="px-4 py-2 rounded-xl text-sm font-bold text-white transition cursor-pointer"
                         style="background-color:#7a3f91;">
                     <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
                 </button>
@@ -937,7 +964,6 @@ select.mu-filter-input.mu-active {
                     <span class="text-white/60 text-xs ml-1">(filtered)</span>
                 @endif
             </p>
-
             <div class="flex items-center gap-1 flex-wrap py-2">
                 <button wire:click="previousPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
@@ -1363,7 +1389,6 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$dOk)
-            {{-- Photo upload --}}
             <div class="mb-5">
                 <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">
                     Profile Photo <span class="font-normal normal-case" style="color:#000000;">(optional)</span>

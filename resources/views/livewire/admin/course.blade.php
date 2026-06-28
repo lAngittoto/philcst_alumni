@@ -144,8 +144,19 @@ new class extends Component {
 
                 $this->setAlert('success', "Course '{$code}' updated successfully.");
 
+                // ── Notify admin bell — pass old+new so JS can build "BSAB → BSA" ──
+                $this->dispatch(
+                    'admin-course-updated',
+                    id:       $course->id,
+                    action:   'updated',
+                    old_code: $oldCode,
+                    old_name: $oldName,
+                    new_code: $code,
+                    new_name: $name,
+                );
+
             } else {
-                Course::create(['code' => $code, 'name' => $name]);
+                $course = Course::create(['code' => $code, 'name' => $name]);
 
                 $this->writeAuditLog(
                     action:       'created',
@@ -156,6 +167,15 @@ new class extends Component {
                 );
 
                 $this->setAlert('success', "Course '{$code}' added successfully.");
+
+                // ── Notify admin bell ────────────────────────────────────────
+                $this->dispatch(
+                    'admin-course-updated',
+                    id:       $course->id,
+                    action:   'created',
+                    new_code: $code,
+                    new_name: $name,
+                );
             }
 
             $this->loadCourses();
@@ -232,7 +252,7 @@ new class extends Component {
         <div class="lg:col-span-2">
             <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden lg:sticky lg:top-5">
 
-                {{-- Card Header — no icon, plain text only --}}
+                {{-- Card Header --}}
                 <div class="px-5 py-3.5 border-b border-[#E8E0F0]"
                      style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
                     <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide leading-tight">
@@ -333,7 +353,7 @@ new class extends Component {
         <div class="lg:col-span-3 h-full min-h-0 flex flex-col">
             <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden flex flex-col flex-1 min-h-0">
 
-                {{-- Card Header — no icon, plain text only --}}
+                {{-- Card Header --}}
                 <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center justify-between shrink-0"
                      style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
                     <p class="text-xl font-semibold text-[#333333] uppercase tracking-wide">Course List</p>

@@ -85,6 +85,135 @@
             border-bottom-color: #1a1a1a;
         }
         .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
+
+        /* ════════════════════════════════════════════════════════════════
+           SIDEBAR — CLEAN WHITE + SOLID PURPLE REDESIGN (no gradients)
+        ════════════════════════════════════════════════════════════════ */
+        .reg-sidebar {
+            background: #FFFFFF;
+            border-right: 1px solid #E5E5E5;
+        }
+
+        /* Hamburger (mobile open trigger inside header, opens drawer) */
+        .reg-hamburger-line {
+            background: #7A3F91;
+        }
+
+        /* Nav items */
+        .reg-nav-link {
+            position: relative;
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            transition: background-color 0.2s ease, transform 0.15s ease;
+        }
+        .reg-nav-link:not(.is-active):hover {
+            background: #F5F5F5;
+        }
+        .reg-nav-link:not(.is-active):hover .reg-nav-icon {
+            transform: scale(1.05);
+        }
+        .reg-nav-link.is-active {
+            background: #7A3F91;
+        }
+        .reg-nav-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-right: 0.9rem;
+            transition: transform 0.2s ease;
+            background: #F0E9F6;
+            color: #7A3F91;
+        }
+        .reg-nav-link.is-active .reg-nav-icon {
+            background: #FFFFFF;
+            color: #7A3F91;
+        }
+        .reg-nav-label {
+            font-weight: 600;
+            font-size: 0.9rem;
+            letter-spacing: 0.01em;
+            color: #000000;
+        }
+        .reg-nav-link.is-active .reg-nav-label {
+            color: #FFFFFF;
+            font-weight: 700;
+        }
+        .reg-nav-dot {
+            margin-left: auto;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #fff;
+            flex-shrink: 0;
+        }
+
+        .reg-nav-section-label {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: #000000;
+            opacity: 0.45;
+            padding: 0 1rem;
+            margin-top: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Logout button + loading state */
+        .reg-logout-btn {
+            position: relative;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 0.9rem 1rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #fff;
+            background: #7A3F91;
+            border: none;
+            cursor: pointer;
+            overflow: hidden;
+            transition: background-color 0.2s ease, transform 0.15s ease;
+        }
+        .reg-logout-btn:hover { background: #6A3580; }
+        .reg-logout-btn:active { transform: scale(0.97); }
+        .reg-logout-btn:disabled {
+            cursor: not-allowed;
+            background: #8E5DA3;
+        }
+        .reg-logout-spinner {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            animation: reg-spin 0.7s linear infinite;
+            display: inline-block;
+        }
+        @keyframes reg-spin {
+            to { transform: rotate(360deg); }
+        }
+        .reg-logout-text-swap {
+            display: inline-flex;
+            align-items: center;
+        }
+
+        /* Mobile drawer overlay tweaks (kept minimal, only sidebar visuals) */
+        @media (max-width: 1023px) {
+            .reg-sidebar {
+                box-shadow: 0 0 60px rgba(0,0,0,0.18);
+            }
+        }
     </style>
     <script>
     // ─────────────────────────────────────────────────────────────────────────
@@ -543,7 +672,7 @@
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="antialiased" x-data="{ sidebarOpen: false }">
+<body class="antialiased" x-data="{ sidebarOpen: false, loggingOut: false }">
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
     {{-- Mobile overlay --}}
     <div x-show="sidebarOpen"
@@ -557,21 +686,20 @@
          class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
+    {{-- ══ SIDEBAR (REDESIGNED) ════════════════════════════════════════════ --}}
     <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-           class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
-                  transition-transform duration-300 shadow-2xl
+           class="reg-sidebar fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
+                  transition-transform duration-300
                   lg:translate-x-0 lg:static lg:inset-0
-                  flex flex-col h-full text-[#333333] shrink-0"
-           style="background:#FFFFFF; border-right:1px solid #E8E0F0;">
+                  flex flex-col h-full text-[#333333] shrink-0">
 
         {{-- Sidebar Header --}}
-        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
-            <div class="text-left min-w-0 flex-1 pr-2">
-                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
-                    Registrar<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
-                </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
+        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E5E5E5] shrink-0">
+            <div class="min-w-0">
+                <p class="text-[15px] uppercase tracking-[0.18em] font-extrabold text-[#7A3F91] leading-none">
+                    PHILCST
+                </p>
+                <p class="text-[13px] tracking-[0.04em] font-medium text-black mt-1.5 leading-none">
                     Records Management
                 </p>
             </div>
@@ -604,16 +732,11 @@
                                 : ($store.notifs ? $store.notifs.unread : 0)">
                 </span>
             </button>
-
-            {{-- Mobile close --}}
-            <button @click="sidebarOpen = false"
-                    class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
-                <i class="fa-solid fa-circle-xmark text-xl"></i>
-            </button>
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+            <p class="reg-nav-section-label">MENU</p>
             @php
                 $sidebarLinks = [
                     ['route' => 'registrar.dashboard',           'icon' => 'gauge-high', 'label' => 'Dashboard'],
@@ -626,36 +749,38 @@
                 @php $isActive = request()->routeIs($link['route']); @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
-                   @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}')"
-                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive
-                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
-                              : 'hover:bg-[#F9F7FC]' }}">
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg
-                                transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         style="background-color:{{ $isActive ? '#EDE9F8' : '#F9F7FC' }};color:#7A3F91;">
-                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
+                   @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}'); sidebarOpen = false;"
+                   class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
+                    <div class="reg-nav-icon">
+                        <i class="fa-solid fa-{{ $link['icon'] }}"></i>
                     </div>
-                    <span class="font-medium tracking-wide
-                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
-                        {{ $link['label'] }}
-                    </span>
+                    <span class="reg-nav-label">{{ $link['label'] }}</span>
                     @if($isActive)
-                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                        <span class="reg-nav-dot"></span>
                     @endif
                 </a>
             @endforeach
         </nav>
 
         {{-- Logout --}}
-        <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            <form method="POST" action="{{ route('logout') }}">
+        <div class="p-4 mt-auto border-t border-[#E5E5E5] shrink-0">
+            <form method="POST"
+                  action="{{ route('logout') }}"
+                  @submit="loggingOut = true">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
-                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
-                    <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                        :disabled="loggingOut"
+                        class="reg-logout-btn">
+                    <template x-if="!loggingOut">
+                        <span class="reg-logout-text-swap">
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                        </span>
+                    </template>
+                    <template x-if="loggingOut">
+                        <span class="reg-logout-text-swap">
+                            <span class="reg-logout-spinner mr-2"></span> Logging out…
+                        </span>
+                    </template>
                 </button>
             </form>
         </div>
@@ -669,15 +794,11 @@
             <button @click="sidebarOpen = !sidebarOpen"
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="sidebarOpen ? 'rotate-45 translate-y-2' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
-                    <span :class="sidebarOpen ? 'opacity-0' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
-                    <span :class="sidebarOpen ? '-rotate-45 -translate-y-2.5' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                    <span class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
+                    <span class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
+                    <span class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#333333]">Registrar Portal</h2>
             <div class="w-10"></div>
         </header>
 

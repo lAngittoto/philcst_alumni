@@ -368,31 +368,123 @@ new class extends Component {
         word-break: break-word;
     }
 
-    /* ── Profile info table cards ────────────────────────────────── */
+    /* ── Profile info table cards (modernized) ───────────────────── */
     .ar-card {
         background: #fff;
-        border: 1.5px solid #E4E4E4;
-        border-radius: 10px;
+        border: 1.5px solid #ECE5F2;
+        border-radius: 12px;
         overflow: hidden;
+        box-shadow: 0 1px 2px rgba(122,63,145,.05);
+        transition: box-shadow .15s ease, border-color .15s ease;
     }
+    .ar-card:hover { border-color: #DCC9EA; box-shadow: 0 3px 10px rgba(122,63,145,.08); }
     .ar-card-header {
-        padding: 6px 12px;
-        border-bottom: 1px solid #EEEEEE;
-        background: #F8F8F8;
+        padding: 7px 12px;
+        border-bottom: 1px solid #EDE3F5;
+        background: linear-gradient(135deg,#FAF7FD,#F5EEFA);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+    }
+    .ar-card-header i {
+        font-size: .62rem;
+        color: #7A3F91;
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(122,63,145,.15);
     }
     .ar-card-header p {
-        font-size: .7rem;
-        font-weight: 600;
+        font-size: .68rem;
+        font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .07em;
-        color: #1a1a1a;
+        color: #5B2D6E;
         margin: 0;
     }
     .ar-cell {
-        padding: 6px 10px;
-        border: 1px solid #F0F0F0;
-        background: #fff;
-        border-radius: 7px;
+        padding: 7px 11px;
+        border: 1px solid #F2EEF7;
+        background: #FBFAFC;
+        border-radius: 8px;
+        transition: background .15s ease, border-color .15s ease;
+    }
+    .ar-cell:hover { background: #F6F1FA; border-color: #E8DCF0; }
+
+    /* ── Modernized status / info chips (replaces "|" divided text) ── */
+    .ar-info-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: .68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        white-space: nowrap;
+    }
+
+    /* ── Filter bar: filtering / loading state ────────────────────── */
+    .ar-filter-progress-track {
+        height: 2px;
+        width: 100%;
+        overflow: hidden;
+        background: transparent;
+        position: relative;
+    }
+    .ar-filter-progress-bar {
+        position: absolute;
+        top: 0; left: 0;
+        height: 100%;
+        width: 40%;
+        border-radius: 99px;
+        background: linear-gradient(135deg,#7A3F91,#9b59b6);
+        animation: arFilterProgress 1s ease-in-out infinite;
+    }
+    @keyframes arFilterProgress {
+        0%   { left: -40%; }
+        100% { left: 100%; }
+    }
+
+    /* ── Mobile responsiveness for the View Profile panel ─────────── */
+    .ar-profile-body {
+        padding: 8px 12px;
+    }
+    .ar-profile-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-rows: auto auto auto auto auto auto;
+        gap: 6px;
+        height: 100%;
+        box-sizing: border-box;
+    }
+    @media (max-width: 768px) {
+        .ar-profile-body {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 10px 12px 20px;
+        }
+        .ar-profile-grid {
+            grid-template-columns: 1fr;
+            grid-template-rows: none;
+            height: auto;
+            gap: 10px;
+        }
+        .ar-profile-grid > div { grid-column: 1 / -1 !important; }
+        .ar-avatar-strip { flex-direction: column; }
+        .ar-photo-col {
+            border-right: none;
+            border-bottom: 1.5px solid #EEEEEE;
+            width: 100%;
+            min-width: 0;
+        }
+        .ar-info-col { padding: 12px 14px; }
     }
 
     /* ── Panel animation ─────────────────────────────────────────── */
@@ -564,8 +656,20 @@ new class extends Component {
     <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
 
         {{-- ── Filter bar ── --}}
-        <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0">
-            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+        <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+
+            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;"
+                  wire:loading.remove wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">FILTERS</span>
+
+            <span class="ar-filter-label inline-flex items-center gap-1.5 text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;"
+                  wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+                <svg class="animate-spin w-3 h-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                </svg>
+                FILTERING…
+            </span>
 
             {{-- ── Profile Status Pill Tabs (All / Complete / Pending) ── --}}
             <div class="flex items-center gap-1.5 shrink-0">
@@ -669,9 +773,15 @@ new class extends Component {
             @endif
         </div>
 
+        {{-- Filtering progress indicator --}}
+        <div class="ar-filter-progress-track" wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+            <div class="ar-filter-progress-bar"></div>
+        </div>
+
         {{-- Table wrapper --}}
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
-            <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200" class="h-full overflow-y-auto overflow-x-auto">
+            <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200" class="h-full overflow-y-auto overflow-x-auto transition-opacity duration-200"
+                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
                 <table class="w-full border-collapse table-fixed" style="min-width:620px;">
                     <colgroup>
                         <col style="width:28%;"><col style="width:18%;"><col style="width:14%;"><col style="width:12%;"><col style="width:28%;">
@@ -858,13 +968,13 @@ new class extends Component {
         {{-- ── Sticky Header ── --}}
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-3 min-w-0">
                 <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
                     <i class="fas fa-user text-white text-xs"></i>
                 </div>
-                <div>
+                <div class="min-w-0">
                     <h2 class="text-white font-semibold text-sm leading-tight">Alumni Profile</h2>
-                    <p class="text-white/60 text-xs font-normal">
+                    <p class="text-white/60 text-xs font-normal truncate">
                         {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
                     </p>
                 </div>
@@ -875,16 +985,9 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- ── Body — CSS grid, no scroll ── --}}
-        <div class="flex-1 min-h-0 overflow-hidden" style="padding:8px 12px;">
-            <div style="
-                display:grid;
-                grid-template-columns: 1fr 1fr 1fr;
-                grid-template-rows: auto auto auto auto auto auto;
-                gap:6px;
-                height:100%;
-                box-sizing:border-box;
-            ">
+        {{-- ── Body — responsive grid (no-scroll on desktop, scrolls on mobile) ── --}}
+        <div class="flex-1 min-h-0 overflow-hidden ar-profile-body">
+            <div class="ar-profile-grid">
 
                 {{-- ══ Row 1: Avatar strip — full width ══ --}}
                 {{--
@@ -1103,23 +1206,21 @@ new class extends Component {
                             {{ $viewingProfile['student_id'] ?? '—' }}
                         </p>
 
-                        {{-- Badges row — divider-separated ── --}}
-                        <div class="flex flex-wrap items-center" style="gap:0;">
-                            <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
-                                {{ $viewingProfile['course_code'] ?? '—' }}
+                        {{-- Badges row — modern chip badges ── --}}
+                        <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span class="ar-info-chip" style="background:#F3EAFA;color:#7A3F91;">
+                                <i class="fas fa-graduation-cap" style="font-size:.6rem;"></i>{{ $viewingProfile['course_code'] ?? '—' }}
                             </span>
-                            <span style="color:#AAAAAA;margin:0 6px;font-size:.7rem;">|</span>
-                            <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
-                                Batch {{ $viewingProfile['batch'] ?? '—' }}
+                            <span class="ar-info-chip" style="background:#F0F0F0;color:#444444;">
+                                <i class="fas fa-calendar" style="font-size:.6rem;"></i>Batch {{ $viewingProfile['batch'] ?? '—' }}
                             </span>
-                            <span style="color:#AAAAAA;margin:0 6px;font-size:.7rem;">|</span>
                             @if(!empty($viewingProfile['profile_completed']))
-                                <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
-                                    Complete
+                                <span class="ar-info-chip" style="background:#ECFDF5;color:#059669;">
+                                    <i class="fas fa-circle-check" style="font-size:.6rem;"></i>Complete
                                 </span>
                             @else
-                                <span class="font-semibold uppercase" style="font-size:.75rem;color:#1a1a1a;">
-                                    Incomplete Information
+                                <span class="ar-info-chip" style="background:#FFFBEB;color:#D97706;">
+                                    <i class="fas fa-triangle-exclamation" style="font-size:.6rem;"></i>Incomplete
                                 </span>
                             @endif
                         </div>
@@ -1135,7 +1236,7 @@ new class extends Component {
 
                 {{-- ── Row 2: Student ID | Student Name (4 cells) ── --}}
                 <div class="ar-card" style="grid-column:1/2;">
-                    <div class="ar-card-header"><p>Student ID</p></div>
+                    <div class="ar-card-header"><i class="fas fa-id-card"></i><p>Student ID</p></div>
                     <div class="p-2">
                         <div class="ar-cell">
                             <p class="ar-field-label">Student ID</p>
@@ -1145,8 +1246,8 @@ new class extends Component {
                 </div>
 
                 <div class="ar-card" style="grid-column:2/-1;">
-                    <div class="ar-card-header"><p>Student's Name</p></div>
-                    <div class="p-2 grid grid-cols-4 gap-1.5">
+                    <div class="ar-card-header"><i class="fas fa-signature"></i><p>Student's Name</p></div>
+                    <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
                             <p class="ar-field-value text-xs">{{ $up($viewingProfile['last_name'] ?? '') ?: '—' }}</p>
@@ -1168,7 +1269,7 @@ new class extends Component {
 
                 {{-- ── Row 3: Student Data | Father | Mother ── --}}
                 <div class="ar-card">
-                    <div class="ar-card-header"><p>Student's Data</p></div>
+                    <div class="ar-card-header"><i class="fas fa-user-graduate"></i><p>Student's Data</p></div>
                     <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Sex</p>
@@ -1190,7 +1291,7 @@ new class extends Component {
                 </div>
 
                 <div class="ar-card">
-                    <div class="ar-card-header"><p>Father's Name</p></div>
+                    <div class="ar-card-header"><i class="fas fa-person"></i><p>Father's Name</p></div>
                     <div class="p-2 grid grid-cols-1 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
@@ -1208,7 +1309,7 @@ new class extends Component {
                 </div>
 
                 <div class="ar-card">
-                    <div class="ar-card-header"><p>Mother's Maiden Name</p></div>
+                    <div class="ar-card-header"><i class="fas fa-person-dress"></i><p>Mother's Maiden Name</p></div>
                     <div class="p-2 grid grid-cols-1 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
@@ -1227,8 +1328,8 @@ new class extends Component {
 
                 {{-- ── Row 4: Address (full width) ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
-                    <div class="ar-card-header"><p>Permanent Address</p></div>
-                    <div class="p-2 grid grid-cols-4 gap-1.5">
+                    <div class="ar-card-header"><i class="fas fa-location-dot"></i><p>Permanent Address</p></div>
+                    <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Street</p>
                             <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_street'] ?? '') ?: '—' }}</p>
@@ -1250,7 +1351,8 @@ new class extends Component {
 
                 {{-- ── Row 5: DSWD | Disability | Contact | Email ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
-                    <div class="p-2 grid grid-cols-4 gap-1.5">
+                    <div class="ar-card-header"><i class="fas fa-circle-info"></i><p>Additional Information</p></div>
+                    <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">DSWD Household No.</p>
                             <p class="ar-field-value text-xs">{{ $up($viewingProfile['dswd_household_no'] ?? '') ?: '—' }}</p>
@@ -1273,7 +1375,7 @@ new class extends Component {
                 {{-- ── Row 6: Employment Status ── --}}
                 <div class="ar-card" style="grid-column:1/-1; min-height:0; margin-bottom:4px;">
                     <div class="ar-card-header flex items-center justify-between">
-                        <p>Employment Status</p>
+                        <span class="flex items-center gap-1.5"><i class="fas fa-briefcase"></i><p>Employment Status</p></span>
                         @if($emp && $submittedAt)
                             <span class="text-xs text-[#1a1a1a] font-semibold normal-case tracking-normal">Updated {{ $submittedAt }}</span>
                         @endif
