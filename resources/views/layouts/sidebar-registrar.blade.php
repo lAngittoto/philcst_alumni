@@ -11,6 +11,7 @@
         [x-cloak] { display: none !important; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+
         #bell-btn {
             background: transparent !important;
             border: none !important;
@@ -31,75 +32,16 @@
             box-shadow: none !important;
         }
         .bell-badge { pointer-events: none; }
-        .notif-item { cursor: pointer; position: relative; }
-        .notif-hover-label {
-            pointer-events: none;
-            position: fixed;
-            background: rgba(0,0,0,0.82);
-            color: #fff;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            padding: 4px 10px;
-            border-radius: 20px;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            white-space: nowrap;
-            z-index: 99999;
-        }
-        .notif-item:hover .notif-hover-label { opacity: 1; }
 
-        /* ── Close button tooltip ── */
-        .notif-close-wrap {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .notif-close-tip {
-            position: absolute;
-            top: calc(100% + 7px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: #1a1a1a;
-            color: #fff;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            padding: 4px 10px;
-            border-radius: 7px;
-            white-space: nowrap;
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            z-index: 100000;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.30);
-        }
-        .notif-close-tip::after {
-            content: '';
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 5px solid transparent;
-            border-bottom-color: #1a1a1a;
-        }
-        .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
-
-        /* ════════════════════════════════════════════════════════════════
-           SIDEBAR — CLEAN WHITE + SOLID PURPLE REDESIGN (no gradients)
-        ════════════════════════════════════════════════════════════════ */
+        /* ════════════════════════════════════════════════════════
+           SIDEBAR
+        ════════════════════════════════════════════════════════ */
         .reg-sidebar {
             background: #FFFFFF;
             border-right: 1px solid #E5E5E5;
         }
+        .reg-hamburger-line { background: #7A3F91; }
 
-        /* Hamburger (mobile open trigger inside header, opens drawer) */
-        .reg-hamburger-line {
-            background: #7A3F91;
-        }
-
-        /* Nav items */
         .reg-nav-link {
             position: relative;
             display: flex;
@@ -108,15 +50,10 @@
             border-radius: 12px;
             transition: background-color 0.2s ease, transform 0.15s ease;
         }
-        .reg-nav-link:not(.is-active):hover {
-            background: #F5F5F5;
-        }
-        .reg-nav-link:not(.is-active):hover .reg-nav-icon {
-            transform: scale(1.05);
-        }
-        .reg-nav-link.is-active {
-            background: #7A3F91;
-        }
+        .reg-nav-link:not(.is-active):hover { background: #F5F5F5; }
+        .reg-nav-link:not(.is-active):hover .reg-nav-icon { transform: scale(1.05); }
+        .reg-nav-link.is-active { background: #7A3F91; }
+
         .reg-nav-icon {
             width: 38px;
             height: 38px;
@@ -130,29 +67,23 @@
             background: #F0E9F6;
             color: #7A3F91;
         }
-        .reg-nav-link.is-active .reg-nav-icon {
-            background: #FFFFFF;
-            color: #7A3F91;
-        }
+        .reg-nav-link.is-active .reg-nav-icon { background: #FFFFFF; color: #7A3F91; }
+
         .reg-nav-label {
             font-weight: 600;
             font-size: 0.9rem;
             letter-spacing: 0.01em;
             color: #000000;
         }
-        .reg-nav-link.is-active .reg-nav-label {
-            color: #FFFFFF;
-            font-weight: 700;
-        }
+        .reg-nav-link.is-active .reg-nav-label { color: #FFFFFF; font-weight: 700; }
+
         .reg-nav-dot {
             margin-left: auto;
-            width: 6px;
-            height: 6px;
+            width: 6px; height: 6px;
             border-radius: 50%;
             background: #fff;
             flex-shrink: 0;
         }
-
         .reg-nav-section-label {
             font-size: 11px;
             font-weight: 800;
@@ -164,7 +95,7 @@
             margin-bottom: 0.5rem;
         }
 
-        /* Logout button + loading state */
+        /* Logout */
         .reg-logout-btn {
             position: relative;
             width: 100%;
@@ -185,36 +116,122 @@
             overflow: hidden;
             transition: background-color 0.2s ease, transform 0.15s ease;
         }
-        .reg-logout-btn:hover { background: #6A3580; }
-        .reg-logout-btn:active { transform: scale(0.97); }
-        .reg-logout-btn:disabled {
-            cursor: not-allowed;
-            background: #8E5DA3;
-        }
+        .reg-logout-btn:hover   { background: #6A3580; }
+        .reg-logout-btn:active  { transform: scale(0.97); }
+        .reg-logout-btn:disabled { cursor: not-allowed; background: #8E5DA3; }
+
         .reg-logout-spinner {
-            width: 14px;
-            height: 14px;
+            width: 14px; height: 14px;
             border-radius: 50%;
             border: 2px solid rgba(255,255,255,0.35);
             border-top-color: #fff;
             animation: reg-spin 0.7s linear infinite;
             display: inline-block;
         }
-        @keyframes reg-spin {
-            to { transform: rotate(360deg); }
-        }
-        .reg-logout-text-swap {
-            display: inline-flex;
-            align-items: center;
+        @keyframes reg-spin { to { transform: rotate(360deg); } }
+        .reg-logout-text-swap { display: inline-flex; align-items: center; }
+
+        @media (max-width: 1023px) {
+            .reg-sidebar { box-shadow: 0 0 60px rgba(0,0,0,0.18); }
         }
 
-        /* Mobile drawer overlay tweaks (kept minimal, only sidebar visuals) */
-        @media (max-width: 1023px) {
-            .reg-sidebar {
-                box-shadow: 0 0 60px rgba(0,0,0,0.18);
-            }
+        /* ════════════════════════════════════════════════════════
+           NOTIFICATION PANEL
+        ════════════════════════════════════════════════════════ */
+        .notif-item {
+            cursor: pointer;
+            position: relative;
+            display: flex;
+            align-items: flex-start;
+            gap: 13px;
+            padding: 14px 18px;
+            border-bottom: 0.5px solid #EEEEEE;
+            transition: background 0.12s ease;
         }
+        .notif-item:last-child  { border-bottom: none; }
+        .notif-item.is-unread   { background: #FBFAFF; }
+        .notif-item.is-read     { background: #FFFFFF; }
+        .notif-item:hover       { background: #F5F0FB; }
+
+        .notif-icon-wrap {
+            width: 38px; height: 38px;
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            margin-top: 1px;
+            font-size: 15px;
+        }
+        .notif-icon-emp     { background: #EBF4FE; color: #1A6FC4; }
+        .notif-icon-alumni  { background: #F0E9F8; color: #7A3F91; }
+        .notif-icon-import  { background: #EAFAF3; color: #0E8058; }
+        .notif-icon-chat    { background: #FEF0E6; color: #C06A20; }
+        .notif-icon-default { background: #F3F3F3; color: #888888; }
+
+        .notif-body         { flex: 1; min-width: 0; }
+
+        .notif-title-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 4px;
+        }
+        .notif-title-text      { font-size: 13px; font-weight: 600; color: #222222; line-height: 1.35; }
+        .notif-title-text.is-read { color: #555555; font-weight: 500; }
+
+        .notif-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 7px;
+            border-radius: 20px;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+        .notif-tag-emp    { background: #DBEAFE; color: #1347A0; }
+        .notif-tag-alumni { background: #EDE1F9; color: #5A2270; }
+        .notif-tag-import { background: #D1FAE5; color: #065F46; }
+        .notif-tag-chat   { background: #FEE8D1; color: #953F0E; }
+
+        .notif-count-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px; height: 18px;
+            background: #7A3F91;
+            color: #ffffff;
+            font-size: 9px;
+            font-weight: 700;
+            border-radius: 20px;
+            padding: 0 5px;
+            flex-shrink: 0;
+        }
+
+        .notif-unread-dot {
+            width: 7px; height: 7px;
+            background: #DC2626;
+            border-radius: 50%;
+            flex-shrink: 0;
+            margin-top: 4px;
+        }
+
+        .notif-message-text {
+            font-size: 12px;
+            color: #555555;
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+
+        .notif-time-row { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #AAAAAA; }
+        .notif-time-row i { font-size: 10px; }
     </style>
+
     <script>
     // ─────────────────────────────────────────────────────────────────────────
     //  ROUTE MAP
@@ -250,31 +267,22 @@
                     });
                     if (res.ok) {
                         var raw = await res.json();
-                        // ✅ Always replace items with fresh grouped data from server
                         this.items = this._groupByDay(raw);
                     }
                 } catch (e) { /* silently fail */ }
             },
 
-            // ─── GROUP-BY-DAY ──────────────────────────────────────────────────
             _groupByDay(rows) {
                 var map = new Map();
-
-                // Sort newest first so we process latest records first
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
                     .forEach(function (n) {
                         var rawDedup = n.dedup_key || '';
-
-                        // ✅ Use updated_at if available and newer, otherwise created_at
-                        // This ensures the displayed timestamp is always the most recent activity
                         var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
                             ? n.updated_at
                             : n.created_at;
-
-                        // Use the DATE portion of the most recent timestamp for day grouping
                         var day = nTimestamp
                             ? new Date(nTimestamp).toISOString().slice(0, 10)
                             : 'unknown';
@@ -320,15 +328,9 @@
                             g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
-
-                            // ✅ KEY FIX: Always keep the LATEST timestamp in the group
-                            // Since rows are sorted newest-first, the first record inserted
-                            // into the group already has the latest timestamp.
-                            // But if this incoming record is somehow newer, update it.
                             if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
                                 g.created_at = nTimestamp;
                             }
-
                             if (isEmpEvent) {
                                 g.message = g.count + ' employment status update(s) today.';
                                 g.title   = 'Employment Status Updated';
@@ -343,12 +345,10 @@
                                 g.title   = 'Bulk Import Complete';
                             }
                         } else {
-                            // ✅ First record for this group — use the latest timestamp
                             map.set(groupKey, Object.assign({}, n, {
                                 count:      Number(n.count) || 1,
                                 _ids:       [n.id],
                                 _roomName:  n._roomName || '',
-                                // ✅ Store the most recent timestamp as created_at for display
                                 created_at: nTimestamp || n.created_at,
                                 title: isEmpEvent    ? 'Employment Status Updated'
                                      : isChatMsg     ? (n.title || 'New Chat Message')
@@ -446,9 +446,7 @@
         }
         var s = Alpine.store('notifs');
         if (!s) return;
-        if (!s._pollTimer) {
-            s.init();
-        }
+        if (!s._pollTimer) s.init();
     };
 
     document.addEventListener('alpine:init', function () {
@@ -533,17 +531,6 @@
         if (s && s.open) positionPanel();
     });
 
-    document.addEventListener('mousemove', function (e) {
-        var target = e.target;
-        if (!target || typeof target.closest !== 'function') return;
-        var item = target.closest('.notif-item');
-        if (!item) return;
-        var label = item.querySelector('.notif-hover-label');
-        if (!label) return;
-        label.style.left = (e.clientX + 14) + 'px';
-        label.style.top  = (e.clientY + 14) + 'px';
-    });
-
     // ─────────────────────────────────────────────────────────────────────────
     //  SIDEBAR SMART MARK-READ
     // ─────────────────────────────────────────────────────────────────────────
@@ -557,9 +544,7 @@
         if (routeName === 'registrar.alumni.register') {
             routesToMark.push('registrar.alumni');
         }
-        routesToMark.forEach(function (r) {
-            s.markReadByRoute(r);
-        });
+        routesToMark.forEach(function (r) { s.markReadByRoute(r); });
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -573,10 +558,6 @@
             if (!d) return {};
             return Array.isArray(d) ? (d[0] || {}) : d;
         }
-        function _statusLabel(raw) {
-            var map = { employed: 'Employed', self_employed: 'Self-Employed', unemployed: 'Unemployed' };
-            return map[raw] || (raw ? raw.replace(/_/g, ' ') : 'N/A');
-        }
 
         async function _saveNotif(payload) {
             try {
@@ -589,7 +570,6 @@
                     },
                     body: JSON.stringify(payload),
                 });
-                // ✅ Wait a bit then re-fetch so the panel shows updated timestamp immediately
                 await new Promise(function (r) { setTimeout(r, 300); });
                 var s = window.__safeNotifsStore();
                 if (s) await s._fetch();
@@ -605,7 +585,7 @@
             _saveNotif({
                 icon:       'user-graduate',
                 title:      'New Alumni Registered',
-                message:    (d.name || 'Alumni') + ' (ID: ' + (d.id || '—') + ') has been registered and is now VERIFIED.',
+                message:    (d.name || 'Alumni') + ' (ID: ' + (d.id || '—') + ') has been registered and is now verified.',
                 link_route: 'registrar.alumni',
                 link_label: 'View Alumni',
                 dedup_key:  'registered',
@@ -650,9 +630,9 @@
 
         window.addEventListener('message-received', function (e) {
             var d = _detail(e);
-            var sender   = d.sender  || 'Someone';
-            var roomName = d.room    || 'Group Chat';
-            var bodySnip = d.body    || '';
+            var sender   = d.sender   || 'Someone';
+            var roomName = d.room     || 'Group Chat';
+            var bodySnip = d.body     || '';
             var count    = Number(d.count) || 1;
             if (bodySnip.length > 60) bodySnip = bodySnip.substring(0, 57) + '…';
             var message = count > 1
@@ -674,6 +654,7 @@
 </head>
 <body class="antialiased" x-data="{ sidebarOpen: false, loggingOut: false }">
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+
     {{-- Mobile overlay --}}
     <div x-show="sidebarOpen"
          x-transition:enter="transition opacity-ease-out duration-300"
@@ -686,7 +667,7 @@
          class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR (REDESIGNED) ════════════════════════════════════════════ --}}
+    {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
     <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
            class="reg-sidebar fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
                   transition-transform duration-300
@@ -739,10 +720,10 @@
             <p class="reg-nav-section-label">MENU</p>
             @php
                 $sidebarLinks = [
-                    ['route' => 'registrar.dashboard',           'icon' => 'gauge-high', 'label' => 'Dashboard'],
-                    ['route' => 'registrar.alumni',              'icon' => 'users',       'label' => 'Alumni Records'],
-                    ['route' => 'registrar.alumni.register',     'icon' => 'user-plus',   'label' => 'Register Alumni'],
-                    ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',  'label' => 'Employment Tracking'],
+                    ['route' => 'registrar.dashboard',           'icon' => 'gauge-high',  'label' => 'Dashboard'],
+                    ['route' => 'registrar.alumni',              'icon' => 'users',        'label' => 'Alumni Records'],
+                    ['route' => 'registrar.alumni.register',     'icon' => 'user-plus',    'label' => 'Register Alumni'],
+                    ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',   'label' => 'Employment Tracking'],
                 ];
             @endphp
             @foreach($sidebarLinks as $link)
@@ -788,6 +769,7 @@
 
     {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+
         {{-- Mobile top bar --}}
         <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
                        lg:hidden shrink-0 z-30">
@@ -826,7 +808,6 @@
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
     @click.stop
-    class="bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden"
     style="
         position: fixed;
         top: 88px;
@@ -835,57 +816,68 @@
         z-index: 9999;
         transform-origin: top left;
         min-height: 520px;
-        box-shadow: 0 24px 60px -8px rgba(122,63,145,0.30),
-                    0 6px 24px rgba(0,0,0,0.10);
+        background: #FFFFFF;
+        border-radius: 16px;
+        border: 0.5px solid #E0D8ED;
+        box-shadow: 0 20px 48px -8px rgba(90,34,112,0.18), 0 4px 16px rgba(0,0,0,0.08);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     ">
 
     {{-- Panel Header --}}
-    <div class="flex items-center justify-between px-5 py-4 shrink-0"
-         style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-        <div class="flex items-center gap-2.5">
-            <i class="fas fa-bell text-white" style="font-size:15px;"></i>
-            <span class="text-white font-bold" style="font-size:16px;">Notifications</span>
-            <span x-show="$store.notifs && $store.notifs.unread > 0"
-                  x-cloak
-                  class="bg-red-500 text-white font-black px-2 py-0.5 rounded-full leading-none"
-                  style="font-size:11px;"
-                  x-text="$store.notifs ? $store.notifs.unread + ' new' : ''">
+    <div style="background:#5A2270; padding:16px 18px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <i class="fas fa-bell" style="color:#fff; font-size:15px; opacity:0.85;"></i>
+            <span style="font-size:14px; font-weight:600; color:#fff; letter-spacing:0.02em;">Notifications</span>
+            <span
+                x-show="$store.notifs && $store.notifs.unread > 0"
+                x-cloak
+                style="background:#DC2626; color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; letter-spacing:0.04em;"
+                x-text="($store.notifs ? $store.notifs.unread : 0) + ' new'">
             </span>
         </div>
-        <div class="flex items-center gap-1">
+        <div style="display:flex; align-items:center; gap:4px;">
             <button type="button"
                     x-show="$store.notifs && $store.notifs.unread > 0"
                     x-cloak
                     @click.stop="$store.notifs && $store.notifs.markAllRead()"
-                    class="text-white/70 hover:text-white font-semibold hover:bg-white/10
-                           rounded-lg px-2.5 py-1.5 transition"
-                    style="font-size:11px;">
+                    style="background:transparent; border:0.5px solid rgba(255,255,255,0.3); color:rgba(255,255,255,0.85); font-size:11px; font-weight:500; padding:5px 10px; border-radius:8px; cursor:pointer; letter-spacing:0.02em; transition:background 0.15s;"
+                    onmouseover="this.style.background='rgba(255,255,255,0.12)'"
+                    onmouseout="this.style.background='transparent'">
                 Mark all read
             </button>
-
-            <div class="notif-close-wrap ml-1">
-                <span class="notif-close-tip">Close</span>
-                <button type="button"
-                        @click.stop="$store.notifs && $store.notifs.close()"
-                        class="w-7 h-7 flex items-center justify-center rounded-lg
-                               text-white/50 hover:text-white hover:bg-white/10 transition">
-                    <i class="fas fa-xmark" style="font-size:14px;"></i>
-                </button>
-            </div>
+            <button type="button"
+                    @click.stop="$store.notifs && $store.notifs.close()"
+                    title="Close notifications"
+                    style="width:28px; height:28px; background:transparent; border:none; color:rgba(255,255,255,0.55); font-size:14px; cursor:pointer; border-radius:7px; display:flex; align-items:center; justify-content:center; transition:background 0.15s, color 0.15s;"
+                    onmouseover="this.style.background='rgba(255,255,255,0.12)'; this.style.color='#fff';"
+                    onmouseout="this.style.background='transparent'; this.style.color='rgba(255,255,255,0.55)';">
+                <i class="fas fa-xmark"></i>
+            </button>
         </div>
     </div>
 
-    {{-- Scrollable notification list --}}
+    {{-- Sub-header --}}
+    <div style="background:#F7F4FB; padding:9px 18px; display:flex; align-items:center; justify-content:space-between; border-bottom:0.5px solid #E0D8ED; flex-shrink:0;">
+        <span style="font-size:11px; font-weight:600; color:#7A3F91; letter-spacing:0.1em; text-transform:uppercase;">Recent Activity</span>
+        <span style="font-size:11px; color:#888888; font-weight:400;"
+              x-text="($store.notifs ? $store.notifs.items.length : 0) + ' notification(s)'">
+        </span>
+    </div>
+
+    {{-- Scrollable list --}}
     <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+
+        {{-- Empty state --}}
         <template x-if="$store.notifs && $store.notifs.items.length === 0">
-            <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
-                <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-                     style="background:#F5F5F5;">
-                    <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:56px 24px; text-align:center;">
+                <div style="width:56px; height:56px; background:#F3F3F3; border-radius:14px; display:flex; align-items:center; justify-content:center; margin-bottom:16px; border:0.5px solid #EEEEEE;">
+                    <i class="fas fa-bell-slash" style="font-size:22px; color:#CCCCCC;"></i>
                 </div>
-                <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
-                <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
-                    Alumni registrations, imports, employment updates,<br>and chat messages will appear here.
+                <p style="font-size:14px; font-weight:600; color:#888888; margin-bottom:6px;">No notifications yet</p>
+                <p style="font-size:12px; color:#BBBBBB; line-height:1.6;">
+                    Alumni registrations, bulk imports, employment updates,<br>and chat messages will appear here.
                 </p>
             </div>
         </template>
@@ -894,10 +886,8 @@
         <template x-if="$store.notifs">
             <template x-for="notif in $store.notifs.items" :key="notif.id">
                 <div
-                    class="notif-item flex items-start gap-4 px-5 py-4
-                           border-b border-[#F5F5F5] last:border-b-0
-                           transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#F8F5FD] hover:bg-[#F0E9FA]'"
+                    class="notif-item"
+                    :class="notif.read ? 'is-read' : 'is-unread'"
                     @click.stop="
                         $store.notifs.markRead(notif);
                         $store.notifs.close();
@@ -906,107 +896,75 @@
                             window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                         }
                     ">
+
                     {{-- Icon --}}
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
-                        <i class="fas text-[#7A3F91]"
-                           :class="'fa-' + (notif.icon || 'bell')"
-                           style="font-size:15px;"></i>
+                    <div class="notif-icon-wrap"
+                         :class="{
+                             'notif-icon-emp':     notif.icon === 'arrow-rotate-right',
+                             'notif-icon-alumni':  notif.icon === 'user-graduate',
+                             'notif-icon-import':  notif.icon === 'file-import',
+                             'notif-icon-chat':    notif.icon === 'comment-dots',
+                             'notif-icon-default': !['arrow-rotate-right','user-graduate','file-import','comment-dots'].includes(notif.icon)
+                         }">
+                        <i class="fas" :class="'fa-' + (notif.icon || 'bell')"></i>
                     </div>
 
-                    {{-- Content --}}
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-2">
-                            <div class="flex items-center gap-1.5 flex-wrap">
-                                <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
-                                   style="font-size:13px;line-height:1.4;"
-                                   x-text="notif.title"></p>
+                    {{-- Body --}}
+                    <div class="notif-body">
 
-                                <span
-                                    x-show="Number(notif.count) > 1"
-                                    x-cloak
-                                    class="inline-flex items-center justify-center
-                                           min-w-[22px] h-5 rounded-full px-1.5
-                                           text-[10px] font-black text-white leading-none"
-                                    style="background:#7A3F91;"
-                                    x-text="'×' + Number(notif.count)">
+                        {{-- Title row --}}
+                        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+                            <div class="notif-title-row">
+                                <span class="notif-title-text"
+                                      :class="notif.read ? 'is-read' : ''"
+                                      x-text="notif.title">
                                 </span>
 
-                                <span
-                                    x-show="notif.icon === 'arrow-rotate-right' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
-                                    EMPLOYMENT
-                                </span>
+                                {{-- Type tags --}}
+                                <span x-show="notif.icon === 'arrow-rotate-right'" x-cloak
+                                      class="notif-tag notif-tag-emp">Employment</span>
+                                <span x-show="notif.icon === 'user-graduate'" x-cloak
+                                      class="notif-tag notif-tag-alumni">New Alumni</span>
+                                <span x-show="notif.icon === 'file-import'" x-cloak
+                                      class="notif-tag notif-tag-import">Import</span>
+                                <span x-show="notif.icon === 'comment-dots'" x-cloak
+                                      class="notif-tag notif-tag-chat">Message</span>
 
-                                <span
-                                    x-show="notif.icon === 'user-graduate' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-                                    NEW ALUMNI
-                                </span>
-
-                                <span
-                                    x-show="notif.icon === 'file-import' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
-                                    IMPORT
-                                </span>
-
-                                <span
-                                    x-show="notif.icon === 'comment-dots' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
-                                    NEW MSG
+                                {{-- Count badge --}}
+                                <span x-show="Number(notif.count) > 1" x-cloak
+                                      class="notif-count-badge"
+                                      x-text="'×' + Number(notif.count)">
                                 </span>
                             </div>
-                            <span x-show="!notif.read" x-cloak
-                                  class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1"></span>
+
+                            {{-- Unread dot --}}
+                            <span x-show="!notif.read" x-cloak class="notif-unread-dot"></span>
                         </div>
 
                         {{-- Message --}}
-                        <p class="text-[#666666] mt-1 leading-relaxed"
-                           style="font-size:12px;
-                                  display:-webkit-box;
-                                  -webkit-line-clamp:2;
-                                  -webkit-box-orient:vertical;
-                                  overflow:hidden;"
-                           x-text="notif.message">
-                        </p>
+                        <p class="notif-message-text" x-text="notif.message"></p>
 
                         {{-- Timestamp --}}
-                        <div class="flex items-center gap-1 mt-2">
-                            <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                            <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                  x-text="notif.created_at
-                                      ? new Date(notif.created_at).toLocaleString('en-PH', {
-                                          month: 'short', day: 'numeric', year: 'numeric',
-                                          hour: '2-digit', minute: '2-digit'
-                                        })
-                                      : ''">
+                        <div class="notif-time-row">
+                            <i class="fas fa-clock"></i>
+                            <span x-text="notif.created_at
+                                ? new Date(notif.created_at).toLocaleString('en-PH', {
+                                    month: 'short', day: 'numeric', year: 'numeric',
+                                    hour: '2-digit', minute: '2-digit'
+                                  })
+                                : ''">
                             </span>
                         </div>
                     </div>
-                    <span class="notif-hover-label">
-                        <i class="fas fa-eye" style="font-size:10px;margin-right:5px;"></i>View Details
-                    </span>
                 </div>
             </template>
         </template>
     </div>
 
     {{-- Panel Footer --}}
-    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
-        <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
-            Click a notification to view and mark as read
+    <div style="background:#F7F7F5; border-top:0.5px solid #E0D8ED; padding:10px 18px; text-align:center; flex-shrink:0;">
+        <p style="font-size:11px; color:#BBBBBB; font-weight:400; letter-spacing:0.01em;">
+            Select a notification to view details and mark as read.
         </p>
     </div>
 </div>

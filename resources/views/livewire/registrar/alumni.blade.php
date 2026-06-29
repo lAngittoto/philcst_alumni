@@ -19,7 +19,7 @@ new class extends Component {
     public string $alumniSearch      = '';
     public string $alumniBatch       = '';
     public string $alumniCourse      = '';
-    public string $alumniProfileFilter = 'all'; // all | complete | incomplete
+    public string $alumniProfileFilter = 'all';
 
     public ?int   $viewingProfileId  = null;
     public        $viewingProfile    = null;
@@ -110,6 +110,35 @@ new class extends Component {
         $parts[] = trim($l);
         if (trim($s) !== '') $parts[] = trim($s);
         return implode(' ', array_filter($parts));
+    }
+
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="ar-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
+    /**
+     * Derive profile completeness from required fields regardless of DB flag.
+     * Required: first_name, last_name, middle_initial, student_id, course_code, batch, email
+     */
+    public function isProfileComplete(array $profile): bool
+    {
+        if (!empty($profile['profile_completed'])) return true;
+
+        $required = ['first_name', 'last_name', 'middle_initial', 'student_id', 'course_code', 'batch', 'email'];
+        foreach ($required as $field) {
+            if (empty(trim($profile[$field] ?? ''))) return false;
+        }
+        return true;
     }
 
     public function resetAlumniFilters(): void
@@ -218,6 +247,15 @@ new class extends Component {
 <div>
 
 <style>
+    /* ── Search highlight ────────────────────────────────────────── */
+    mark.ar-hl {
+        background: #BFDBFE;
+        color: inherit;
+        border-radius: 2px;
+        padding: 0 1px;
+        font-weight: 700;
+    }
+
     /* ── Hover tooltip ───────────────────────────────────────────── */
     .ar-hover-tip {
         position: fixed;
@@ -352,71 +390,57 @@ new class extends Component {
     .ar-status-pill.active-complete { background: #ecfdf5; color:#059669; border-color:#6ee7b7; }
     .ar-status-pill.active-incomplete { background: #fffbeb; color:#d97706; border-color:#fcd34d; }
 
-    /* ── Profile field labels — semi-bold, not too heavy ─────────── */
+    /* ── Profile field labels ─────────── */
     .ar-field-label {
         font-size: .625rem;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: .06em;
-        color: #333333;
-        margin-bottom: 1px;
+        color: #555555;
+        margin-bottom: 2px;
     }
     .ar-field-value {
         font-size: .8rem;
         font-weight: 600;
-        color: #1a1a1a;
+        color: #111111;
         word-break: break-word;
     }
 
-    /* ── Profile info table cards (modernized) ───────────────────── */
+    /* ── Profile info cards ── WHITE background ───────────────── */
     .ar-card {
-        background: #fff;
-        border: 1.5px solid #ECE5F2;
+        background: #ffffff;
+        border: 1.5px solid #E4E4E4;
         border-radius: 12px;
         overflow: hidden;
-        box-shadow: 0 1px 2px rgba(122,63,145,.05);
-        transition: box-shadow .15s ease, border-color .15s ease;
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
     }
-    .ar-card:hover { border-color: #DCC9EA; box-shadow: 0 3px 10px rgba(122,63,145,.08); }
     .ar-card-header {
         padding: 7px 12px;
-        border-bottom: 1px solid #EDE3F5;
-        background: linear-gradient(135deg,#FAF7FD,#F5EEFA);
+        border-bottom: 1.5px solid #EEEEEE;
+        background: #F7F7F7;
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: 7px;
-    }
-    .ar-card-header i {
-        font-size: .62rem;
-        color: #7A3F91;
-        width: 18px;
-        height: 18px;
-        flex-shrink: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: #fff;
-        border-radius: 6px;
-        box-shadow: 0 1px 3px rgba(122,63,145,.15);
     }
     .ar-card-header p {
         font-size: .68rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .07em;
-        color: #5B2D6E;
+        color: #222222;
         margin: 0;
     }
+
+    /* ── Cells — WHITE background ─────────────────────────────── */
     .ar-cell {
         padding: 7px 11px;
-        border: 1px solid #F2EEF7;
-        background: #FBFAFC;
+        border: 1.5px solid #EEEEEE;
+        background: #ffffff;
         border-radius: 8px;
-        transition: background .15s ease, border-color .15s ease;
     }
-    .ar-cell:hover { background: #F6F1FA; border-color: #E8DCF0; }
 
-    /* ── Modernized status / info chips (replaces "|" divided text) ── */
+    /* ── Info chips ── */
     .ar-info-chip {
         display: inline-flex;
         align-items: center;
@@ -430,44 +454,23 @@ new class extends Component {
         white-space: nowrap;
     }
 
-    /* ── Filter bar: filtering / loading state ────────────────────── */
-    .ar-filter-progress-track {
-        height: 2px;
-        width: 100%;
-        overflow: hidden;
-        background: transparent;
-        position: relative;
-    }
-    .ar-filter-progress-bar {
-        position: absolute;
-        top: 0; left: 0;
-        height: 100%;
-        width: 40%;
-        border-radius: 99px;
-        background: linear-gradient(135deg,#7A3F91,#9b59b6);
-        animation: arFilterProgress 1s ease-in-out infinite;
-    }
-    @keyframes arFilterProgress {
-        0%   { left: -40%; }
-        100% { left: 100%; }
-    }
-
-    /* ── Mobile responsiveness for the View Profile panel ─────────── */
+    /* ── Mobile responsiveness ─────────────────────────────────── */
     .ar-profile-body {
-        padding: 8px 12px;
+        padding: 10px 14px;
+        background: #F2F2F2;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
     .ar-profile-grid {
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         grid-template-rows: auto auto auto auto auto auto;
-        gap: 6px;
+        gap: 8px;
         height: 100%;
         box-sizing: border-box;
     }
     @media (max-width: 768px) {
         .ar-profile-body {
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
             padding: 10px 12px 20px;
         }
         .ar-profile-grid {
@@ -494,7 +497,7 @@ new class extends Component {
     }
     .ar-panel { animation: arPanelIn .18s cubic-bezier(.4,0,.2,1) both; }
 
-    /* ── Photo avatar action buttons — icon only ────────────────── */
+    /* ── Photo action buttons ────────────────────────────────── */
     .ar-photo-action-btn {
         position: relative;
         display: inline-flex;
@@ -510,38 +513,6 @@ new class extends Component {
         font-size: 12px;
         flex-shrink: 0;
     }
-
-    /* ── Reset button tooltip — positioned BELOW the icon ────────── */
-    .ar-photo-action-btn .ar-photo-action-tip {
-        position: absolute;
-        top: calc(100% + 7px);
-        left: 50%;
-        transform: translateX(-50%);
-        background: #1a1a1a;
-        color: #fff;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: .05em;
-        padding: 4px 9px;
-        border-radius: 6px;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 9999;
-        box-shadow: 0 4px 12px rgba(0,0,0,.28);
-    }
-    /* Arrow pointing UP (tooltip is below the button) */
-    .ar-photo-action-btn .ar-photo-action-tip::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 4px solid transparent;
-        border-bottom-color: #1a1a1a;
-    }
-    .ar-photo-action-btn:hover .ar-photo-action-tip { opacity: 1; }
     .ar-photo-save-btn { background: #7A3F91; border-color: #7A3F91; color: #fff; }
     .ar-photo-save-btn:hover { background: #6a3280; border-color: #6a3280; }
     .ar-photo-save-btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -550,7 +521,7 @@ new class extends Component {
     .ar-photo-default-btn { color: #555555; }
     .ar-photo-default-btn:hover { background: #F5F5F5; border-color: #BBBBBB; color: #333333; }
 
-    /* ── Upload progress shimmer ─────────────────────────────────── */
+    /* ── Upload shimmer ─────────────────────────────────────────── */
     @keyframes arShimmer {
         0%   { background-position: -200% 0; }
         100% { background-position:  200% 0; }
@@ -567,40 +538,49 @@ new class extends Component {
         justify-content: center;
     }
 
-    /* ── Avatar strip layout ─────────────────────────────────────── */
+    /* ── Avatar strip — WHITE background ─────────────────────── */
     .ar-avatar-strip {
         display: flex;
         align-items: stretch;
         gap: 0;
-        background: #fff;
+        background: #ffffff;
         border: 1.5px solid #E4E4E4;
-        border-radius: 10px;
+        border-radius: 12px;
         overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
     }
-
-    /* ── Large photo column ──────────────────────────────────────── */
     .ar-photo-col {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
         justify-content: center;
         flex-shrink: 0;
-        padding: 10px 12px;
+        padding: 12px 14px;
         border-right: 1.5px solid #EEEEEE;
-        background: #FAFAFA;
+        background: #F7F7F7;
         gap: 5px;
         min-width: 160px;
     }
-
-    /* ── Info column next to photo ───────────────────────────────── */
     .ar-info-col {
         flex: 1;
         min-width: 0;
         display: flex;
         flex-direction: column;
         justify-content: center;
-        padding: 10px 14px;
+        padding: 12px 16px;
         gap: 5px;
+        background: #ffffff;
+    }
+
+    /* ── Employment 2-col grid ────────────────────────────────── */
+    .ar-emp-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 8px;
+    }
+    @media (max-width: 600px) {
+        .ar-emp-grid { grid-template-columns: 1fr; }
     }
 </style>
 
@@ -659,38 +639,18 @@ new class extends Component {
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
 
-            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;"
-                  wire:loading.remove wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">FILTERS</span>
+            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
-            <span class="ar-filter-label inline-flex items-center gap-1.5 text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;"
-                  wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
-                <svg class="animate-spin w-3 h-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-                FILTERING…
-            </span>
-
-            {{-- ── Profile Status Pill Tabs (All / Complete / Pending) ── --}}
+            {{-- Profile Status Pill Tabs --}}
             <div class="flex items-center gap-1.5 shrink-0">
-                <button type="button"
-                        wire:click="$set('alumniProfileFilter','all')"
-                        class="ar-status-pill {{ $alumniProfileFilter === 'all' ? 'active-all' : '' }}">
-                    All
-                </button>
-                <button type="button"
-                        wire:click="$set('alumniProfileFilter','complete')"
-                        class="ar-status-pill {{ $alumniProfileFilter === 'complete' ? 'active-complete' : '' }}">
-                    Complete
-                </button>
-                <button type="button"
-                        wire:click="$set('alumniProfileFilter','incomplete')"
-                        class="ar-status-pill {{ $alumniProfileFilter === 'incomplete' ? 'active-incomplete' : '' }}">
-                    Pending
-                </button>
+                <button type="button" wire:click="$set('alumniProfileFilter','all')"
+                        class="ar-status-pill {{ $alumniProfileFilter === 'all' ? 'active-all' : '' }}">All</button>
+                <button type="button" wire:click="$set('alumniProfileFilter','complete')"
+                        class="ar-status-pill {{ $alumniProfileFilter === 'complete' ? 'active-complete' : '' }}">Complete</button>
+                <button type="button" wire:click="$set('alumniProfileFilter','incomplete')"
+                        class="ar-status-pill {{ $alumniProfileFilter === 'incomplete' ? 'active-incomplete' : '' }}">Pending</button>
             </div>
 
-            {{-- Divider --}}
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
 
             {{-- Search --}}
@@ -714,7 +674,7 @@ new class extends Component {
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                     x-transition:leave="transition ease-in duration-75"  x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;">
                     <button type="button" @click="select('')" :class="{'active':$wire.alumniBatch===''}" class="ar-dropdown-item">All Batch Years</button>
                     @foreach($this->batches as $b)
@@ -733,7 +693,7 @@ new class extends Component {
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                     x-transition:leave="transition ease-in duration-75"  x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;">
                     <button type="button" @click="select('')" :class="{'active':$wire.alumniCourse===''}" class="ar-dropdown-item">All Courses</button>
                     @foreach($this->courses as $c)
@@ -745,22 +705,14 @@ new class extends Component {
             {{-- Reset --}}
             <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none">
-                <span wire:loading.remove wire:target="resetAlumniFilters"><i class="fas fa-rotate-left text-sm"></i></span>
-                <span wire:loading wire:target="resetAlumniFilters">
-                    <svg class="animate-spin w-4 h-4 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                </span>
+                <i class="fas fa-rotate-left text-sm"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
             {{-- Active filter badges --}}
             @if($alumniProfileFilter !== 'all')
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border
-                         {{ $alumniProfileFilter === 'complete'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200' }}">
+                         {{ $alumniProfileFilter === 'complete' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200' }}">
                 Showing {{ $alumniProfileFilter === 'complete' ? 'Complete' : 'Pending' }} only
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
@@ -773,14 +725,20 @@ new class extends Component {
             @endif
         </div>
 
-        {{-- Filtering progress indicator --}}
+        {{-- Filtering progress bar --}}
         <div class="ar-filter-progress-track" wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
             <div class="ar-filter-progress-bar"></div>
         </div>
+        <style>
+            .ar-filter-progress-track { height:2px;width:100%;overflow:hidden;background:transparent;position:relative; }
+            .ar-filter-progress-bar { position:absolute;top:0;left:0;height:100%;width:40%;border-radius:99px;background:linear-gradient(135deg,#7A3F91,#9b59b6);animation:arFilterProgress 1s ease-in-out infinite; }
+            @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
+        </style>
 
         {{-- Table wrapper --}}
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
-            <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200" class="h-full overflow-y-auto overflow-x-auto transition-opacity duration-200"
+            <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
+                 class="h-full overflow-y-auto overflow-x-auto transition-opacity duration-200"
                  wire:loading.class="opacity-40" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
                 <table class="w-full border-collapse table-fixed" style="min-width:620px;">
                     <colgroup>
@@ -797,30 +755,41 @@ new class extends Component {
                     </thead>
                     <tbody class="divide-y divide-[#F0ECF5]">
                         @forelse($this->alumniRecords as $item)
+                        @php
+                            $displayName = $this->formatDisplayName(
+                                $item->first_name ?? '', $item->middle_initial ?? '',
+                                $item->last_name ?? '', $item->suffix ?? ''
+                            );
+                        @endphp
                         <tr class="ar-row bg-white" wire:click="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                                          class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false">
                                     <span class="font-semibold text-[#333333] text-sm uppercase truncate block">
-                                        {{ $this->formatDisplayName($item->first_name??'',$item->middle_initial??'',$item->last_name??'',$item->suffix??'') }}
+                                        {!! $this->highlight($displayName, $this->alumniSearch) !!}
                                     </span>
                                 </div>
                             </td>
                             <td class="px-4 py-3 overflow-hidden">
-                                <span class="font-mono text-[#333333] text-sm font-semibold uppercase truncate block">{{ $item->student_id }}</span>
+                                <span class="font-mono text-[#333333] text-sm font-semibold uppercase truncate block">
+                                    {!! $this->highlight($item->student_id ?? '', $this->alumniSearch) !!}
+                                </span>
                             </td>
                             <td class="px-4 py-3 overflow-hidden">
                                 <span class="inline-block px-2.5 py-1 rounded-full text-xs font-semibold uppercase truncate max-w-full"
                                       style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
-                                    {{ $item->course_code ?? '—' }}
+                                    {!! $this->highlight($item->course_code ?? '—', $this->alumniSearch) !!}
                                 </span>
                             </td>
                             <td class="px-4 py-3 text-center overflow-hidden">
                                 <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
                             <td class="px-4 py-3 hidden md:table-cell overflow-hidden">
-                                <span class="text-[#333333] text-sm font-normal uppercase truncate block">{{ strtoupper($item->email ?? '—') }}</span>
+                                {{-- Email: preserve original casing from DB --}}
+                                <span class="text-[#333333] text-sm font-normal truncate block">
+                                    {!! $this->highlight($item->email ?? '', $this->alumniSearch) !!}
+                                </span>
                             </td>
                         </tr>
                         @empty
@@ -906,7 +875,7 @@ new class extends Component {
 </div>{{-- end page --}}
 
 
-{{-- ══ VIEW PROFILE — FULLSCREEN NO-SCROLL PANEL ══════════════════ --}}
+{{-- ══ VIEW PROFILE PANEL ══════════════════════════════════════════ --}}
 @if($activeModal === 'viewProfile' && $viewingProfile)
 @php
     $up = fn(?string $v): string => strtoupper(trim($v ?? ''));
@@ -934,36 +903,51 @@ new class extends Component {
         'seeking_employment' => 'Actively Seeking Employment',
         'not_looking'        => 'Not Currently Looking',
     ];
-
-    $empStatus   = $emp['employment_status'] ?? null;
-    $isWorking   = in_array($empStatus, ['employed', 'self_employed']);
-    $empTypeLbl  = $empTypeMap[$emp['employment_type'] ?? ''] ?? null;
-    $dateHired   = !empty($emp['date_hired'])
-        ? \Carbon\Carbon::parse($emp['date_hired'])->format('F j, Y') : null;
-    $submittedAt = !empty($emp['created_at'])
-        ? \Carbon\Carbon::parse($emp['created_at'])->format('M j, Y') : null;
-    $careerPath  = !empty($emp['career_path']) ? json_decode($emp['career_path'], true) : [];
-    $cpLabels    = [
+    $workLocMap = [
+        'local'  => 'Local',
+        'abroad' => 'Abroad',
+        'remote' => 'Remote',
+        'hybrid' => 'Hybrid / Mixed',
+    ];
+    $cpLabels = [
         'ofw'                   => 'OFW',
         'freelancer'            => 'Freelancer',
         'entrepreneur'          => 'Entrepreneur',
         'career_shifter'        => 'Career Shifter',
         'industry_professional' => 'Industry Professional',
     ];
+    $eduMap = [
+        'pursuing_masteral'  => 'Pursuing Masteral',
+        'pursuing_doctorate' => 'Pursuing Doctorate',
+    ];
+
+    $empStatus   = $emp['employment_status'] ?? null;
+    $isWorking   = in_array($empStatus, ['employed', 'self_employed']);
+    $empTypeLbl  = $empTypeMap[$emp['employment_type'] ?? ''] ?? null;
+    $dateHired   = !empty($emp['date_hired'])
+        ? \Carbon\Carbon::parse($emp['date_hired'])->format('F j, Y') : null;
+    $updatedAt   = !empty($emp['updated_at'])
+        ? \Carbon\Carbon::parse($emp['updated_at'])->format('M j, Y g:i A') : null;
+    $submittedAt = !empty($emp['created_at'])
+        ? \Carbon\Carbon::parse($emp['created_at'])->format('M j, Y') : null;
+    $careerPath  = !empty($emp['career_path']) ? json_decode($emp['career_path'], true) : [];
+
     $dob = !empty($viewingProfile['date_of_birth'])
         ? strtoupper(\Carbon\Carbon::parse($viewingProfile['date_of_birth'])->format('F j, Y'))
         : '—';
 
     $hasCustomPhoto = !empty($viewingProfile['profile_photo'])
         && !str_contains($viewingProfile['profile_photo'], 'default.png');
+
+    // Derive completeness: DB flag OR all required fields filled
+    $profileIsComplete = $this->isProfileComplete($viewingProfile);
 @endphp
 
-{{-- Fullscreen overlay --}}
 <div class="fixed inset-0 z-50"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="w-full h-full flex flex-col bg-[#F0F0F0] ar-panel overflow-hidden">
+    <div class="w-full h-full flex flex-col ar-panel" style="background:#F2F2F2;overflow:hidden;">
 
         {{-- ── Sticky Header ── --}}
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0"
@@ -985,21 +969,11 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- ── Body — responsive grid (no-scroll on desktop, scrolls on mobile) ── --}}
-        <div class="flex-1 min-h-0 overflow-hidden ar-profile-body">
+        {{-- ── Body ── --}}
+        <div class="flex-1 min-h-0 ar-profile-body">
             <div class="ar-profile-grid">
 
-                {{-- ══ Row 1: Avatar strip — full width ══ --}}
-                {{--
-                    x-data manages:
-                      previewSrc       — shown in <img> (FileReader preview or saved URL)
-                      originalSrc      — the alumni's saved photo URL (restored on cancel)
-                      defaultSrc       — the system default photo URL
-                      pendingFile      — File object picked by user
-                      hasFile          — true once any change is staged
-                      saving           — true while Livewire is processing
-                      isDefaultPending — true when user staged a reset-to-default
-                --}}
+                {{-- ══ Row 1: Avatar strip ══ --}}
                 <div style="grid-column:1/-1;"
                      x-data="{
                          previewSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
@@ -1009,125 +983,80 @@ new class extends Component {
                          hasFile: false,
                          saving: false,
                          isDefaultPending: false,
-
-                         get isShowingDefault() {
-                             return this.previewSrc === this.defaultSrc;
-                         },
-
+                         get isShowingDefault() { return this.previewSrc === this.defaultSrc; },
                          init() {
                              $wire.$on('photo-saved', () => {
-                                 this.pendingFile      = null;
-                                 this.hasFile          = false;
-                                 this.saving           = false;
-                                 this.isDefaultPending = false;
-                                 this.originalSrc      = this.previewSrc;
+                                 this.pendingFile = null; this.hasFile = false;
+                                 this.saving = false; this.isDefaultPending = false;
+                                 this.originalSrc = this.previewSrc;
                              });
                          },
-
                          onFileChange(event) {
                              const file = event.target.files[0];
                              if (!file) return;
-                             this.pendingFile      = file;
-                             this.hasFile          = true;
-                             this.isDefaultPending = false;
+                             this.pendingFile = file; this.hasFile = true; this.isDefaultPending = false;
                              const reader = new FileReader();
                              reader.onload = (e) => { this.previewSrc = e.target.result; };
                              reader.readAsDataURL(file);
                          },
-
                          setDefault() {
-                             this.pendingFile      = null;
-                             this.hasFile          = true;
-                             this.isDefaultPending = true;
-                             this.previewSrc       = this.defaultSrc;
+                             this.pendingFile = null; this.hasFile = true;
+                             this.isDefaultPending = true; this.previewSrc = this.defaultSrc;
                              if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                          },
-
                          savePhoto() {
                              if (this.saving) return;
                              this.saving = true;
                              if (this.isDefaultPending) {
                                  $wire.resetAlumniPhoto();
                              } else if (this.pendingFile) {
-                                 $wire.upload(
-                                     'newAlumniPhoto',
-                                     this.pendingFile,
+                                 $wire.upload('newAlumniPhoto', this.pendingFile,
                                      () => { $wire.uploadAlumniPhoto(); },
                                      () => {
-                                         this.saving           = false;
-                                         this.hasFile          = false;
-                                         this.isDefaultPending = false;
-                                         this.pendingFile      = null;
-                                         this.previewSrc       = this.originalSrc;
+                                         this.saving = false; this.hasFile = false;
+                                         this.isDefaultPending = false; this.pendingFile = null;
+                                         this.previewSrc = this.originalSrc;
                                          if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                                      },
                                      () => {}
                                  );
-                             } else {
-                                 this.saving = false;
-                             }
+                             } else { this.saving = false; }
                          },
-
                          cancelPhoto() {
-                             this.pendingFile      = null;
-                             this.hasFile          = false;
-                             this.isDefaultPending = false;
-                             this.previewSrc       = this.originalSrc;
+                             this.pendingFile = null; this.hasFile = false;
+                             this.isDefaultPending = false; this.previewSrc = this.originalSrc;
                              if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                          }
                      }"
                      class="ar-avatar-strip">
 
-                    {{-- ── LEFT: Large 2×2 photo column ── --}}
                     <div class="ar-photo-col">
-
-                        {{-- Photo + right-side reset button together --}}
                         <div class="flex items-start gap-2">
-
-                            {{-- Photo container — large passport-style --}}
                             <div class="relative group" style="width:108px;height:108px;flex-shrink:0;">
-                                <img :src="previewSrc"
-                                     alt="{{ $viewingProfile['first_name'] ?? '' }}"
-                                     class="w-full h-full object-cover shadow-md transition-all"
-                                     style="border-radius:12px;"
+                                <img :src="previewSrc" alt="{{ $viewingProfile['first_name'] ?? '' }}"
+                                     class="w-full h-full object-cover shadow-md transition-all" style="border-radius:12px;"
                                      :class="hasFile ? 'ring-2 ring-[#7A3F91] ring-offset-2' : 'ring-2 ring-[#E0E0E0]'">
-
-                                {{-- Shimmer overlay while saving --}}
                                 <div x-show="saving" class="ar-uploading-overlay">
                                     <i class="fas fa-spinner fa-spin text-[#7A3F91] text-base"></i>
                                 </div>
-
-                                {{-- Camera hover overlay --}}
                                 <label x-show="!saving"
                                        class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                                        style="border-radius:12px;">
                                     <i class="fas fa-camera text-white" style="font-size:16px;"></i>
-                                    <input type="file"
-                                           x-ref="photoInput"
-                                           class="hidden"
-                                           accept="image/jpeg,image/png,image/webp"
-                                           @change="onFileChange($event)">
+                                    <input type="file" x-ref="photoInput" class="hidden"
+                                           accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
                                 </label>
-
-                                {{-- Purple pending-change dot --}}
                                 <span x-show="hasFile && !saving"
                                       class="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#7A3F91] border-2 border-white shadow"
                                       style="display:none;"></span>
                             </div>
 
-                            {{-- ── RIGHT of photo: Reset to default + Save/Cancel stacked ── --}}
                             <div class="flex flex-col gap-1.5" x-show="!saving" style="padding-top:2px;">
-
-                                {{-- ↺ Reset to default — RIGHT SIDE, tooltip to the right --}}
                                 <div class="relative group/rst">
-                                    <button type="button"
-                                            class="ar-photo-action-btn ar-photo-default-btn"
-                                            x-show="!hasFile && !isShowingDefault"
-                                            @click="setDefault()"
-                                            style="display:none;">
+                                    <button type="button" class="ar-photo-action-btn ar-photo-default-btn"
+                                            x-show="!hasFile && !isShowingDefault" @click="setDefault()" style="display:none;">
                                         <i class="fas fa-rotate-left"></i>
                                     </button>
-                                    {{-- Tooltip to the RIGHT --}}
                                     <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none
                                                 bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg
                                                 opacity-0 group-hover/rst:opacity-100 transition-opacity duration-150 z-[9999]"
@@ -1136,14 +1065,9 @@ new class extends Component {
                                         <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
                                     </div>
                                 </div>
-
-                                {{-- ✓ Save — RIGHT SIDE --}}
                                 <div class="relative group/sav">
-                                    <button type="button"
-                                            class="ar-photo-action-btn ar-photo-save-btn"
-                                            x-show="hasFile"
-                                            @click="savePhoto()"
-                                            style="display:none;">
+                                    <button type="button" class="ar-photo-action-btn ar-photo-save-btn"
+                                            x-show="hasFile" @click="savePhoto()" style="display:none;">
                                         <i class="fas fa-check"></i>
                                     </button>
                                     <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none
@@ -1154,14 +1078,9 @@ new class extends Component {
                                         <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
                                     </div>
                                 </div>
-
-                                {{-- ✕ Cancel — RIGHT SIDE --}}
                                 <div class="relative group/can">
-                                    <button type="button"
-                                            class="ar-photo-action-btn ar-photo-cancel-btn"
-                                            x-show="hasFile"
-                                            @click="cancelPhoto()"
-                                            style="display:none;">
+                                    <button type="button" class="ar-photo-action-btn ar-photo-cancel-btn"
+                                            x-show="hasFile" @click="cancelPhoto()" style="display:none;">
                                         <i class="fas fa-xmark"></i>
                                     </button>
                                     <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none
@@ -1172,71 +1091,53 @@ new class extends Component {
                                         <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
                                     </div>
                                 </div>
+                            </div>
 
-                            </div>{{-- end right-of-photo buttons --}}
-
-                            {{-- Saving label (shown instead of buttons) --}}
-                            <span x-show="saving"
-                                  class="inline-flex items-center gap-1.5 font-semibold self-start"
+                            <span x-show="saving" class="inline-flex items-center gap-1.5 font-semibold self-start"
                                   style="font-size:.72rem;color:#7A3F91;display:none;padding-top:6px;">
                                 <i class="fas fa-spinner fa-spin" style="font-size:10px;"></i> Saving…
                             </span>
-
-                        </div>{{-- end photo+buttons row --}}
-
-                        {{-- ── "Hover photo to change" hint ── --}}
-                        <p x-show="!hasFile && !saving"
-                           class="text-center font-semibold leading-tight select-none"
-                           style="font-size:.68rem;color:#1a1a1a;max-width:108px;display:block;">
-                            Hover photo to change
-                        </p>
-
-                    </div>{{-- end photo col --}}
-
-                    {{-- ── RIGHT: Name + ID + badges ── --}}
-                    <div class="ar-info-col">
-
-                        {{-- Name --}}
-                        <p class="font-bold uppercase leading-tight" style="font-size:1.05rem;color:#1a1a1a;">
-                            {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
-                        </p>
-
-                        {{-- Student ID --}}
-                        <p class="font-mono" style="font-size:.73rem;color:#1a1a1a;letter-spacing:.03em;">
-                            {{ $viewingProfile['student_id'] ?? '—' }}
-                        </p>
-
-                        {{-- Badges row — modern chip badges ── --}}
-                        <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span class="ar-info-chip" style="background:#F3EAFA;color:#7A3F91;">
-                                <i class="fas fa-graduation-cap" style="font-size:.6rem;"></i>{{ $viewingProfile['course_code'] ?? '—' }}
-                            </span>
-                            <span class="ar-info-chip" style="background:#F0F0F0;color:#444444;">
-                                <i class="fas fa-calendar" style="font-size:.6rem;"></i>Batch {{ $viewingProfile['batch'] ?? '—' }}
-                            </span>
-                            @if(!empty($viewingProfile['profile_completed']))
-                                <span class="ar-info-chip" style="background:#ECFDF5;color:#059669;">
-                                    <i class="fas fa-circle-check" style="font-size:.6rem;"></i>Complete
-                                </span>
-                            @else
-                                <span class="ar-info-chip" style="background:#FFFBEB;color:#D97706;">
-                                    <i class="fas fa-triangle-exclamation" style="font-size:.6rem;"></i>Incomplete
-                                </span>
-                            @endif
                         </div>
 
-                        {{-- Email --}}
-                        <p style="font-size:.72rem;color:#1a1a1a;font-weight:500;">
-                            {{ strtolower($viewingProfile['email'] ?? '—') }}
+                        <p x-show="!hasFile && !saving" class="text-center font-semibold leading-tight select-none"
+                           style="font-size:.68rem;color:#666666;max-width:108px;display:block;">
+                            Hover photo to change
                         </p>
+                    </div>
 
-                    </div>{{-- end info col --}}
-
+                    <div class="ar-info-col">
+                        <p class="font-bold uppercase leading-tight" style="font-size:1.05rem;color:#111111;">
+                            {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
+                        </p>
+                        <p class="font-mono" style="font-size:.73rem;color:#444444;letter-spacing:.03em;">
+                            {{ $viewingProfile['student_id'] ?? '—' }}
+                        </p>
+                        <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;">
+                                {{ $viewingProfile['course_code'] ?? '—' }}
+                            </span>
+                            <span style="color:#CCCCCC;font-size:.7rem;">•</span>
+                            <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;">
+                                Batch {{ $viewingProfile['batch'] ?? '—' }}
+                            </span>
+                            <span style="color:#CCCCCC;font-size:.7rem;">•</span>
+                            {{-- Complete chip: uses derived logic (DB flag OR all required fields present) --}}
+                            @if($profileIsComplete)
+                                <span class="ar-info-chip" style="background:#ECFDF5;color:#059669;border:1px solid #6ee7b7;">Complete</span>
+                            @else
+                                <span class="ar-info-chip" style="background:#FFFBEB;color:#D97706;border:1px solid #fcd34d;">Incomplete</span>
+                            @endif
+                        </div>
+                        {{-- Email: preserve original casing from DB --}}
+                        <p style="font-size:.72rem;color:#444444;font-weight:500;">
+                            {{ $viewingProfile['email'] ?? '—' }}
+                        </p>
+                    </div>
                 </div>{{-- end avatar strip --}}
 
-                {{-- ── Row 2: Student ID | Student Name (4 cells) ── --}}
+                {{-- ── Row 2: Student ID | Name ── --}}
                 <div class="ar-card" style="grid-column:1/2;">
-                    <div class="ar-card-header"><i class="fas fa-id-card"></i><p>Student ID</p></div>
+                    <div class="ar-card-header"><p>Student ID</p></div>
                     <div class="p-2">
                         <div class="ar-cell">
                             <p class="ar-field-label">Student ID</p>
@@ -1246,7 +1147,7 @@ new class extends Component {
                 </div>
 
                 <div class="ar-card" style="grid-column:2/-1;">
-                    <div class="ar-card-header"><i class="fas fa-signature"></i><p>Student's Name</p></div>
+                    <div class="ar-card-header"><p>Student's Name</p></div>
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
@@ -1269,7 +1170,7 @@ new class extends Component {
 
                 {{-- ── Row 3: Student Data | Father | Mother ── --}}
                 <div class="ar-card">
-                    <div class="ar-card-header"><i class="fas fa-user-graduate"></i><p>Student's Data</p></div>
+                    <div class="ar-card-header"><p>Student's Data</p></div>
                     <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Sex</p>
@@ -1281,17 +1182,13 @@ new class extends Component {
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Course</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['course_code'] ?? '') ?: '—' }}</p>
-                        </div>
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Year Level</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['year_level'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['course_name'] ?? $viewingProfile['course_code'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
                 <div class="ar-card">
-                    <div class="ar-card-header"><i class="fas fa-person"></i><p>Father's Name</p></div>
+                    <div class="ar-card-header"><p>Father's Name</p></div>
                     <div class="p-2 grid grid-cols-1 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
@@ -1309,7 +1206,7 @@ new class extends Component {
                 </div>
 
                 <div class="ar-card">
-                    <div class="ar-card-header"><i class="fas fa-person-dress"></i><p>Mother's Maiden Name</p></div>
+                    <div class="ar-card-header"><p>Mother's Maiden Name</p></div>
                     <div class="p-2 grid grid-cols-1 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
@@ -1326,9 +1223,9 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 4: Address (full width) ── --}}
+                {{-- ── Row 4: Address ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
-                    <div class="ar-card-header"><i class="fas fa-location-dot"></i><p>Permanent Address</p></div>
+                    <div class="ar-card-header"><p>Permanent Address</p></div>
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Street</p>
@@ -1349,9 +1246,9 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 5: DSWD | Disability | Contact | Email ── --}}
+                {{-- ── Row 5: Additional Info ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
-                    <div class="ar-card-header"><i class="fas fa-circle-info"></i><p>Additional Information</p></div>
+                    <div class="ar-card-header"><p>Additional Information</p></div>
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">DSWD Household No.</p>
@@ -1367,95 +1264,126 @@ new class extends Component {
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Email Address</p>
-                            <p class="ar-field-value text-xs" style="font-size:.7rem;">{{ $up($viewingProfile['email'] ?? '') ?: '—' }}</p>
+                            {{-- Email: preserve original casing from DB, no strtoupper/strtolower --}}
+                            <p class="ar-field-value text-xs" style="font-size:.7rem;">{{ trim($viewingProfile['email'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
-                {{-- ── Row 6: Employment Status ── --}}
-                <div class="ar-card" style="grid-column:1/-1; min-height:0; margin-bottom:4px;">
-                    <div class="ar-card-header flex items-center justify-between">
-                        <span class="flex items-center gap-1.5"><i class="fas fa-briefcase"></i><p>Employment Status</p></span>
-                        @if($emp && $submittedAt)
-                            <span class="text-xs text-[#1a1a1a] font-semibold normal-case tracking-normal">Updated {{ $submittedAt }}</span>
+                {{-- ══ Row 6: Employment ══ --}}
+                <div class="ar-card" style="grid-column:1/-1; margin-bottom:4px;">
+
+                    <div class="ar-card-header">
+                        <p>Employment</p>
+                        @if($emp && $updatedAt)
+                            <span style="font-size:.62rem;font-weight:600;color:#555555;text-transform:none;letter-spacing:0;font-family:inherit;">
+                                Last updated {{ $updatedAt }}
+                            </span>
                         @endif
                     </div>
 
                     @if(!$emp)
-                        <div class="p-3 text-center">
-                            <p class="text-xs font-semibold text-[#1a1a1a]">No employment record submitted yet.</p>
-                            <p class="text-xs text-[#1a1a1a] mt-0.5 font-normal">The alumni has not filled in their employment information.</p>
+                        <div class="p-3">
+                            <div class="ar-cell">
+                                <p class="ar-field-label">Employment Record</p>
+                                <p class="ar-field-value text-xs">No employment information submitted yet.</p>
+                            </div>
                         </div>
                     @else
-                        <div class="p-2 flex flex-wrap gap-x-4 gap-y-2 items-start">
-                            <div class="flex flex-wrap gap-1.5 items-center">
-                                @if($empStatus && isset($empStatusMap[$empStatus]))
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#1a1a1a] border border-[#DEDEDE]">
-                                        {{ $empStatusMap[$empStatus] }}
-                                    </span>
-                                @endif
+                        <div class="ar-emp-grid">
+
+                            {{-- ── Left column ── --}}
+                            <div class="flex flex-col gap-1.5">
+
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Status</p>
+                                    <p class="ar-field-value text-xs">{{ $empStatusMap[$empStatus] ?? '—' }}</p>
+                                </div>
+
                                 @if($isWorking && $empTypeLbl)
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#444444] border border-[#E0E0E0]">{{ $empTypeLbl }}</span>
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Employment Type</p>
+                                    <p class="ar-field-value text-xs">{{ $empTypeLbl }}</p>
+                                </div>
                                 @endif
+
                                 @if($isWorking && !empty($emp['work_location']))
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#444444] border border-[#E0E0E0]">{{ ucfirst($emp['work_location']) }}</span>
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Work Location</p>
+                                    <p class="ar-field-value text-xs">{{ $workLocMap[$emp['work_location']] ?? ucfirst($emp['work_location']) }}</p>
+                                </div>
                                 @endif
-                                @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']) && isset($unempMap[$emp['unemployment_status']]))
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#444444] border border-[#E0E0E0]">{{ $unempMap[$emp['unemployment_status']] }}</span>
+
+                                @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']))
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Unemployment Reason</p>
+                                    <p class="ar-field-value text-xs">{{ $unempMap[$emp['unemployment_status']] ?? '—' }}</p>
+                                </div>
                                 @endif
+
+                                @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none' && isset($eduMap[$emp['education_status']]))
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Further Studies</p>
+                                    <p class="ar-field-value text-xs">{{ $eduMap[$emp['education_status']] }}</p>
+                                </div>
+                                @endif
+
+                                @if($submittedAt)
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Date Submitted</p>
+                                    <p class="ar-field-value text-xs">{{ $submittedAt }}</p>
+                                </div>
+                                @endif
+
                             </div>
 
-                            @if($isWorking && (!empty($emp['company_name']) || !empty($emp['job_title'])))
-                                <div class="flex gap-1.5 flex-wrap">
-                                    @if(!empty($emp['company_name']))
-                                        <div class="ar-cell">
-                                            <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company Name' }}</p>
-                                            <p class="ar-field-value text-xs uppercase">{{ strtoupper($emp['company_name']) }}</p>
-                                        </div>
-                                    @endif
+                            {{-- ── Right column ── --}}
+                            <div class="flex flex-col gap-1.5">
+
+                                @if($isWorking)
                                     @if(!empty($emp['job_title']))
-                                        <div class="ar-cell">
-                                            <p class="ar-field-label">Job Title</p>
-                                            <p class="ar-field-value text-xs uppercase">{{ strtoupper($emp['job_title']) }}</p>
-                                        </div>
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Position / Role' : 'Job Title' }}</p>
+                                        <p class="ar-field-value text-xs" style="text-transform:uppercase;">{{ strtoupper($emp['job_title']) }}</p>
+                                    </div>
                                     @endif
+
+                                    @if(!empty($emp['company_name']))
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company' }}</p>
+                                        <p class="ar-field-value text-xs" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
+                                    </div>
+                                    @endif
+
                                     @if($dateHired)
-                                        <div class="ar-cell">
-                                            <p class="ar-field-label">Date Hired</p>
-                                            <p class="ar-field-value text-xs">{{ $dateHired }}</p>
-                                        </div>
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">Date Hired</p>
+                                        <p class="ar-field-value text-xs">{{ $dateHired }}</p>
+                                    </div>
                                     @endif
+
                                     @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
-                                        <div class="ar-cell">
-                                            <p class="ar-field-label">Course Relevance</p>
-                                            <p class="ar-field-value text-xs">{{ $relevanceMap[$emp['course_relevance']] }}</p>
-                                        </div>
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">Course Relevance</p>
+                                        <p class="ar-field-value text-xs">{{ $relevanceMap[$emp['course_relevance']] }}</p>
+                                    </div>
                                     @endif
-                                </div>
-                            @endif
 
-                            @if($isWorking && count($careerPath))
-                                <div class="flex flex-wrap gap-1 items-center">
-                                    <span class="ar-field-label mr-1">Career Path:</span>
-                                    @foreach($careerPath as $cpKey)
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-white text-[#333333] border border-[#DEDEDE]">
-                                            {{ $cpLabels[$cpKey] ?? $cpKey }}
-                                        </span>
-                                    @endforeach
-                                </div>
-                            @endif
-
-                            @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none')
-                                @php $eduMap = ['pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate']; @endphp
-                                @if(isset($eduMap[$emp['education_status']]))
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-[#333333] border border-[#DEDEDE]">
-                                        {{ $eduMap[$emp['education_status']] }}
-                                    </span>
+                                    @if(count($careerPath))
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">Career Path</p>
+                                        <p class="ar-field-value text-xs">
+                                            {{ implode(', ', array_map(fn($k) => $cpLabels[$k] ?? $k, $careerPath)) }}
+                                        </p>
+                                    </div>
+                                    @endif
                                 @endif
-                            @endif
+
+                            </div>
+
                         </div>
                     @endif
-                </div>
+                </div>{{-- end employment card --}}
 
             </div>{{-- end grid --}}
         </div>{{-- end body --}}
