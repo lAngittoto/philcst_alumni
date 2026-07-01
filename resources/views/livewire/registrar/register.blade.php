@@ -1106,45 +1106,23 @@ new class extends Component {
         animation: greenBarShine 1.4s infinite linear;
     }
 
-    /* ── Required columns — simple text list ── */
-    .req-col-list {
+    /* ── Required columns — horizontal wrap chips ── */
+    .req-col-chips {
         display: flex;
-        flex-direction: column;
-        gap: 0;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 14px;
     }
-    .req-col-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 14px;
-        border-bottom: 1px solid #E8F0FE;
-        transition: background .1s;
-    }
-    .req-col-item:last-child { border-bottom: none; }
-    .req-col-item:hover { background: #F0F7FF; }
-    .req-col-code {
+    .req-col-chip {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: .8rem;
+        font-size: .78rem;
         font-weight: 700;
         color: #1D4ED8;
         background: #EAF1FF;
         border: 1px solid #D2E2FF;
         border-radius: 6px;
-        padding: 3px 9px;
+        padding: 4px 10px;
         white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .req-col-dot {
-        width: 5px; height: 5px;
-        border-radius: 50%;
-        background: #CBD5E1;
-        flex-shrink: 0;
-    }
-    .req-col-text {
-        font-size: .8rem;
-        font-weight: 500;
-        color: #444;
-        line-height: 1.3;
     }
 
     /* ── Page card ── */
@@ -1172,8 +1150,8 @@ new class extends Component {
 
     /* ── Import modal: fixed size, no resize ── */
     .import-modal-box {
-        width: 520px;
-        height: 640px;
+        width: 640px;
+        height: 750px;
         max-width: calc(100vw - 32px);
         max-height: calc(100vh - 40px);
         display: flex;
@@ -1700,39 +1678,27 @@ new class extends Component {
             {{-- STEP 1: UPLOAD --}}
             @if($importStep === 'upload')
 
-            {{-- ══ Required Columns — simple clean text list ══ --}}
+            {{-- ══ Required Columns — horizontal chips, no icons ══ --}}
             <div class="rounded-xl border border-blue-200 overflow-hidden" style="background:#F8FBFF;">
                 {{-- header --}}
-                <div class="flex items-center gap-2 px-4 py-3 border-b border-blue-100" style="background:#EEF4FF;">
-                    <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background:#1D4ED8;">
-                        <i class="fas fa-table-columns text-white" style="font-size:.7rem;"></i>
+                <div class="flex items-center gap-2 px-4 py-2.5 border-b border-blue-100" style="background:#EEF4FF;">
+                    <div class="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style="background:#1D4ED8;">
+                        <i class="fas fa-table-columns text-white" style="font-size:.6rem;"></i>
                     </div>
                     <p class="font-bold text-blue-900 text-sm">Required Excel Columns</p>
-                    <span class="ml-auto text-xs font-semibold text-blue-500 bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-full">
-                        Column order doesn't matter
-                    </span>
+
                 </div>
 
-                {{-- Simple list — column name only, no numbers, no descriptions, no badges --}}
+                {{-- Horizontal chips — text only, no icons ── --}}
                 @php
                 $reqCols = [
-                    ['first_name',  'fas fa-user'        ],
-                    ['last_name',   'fas fa-user'        ],
-                    ['middle_name', 'fas fa-user'        ],
-                    ['suffix',      'fas fa-tag'         ],
-                    ['student_id',  'fas fa-id-card'     ],
-                    ['course',      'fas fa-book-open'   ],
-                    ['batch',       'fas fa-calendar-alt'],
-                    ['email',       'fas fa-envelope'    ],
+                    'first_name', 'last_name', 'middle_name', 'suffix',
+                    'student_id', 'course',    'batch',       'email',
                 ];
                 @endphp
-
-                <div class="req-col-list px-1 py-1">
-                    @foreach($reqCols as [$col, $icon])
-                    <div class="req-col-item">
-                        <i class="{{ $icon }}" style="font-size:.7rem;color:#93C5FD;flex-shrink:0;"></i>
-                        <span class="req-col-code">{{ $col }}</span>
-                    </div>
+                <div class="req-col-chips">
+                    @foreach($reqCols as $col)
+                        <span class="req-col-chip">{{ $col }}</span>
                     @endforeach
                 </div>
             </div>

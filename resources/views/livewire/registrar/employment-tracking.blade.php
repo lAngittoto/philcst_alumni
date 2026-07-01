@@ -494,6 +494,20 @@ new class extends Component {
         return implode(' ', array_filter($parts));
     }
 
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="ar-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     public function with(): array { return []; }
 };
 ?>
@@ -549,6 +563,54 @@ new class extends Component {
 
     /* Cursor-follow tooltip trigger elements */
     [data-tip] { cursor: pointer; }
+
+    /* ── Search highlight (matches Alumni Records / Dashboard) ─────────────── */
+    mark.ar-hl {
+        background: #BFDBFE;
+        color: inherit;
+        border-radius: 2px;
+        padding: 0 1px;
+        font-weight: 700;
+    }
+
+    /* ── Filtering progress bar (matches Alumni Records / Dashboard) ───────── */
+    .ar-filter-progress-track { height:2px;width:100%;overflow:hidden;background:transparent;position:relative; }
+    .ar-filter-progress-bar { position:absolute;top:0;left:0;height:100%;width:40%;border-radius:99px;background:linear-gradient(135deg,#7A3F91,#9b59b6);animation:arFilterProgress 1s ease-in-out infinite; }
+    @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
+
+    /* ── Close button (matches Alumni Records) ──────────────────────────────
+       Static, attached tooltip that stays BELOW the X button — no longer
+       uses the cursor-follow tooltip system. */
+    .emp-close-btn {
+        position: relative;
+        display: flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px;
+        border-radius: 10px;
+        background: rgba(255,255,255,.12);
+        border: 1px solid rgba(255,255,255,.2);
+        color: #fff; cursor: pointer;
+        transition: background .15s;
+        overflow: visible;
+    }
+    .emp-close-btn:hover { background: rgba(255,255,255,.22); }
+    .emp-close-tip {
+        position: absolute;
+        top: calc(100% + 8px); right: 0;
+        background: rgba(27,6,46,.88);
+        color: #fff; font-size: 10px; font-weight: 600;
+        letter-spacing: .08em; text-transform: uppercase;
+        padding: 4px 10px; border-radius: 7px;
+        white-space: nowrap; pointer-events: none;
+        opacity: 0; transition: opacity .15s ease;
+        z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,.28);
+    }
+    .emp-close-tip::before {
+        content: '';
+        position: absolute; bottom: 100%; right: 10px;
+        border: 5px solid transparent;
+        border-bottom-color: rgba(27,6,46,.88);
+    }
+    .emp-close-btn:hover .emp-close-tip { opacity: 1; }
 
     @media (max-width: 640px) {
         .stat-cards-grid { display:grid!important; grid-template-columns:1fr 1fr!important; gap:8px!important; }
@@ -979,18 +1041,17 @@ new class extends Component {
                 </p>
             </div>
         </div>
-        <div class="relative shrink-0 ml-3">
-            <button wire:click="closeModal"
-                    data-tip="Close"
-                    class="w-9 h-9 rounded-[10px] bg-white/[.12] border border-white/20 text-white
-                           flex items-center justify-center hover:bg-white/[.22] transition cursor-pointer">
-                <i class="fas fa-xmark text-sm"></i>
-            </button>
-        </div>
+
+        {{-- FIXED: static close-button tooltip that stays below the X, matching Alumni Records --}}
+        <button wire:click="closeModal" class="emp-close-btn shrink-0 ml-3">
+            <span class="emp-close-tip">Close</span>
+            <i class="fas fa-xmark text-sm"></i>
+        </button>
     </div>
 
     {{-- ── Toolbar ── --}}
-    <div class="px-3 sm:px-6 lg:px-10 py-2.5 sm:py-3 bg-white border-b border-gray-200 shrink-0">
+    <div class="px-3 sm:px-6 lg:px-10 py-2.5 sm:py-3 bg-white border-b border-gray-200 shrink-0 transition-opacity duration-200"
+         wire:loading.class="opacity-60" wire:target="modalSearch,modalBatch,modalCourse">
         <div class="modal-toolbar flex flex-wrap gap-2 items-center">
 
             <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
@@ -1112,8 +1173,15 @@ new class extends Component {
         </div>
     </div>
 
+    {{-- Filtering progress bar --}}
+    <div class="ar-filter-progress-track" wire:loading wire:target="modalSearch,modalBatch,modalCourse">
+        <div class="ar-filter-progress-bar"></div>
+    </div>
+
     {{-- ── Table ── --}}
-    <div class="modal-table-wrap flex-1 overflow-y-auto overflow-x-auto min-h-0" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
+    <div class="modal-table-wrap flex-1 overflow-y-auto overflow-x-auto min-h-0 transition-opacity duration-200"
+         style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
+         wire:loading.class="opacity-40" wire:target="modalSearch,modalBatch,modalCourse">
         <table class="w-full border-collapse" style="min-width:700px;">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
@@ -1146,15 +1214,15 @@ new class extends Component {
                         <div class="flex items-center gap-2.5">
                             <img src="{{ $photo }}" alt="{{ e($row->first_name ?? '') }}"
                                  class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{{ $dName }}</p>
+                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{!! $this->highlight($dName, $this->modalSearch) !!}</p>
                         </div>
                     </td>
                     <td class="px-4 py-3">
-                        <span class="text-sm font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</span>
+                        <span class="text-sm font-mono font-semibold text-[#111111]">{!! $row->student_id ? $this->highlight($row->student_id, $this->modalSearch) : '—' !!}</span>
                     </td>
                     <td class="px-4 py-3">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold bg-[#F9F7FC] text-[#7a3f91]">
-                            {{ $row->course_code ?? '—' }}
+                            {!! $row->course_code ? $this->highlight($row->course_code, $this->modalSearch) : '—' !!}
                         </span>
                     </td>
                     <td class="px-4 py-3 text-center">
@@ -1179,14 +1247,14 @@ new class extends Component {
                     </td>
                     <td class="px-4 py-3">
                         @if($row->email ?? null)
-                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">{{ strtolower($row->email) }}</span>
+                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">{!! $this->highlight(strtolower($row->email), $this->modalSearch) !!}</span>
                         @else
                             <span class="text-xs text-[#AAAAAA]">—</span>
                         @endif
                     </td>
                     <td class="px-4 pr-6 lg:pr-10 py-3">
                         @if($row->contact_number ?? null)
-                            <span class="text-sm text-[#333333]">{{ $row->contact_number }}</span>
+                            <span class="text-sm text-[#333333]">{!! $this->highlight($row->contact_number, $this->modalSearch) !!}</span>
                         @else
                             <span class="text-xs text-[#AAAAAA]">—</span>
                         @endif
@@ -1264,9 +1332,13 @@ new class extends Component {
         var currentTarget = null;
 
         function showTip(el, e) {
-            var text = el.getAttribute('data-tip');
+            // data-tip-noicon => plain text tooltip, no eye icon (no longer used by Close button)
+            var noIconText = el.getAttribute('data-tip-noicon');
+            var text = noIconText || el.getAttribute('data-tip');
             if (!text) return;
-            tip.innerHTML = '<i class="fas fa-eye" style="font-size:.6rem;margin-right:5px;"></i>' + text;
+            tip.innerHTML = noIconText
+                ? text
+                : '<i class="fas fa-eye" style="font-size:.6rem;margin-right:5px;"></i>' + text;
             tip.style.display = 'block';
             moveTip(e);
         }
@@ -1288,7 +1360,7 @@ new class extends Component {
         }
 
         document.addEventListener('mouseover', function(e) {
-            var el = e.target.closest('[data-tip]');
+            var el = e.target.closest('[data-tip], [data-tip-noicon]');
             if (el && el !== currentTarget) {
                 currentTarget = el;
                 showTip(el, e);

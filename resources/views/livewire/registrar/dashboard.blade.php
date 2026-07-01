@@ -370,12 +370,42 @@ new class extends Component {
         if (trim($s) !== '') $parts[] = trim($s);
         return implode(' ', array_filter($parts));
     }
+
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="ar-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
 };
 ?>
 
 <div
     @dash-open-alumni.window="$wire.openAlumniModal($event.detail.filter ?? 'all', $event.detail.batch ?? null)"
     @dash-open-emp.window="$wire.openEmpModal($event.detail.filter ?? '')">
+
+    <style>
+        /* ── Search highlight (matches Alumni Records) ─────────────── */
+        mark.ar-hl {
+            background: #BFDBFE;
+            color: inherit;
+            border-radius: 2px;
+            padding: 0 1px;
+            font-weight: 700;
+        }
+
+        /* ── Filtering progress bar (matches Alumni Records) ───────── */
+        .ar-filter-progress-track { height:2px;width:100%;overflow:hidden;background:transparent;position:relative; }
+        .ar-filter-progress-bar { position:absolute;top:0;left:0;height:100%;width:40%;border-radius:99px;background:linear-gradient(135deg,#7A3F91,#9b59b6);animation:arFilterProgress 1s ease-in-out infinite; }
+        @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
+    </style>
 
     <div id="__dash_batch_data" class="hidden"
          data-batches="{{ $this->allBatches->toJson() }}"
@@ -702,7 +732,8 @@ new class extends Component {
         </div>
 
         {{-- ── Toolbar ── --}}
-        <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
+        <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0 transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
             <div class="flex flex-wrap gap-2 items-center">
 
                 <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
@@ -822,8 +853,15 @@ new class extends Component {
             </div>
         </div>
 
+        {{-- Filtering progress bar --}}
+        <div class="ar-filter-progress-track" wire:loading wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
+            <div class="ar-filter-progress-bar"></div>
+        </div>
+
         {{-- Table --}}
-        <div class="flex-1 overflow-y-auto min-h-0" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
+        <div class="flex-1 overflow-y-auto min-h-0 transition-opacity duration-200"
+             style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
+             wire:loading.class="opacity-40" wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
 
             @if($alumniModalFilter === 'courses')
             <table class="w-full border-collapse" style="min-width:500px;">
@@ -843,13 +881,13 @@ new class extends Component {
                             <span class="text-xs font-semibold text-[#333333]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
                         <td class="px-5 py-3">
-                            <span class="text-sm font-mono font-bold text-[#111111]">{{ $course->code }}</span>
+                            <span class="text-sm font-mono font-bold text-[#111111]">{!! $this->highlight($course->code ?? '', $this->alumniModalSearch) !!}</span>
                         </td>
                         <td class="px-5 py-3">
-                            <p class="text-sm font-semibold text-[#111111]">{{ $course->name }}</p>
+                            <p class="text-sm font-semibold text-[#111111]">{!! $this->highlight($course->name ?? '', $this->alumniModalSearch) !!}</p>
                         </td>
                         <td class="px-5 py-3">
-                            <span class="text-sm text-[#333333]">{{ $course->college ?? '—' }}</span>
+                            <span class="text-sm text-[#333333]">{!! $course->college ? $this->highlight($course->college, $this->alumniModalSearch) : '—' !!}</span>
                         </td>
                     </tr>
                     @empty
@@ -879,7 +917,10 @@ new class extends Component {
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     @forelse($this->alumniModalRecords as $idx => $alumni)
-                    @php $rowNum = ($this->alumniModalRecords->currentPage() - 1) * $this->alumniModalRecords->perPage() + $idx + 1; @endphp
+                    @php
+                        $rowNum = ($this->alumniModalRecords->currentPage() - 1) * $this->alumniModalRecords->perPage() + $idx + 1;
+                        $aDisplayName = $this->formatDisplayName($alumni->first_name??'',$alumni->middle_initial??'',$alumni->last_name??'',$alumni->suffix??'');
+                    @endphp
                     <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
                         <td class="pl-6 lg:pl-10 pr-3 py-3">
                             <span class="text-xs font-semibold text-[#333333]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
@@ -890,15 +931,15 @@ new class extends Component {
                                      alt="{{ $alumni->first_name }}"
                                      class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
                                 <p class="text-sm font-semibold text-[#111111] truncate uppercase">
-                                    {{ $this->formatDisplayName($alumni->first_name??'',$alumni->middle_initial??'',$alumni->last_name??'',$alumni->suffix??'') }}
+                                    {!! $this->highlight($aDisplayName, $this->alumniModalSearch) !!}
                                 </p>
                             </div>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="text-sm font-mono font-semibold text-[#111111]">{{ $alumni->student_id }}</span>
+                            <span class="text-sm font-mono font-semibold text-[#111111]">{!! $this->highlight($alumni->student_id ?? '', $this->alumniModalSearch) !!}</span>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="font-mono text-sm font-semibold text-[#111111]">{{ $alumni->course_code }}</span>
+                            <span class="font-mono text-sm font-semibold text-[#111111]">{!! $this->highlight($alumni->course_code ?? '', $this->alumniModalSearch) !!}</span>
                         </td>
                         <td class="px-4 py-3 text-center">
                             <span class="text-sm font-semibold text-[#111111]">{{ $alumni->batch }}</span>
@@ -1070,7 +1111,8 @@ new class extends Component {
         </div>
 
         {{-- ── Toolbar ── --}}
-        <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
+        <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0 transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="empFilter,empBatchFilter,empCourseFilter,empSearch">
             <div class="flex flex-wrap gap-2 items-center">
 
                 <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
@@ -1175,8 +1217,15 @@ new class extends Component {
             </div>
         </div>
 
+        {{-- Filtering progress bar --}}
+        <div class="ar-filter-progress-track" wire:loading wire:target="empFilter,empBatchFilter,empCourseFilter,empSearch">
+            <div class="ar-filter-progress-bar"></div>
+        </div>
+
         {{-- Table --}}
-        <div class="flex-1 overflow-y-auto min-h-0" style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
+        <div class="flex-1 overflow-y-auto min-h-0 transition-opacity duration-200"
+             style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
+             wire:loading.class="opacity-40" wire:target="empFilter,empBatchFilter,empCourseFilter,empSearch">
             <table class="w-full border-collapse" style="min-width:900px;">
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
@@ -1221,25 +1270,25 @@ new class extends Component {
                             <div class="flex items-center gap-2.5">
                                 <img src="{{ $photo }}" alt="{{ $row->first_name ?? '' }}"
                                      class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                                <p class="text-sm font-semibold text-[#111111] truncate uppercase">{{ $dName }}</p>
+                                <p class="text-sm font-semibold text-[#111111] truncate uppercase">{!! $this->highlight($dName, $this->empSearch) !!}</p>
                             </div>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="text-sm font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</span>
+                            <span class="text-sm font-mono font-semibold text-[#111111]">{!! $row->student_id ? $this->highlight($row->student_id, $this->empSearch) : '—' !!}</span>
                         </td>
                         <td class="px-4 py-3">
-                            <span class="text-sm font-semibold text-[#111111]">{{ $row->course_code ?? '—' }}</span>
+                            <span class="text-sm font-semibold text-[#111111]">{!! $row->course_code ? $this->highlight($row->course_code, $this->empSearch) : '—' !!}</span>
                         </td>
                         <td class="px-4 py-3 hidden md:table-cell">
                             @if($dynCellValue)
-                                <p class="{{ $dynCellClass }}">{{ $dynCellValue }}</p>
+                                <p class="{{ $dynCellClass }}">{!! $this->highlight($dynCellValue, $this->empSearch) !!}</p>
                             @else
                                 <span class="text-xs text-[#AAAAAA]">—</span>
                             @endif
                         </td>
                         <td class="pl-4 pr-6 lg:pr-10 py-3 hidden sm:table-cell">
                             <span class="text-sm text-[#333333] truncate block max-w-[200px]">
-                                {{ strtolower($row->email ?? '—') }}
+                                {!! $row->email ? $this->highlight(strtolower($row->email), $this->empSearch) : '—' !!}
                             </span>
                         </td>
                     </tr>

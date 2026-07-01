@@ -14,11 +14,11 @@ new class extends Component {
     public string $course = '';
 
     // Logged-in alumni details
-    public string $myBatch          = '';
-    public string $myCourseCode     = '';
-    public string $myCourseName     = '';
-    public string $myCollegeKeyword = '';
-    public int    $myAlumniId       = 0;
+    public string $myBatch       = '';
+    public string $myCourseCode  = '';
+    public string $myCourseName  = '';
+    public string $myCollege     = '';
+    public int    $myAlumniId    = 0;
 
     protected string $paginationTheme = 'tailwind';
 
@@ -33,10 +33,9 @@ new class extends Component {
                 $this->myCourseName = (string) ($alumni->course_name ?? '');
                 $this->myAlumniId   = (int)    ($alumni->id          ?? 0);
 
-                // Extract the last word of the course name as the college keyword
-                if ($this->myCourseName !== '') {
-                    $words = array_filter(explode(' ', trim($this->myCourseName)));
-                    $this->myCollegeKeyword = (string) end($words);
+                // Get the REAL college this course belongs to (from Course.college column)
+                if ($this->myCourseCode !== '') {
+                    $this->myCollege = (string) (Course::where('code', $this->myCourseCode)->value('college') ?? '');
                 }
             }
         }
@@ -60,7 +59,11 @@ new class extends Component {
      * Privacy rule: only alumni from the SAME BATCH as the logged-in user.
      * Within that batch, ALL courses are visible (no college restriction).
      * Optional: filter by specific course or search term.
-     * Sorted: course name A-Z, then name A-Z.
+     *
+     * Sort priority (uses the REAL Course.college column via Eloquent, not guessing):
+     *   1) Your own course shows FIRST
+     *   2) Then other courses in your SAME COLLEGE (grouped together)
+     *   3) Then the rest, grouped by their own college, then course name, then name
      */
     #[Computed]
     public function alumniRecords()
@@ -88,11 +91,43 @@ new class extends Component {
             $q->where('course_code', $this->course);
         }
 
-        // Sort: course name A-Z, then name A-Z
-        $q->orderBy('course_name')
-          ->orderBy('name');
+        // Pull a real course_code -> college map (Eloquent, no raw table names)
+        $collegeMap = Course::pluck('college', 'code')->toArray();
 
-        return $q->paginate(100);
+        $myCourseCode = $this->myCourseCode;
+        $myCollege    = $this->myCollege;
+
+        // Sort entirely in PHP using the real college map — safest & always correct
+        $all = $q->get()->sortBy(function ($alumni) use ($collegeMap, $myCourseCode, $myCollege) {
+            $college = $collegeMap[$alumni->course_code] ?? '';
+
+            $ownCourseRank  = ($myCourseCode !== '' && $alumni->course_code === $myCourseCode) ? 0 : 1;
+            $ownCollegeRank = ($myCollege !== '' && $college === $myCollege) ? 0 : 1;
+
+            // Composite sort key: own course first, then own college, then college name, then course name, then alumni name
+            return sprintf(
+                '%d|%d|%s|%s|%s',
+                $ownCourseRank,
+                $ownCollegeRank,
+                $college,
+                $alumni->course_name,
+                $alumni->name
+            );
+        })->values();
+
+        // Manual pagination over the sorted collection
+        $perPage = 100;
+        $page    = (int) ($this->page ?? 1);
+        $page    = $page > 0 ? $page : 1;
+        $sliced  = $all->forPage($page, $perPage);
+
+        return new \Illuminate\Pagination\LengthAwarePaginator(
+            $sliced->values(),
+            $all->count(),
+            $perPage,
+            $page,
+            ['path' => request()->url(), 'pageName' => 'page']
+        );
     }
 
     public function resetFilters(): void
@@ -142,7 +177,7 @@ new class extends Component {
 
 <style>
 /* ── Base ──────────────────────────────────────────────── */
-.yb-card { transition: border-color .15s ease, box-shadow .15s ease; }
+.yb-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
 .yb-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
 
 .yb-section-badge {
@@ -165,8 +200,28 @@ new class extends Component {
 .yb-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Loading ────────────────────────────────────────────── */
-.yb-loading-overlay { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+/* ── Filtering progress bar (replaces blur/spinner overlay) ── */
+.yb-filter-progress-track {
+    height: 2px;
+    width: 100%;
+    overflow: hidden;
+    background: transparent;
+    position: relative;
+    flex-shrink: 0;
+}
+.yb-filter-progress-bar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 40%;
+    border-radius: 99px;
+    background: #7A3F91;
+    animation: ybFilterProgress 1s ease-in-out infinite;
+}
+@keyframes ybFilterProgress {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+}
 
 /* ── Entry animation ────────────────────────────────────── */
 @keyframes ybFadeUp {
@@ -241,11 +296,11 @@ new class extends Component {
 }
 .yb-pagination-bar {
     flex-shrink: 0;
-    background: linear-gradient(to right, #7a3f91, #9b59b6);
+    background: #7A3F91;
     padding: 0 1rem; min-height: 48px;
     display: flex; align-items: center;
     justify-content: space-between; gap: 0.5rem;
-    flex-wrap: wrap; border-top: 1px solid rgba(122,63,145,.3);
+    flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,.15);
 }
 .yb-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -257,9 +312,7 @@ new class extends Component {
 .yb-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .yb-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-/* ── Batch watermark — removed (replaced by header banner) ── */
-
-/* ── Big BATCH banner in header ─────────────────────────── */
+/* ── Big BATCH banner in header — solid ube ─────────────── */
 .yb-batch-banner {
     position: relative;
     display: inline-flex;
@@ -301,16 +354,24 @@ new class extends Component {
     background: #fff;
     line-height: 1;
 }
-.yb-batch-banner-year em {
-    font-style: normal;
-    color: #7A3F91;
-    margin-left: 3px;
-}
 
-/* ── "My card" highlight — purple border + glow only ────── */
+/* ── "My card" highlight — purple border + idle pulsing glow ────── */
 .yb-card-me {
     border-color: #7A3F91 !important;
-    box-shadow: 0 0 0 3px rgba(122,63,145,.22), 0 6px 20px rgba(122,63,145,.18) !important;
+    border-width: 2px !important;
+    animation: ybMeGlowPulse 2.2s ease-in-out infinite;
+}
+.yb-card-me:hover {
+    animation: none;
+    box-shadow: 0 0 0 6px rgba(122,63,145,.35), 0 10px 28px rgba(122,63,145,.32) !important;
+}
+@keyframes ybMeGlowPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 3px rgba(122,63,145,.18), 0 6px 16px rgba(122,63,145,.14);
+    }
+    50% {
+        box-shadow: 0 0 0 7px rgba(122,63,145,.32), 0 10px 26px rgba(122,63,145,.30);
+    }
 }
 
 /* Privacy notice pill */
@@ -322,49 +383,50 @@ new class extends Component {
     border: 1.5px solid #F6D860;
     white-space: nowrap;
 }
+
+/* ── Mobile responsiveness ──────────────────────────────── */
+@media (max-width: 640px) {
+    .yb-batch-banner-year { font-size: 1.1rem; padding: 0 12px 0 10px; }
+    .yb-batch-banner-label { font-size: 9px; padding: 0 8px; }
+    .yb-filter-bar { gap: 8px; }
+}
+@media (max-width: 480px) {
+    .yb-pagination-bar { padding: 8px 0.75rem; }
+}
 </style>
 
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col gap-4 px-4 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
 
     {{-- PAGE HEADER --}}
-    <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-book-open text-white text-lg"></i>
+    <div class="flex flex-col gap-3 flex-shrink-0">
+
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-4">
+                <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-[#7A3F91]">
+                    <i class="fas fa-book-open text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
+                    <p class="text-xs leading-relaxed mt-0.5" style="color:#555555;">
+                        A digital collection of PhilCST graduates
+                    </p>
+                </div>
             </div>
-            <div>
-                <h1 class="text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                <p class="text-xs leading-relaxed mt-0.5" style="color:#555555;">
-                    A digital collection of PhilCST graduates
-                    @if($myBatch !== '')
-                        &mdash;
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold"
-                              style="background:#EDE0F5; color:#7A3F91; border:1px solid #d4aaeb;">
-                            Class of {{ $myBatch }}
-                        </span>
-                    @endif
-                </p>
+
+            <div class="flex items-center gap-2 flex-wrap">
+                {{-- Big readable BATCH XXXX banner --}}
+                @if($myBatch !== '')
+                <div class="yb-batch-banner" aria-label="Batch {{ $myBatch }}">
+                    <span class="yb-batch-banner-label">
+                        <i class="fas fa-graduation-cap mr-1.5" style="font-size:9px;"></i>
+                        Batch
+                    </span>
+                    <span class="yb-batch-banner-year">{{ $myBatch }}</span>
+                </div>
+                @endif
             </div>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap">
-            {{-- Big readable BATCH XXXX banner --}}
-            @if($myBatch !== '')
-            <div class="yb-batch-banner" aria-label="Batch {{ $myBatch }}">
-                <span class="yb-batch-banner-label">
-                    <i class="fas fa-graduation-cap mr-1.5" style="font-size:9px;"></i>
-                    Batch
-                </span>
-                <span class="yb-batch-banner-year">{{ $myBatch }}<em>.</em></span>
-            </div>
-            @endif
-            {{-- Count chip --}}
-            <span class="yb-chip">
-                <i class="fas fa-graduation-cap text-[10px]"></i>
-                {{ number_format($this->alumniRecords->total()) }} Alumni
-            </span>
-        </div>
     </div>
 
     {{-- UNIFIED BLOCK --}}
@@ -373,13 +435,13 @@ new class extends Component {
         {{-- FILTER BAR --}}
         <div class="yb-filter-bar flex flex-wrap gap-2 items-center">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+            <div class="flex items-center gap-2 px-1 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">
                 Filters
             </div>
 
             {{-- Search --}}
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
+            <div class="relative flex-1 min-w-[150px] max-w-xs"
                  wire:ignore
                  x-data="{ q: '', init() { this.q = $wire.search ?? ''; $wire.$watch('search', v => { if (v !== this.q) this.q = v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
@@ -447,20 +509,11 @@ new class extends Component {
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
-            {{-- Count + spinner --}}
-            <div class="flex items-center gap-2 ml-auto">
-                <span wire:loading wire:target="search,course,resetFilters,previousPage,nextPage">
-                    <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                </span>
-                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
-                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
-                    {{ number_format($this->alumniRecords->total()) }} found
-                </span>
-            </div>
+        </div>
+
+        {{-- Filtering progress bar (replaces the old blur overlay) --}}
+        <div class="yb-filter-progress-track" wire:loading wire:target="search,course,resetFilters,previousPage,nextPage,gotoPage">
+            <div class="yb-filter-progress-bar"></div>
         </div>
 
         {{-- SCROLLABLE CARDS AREA --}}
@@ -469,27 +522,11 @@ new class extends Component {
 
             <div id="yb-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-4"
-                 wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="search,course,resetFilters,previousPage,nextPage">
+                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4"
+                 wire:loading.class="opacity-50"
+                 wire:target="search,course,resetFilters,previousPage,nextPage,gotoPage">
 
-                {{-- Loading overlay --}}
-                <div wire:loading
-                     wire:target="search,course,resetFilters,previousPage,nextPage"
-                     class="yb-loading-overlay absolute inset-0 z-20 flex items-center justify-center"
-                     style="background:rgba(243,244,246,.75);">
-                    <div class="flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-xl border bg-white"
-                         style="border-color:#E8E0F0;">
-                        <svg class="animate-spin w-4 h-4" style="color:#7A3F91;"
-                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                        </svg>
-                        <span class="text-xs font-semibold" style="color:#7A3F91;">Loading alumni…</span>
-                    </div>
-                </div>
-
-                {{-- ── Cards grouped by COURSE NAME (since batch is fixed) ── --}}
+                {{-- ── Cards grouped by COURSE NAME (your own course shows first) ── --}}
                 @if($this->alumniRecords->count() > 0)
                     @php $prevCourse = null; @endphp
                     <div class="yb-grid-wrap space-y-2">
@@ -517,11 +554,10 @@ new class extends Component {
                             @php $isMe = ($myAlumniId > 0 && $alumni->id === $myAlumniId); @endphp
                             <div wire:key="alumni-{{ $alumni->id }}"
                                  class="yb-card {{ $isMe ? 'yb-card-me' : '' }} bg-white rounded-2xl overflow-hidden border flex flex-col items-center shadow-sm cursor-default"
-                                 style="border-color:#E8E0F0; position:relative;">
+                                 style="border-color:#E8E0F0;">
 
-                                {{-- Purple header strip --}}
-                                <div class="w-full h-[88px] shrink-0 relative"
-                                     style="background:{{ $isMe ? 'linear-gradient(135deg,#6b2d85,#9b59b6)' : '#7A3F91' }};">
+                                {{-- Purple header strip — solid --}}
+                                <div class="w-full h-[88px] shrink-0 relative bg-[#7A3F91]">
                                     <div class="absolute left-1/2 -translate-x-1/2 -bottom-[39px] z-10 w-[78px] h-[78px]">
                                         <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
                                              alt="{{ $alumni->name }}"
@@ -538,13 +574,12 @@ new class extends Component {
                                        style="color:#111111;">
                                         {{ $this->formatAlumniName($alumni->name) }}
                                     </p>
-                                    <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
-                                       style="color:#555555; letter-spacing:0.02em;">
+                                    <p class="text-sm font-bold uppercase leading-snug mb-2.5"
+                                       style="color:#333333; letter-spacing:0.02em;">
                                         {{ $alumni->course_name }}
                                     </p>
                                     <span class="inline-flex items-center gap-1 px-2.5 py-[3px] rounded-full text-xs font-bold"
                                           style="background:#F3E8FF; color:#7A3F91; border:1.5px solid #D8B4FE;">
-                                        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
                                         Class of {{ $alumni->batch }}
                                     </span>
                                 </div>
@@ -580,7 +615,7 @@ new class extends Component {
                 <i class="fas fa-arrow-up text-xs"></i>
             </button>
 
-        </div>{{-- /scroll+watermark wrapper --}}
+        </div>{{-- /scroll wrapper --}}
 
         {{-- PAGINATION --}}
         @php
@@ -644,5 +679,3 @@ new class extends Component {
     </div>{{-- /yb-table-block --}}
 
 </div>{{-- /main layout --}}
-
-</div>{{-- /root --}}

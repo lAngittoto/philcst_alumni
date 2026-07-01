@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Alumni</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
@@ -88,9 +91,148 @@
             border-bottom-color: #1a1a1a;
         }
         .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
+
+        /* ════════════════════════════════════════════════════════
+           ALUMNI SIDEBAR — GRADUATE / ALUMNI THEME
+        ════════════════════════════════════════════════════════ */
+        .alm-sidebar-header {
+            background: #7A3F91;
+            position: relative;
+            overflow: hidden;
+        }
+        .alm-sidebar-header::after {
+            content: '';
+            position: absolute;
+            top: -40px; right: -30px;
+            width: 130px; height: 130px;
+            display: none;
+        }
+        .alm-cap-badge {
+            width: 42px; height: 42px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.22);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            backdrop-filter: blur(2px);
+        }
+
+        .alm-nav-link {
+            position: relative;
+            transition: background-color 0.2s ease, transform 0.15s ease;
+        }
+        .alm-nav-link:not(.is-active):hover {
+            background: #FAF6FE;
+        }
+        .alm-nav-link:not(.is-active):hover .alm-nav-icon {
+            transform: scale(1.07);
+        }
+        .alm-nav-link.is-active {
+            background: #F3EBFA;
+            border: 1px solid #E0CFEE;
+        }
+        .alm-nav-icon { transition: transform 0.2s ease; }
+
+        .alm-section-label {
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: #9A8AA8;
+            padding: 0 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Logout button + spinner (mirrors registrar pattern) */
+        .alm-logout-btn {
+            position: relative;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 1rem 1rem;
+            border-radius: 14px;
+            font-weight: 800;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: #fff;
+            background: #7A3F91;
+            border: none;
+            cursor: pointer;
+            overflow: hidden;
+            box-shadow: 0 8px 18px -6px rgba(122,63,145,0.55);
+            transition: filter 0.2s ease, transform 0.15s ease;
+        }
+        .alm-logout-btn:hover   { filter: brightness(1.1); }
+        .alm-logout-btn:active  { transform: scale(0.97); }
+        .alm-logout-btn:disabled {
+            cursor: not-allowed;
+            filter: grayscale(0.15) brightness(0.95);
+        }
+        .alm-logout-spinner {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            animation: alm-spin 0.7s linear infinite;
+            display: inline-block;
+        }
+        @keyframes alm-spin { to { transform: rotate(360deg); } }
+        .alm-logout-text-swap { display: inline-flex; align-items: center; }
+
+        @media (max-width: 1023px) {
+            #alumni-sidebar-aside { box-shadow: 0 0 60px rgba(0,0,0,0.18); }
+        }
+
+        /* Mobile topbar — icon only, no "Alumni Portal" text clutter */
+        .alm-mobile-topbar-mark {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .alm-mobile-topbar-mark .alm-mark-icon {
+            width: 30px; height: 30px;
+            border-radius: 9px;
+            background: #7A3F91;
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        /* ════════════════════════════════════════════════════════
+           NOTIFICATION PANEL — refined
+        ════════════════════════════════════════════════════════ */
+        #alumni-notif-panel {
+            max-width: calc(100vw - 16px);
+        }
+        @media (max-width: 1023px) {
+            #alumni-notif-panel {
+                left: 8px !important;
+                right: 8px;
+                width: auto !important;
+                min-height: 0 !important;
+                max-height: 80vh;
+            }
+            #alumni-notif-panel .notif-list-scroll {
+                max-height: calc(80vh - 130px) !important;
+            }
+        }
     </style>
 
     <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    //  BFCACHE FIX — prevents "This page has expired" after logout.
+    //  When the browser restores a page from back/forward cache (bfcache),
+    //  the CSRF token + session embedded in that cached HTML is stale.
+    //  Submitting any form (like Logout) from that stale page triggers
+    //  Laravel's 419 Page Expired error. Forcing a hard reload whenever a
+    //  page is restored from bfcache guarantees a fresh token/session.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) {
+            window.location.reload();
+        }
+    });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  ROUTE MAP — centralized so both notif-click and sidebar use the same map
     // ─────────────────────────────────────────────────────────────────────────
@@ -439,12 +581,6 @@
 
         var routesToMark = [routeName];
 
-        // Messenger and dashboard — mark their own routes
-        // Employment page clears employment notifs
-        // Job opportunities clears job notifs
-        // Events page clears event notifs
-        // (Add cross-clearing rules here if needed in the future)
-
         routesToMark.forEach(function (r) {
             s.markReadByRoute(r);
         });
@@ -563,6 +699,7 @@
     class="antialiased"
     x-data="{
         open: false,
+        loggingOut: false,
         profileComplete: {{ (bool)(auth()->user()?->alumni?->profile_completed ?? false) ? 'true' : 'false' }}
     }"
     x-on:profile-updated.window="profileComplete = $event.detail.completed"
@@ -585,22 +722,28 @@
 
     {{-- ══ SIDEBAR ══ --}}
     <aside
+        id="alumni-sidebar-aside"
         :class="open ? 'translate-x-0' : '-translate-x-full'"
         class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
-               shadow-2xl lg:translate-x-0 lg:static lg:inset-0
+               lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
 
-        {{-- Sidebar header --}}
-        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
+        {{-- Sidebar header — graduate-themed --}}
+        <div class="alm-sidebar-header flex items-center justify-between h-24 px-5 shrink-0">
 
-            <div class="text-left min-w-0 flex-1 pr-2">
-                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
-                    Alumni<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
-                </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
-                    Graduate Network
-                </p>
+            <div class="flex items-center gap-3 min-w-0 flex-1 pr-2 relative z-10">
+                <div class="alm-cap-badge">
+                    <i class="fa-solid fa-graduation-cap text-white" style="font-size:17px;"></i>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="text-[19px] font-bold tracking-tight text-white leading-tight truncate">
+                        Alumni<span class="font-semibold text-white/70">Portal</span>
+                    </h1>
+                    <p class="text-[10px] uppercase tracking-[0.2em] text-white/60 font-semibold">
+                        Graduate Network
+                    </p>
+                </div>
             </div>
 
             {{-- Bell Button --}}
@@ -609,11 +752,12 @@
                 type="button"
                 @click.stop="$store.alumniNotifs && $store.alumniNotifs.toggle(); positionAlumniPanel();"
                 title="Notifications"
-                aria-label="Open notifications">
+                aria-label="Open notifications"
+                class="relative z-10">
 
                 <i class="bell-icon fas fa-bell"
                    :class="$store.alumniNotifs && $store.alumniNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
+                   style="font-size:19px; color:#FFFFFF;
                           --fa-animation-duration:4s;
                           --fa-animation-iteration-count:infinite;
                           pointer-events:none;"></i>
@@ -624,25 +768,21 @@
                     x-transition:enter="transition ease-out duration-200"
                     x-transition:enter-start="opacity-0 scale-0"
                     x-transition:enter-end="opacity-100 scale-100"
-                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                    class="bell-badge absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full
                            bg-red-500 text-white text-[9px] font-black
                            flex items-center justify-center px-1 leading-none
-                           shadow-md ring-2 ring-white"
+                           shadow-md ring-2 ring-[#7A3F91]"
                     x-text="$store.alumniNotifs && $store.alumniNotifs.unread > 99
                                 ? '99+'
                                 : ($store.alumniNotifs ? $store.alumniNotifs.unread : 0)">
                 </span>
             </button>
 
-            {{-- Mobile close --}}
-            <button @click="open = false"
-                    class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
-                <i class="fa-solid fa-circle-xmark text-xl"></i>
-            </button>
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+            <p class="alm-section-label">MENU</p>
 
             @php
                 $sidebarLinks = [
@@ -693,46 +833,50 @@
 
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->is($link['pattern']); @endphp
-                {{--
-                    FIX: On click, call __alumniSidebarNotifsMarkRead(routeName) BEFORE navigating.
-                    This marks matching notifs as read (removes red dot) but keeps the
-                    notification text/history intact in the DB and panel.
-                --}}
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
-                   @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}')"
-                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive
-                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
-                              : 'hover:bg-[#F9F7FC]' }}">
+                   @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
+                   class="alm-nav-link {{ $isActive ? 'is-active' : '' }}
+                          flex items-center px-4 py-3 rounded-xl group">
 
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg
-                                transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         style="background-color:{{ $isActive ? '#EDE9F8' : '#F9F7FC' }};color:#7A3F91;">
+                    <div class="alm-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
+                         style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
+                                box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="font-medium tracking-wide flex-1
-                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                    <span class="font-medium tracking-wide flex-1 text-[14px]
+                                 {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
-                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                        <span class="ml-auto w-1.5 h-6 rounded-full shrink-0"
+                              style="background:#7A3F91;"></span>
                     @endif
                 </a>
             @endforeach
         </nav>
 
-        {{-- Logout --}}
+        {{-- Logout — with loading spinner --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            <form method="POST" action="{{ route('logout') }}">
+            <form method="POST"
+                  action="{{ route('logout') }}"
+                  @submit="loggingOut = true">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
-                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
-                    <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                        :disabled="loggingOut"
+                        class="alm-logout-btn">
+                    <template x-if="!loggingOut">
+                        <span class="alm-logout-text-swap">
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                        </span>
+                    </template>
+                    <template x-if="loggingOut">
+                        <span class="alm-logout-text-swap">
+                            <span class="alm-logout-spinner mr-2"></span> Logging out…
+                        </span>
+                    </template>
                 </button>
             </form>
         </div>
@@ -741,11 +885,11 @@
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
-        {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
+        {{-- Mobile top bar — icon mark only, no "Alumni Portal" text --}}
+        <header class="flex items-center justify-between px-5 py-3.5 bg-white border-b border-[#E8E0F0]
                        lg:hidden shrink-0 z-30">
             <button @click="open = !open"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
+                    class="text-[#333333] focus:outline-none p-2 -ml-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
                     <span :class="open ? 'rotate-45 translate-y-2' : ''"
                           class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
@@ -755,7 +899,13 @@
                           class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#333333]">Alumni Portal</h2>
+
+            <div class="alm-mobile-topbar-mark">
+                <div class="alm-mark-icon">
+                    <i class="fa-solid fa-graduation-cap"></i>
+                </div>
+            </div>
+
             <div class="w-10"></div>
         </header>
 
@@ -799,10 +949,13 @@
 
     {{-- Panel Header --}}
     <div class="flex items-center justify-between px-5 py-4 shrink-0"
-         style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+         style="background:#7A3F91;">
         <div class="flex items-center gap-2.5">
-            <i class="fas fa-bell text-white" style="font-size:15px;"></i>
-            <span class="text-white font-bold" style="font-size:16px;">Notifications</span>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center"
+                 style="background:rgba(255,255,255,0.14);">
+                <i class="fas fa-bell text-white" style="font-size:13px;"></i>
+            </div>
+            <span class="text-white font-bold" style="font-size:15px;">Notifications</span>
             <span x-show="$store.alumniNotifs && $store.alumniNotifs.unread > 0"
                   x-cloak
                   class="bg-red-500 text-white font-black px-2 py-0.5 rounded-full leading-none"
@@ -834,14 +987,25 @@
         </div>
     </div>
 
+    {{-- Sub-header --}}
+    <div class="px-5 py-2.5 flex items-center justify-between shrink-0"
+         style="background:#FAF6FE; border-bottom:1px solid #ECE2F8;">
+        <span style="font-size:11px; font-weight:700; color:#7A3F91; letter-spacing:0.08em; text-transform:uppercase;">
+            Recent Activity
+        </span>
+        <span style="font-size:11px; color:#9A8AA8; font-weight:500;"
+              x-text="($store.alumniNotifs ? $store.alumniNotifs.items.length : 0) + ' notification(s)'">
+        </span>
+    </div>
+
     {{-- Scrollable notification list --}}
-    <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+    <div class="notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 420px;">
 
         <template x-if="$store.alumniNotifs && $store.alumniNotifs.items.length === 0">
             <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
                 <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-                     style="background:#F5F5F5;">
-                    <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
+                     style="background:#F9F7FC; border:1px solid #ECE2F8;">
+                    <i class="fas fa-bell-slash" style="font-size:26px;color:#D7C8E6;"></i>
                 </div>
                 <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
                 <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
@@ -857,7 +1021,7 @@
                     class="notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#F8F5FD] hover:bg-[#F0E9FA]'"
+                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
                     @click.stop="
                         $store.alumniNotifs.markRead(notif);
                         $store.alumniNotifs.close();
@@ -869,7 +1033,7 @@
 
                     {{-- Icon --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
+                         style="background:#F3EBFA;">
                         <i class="fas text-[#7A3F91]"
                            :class="'fa-' + (notif.icon || 'bell')"
                            style="font-size:15px;"></i>
@@ -900,7 +1064,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:#7A3F91;">
                                     NEW JOB
                                 </span>
 
@@ -910,7 +1074,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                           background:#059669;">
                                     NEW EVENT
                                 </span>
 
@@ -920,7 +1084,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                           background:#0284c7;">
                                     EMPLOYMENT
                                 </span>
 
@@ -930,7 +1094,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:#7A3F91;">
                                     NEW MSG
                                 </span>
                             </div>

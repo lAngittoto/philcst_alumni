@@ -265,7 +265,7 @@ new class extends Component {
     @keyframes slideInFull { from { opacity:0; } to { opacity:1; } }
     .fs-in, .emp-detail-in, .id-card-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
 
-    /* ── STAT CARD TOOLTIP (appears ABOVE) ── */
+    /* ── STAT CARD TOOLTIP (appears ABOVE, desktop only) ── */
     .dash-stat-card {
         position: relative;
         overflow: visible;
@@ -286,7 +286,7 @@ new class extends Component {
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.15s;
-        z-index: 9999;
+        z-index: 30;
     }
     .dash-stat-card .stat-tooltip::after {
         content: '';
@@ -297,7 +297,12 @@ new class extends Component {
         border: 5px solid transparent;
         border-top-color: #000000;
     }
-    .dash-stat-card:hover .stat-tooltip { opacity: 1; }
+    @media (min-width: 1024px) {
+        .dash-stat-card:hover .stat-tooltip { opacity: 1; }
+    }
+    @media (max-width: 1023px) {
+        .dash-stat-card .stat-tooltip { display: none; }
+    }
 
     /* ── Close button tooltip — BOTTOM ── */
     .close-btn-wrap { position: relative; }
@@ -328,7 +333,9 @@ new class extends Component {
         border: 4px solid transparent;
         border-bottom-color: #000000;
     }
-    .close-btn-wrap:hover .close-tooltip { opacity: 1; }
+    @media (min-width: 1024px) {
+        .close-btn-wrap:hover .close-tooltip { opacity: 1; }
+    }
 
     /* ── Equal-height main grid ── */
     .dash-main-grid {
@@ -340,6 +347,7 @@ new class extends Component {
     @media (max-width: 1023px) {
         .dash-main-grid {
             grid-template-columns: 1fr;
+            gap: 0.85rem;
         }
     }
 
@@ -354,7 +362,7 @@ new class extends Component {
         flex-direction: column;
     }
 
-    /* ── Stat grid: 2×2 equal height ── */
+    /* ── Stat grid: 2×2 equal height on desktop, 1-col on phone ── */
     .dash-stat-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -368,28 +376,45 @@ new class extends Component {
         flex-direction: column;
         justify-content: center;
     }
+    @media (max-width: 639px) {
+        .dash-stat-grid {
+            grid-template-columns: 1fr;
+            grid-template-rows: none;
+            gap: 0.65rem;
+        }
+        .dash-stat-grid .dash-stat-card {
+            padding: 1rem !important;
+        }
+        .dash-stat-grid .dash-stat-card .stat-big-num {
+            font-size: 2.1rem !important;
+        }
+    }
+    @media (min-width: 640px) and (max-width: 1023px) {
+        .dash-stat-grid .dash-stat-card .stat-big-num {
+            font-size: 2.4rem !important;
+        }
+    }
 </style>
 
 {{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
-<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto">
+<div class="px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto">
 
     {{-- ═══ PAGE HEADER ════════════════════════════════════════════ --}}
-    <div class="flex items-center gap-3 mb-5">
-        <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <i class="fas fa-gauge-high text-white text-base"></i>
+    <div class="flex items-center gap-4 mb-5 flex-wrap">
+        <div class="w-11 h-11 rounded-2xl flex items-center justify-center shadow-md shrink-0 bg-[#7A3F91]">
+            <i class="fas fa-graduation-cap text-white text-base"></i>
         </div>
         <div>
-            <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Alumni Dashboard</h1>
-            <p class="text-sm text-[#333333] font-normal">{{ now()->format('l, F j, Y') }}</p>
+            <h1 class="text-xl font-semibold tracking-tight text-gray-900">Alumni Dashboard</h1>
+            <p class="text-sm leading-relaxed mt-0.5 text-gray-700">{{ now()->format('l, F j, Y') }}</p>
         </div>
 
         @if(!$profileComplete || !$hasEmployment)
-        <div class="ml-auto hidden sm:flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold bg-[#F9F7FC] border-[#d9c9e8] text-[#111111]">
-            <i class="fas fa-triangle-exclamation text-sm text-[#9b59b6]"></i>
-            <span>@if(!$profileComplete) Complete your profile @else Add employment info @endif</span>
+        <div class="sm:ml-auto flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold bg-[#F9F7FC] border-[#d9c9e8] text-[#111111] w-full sm:w-auto">
+            <i class="fas fa-triangle-exclamation text-sm text-[#7A3F91] shrink-0"></i>
+            <span class="flex-1">@if(!$profileComplete) Complete your profile @else Add employment info @endif</span>
             <a href="{{ !$profileComplete ? route('alumni.information') : route('alumni.employment') }}"
-               class="px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90 bg-[#7A3F91]">
+               class="px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90 bg-[#7A3F91] shrink-0">
                 Go <i class="fas fa-arrow-right text-xs ml-0.5"></i>
             </a>
         </div>
@@ -403,58 +428,57 @@ new class extends Component {
 
         {{-- ══ LEFT: Profile Card ═══ --}}
         <div class="dash-profile-col">
-            <div class="dash-profile-card rounded-2xl overflow-hidden shadow-md border border-[#E8E0F0] bg-white">
+            <div class="dash-profile-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
                 {{-- Photo banner --}}
-                <div class="relative w-full overflow-hidden shrink-0 h-[220px] bg-[#EDE0F5]">
+                <div class="relative w-full overflow-hidden shrink-0 h-[300px] sm:h-[220px] bg-[#EDE0F5]">
                     <img src="{{ $photoUrl }}"
                          alt="{{ $alumniFirstName }}"
                          class="w-full h-full object-cover object-top"
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    <div class="w-full h-full items-center justify-center font-black text-white hidden text-[5rem]"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6); display:none;">
+                    <div class="w-full h-full items-center justify-center font-black text-white hidden text-[5rem] bg-[#7A3F91]" style="display:none;">
                         {{ strtoupper(substr($alumniFirstName, 0, 1)) ?: '?' }}
                     </div>
                     <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.65) 100%);"></div>
                     <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
-                        <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.15rem]"
+                        <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"
                            style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
                             {{ $alumniName ?: '—' }}
                         </p>
-                        <p class="font-mono text-[0.8rem]" style="color:rgba(255,255,255,.65);">{{ $alumniStudentId ?: 'No student ID' }}</p>
+                        <p class="font-mono text-[0.78rem] sm:text-[0.8rem]" style="color:rgba(255,255,255,.65);">{{ $alumniStudentId ?: 'No student ID' }}</p>
                     </div>
                 </div>
 
                 <div class="px-4 py-3 flex flex-col divide-y divide-[#F3F4F6] flex-1">
 
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Course</span>
-                        <span class="text-[0.88rem] font-bold font-mono text-[#111111]">{{ $alumniCourseCode ?: '—' }}</span>
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Course</span>
+                        <span class="text-[0.88rem] font-bold font-mono text-gray-900">{{ $alumniCourseCode ?: '—' }}</span>
                     </div>
 
                     @if($alumniCourseFull)
                     <div class="py-2.5 flex items-center justify-center">
-                        <span class="text-[0.82rem] font-semibold text-center text-[#111111] leading-snug">{{ $alumniCourseFull }}</span>
+                        <span class="text-[0.82rem] font-semibold text-center text-gray-900 leading-snug">{{ $alumniCourseFull }}</span>
                     </div>
                     @endif
 
                     @if($alumniCollege)
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">College</span>
-                        <span class="text-[0.82rem] font-semibold text-right uppercase text-[#111111] leading-snug" style="max-width:170px;">{{ $alumniCollege }}</span>
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">College</span>
+                        <span class="text-[0.82rem] font-semibold text-right uppercase text-gray-900 leading-snug" style="max-width:170px;">{{ $alumniCollege }}</span>
                     </div>
                     @endif
 
                     @if($alumniBatch)
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Batch</span>
-                        <span class="text-[0.88rem] font-semibold text-[#111111]">{{ $alumniBatch }}</span>
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Batch</span>
+                        <span class="text-[0.88rem] font-semibold text-gray-900">{{ $alumniBatch }}</span>
                     </div>
                     @endif
 
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.72rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Student ID</span>
-                        <span class="text-[0.83rem] font-semibold font-mono text-[#111111]">{{ $alumniStudentId ?: '—' }}</span>
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Student ID</span>
+                        <span class="text-[0.83rem] font-semibold font-mono text-gray-900">{{ $alumniStudentId ?: '—' }}</span>
                     </div>
 
                     <div class="flex-1"></div>
@@ -463,52 +487,52 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ══ RIGHT: Stat Cards — 2×2 grid ══════════════════════ --}}
+        {{-- ══ RIGHT: Stat Cards — 2×2 grid (1-col on phone) ══════════════════════ --}}
         <div class="dash-stat-grid">
 
             {{-- Card 1: Upcoming Events --}}
             <button wire:click="goToUpcomingEvents"
-               class="dash-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                      hover:shadow-lg hover:border-blue-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                      hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Upcoming Events</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
-                        <i class="fas fa-calendar-check text-white text-lg"></i>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
+                        <i class="fas fa-calendar-check text-white text-base sm:text-lg"></i>
                     </div>
-                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700 border border-blue-200 bg-blue-50 text-[0.75rem]">Upcoming</span>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700 border border-blue-200 bg-blue-50 text-[0.7rem] sm:text-[0.75rem]">Upcoming</span>
                 </div>
-                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ $upcomingEvents }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Upcoming Events</p>
+                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ $upcomingEvents }}</p>
+                <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Upcoming Events</p>
             </button>
 
             {{-- Card 2: Total Events --}}
             <button wire:click="goToAllEvents"
-               class="dash-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                      hover:shadow-lg hover:border-green-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                      hover:shadow-md hover:border-green-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Total Events</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
-                        <i class="fas fa-calendar-days text-white text-lg"></i>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
+                        <i class="fas fa-calendar-days text-white text-base sm:text-lg"></i>
                     </div>
-                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700 border border-emerald-200 bg-emerald-50 text-[0.75rem]">Total</span>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700 border border-emerald-200 bg-emerald-50 text-[0.7rem] sm:text-[0.75rem]">Total</span>
                 </div>
-                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ $totalEvents }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Total Events</p>
+                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ $totalEvents }}</p>
+                <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Total Events</p>
             </button>
 
             {{-- Card 3: Active Jobs --}}
             <button wire:click="goToJobs"
-               class="dash-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
-                      hover:shadow-lg hover:border-amber-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                      hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Job Opportunities</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow bg-amber-600">
-                        <i class="fas fa-briefcase text-white text-lg"></i>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-600">
+                        <i class="fas fa-briefcase text-white text-base sm:text-lg"></i>
                     </div>
-                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700 border border-amber-200 bg-amber-50 text-[0.75rem]">Jobs</span>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700 border border-amber-200 bg-amber-50 text-[0.7rem] sm:text-[0.75rem]">Jobs</span>
                 </div>
-                <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[3rem]">{{ $activeJobs }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[1.05rem]">Active Job Posts</p>
+                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ $activeJobs }}</p>
+                <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Active Job Posts</p>
             </button>
 
             {{-- Card 4: Employment --}}
@@ -521,29 +545,29 @@ new class extends Component {
                 $empCard = $empCardMap[$employmentStatus] ?? null;
             @endphp
             <a href="{{ route('alumni.employment') }}"
-               class="dash-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-5
+               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       transition-all duration-200 active:scale-[.985] no-underline
-                      {{ $hasEmployment ? 'hover:shadow-lg hover:border-[#7A3F91]/40' : 'hover:shadow-lg hover:border-red-300' }}">
+                      {{ $hasEmployment ? 'hover:shadow-md hover:border-[#7A3F91]/40' : 'hover:shadow-md hover:border-red-300' }}">
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>{{ $hasEmployment ? 'View Employment Status' : 'Add Employment Record' }}</span>
-                <div class="flex items-start justify-between mb-4">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow shrink-0"
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow shrink-0"
                          style="background:{{ $hasEmployment ? ($empCard ? $empCard[2] : '#7A3F91') : '#e11d48' }};">
-                        <i class="fas {{ $hasEmployment ? ($empCard ? $empCard[1] : 'fa-briefcase') : 'fa-triangle-exclamation' }} text-white text-lg"></i>
+                        <i class="fas {{ $hasEmployment ? ($empCard ? $empCard[1] : 'fa-briefcase') : 'fa-triangle-exclamation' }} text-white text-base sm:text-lg"></i>
                     </div>
-                    <i class="fas fa-chevron-right text-[#333333] opacity-40 text-base mt-1"></i>
+                    <i class="fas fa-chevron-right text-gray-700 opacity-40 text-base mt-1"></i>
                 </div>
                 @if($hasEmployment && $empCard)
-                    <p class="font-extrabold text-[#111111] text-[3rem] leading-none tracking-tight truncate">{{ $empCard[0] }}</p>
-                    <p class="font-semibold mt-2 text-[#333333] text-[1.05rem]">Employment Status</p>
+                    <p class="stat-big-num font-extrabold text-gray-900 text-[2.6rem] sm:text-[3rem] leading-none tracking-tight truncate">{{ $empCard[0] }}</p>
+                    <p class="font-semibold mt-2 text-gray-700 text-[0.98rem] sm:text-[1.05rem]">Employment Status</p>
                     @if($jobTitle)
-                        <p class="font-semibold mt-1 truncate uppercase text-[0.82rem] text-[#333333]">
+                        <p class="font-semibold mt-1 truncate uppercase text-[0.8rem] sm:text-[0.82rem] text-gray-700">
                             <i class="fas fa-id-badge mr-1 text-[0.65rem]"></i>{{ $jobTitle }}
                             @if($companyName) · {{ $companyName }} @endif
                         </p>
                     @endif
                 @else
-                    <p class="font-extrabold leading-none text-red-600 text-[3rem] tracking-tight">No Record</p>
-                    <p class="font-semibold mt-2 text-[#333333] text-[1.05rem]">Employment Status</p>
+                    <p class="stat-big-num font-extrabold leading-none text-red-600 text-[2.6rem] sm:text-[3rem] tracking-tight">No Record</p>
+                    <p class="font-semibold mt-2 text-gray-700 text-[0.98rem] sm:text-[1.05rem]">Employment Status</p>
                     <p class="font-semibold mt-1 flex items-center gap-1 text-red-600 text-[0.85rem]">
                         <i class="fas fa-plus-circle"></i> Add record now
                     </p>
@@ -564,20 +588,19 @@ new class extends Component {
 <div class="fixed inset-0 z-[9999] flex flex-col bg-[#F9FAFB] overflow-hidden emp-detail-in"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-6 h-12 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)]"
-         style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
+    <div class="flex items-center justify-between px-4 sm:px-6 h-auto min-h-[3rem] py-2 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)] bg-[#7A3F91]">
         <div class="flex items-center gap-3 min-w-0">
             <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
                 <i class="fas fa-briefcase text-white text-xs"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">MY EMPLOYMENT RECORD</p>
-                <p class="text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[460px]">{{ $emp['job_title'] ?: ($emp['status_label'] ?: 'Employment Details') }}</p>
+                <p class="text-[0.6rem] sm:text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">MY EMPLOYMENT RECORD</p>
+                <p class="text-[0.82rem] sm:text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[180px] sm:max-w-[460px]">{{ $emp['job_title'] ?: ($emp['status_label'] ?: 'Employment Details') }}</p>
             </div>
         </div>
-        <div class="flex items-center gap-2 shrink-0 ml-4">
+        <div class="flex items-center gap-2 shrink-0 ml-2 sm:ml-4">
             <a href="{{ route('alumni.employment') }}"
-               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
+               class="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
                 <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Edit</span>
             </a>
             <div class="close-btn-wrap">
@@ -590,70 +613,70 @@ new class extends Component {
         </div>
     </div>
 
-    <div class="flex flex-wrap border-b border-[#E5E7EB] bg-white shrink-0">
-        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Status</p>
+    <div class="flex flex-wrap border-b border-gray-200 bg-white shrink-0">
+        <div class="px-4 sm:px-5 py-3 border-r border-gray-100 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Status</p>
             <p class="text-[0.92rem] font-bold leading-snug" style="color:{{ $emp['status_color'] }};">{{ $emp['status_label'] ?: '—' }}</p>
         </div>
-        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Job Title</p>
-            <p class="text-[0.92rem] font-bold leading-snug truncate max-w-[180px] text-[#111111]">{{ $emp['job_title'] ?: '—' }}</p>
+        <div class="px-4 sm:px-5 py-3 border-r border-gray-100 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Job Title</p>
+            <p class="text-[0.92rem] font-bold leading-snug truncate max-w-[180px] text-gray-900">{{ $emp['job_title'] ?: '—' }}</p>
         </div>
-        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Company</p>
-            <p class="text-[0.92rem] font-bold leading-snug truncate max-w-[180px] text-[#111111]">{{ $emp['company_name'] ?: '—' }}</p>
+        <div class="px-4 sm:px-5 py-3 border-r border-gray-100 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Company</p>
+            <p class="text-[0.92rem] font-bold leading-snug truncate max-w-[180px] text-gray-900">{{ $emp['company_name'] ?: '—' }}</p>
         </div>
-        <div class="px-5 py-3 min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Date Hired</p>
-            <p class="text-[0.92rem] font-bold leading-snug text-[#111111]">{{ $emp['date_hired'] ?: '—' }}</p>
-            @if($emp['date_hired_ago'])<p class="text-[0.78rem] text-[#333333] mt-px">{{ $emp['date_hired_ago'] }}</p>@endif
+        <div class="px-4 sm:px-5 py-3 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Date Hired</p>
+            <p class="text-[0.92rem] font-bold leading-snug text-gray-900">{{ $emp['date_hired'] ?: '—' }}</p>
+            @if($emp['date_hired_ago'])<p class="text-[0.78rem] text-gray-700 mt-px">{{ $emp['date_hired_ago'] }}</p>@endif
         </div>
     </div>
 
-    <div class="flex flex-wrap gap-1.5 items-center px-5 py-2 bg-white border-b border-[#F3F4F6] shrink-0">
-        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST Alumni</span>
+    <div class="flex flex-wrap gap-1.5 items-center px-4 sm:px-5 py-2 bg-white border-b border-gray-100 shrink-0">
+        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-gray-900 bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST Alumni</span>
         @if(!empty($emp['employment_type']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-blue-700 bg-blue-50 border-blue-200"><i class="fas fa-id-badge text-[10px]"></i> {{ $emp['employment_type'] }}</span>@endif
         @if(!empty($emp['industry']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-amber-700 bg-amber-50 border-amber-200"><i class="fas fa-industry text-[10px]"></i> {{ $emp['industry'] }}</span>@endif
-        @if(!empty($emp['edu_label']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#EDE0F5] border-[#c9ace0]"><i class="fas fa-graduation-cap text-[10px]"></i> {{ $emp['edu_label'] }}</span>@endif
+        @if(!empty($emp['edu_label']))<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-gray-900 bg-[#EDE0F5] border-[#c9ace0]"><i class="fas fa-graduation-cap text-[10px]"></i> {{ $emp['edu_label'] }}</span>@endif
         @if(!empty($emp['abroad']) && $emp['abroad'])<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-cyan-700 bg-cyan-50 border-cyan-200"><i class="fas fa-globe text-[10px]"></i> Working Abroad</span>@endif
     </div>
 
-    <div class="flex-1 min-h-0 overflow-y-auto bg-[#F9FAFB] px-6 py-5 flex flex-col gap-3.5 [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
+    <div class="flex-1 min-h-0 overflow-y-auto bg-[#F9FAFB] px-4 sm:px-6 py-5 flex flex-col gap-3.5 [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
 
         @if(!empty($emp['job_title']) || !empty($emp['company_name']) || !empty($emp['industry']))
-        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
-            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">POSITION INFORMATION</p>
+        <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-3">POSITION INFORMATION</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 @if(!empty($emp['job_title']))
                 <div>
-                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Job Title / Position</p>
-                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug uppercase">{{ $emp['job_title'] }}</p>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Job Title / Position</p>
+                    <p class="text-[0.92rem] font-bold text-gray-900 leading-snug uppercase">{{ $emp['job_title'] }}</p>
                 </div>
                 @endif
                 @if(!empty($emp['company_name']))
                 <div>
-                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Company / Employer</p>
-                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $emp['company_name'] }}</p>
-                    @if(!empty($emp['company_address']))<p class="text-[0.78rem] text-[#333333] mt-px">{{ $emp['company_address'] }}</p>@endif
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Company / Employer</p>
+                    <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $emp['company_name'] }}</p>
+                    @if(!empty($emp['company_address']))<p class="text-[0.78rem] text-gray-700 mt-px">{{ $emp['company_address'] }}</p>@endif
                 </div>
                 @endif
                 @if(!empty($emp['industry']))
                 <div>
-                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Industry</p>
-                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $emp['industry'] }}</p>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Industry</p>
+                    <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $emp['industry'] }}</p>
                 </div>
                 @endif
                 @if(!empty($emp['monthly_salary']))
                 <div>
-                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Monthly Salary</p>
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Monthly Salary</p>
                     <p class="text-[0.92rem] font-bold text-green-600 leading-snug">{{ $emp['monthly_salary'] }}</p>
                 </div>
                 @endif
                 @if(!empty($emp['date_hired']))
                 <div>
-                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Date Hired</p>
-                    <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $emp['date_hired'] }}</p>
-                    @if(!empty($emp['date_hired_ago']))<p class="text-[0.78rem] text-[#333333] mt-px">{{ $emp['date_hired_ago'] }}</p>@endif
+                    <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Date Hired</p>
+                    <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $emp['date_hired'] }}</p>
+                    @if(!empty($emp['date_hired_ago']))<p class="text-[0.78rem] text-gray-700 mt-px">{{ $emp['date_hired_ago'] }}</p>@endif
                 </div>
                 @endif
             </div>
@@ -661,17 +684,17 @@ new class extends Component {
         @endif
 
         @if(!empty($emp['skills']))
-        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
-            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">SKILLS</p>
-            <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($emp['skills']) }}</p>
+        <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-3">SKILLS</p>
+            <p class="text-[0.90rem] leading-[1.75] text-gray-700 whitespace-pre-wrap">{{ trim($emp['skills']) }}</p>
         </div>
         @endif
 
         @if(!empty($emp['linkedin_url']) || !empty($emp['remarks']))
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             @if(!empty($emp['linkedin_url']))
-            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
-                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">LINKEDIN</p>
+            <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-3">LINKEDIN</p>
                 <a href="{{ $emp['linkedin_url'] }}" target="_blank" rel="noopener"
                    class="inline-flex items-center gap-2 text-sm font-semibold hover:underline text-[#0a66c2]">
                     <i class="fab fa-linkedin"></i> View Profile
@@ -679,16 +702,16 @@ new class extends Component {
             </div>
             @endif
             @if(!empty($emp['remarks']))
-            <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
-                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">REMARKS</p>
-                <p class="text-[0.90rem] leading-[1.75] text-[#333333] whitespace-pre-wrap">{{ trim($emp['remarks']) }}</p>
+            <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
+                <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-3">REMARKS</p>
+                <p class="text-[0.90rem] leading-[1.75] text-gray-700 whitespace-pre-wrap">{{ trim($emp['remarks']) }}</p>
             </div>
             @endif
         </div>
         @endif
 
         @if(!empty($emp['updated_at']))
-        <p class="text-center text-[#9CA3AF] font-normal text-[0.82rem]">Last updated {{ $emp['updated_ago'] }}</p>
+        <p class="text-center text-gray-400 font-normal text-[0.82rem]">Last updated {{ $emp['updated_ago'] }}</p>
         @endif
 
         <div class="flex flex-wrap gap-2">
@@ -697,7 +720,7 @@ new class extends Component {
                 <i class="fas fa-pen text-xs"></i> Edit Employment
             </a>
             <button wire:click="closeModal"
-                    class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-[#333333] hover:bg-gray-50 transition bg-white">
+                    class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition bg-white">
                 <i class="fas fa-xmark text-xs"></i> Close
             </button>
         </div>
@@ -722,20 +745,19 @@ new class extends Component {
 <div class="fixed inset-0 z-[9999] flex flex-col bg-white overflow-hidden id-card-in"
      @keydown.escape.window="$wire.closeModal()">
 
-    <div class="flex items-center justify-between px-6 h-12 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)]"
-         style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
+    <div class="flex items-center justify-between px-4 sm:px-6 h-auto min-h-[3rem] py-2 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,.15)] bg-[#7A3F91]">
         <div class="flex items-center gap-3 min-w-0">
             <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
                 <i class="fas fa-user text-white text-xs"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">MY ALUMNI PROFILE</p>
-                <p class="text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[460px] uppercase">{{ $alumniName ?: '—' }}</p>
+                <p class="text-[0.6rem] sm:text-[0.62rem] font-bold uppercase tracking-[0.12em] text-white/55 leading-none">MY ALUMNI PROFILE</p>
+                <p class="text-[0.82rem] sm:text-[0.88rem] font-bold text-white leading-snug whitespace-nowrap overflow-hidden text-ellipsis max-w-[180px] sm:max-w-[460px] uppercase">{{ $alumniName ?: '—' }}</p>
             </div>
         </div>
-        <div class="flex items-center gap-2 shrink-0 ml-4">
+        <div class="flex items-center gap-2 shrink-0 ml-2 sm:ml-4">
             <a href="{{ route('alumni.information') }}"
-               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
+               class="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
                 <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Edit Profile</span>
             </a>
             <div class="close-btn-wrap">
@@ -748,41 +770,41 @@ new class extends Component {
         </div>
     </div>
 
-    <div class="flex flex-wrap border-b border-[#E5E7EB] bg-white shrink-0">
-        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Course</p>
-            <p class="text-[0.92rem] font-bold leading-snug font-mono text-[#111111]">{{ $alumniCourseCode ?: '—' }}</p>
-            @if($alumniCourseFull)<p class="text-[0.78rem] text-[#333333] mt-px truncate max-w-[160px]">{{ $alumniCourseFull }}</p>@endif
+    <div class="flex flex-wrap border-b border-gray-200 bg-white shrink-0">
+        <div class="px-4 sm:px-5 py-3 border-r border-gray-100 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Course</p>
+            <p class="text-[0.92rem] font-bold leading-snug font-mono text-gray-900">{{ $alumniCourseCode ?: '—' }}</p>
+            @if($alumniCourseFull)<p class="text-[0.78rem] text-gray-700 mt-px truncate max-w-[160px]">{{ $alumniCourseFull }}</p>@endif
         </div>
-        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Batch Year</p>
-            <p class="text-[0.92rem] font-bold leading-snug text-[#111111]">{{ $alumniBatch ?: '—' }}</p>
+        <div class="px-4 sm:px-5 py-3 border-r border-gray-100 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Batch Year</p>
+            <p class="text-[0.92rem] font-bold leading-snug text-gray-900">{{ $alumniBatch ?: '—' }}</p>
         </div>
-        <div class="px-5 py-3 border-r border-[#F3F4F6] min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">College</p>
-            <p class="text-[0.92rem] font-bold leading-snug truncate uppercase max-w-[160px] text-[#111111]">{{ $alumniCollege ?: '—' }}</p>
+        <div class="px-4 sm:px-5 py-3 border-r border-gray-100 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">College</p>
+            <p class="text-[0.92rem] font-bold leading-snug truncate uppercase max-w-[160px] text-gray-900">{{ $alumniCollege ?: '—' }}</p>
         </div>
-        <div class="px-5 py-3 min-w-[110px] flex-1">
-            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Profile Status</p>
+        <div class="px-4 sm:px-5 py-3 min-w-[110px] flex-1">
+            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Profile Status</p>
             <p class="text-[0.92rem] font-bold leading-snug {{ $profileComplete ? 'text-green-600' : 'text-amber-600' }}">
                 {{ $profileComplete ? 'Complete' : 'Incomplete' }}
             </p>
         </div>
     </div>
 
-    <div class="flex flex-wrap gap-1.5 items-center px-5 py-2 bg-white border-b border-[#F3F4F6] shrink-0">
-        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-[#111111] bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST Alumni</span>
+    <div class="flex flex-wrap gap-1.5 items-center px-4 sm:px-5 py-2 bg-white border-b border-gray-100 shrink-0">
+        <span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-gray-900 bg-[#F9F7FC] border-[#E8E0F0]"><i class="fas fa-building text-[10px]"></i> PHILCST Alumni</span>
         @if($alumniCourseCode)<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-blue-700 bg-blue-50 border-blue-200"><i class="fas fa-book-open text-[10px]"></i> {{ $alumniCourseCode }}</span>@endif
         @if($alumniBatch)<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border text-green-700 bg-green-50 border-green-200"><i class="fas fa-calendar-check text-[10px]"></i> Batch {{ $alumniBatch }}</span>@endif
         @if($hasEmployment && $empInfo3)<span class="inline-flex items-center gap-[5px] text-[0.75rem] font-bold px-[11px] py-[5px] rounded-full border" style="background:{{ $empInfo3[3] }}; color:{{ $empInfo3[2] }}; border-color:{{ $empInfo3[4] }};"><i class="fas {{ $empInfo3[1] }} text-[10px]"></i> {{ $empInfo3[0] }}</span>@endif
     </div>
 
-    <div class="flex-1 min-h-0 overflow-y-auto bg-[#F9FAFB] px-6 py-5 flex flex-col gap-3.5 [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
+    <div class="flex-1 min-h-0 overflow-y-auto bg-[#F9FAFB] px-4 sm:px-6 py-5 flex flex-col gap-3.5 [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f9fafb]">
 
-        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
+        <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
             <div class="flex flex-col sm:flex-row gap-5">
                 <div class="w-full sm:w-36 shrink-0">
-                    <div class="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-[#EDE0F5]" style="aspect-ratio:3/4;">
+                    <div class="rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-[#EDE0F5] mx-auto sm:mx-0 max-w-[160px] sm:max-w-none" style="aspect-ratio:3/4;">
                         <img src="{{ $this->getProfilePhotoUrl() }}" alt="{{ $alumniFirstName }}" class="w-full h-full object-cover"
                              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                         <div class="w-full h-full items-center justify-center text-5xl font-black text-white hidden bg-[#7A3F91]"
@@ -792,33 +814,33 @@ new class extends Component {
                     </div>
                 </div>
                 <div class="flex-1 min-w-0">
-                    <div class="mb-3">
-                        <p class="text-xl font-bold text-[#111111] uppercase tracking-wide leading-tight">{{ $alumniName ?: '—' }}</p>
-                        <p class="text-sm text-[#333333] font-mono mt-0.5">{{ $alumniStudentId ?: 'No student ID' }}</p>
+                    <div class="mb-3 text-center sm:text-left">
+                        <p class="text-xl font-bold text-gray-900 uppercase tracking-wide leading-tight">{{ $alumniName ?: '—' }}</p>
+                        <p class="text-sm text-gray-700 font-mono mt-0.5">{{ $alumniStudentId ?: 'No student ID' }}</p>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Course Code</p>
-                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug font-mono">{{ $alumniCourseCode ?: '—' }}</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Course Code</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug font-mono">{{ $alumniCourseCode ?: '—' }}</p>
                         </div>
                         @if($alumniCourseFull)
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Course</p>
-                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $alumniCourseFull }}</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Course</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $alumniCourseFull }}</p>
                         </div>
                         @endif
                         @if($alumniCollege)
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">College</p>
-                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug uppercase">{{ $alumniCollege }}</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">College</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug uppercase">{{ $alumniCollege }}</p>
                         </div>
                         @endif
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Batch / Graduation Year</p>
-                            <p class="text-[0.92rem] font-bold text-[#111111] leading-snug">{{ $alumniBatch ?: '—' }}</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Batch / Graduation Year</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $alumniBatch ?: '—' }}</p>
                         </div>
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-0.5">Profile Status</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Profile Status</p>
                             <p class="text-[0.92rem] font-bold leading-snug {{ $profileComplete ? 'text-emerald-600' : 'text-amber-600' }}">
                                 <i class="fas fa-{{ $profileComplete ? 'circle-check' : 'circle-exclamation' }} mr-1"></i>
                                 {{ $profileComplete ? 'Profile Complete' : 'Incomplete' }}
@@ -829,8 +851,8 @@ new class extends Component {
             </div>
         </div>
 
-        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
-            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">EMPLOYMENT SUMMARY</p>
+        <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-3">EMPLOYMENT SUMMARY</p>
             @if($hasEmployment && $empInfo3)
             <div class="flex items-center gap-3 p-3 rounded-xl border mb-4"
                  style="background:{{ $empInfo3[3] }}; border-color:{{ $empInfo3[4] }};">
@@ -840,7 +862,7 @@ new class extends Component {
                 </div>
                 <div>
                     <p class="font-bold text-[0.9rem]" style="color:{{ $empInfo3[2] }};">{{ $empInfo3[0] }}</p>
-                    @if($jobTitle)<p class="text-[#333333] font-semibold uppercase text-[0.8rem]">{{ $jobTitle }}@if($companyName) · {{ $companyName }}@endif</p>@endif
+                    @if($jobTitle)<p class="text-gray-700 font-semibold uppercase text-[0.8rem]">{{ $jobTitle }}@if($companyName) · {{ $companyName }}@endif</p>@endif
                 </div>
             </div>
             <button wire:click="openEmploymentModal"
@@ -852,7 +874,7 @@ new class extends Component {
                 <div class="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center">
                     <i class="fas fa-triangle-exclamation text-xl text-red-400"></i>
                 </div>
-                <p class="font-medium text-[#333333] text-[0.95rem]">No employment record on file.</p>
+                <p class="font-medium text-gray-700 text-[0.95rem]">No employment record on file.</p>
                 <a href="{{ route('alumni.employment') }}"
                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition hover:opacity-90 bg-red-600">
                     <i class="fas fa-plus text-xs"></i> Add Employment Record
@@ -861,23 +883,23 @@ new class extends Component {
             @endif
         </div>
 
-        <div class="bg-white border border-gray-200 rounded-xl px-5 py-[18px]">
-            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-[#9CA3AF] mb-3">ACTIVITY SUMMARY</p>
-            <div class="grid grid-cols-3 gap-3">
+        <div class="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-[18px]">
+            <p class="text-[0.68rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-3">ACTIVITY SUMMARY</p>
+            <div class="grid grid-cols-3 gap-2 sm:gap-3">
                 <button wire:click="goToUpcomingEvents"
-                   class="rounded-xl border p-3 text-center bg-blue-50 border-blue-200 hover:bg-blue-100 transition w-full">
-                    <p class="text-2xl font-bold text-blue-700">{{ $upcomingEvents }}</p>
-                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">Upcoming</p>
+                   class="rounded-xl border p-2.5 sm:p-3 text-center bg-blue-50 border-blue-200 hover:bg-blue-100 transition w-full">
+                    <p class="text-xl sm:text-2xl font-bold text-blue-700">{{ $upcomingEvents }}</p>
+                    <p class="text-[0.65rem] sm:text-xs font-semibold mt-0.5 uppercase text-gray-700">Upcoming</p>
                 </button>
                 <button wire:click="goToAllEvents"
-                   class="rounded-xl border p-3 text-center bg-emerald-50 border-emerald-200 hover:bg-emerald-100 transition w-full">
-                    <p class="text-2xl font-bold text-emerald-700">{{ $totalEvents }}</p>
-                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">Events</p>
+                   class="rounded-xl border p-2.5 sm:p-3 text-center bg-emerald-50 border-emerald-200 hover:bg-emerald-100 transition w-full">
+                    <p class="text-xl sm:text-2xl font-bold text-emerald-700">{{ $totalEvents }}</p>
+                    <p class="text-[0.65rem] sm:text-xs font-semibold mt-0.5 uppercase text-gray-700">Events</p>
                 </button>
                 <button wire:click="goToJobs"
-                   class="rounded-xl border p-3 text-center bg-amber-50 border-amber-200 hover:bg-amber-100 transition w-full">
-                    <p class="text-2xl font-bold text-amber-700">{{ $activeJobs }}</p>
-                    <p class="text-xs font-semibold mt-0.5 uppercase text-[#333333]">Jobs</p>
+                   class="rounded-xl border p-2.5 sm:p-3 text-center bg-amber-50 border-amber-200 hover:bg-amber-100 transition w-full">
+                    <p class="text-xl sm:text-2xl font-bold text-amber-700">{{ $activeJobs }}</p>
+                    <p class="text-[0.65rem] sm:text-xs font-semibold mt-0.5 uppercase text-gray-700">Jobs</p>
                 </button>
             </div>
         </div>
@@ -888,7 +910,7 @@ new class extends Component {
                 <i class="fas fa-pen text-xs"></i> Edit Profile
             </a>
             <button wire:click="closeModal"
-                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-[#333333] hover:bg-gray-50 transition bg-white">
+                    class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition bg-white">
                 <i class="fas fa-xmark text-xs"></i> Close
             </button>
         </div>

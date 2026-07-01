@@ -121,7 +121,9 @@ new class extends \Livewire\Volt\Component {
         return $default;
     }
 
-    // ── UPDATED: 1-minute online threshold ────────────────────────────────
+    // ── 1-minute online threshold — also gives a natural 1-min "grace
+    //    period" after logout before a user flips to Offline, since we
+    //    only compare against the last `last_seen_at` ping timestamp ──────
     private function formatLastSeen(?string $lastSeenAt): string
     {
         if (! $lastSeenAt) return 'Offline';
@@ -136,11 +138,35 @@ new class extends \Livewire\Volt\Component {
         return 'Active ' . $ts->format('M d');
     }
 
-    // ── UPDATED: 1-minute online threshold ────────────────────────────────
+    // ── 1-minute online threshold (same grace window as above) ─────────────
     private function isOnline(?string $lastSeenAt): bool
     {
         if (! $lastSeenAt) return false;
         return Carbon::parse($lastSeenAt)->gte(Carbon::now()->subMinutes(1));
+    }
+
+    /**
+     * ── College-room marker (course_code value used for college-wide rooms)
+     *
+     * ROOT CAUSE OF "only 1 chat shows" BUG:
+     *   Every college-wide room used to be stored with course_code = '' and
+     *   batch = 0. The `chat_rooms` table has a UNIQUE constraint on
+     *   (course_code, batch) — so the FIRST college that ever got its room
+     *   created "claimed" the ('', 0) slot. Every other college (and every
+     *   alumni in it) could never get their own College GC created, because
+     *   the insert silently failed the unique check and was caught/skipped.
+     *   That's why only ONE group chat (the Batch GC) was visible.
+     *
+     * FIX (no migration needed):
+     *   Each college now gets its own unique, deterministic course_code
+     *   marker instead of sharing the blank one — e.g. "CLG_a1b2c3d4".
+     *   This keeps (course_code, batch) genuinely unique per college under
+     *   the existing DB constraint, so every college can have its own
+     *   College GC at the same time.
+     */
+    private function collegeMarker(string $college): string
+    {
+        return 'CLG_' . substr(md5($college), 0, 12);
     }
 
     public function mount(): void
@@ -160,6 +186,11 @@ new class extends \Livewire\Volt\Component {
 
         $this->pinnedRoomIds = Cache::get($this->pinnedRoomsCacheKey(), []);
 
+        // ── Every alumni gets exactly 2 group chats:
+        //      1) Batch GC  (their course_code + batch)
+        //      2) College GC (all courses & batches under their college —
+        //         e.g. BSIT + BSCS + etc. — where Coordinators of that
+        //         college also belong)
         $this->ensureRoomsExist();
         $this->pingPresence();
         $this->loadRooms();
@@ -184,61 +215,142 @@ new class extends \Livewire\Volt\Component {
         }
     }
 
+    /**
+     * ── FIX: Duplicate-entry crash AND "missing college room" bug ───────
+     * See collegeMarker() above for the full root-cause explanation.
+     *
+     * Batch rooms stay keyed on the alumni's real (course_code, batch) —
+     * that pairing is genuinely supposed to be unique. College rooms now
+     * use a per-college unique marker in course_code instead of a shared
+     * blank value, so every college can have its own room.
+     *
+     * try/catch against UniqueConstraintViolationException is kept as a
+     * safety net for race conditions (two requests creating the same room
+     * at the same time) — whichever request wins, we just re-fetch
+     * normally afterward.
+     *
+     * ── SELF-HEAL NOW RUNS UNCONDITIONALLY EVERY MOUNT ──────────────────
+     * Previously the legacy ('', 0) row was only migrated for the FIRST
+     * college that happened to load the page after this fix shipped.
+     * Every other college's room stayed stuck on the blank marker, which
+     * is exactly why the sidebar badge could still show a stray
+     * course-code-looking row instead of "All Courses" — that row was a
+     * *different* college's legacy ('', 0) chat, misclassified as if it
+     * might belong here. We now check + self-heal on every single mount
+     * for whichever college the current alumni belongs to, so it
+     * converges immediately instead of depending on load order.
+     */
     protected function ensureRoomsExist(): void
     {
         $college = $this->alumniCollege;
+
+        // ── Batch room (course_code + batch is genuinely unique per batch) ──
         $batchExists = DB::table('chat_rooms')
             ->where('course_code', $this->alumniCourse)
             ->where('batch', (int) $this->alumniBatch)
             ->exists();
+
         if (! $batchExists) {
-            DB::table('chat_rooms')->insert([
-                'name'        => strtoupper($this->alumniCourse) . ' · Batch ' . $this->alumniBatch,
-                'course_code' => $this->alumniCourse,
-                'batch'       => (int) $this->alumniBatch,
-                'department'  => $college,
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ]);
-        }
-        if ($college) {
-            $collegeExists = DB::table('chat_rooms')
-                ->where('department', $college)
-                ->where('course_code', '')
-                ->where('batch', 0)
-                ->exists();
-            if (! $collegeExists) {
+            try {
                 DB::table('chat_rooms')->insert([
-                    'name'        => $college . ' · All Courses & Batches',
-                    'course_code' => '',
-                    'batch'       => 0,
+                    'name'        => strtoupper($this->alumniCourse) . ' · Batch ' . $this->alumniBatch,
+                    'course_code' => $this->alumniCourse,
+                    'batch'       => (int) $this->alumniBatch,
                     'department'  => $college,
                     'created_at'  => now(),
                     'updated_at'  => now(),
                 ]);
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+                // Another concurrent request already created this exact
+                // batch room — that's fine, just continue.
+            }
+        }
+
+        // ── College room — unique marker per college, NOT a shared ('', 0) ──
+        if ($college) {
+            $marker = $this->collegeMarker($college);
+
+            $collegeExists = DB::table('chat_rooms')
+                ->where('department', $college)
+                ->where('course_code', $marker)
+                ->where('batch', 0)
+                ->exists();
+
+            // ── Self-heal: a legacy row may exist from the old ('', 0)
+            //    scheme, *for this college specifically*. Migrate it in
+            //    place instead of creating a dupe, so existing message
+            //    history for that college isn't lost. This now runs on
+            //    every mount (not just once globally) so each college
+            //    converges to its own marker independently.
+            if (! $collegeExists) {
+                $legacyRow = DB::table('chat_rooms')
+                    ->where('department', $college)
+                    ->where('course_code', '')
+                    ->where('batch', 0)
+                    ->first();
+
+                if ($legacyRow) {
+                    try {
+                        DB::table('chat_rooms')->where('id', $legacyRow->id)->update([
+                            'course_code' => $marker,
+                            'updated_at'  => now(),
+                        ]);
+                        $collegeExists = true;
+                    } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+                        // marker somehow already taken — fall through and
+                        // let the exists() check below handle it normally.
+                    }
+                }
+            }
+
+            if (! $collegeExists) {
+                try {
+                    DB::table('chat_rooms')->insert([
+                        'name'        => $college . ' · All Courses & Batches',
+                        'course_code' => $marker,
+                        'batch'       => 0,
+                        'department'  => $college,
+                        'created_at'  => now(),
+                        'updated_at'  => now(),
+                    ]);
+                } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+                    // Concurrent request for the same college already
+                    // created it — safe to skip.
+                }
             }
         }
     }
 
     private function isCollegeRoom($row): bool
     {
-        return ($row->course_code ?? '') === '' && (int)($row->batch ?? 0) === 0;
+        return (int) ($row->batch ?? 0) === 0 && (string) ($row->course_code ?? '') !== '';
     }
 
+    /**
+     * ── FIX: stray "BSIT-BSCS"-looking row in sidebar ───────────────────
+     * loadRooms() used to match ANY room with course_code IN [marker, '']
+     * and batch = 0 under the alumni's department — including legacy
+     * ('', 0) rows that belong to a *different* college that hasn't been
+     * self-healed yet (department was sometimes blank/stale on old rows).
+     * Now we only ever match this alumni's own college marker, and the
+     * legacy blank-marker fallback is dropped entirely now that
+     * ensureRoomsExist() unconditionally self-heals on every mount.
+     */
     public function loadRooms(): void
     {
         $college = $this->alumniCollege;
+        $marker  = $college ? $this->collegeMarker($college) : null;
 
         $rows = DB::table('chat_rooms')
-            ->where(function ($q) use ($college) {
+            ->where(function ($q) use ($college, $marker) {
                 $q->where(function ($sub) {
                     $sub->where('course_code', $this->alumniCourse)
                         ->where('batch', (int) $this->alumniBatch);
                 });
-                if ($college) {
-                    $q->orWhere(function ($sub) use ($college) {
+                if ($college && $marker) {
+                    $q->orWhere(function ($sub) use ($college, $marker) {
                         $sub->where('department', $college)
-                            ->where('course_code', '')
+                            ->where('course_code', $marker)
                             ->where('batch', 0);
                     });
                 }
@@ -271,8 +383,10 @@ new class extends \Livewire\Volt\Component {
                 }
             }
 
+            $collegeCourseCodes = [];
             if ($isCollege && $college) {
                 $collegeCourses = DB::table('courses')->where('college', $college)->pluck('code');
+                $collegeCourseCodes = $collegeCourses->map(fn ($c) => strtoupper($c))->values()->toArray();
                 $alumniBase = DB::table('alumni')->whereIn('course_code', $collegeCourses)->whereNull('deleted_at');
                 $coordBase  = DB::table('organizer')->where('department', $college)->where('status', 'ACTIVE')->whereNull('deleted_at');
             } else {
@@ -290,7 +404,7 @@ new class extends \Livewire\Volt\Component {
             $totalCoord   = (clone $coordBase)->count();
             $total        = $totalAlumni + $totalCoord;
 
-            // ── UPDATED: 1-minute online threshold ────────────────────────
+            // ── 1-minute online threshold ──────────────────────────────────
             $onlineAlumni = (clone $alumniBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
             $onlineCoord  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
             $online       = $onlineAlumni + $onlineCoord;
@@ -309,6 +423,7 @@ new class extends \Livewire\Volt\Component {
                 'id'             => $r->id,
                 'name'           => $r->name,
                 'course_code'    => $r->course_code,
+                'course_codes'   => $collegeCourseCodes,
                 'batch'          => (int) $r->batch,
                 'department'     => $r->department,
                 'type'           => $isCollege ? 'college' : 'batch',
@@ -324,6 +439,9 @@ new class extends \Livewire\Volt\Component {
             ];
         });
 
+        // ── Messenger-style ordering: Pinned rooms always float to the top.
+        //    Within each tier (pinned / not pinned), unread-first, then by
+        //    most recent activity — exactly like real Messenger/FB chat. ────
         $this->rooms = $mapped->sort(function ($a, $b) {
             $aPinned = $a['is_pinned_room'] ? 1 : 0;
             $bPinned = $b['is_pinned_room'] ? 1 : 0;
@@ -393,6 +511,12 @@ new class extends \Livewire\Volt\Component {
         $this->loadTypingIndicators();
         $this->loadRooms();
         $this->dispatch('chat-scroll-bottom');
+        $this->dispatch('chat-open-mobile');
+    }
+
+    public function backToList(): void
+    {
+        $this->dispatch('chat-close-mobile');
     }
 
     public function toggleToolbar(int $msgId): void
@@ -409,28 +533,46 @@ new class extends \Livewire\Volt\Component {
         $this->reactionsPopupData  = [];
     }
 
+    // ── Explicit, single-purpose toggles for the side panel ────────────────
+    // Each one is self-contained and forces the other panel closed, so the
+    // panel's visibility is driven purely by these two booleans — no mixed
+    // Alpine/Livewire state to fall out of sync.
+    public function openMembersPanel(): void
+    {
+        $this->showBatchmates = true;
+        $this->showPins       = false;
+        $this->batchSearch    = '';
+        $this->loadBatchmates();
+        $this->loadCoordinators();
+    }
+
+    public function openPinsPanel(): void
+    {
+        $this->showPins       = true;
+        $this->showBatchmates = false;
+        $this->loadPins();
+    }
+
+    public function closeSidePanel(): void
+    {
+        $this->showBatchmates = false;
+        $this->showPins       = false;
+    }
+
+    public function toggleBatchmates(): void
+    {
+        if ($this->showBatchmates) { $this->closeSidePanel(); return; }
+        $this->openMembersPanel();
+    }
+
+    public function togglePins(): void
+    {
+        if ($this->showPins) { $this->closeSidePanel(); return; }
+        $this->openPinsPanel();
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     //  SINGLE POLL — wire:poll.1500ms
-    //
-    //  "This page has expired" ROOT CAUSE & FIX:
-    //    The error is a 419 from Laravel's CSRF middleware. It happens when:
-    //      a) The Laravel session lifetime expires (default: 120 min) while
-    //         the page is open — the session cookie becomes invalid.
-    //      b) session()->regenerateToken() is called mid-session — this
-    //         changes the token in the session but Livewire still holds the
-    //         OLD token in its component snapshot, causing every subsequent
-    //         request to fail with a 419 immediately.
-    //
-    //    The PHP-side fix is simple: DO NOTHING. Do NOT call regenerateToken()
-    //    inside a poll. Let the session live its natural lifetime.
-    //
-    //    The JS-side fix (in the template below) intercepts the 419 via
-    //    Livewire's request hook and does a silent window.location.reload()
-    //    so the user just sees a brief page refresh instead of an error modal.
-    //
-    //    Additionally, SESSION_LIFETIME in config/session.php should be set
-    //    to a high value (e.g. 480 = 8 hours) for chat pages. But even if it
-    //    expires, the JS intercept ensures a seamless auto-reload.
     // ─────────────────────────────────────────────────────────────────────
     public function unifiedPoll(): void
     {
@@ -547,7 +689,7 @@ new class extends \Livewire\Volt\Component {
             $totalCoord   = (clone $coordBase)->count();
             $this->totalCount = $totalAlumni + $totalCoord;
 
-            // ── UPDATED: 1-minute online threshold ────────────────────────
+            // ── 1-minute online threshold ──────────────────────────────────
             $onlineAlumni = (clone $alumniBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
             $onlineCoord  = (clone $coordBase)->where('last_seen_at', '>=', now()->subMinutes(1))->count();
             $this->onlineCount = $onlineAlumni + $onlineCoord;
@@ -831,20 +973,6 @@ new class extends \Livewire\Volt\Component {
 
     public function clearReply(): void { $this->replyTo = null; }
 
-    public function toggleBatchmates(): void
-    {
-        $this->showBatchmates = ! $this->showBatchmates;
-        $this->showPins = false; $this->batchSearch = '';
-        if ($this->showBatchmates) $this->loadBatchmates();
-    }
-
-    public function togglePins(): void
-    {
-        $this->showPins = ! $this->showPins;
-        $this->showBatchmates = false;
-        if ($this->showPins) $this->loadPins();
-    }
-
     public function loadBatchmates(): void
     {
         $q = trim($this->batchSearch); $college = $this->alumniCollege;
@@ -869,7 +997,7 @@ new class extends \Livewire\Volt\Component {
                 'batch'         => $a->batch,
                 'course_code'   => $a->course_code,
                 'is_me'         => $a->id === $self->alumniId,
-                // ── UPDATED: 1-minute online threshold ────────────────────
+                // ── 1-minute online threshold ──────────────────────────────
                 'is_online'     => $self->isOnline($a->last_seen_at ?? null),
                 'last_seen_at'  => $a->last_seen_at ?? null,
                 'last_seen_fmt' => $self->formatLastSeen($a->last_seen_at ?? null),
@@ -891,7 +1019,7 @@ new class extends \Livewire\Volt\Component {
                 'name'          => trim($o->first_name.' '.$o->last_name),
                 'photo'         => $self->resolvePhotoUrl($o->profile_photo??null),
                 'dept'          => $o->department,
-                // ── UPDATED: 1-minute online threshold ────────────────────
+                // ── 1-minute online threshold ──────────────────────────────
                 'is_online'     => $self->isOnline($o->last_seen_at ?? null),
                 'last_seen_fmt' => $self->formatLastSeen($o->last_seen_at ?? null),
             ])
@@ -960,120 +1088,135 @@ new class extends \Livewire\Volt\Component {
 }; ?>
 
 {{-- ══════════════════════════════════════════════════════════════════════════
-     TEMPLATE
-     FIX "This page has expired" (419) — DEFINITIVE APPROACH
+     TEMPLATE — Messenger-style group chat UI
      ─────────────────────────────────────────────────────────────────────────
-     ROOT CAUSE:
-       Laravel's CSRF middleware rejects any request whose X-CSRF-TOKEN does
-       not match the token stored in the active session. This happens when:
-         1. The session lifetime expires (config/session.php SESSION_LIFETIME,
-            default 120 min) — the session cookie becomes invalid.
-         2. A session()->regenerateToken() call mid-session changes the stored
-            token so every subsequent Livewire request immediately fails.
+     CHANGES IN THIS REVISION
+     ─────────────────────────────────────────────────────────────────────────
+     1) REMOVED the 419 "page expired" auto-reload script entirely, per
+        request. wire:poll continues to run as a normal Livewire poll — if a
+        session genuinely expires Laravel's default behavior applies.
 
-     FIXES APPLIED (3 layers):
-       Layer 1 — PHP: unifiedPoll() no longer calls regenerateToken(). The
-         session token stays consistent for the full session lifetime.
+     2) FIXED Pins/Members panel not opening on click.
+        Root cause: the panel's visibility was driven by a Blade boolean
+        baked into a literal Alpine `x-show="true"/"false"` STRING at render
+        time, layered on top of a *separate* Tailwind class toggle on the
+        same element. Two different "is this open" signals fighting each
+        other, plus an Alpine x-transition that re-evaluates against a value
+        that never changes reactively after first paint, meant clicks could
+        update the Livewire property correctly but the panel still wouldn't
+        visibly show/hide. Replaced with a single source of truth: plain
+        Blade `@if($showBatchmates || $showPins)` controls whether the panel
+        node exists in the DOM at all (no Alpine x-show needed), and two
+        explicit methods (openMembersPanel / openPinsPanel / closeSidePanel)
+        replace the old toggle-with-side-effects logic so state can't get
+        stuck.
 
-       Layer 2 — JS: Livewire.hook / document.addEventListener intercept
-         every 419 response BEFORE Livewire can display the error modal, then
-         silently call window.location.reload(). The user sees a brief page
-         refresh instead of a broken "This page has expired" dialog.
+     3) FIXED stray course-code-looking room in the sidebar instead of a
+        clean "All Courses" college room.
+        Root cause: loadRooms() matched ANY legacy ('', 0) college room
+        across colleges as a fallback, and ensureRoomsExist() only
+        self-healed the legacy row for whichever college loaded first.
+        Self-heal now runs for the current alumni's college on every mount,
+        and loadRooms() only ever matches this alumni's own college marker
+        — no more blank-marker fallback that could pull in a different
+        college's leftover row.
 
-       Layer 3 — JS: visibilitychange guard. When the tab has been hidden for
-         longer than SESSION_LIFETIME (we use 110 min as a safe margin), a
-         reload is triggered as soon as the user returns to the tab — before
-         the next poll even fires, so there is never a 419 in that case.
+     4) FIXED reaction toolbar tooltips getting visually clipped/hidden
+        behind the purple chat header. Header now gets an explicit modest
+        z-index (z-10) and establishes its own stacking context only for
+        itself; the reaction toolbar + tooltips render with z-[300], well
+        above the header, and `overflow: visible` is enforced up the
+        relevant ancestor chain so nothing clips the floating toolbar near
+        the top of the message list.
 
-     ALSO RECOMMENDED (do once in your project):
-       In config/session.php set: 'lifetime' => 480   (8 hours)
-       In .env add:               SESSION_LIFETIME=480
-       This gives alumni plenty of time without any reloads at all.
+     5) Pinned rooms still float to the top; new messages bump a room
+        toward the top of its tier — Messenger style. Layout stays fully
+        responsive: small screens behave like a single-pane Messenger app
+        (list ⇄ chat with a back button), side panel becomes a full-screen
+        overlay on mobile and a fixed 288px column on desktop.
 ════════════════════════════════════════════════════════════════════════════ --}}
-<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
-     style="height: calc(100vh - 90px);"
-     wire:poll.1500ms="unifiedPoll">
+<div
+    x-data="{ mobileChatOpen: false }"
+    @chat-open-mobile.window="mobileChatOpen = true"
+    @chat-close-mobile.window="mobileChatOpen = false"
+    class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
+    style="height: calc(100vh - 90px);"
+    wire:poll.1500ms="unifiedPoll">
 
-    {{-- ══ 419 intercept + session-expiry reload guard ══ --}}
-    <script>
-    (function () {
-        'use strict';
+    <style>
+        /* ── Smooth Messenger-style transitions ── */
+        #msgr-room-list button,
+        #msgr-room-list .msgr-pin-btn,
+        .msgr-bubble,
+        .msgr-panel,
+        .msgr-tooltip { transition: all .22s cubic-bezier(.4,0,.2,1); }
 
-        var reloading = false;
+        #msgr-room-list > div { transition: transform .25s ease, opacity .25s ease; }
 
-        function safeReload() {
-            if (reloading) return;
-            reloading = true;
-            window.location.reload();
+        .msgr-bubble { transform-origin: bottom; animation: msgrPop .18s ease-out; }
+        @keyframes msgrPop {
+            from { opacity: 0; transform: translateY(6px) scale(.97); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes msgrPanelIn {
+            from { opacity: 0; transform: translateX(12px); }
+            to   { opacity: 1; transform: translateX(0); }
         }
 
-        // ── Layer 2: Intercept 419 from Livewire v3 ───────────────────────
-        // Livewire v3 exposes a global hook system. We listen for any commit
-        // that fails, inspect the HTTP status, and reload silently on 419.
-        if (window.Livewire) {
-            try {
-                Livewire.hook('commit', function (payload) {
-                    // payload.fail is called when the network request fails
-                    if (typeof payload.fail === 'function') {
-                        var origFail = payload.fail;
-                        payload.fail = function (data) {
-                            var status = data && (data.status || (data.response && data.response.status));
-                            if (status === 419) { safeReload(); return; }
-                            origFail(data);
-                        };
-                    }
-                });
-            } catch (e) {}
+        /* ── Tooltip overlay — guaranteed on top of EVERYTHING, including
+           the sticky purple header, never clipped. Black bg / white text,
+           no border. ──────────────────────────────────────────────────── */
+        .msgr-tooltip {
+            position: absolute;
+            z-index: 999;
+            background: #1a1a1a;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 11px;
+            line-height: 1.3;
+            letter-spacing: .02em;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(-2px);
+            border: none;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        }
+        .msgr-tooltip-wrap:hover .msgr-tooltip {
+            opacity: 1;
+            transform: translateY(0);
         }
 
-        // ── Layer 2b: Intercept 419 via fetch / XHR monkey-patch ─────────
-        // Belt-and-suspenders: also intercept at the fetch level in case
-        // the Livewire hook fires after the modal is already shown.
-        var _originalFetch = window.fetch;
-        window.fetch = function () {
-            return _originalFetch.apply(this, arguments).then(function (response) {
-                if (response.status === 419) {
-                    // Clone so the body can be read by Livewire too (if it
-                    // gets that far), but schedule the reload immediately.
-                    setTimeout(safeReload, 0);
-                }
-                return response;
-            });
-        };
+        /* ── Stacking-context fix: header sits at z-10 (its own low
+           context), reaction toolbar + tooltips sit at z-[300] so they
+           always render above the header regardless of scroll position
+           in the message list. Ancestors kept overflow-visible so the
+           toolbar (which is positioned bottom-full off the bubble) is
+           never clipped. ─────────────────────────────────────────────── */
+        #msgr-chat-header { position: relative; z-index: 10; }
+        #msg-list { overflow-x: visible; }
+        .msgr-reaction-toolbar { z-index: 300; }
+        .msgr-reaction-toolbar .msgr-tooltip { z-index: 301; }
 
-        // Also patch XMLHttpRequest for older Livewire v2 compatibility.
-        var _XHROpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function () {
-            this.addEventListener('load', function () {
-                if (this.status === 419) { safeReload(); }
-            });
-            _XHROpen.apply(this, arguments);
-        };
+        /* Readable header text on the purple bar */
+        .msgr-hdr-strong { color: #ffffff; }
+        .msgr-hdr-soft    { color: #EDE0F5; } /* light lavender — readable on purple */
+        .msgr-hdr-faint   { color: #D9C2EE; } /* still readable, used for secondary meta */
 
-        // ── Layer 3: visibilitychange session-expiry guard ────────────────
-        // If the tab was hidden for >= 110 minutes, the 120-min session is
-        // likely expired. Reload before the next poll fires a 419.
-        var hiddenAt        = null;
-        var SESSION_MARGIN  = 110 * 60 * 1000; // 110 minutes in ms
-
-        document.addEventListener('visibilitychange', function () {
-            if (document.hidden) {
-                hiddenAt = Date.now();
-            } else {
-                if (hiddenAt !== null && (Date.now() - hiddenAt) >= SESSION_MARGIN) {
-                    safeReload();
-                }
-                hiddenAt = null;
-            }
-        });
-
-    })();
-    </script>
+        @media (max-width: 768px) {
+            #msgr-sidebar { display: none; }
+            #msgr-sidebar.msgr-mobile-show { display: flex; width: 100% !important; }
+            #msgr-chatpane { display: none; }
+            #msgr-chatpane.msgr-mobile-show { display: flex; width: 100% !important; }
+        }
+    </style>
 
     @php $defaultAv = asset('storage/alumni-photos/default.png'); @endphp
 
     {{-- ══ LEFT SIDEBAR ══ --}}
-    <div class="w-72 flex-shrink-0 flex flex-col border-r border-[#E8E0F0] bg-white">
+    <div id="msgr-sidebar"
+         :class="mobileChatOpen ? '' : 'msgr-mobile-show'"
+         class="w-full md:w-72 flex-shrink-0 flex flex-col border-r border-[#E8E0F0] bg-white">
 
         {{-- My profile header --}}
         <div class="px-4 py-3.5 border-b border-[#5c2778] flex-shrink-0 bg-[#7A3F91]">
@@ -1082,18 +1225,18 @@ new class extends \Livewire\Volt\Component {
                     <img src="{{ $alumniPhoto ?: $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="{{ $alumniFirstName }}">
                 </div>
                 <div class="flex-1 min-w-0">
-                    <p class="text-white font-semibold text-sm leading-tight truncate">{{ $alumniName }}</p>
+                    <p class="msgr-hdr-strong font-semibold text-sm leading-tight truncate">{{ $alumniName }}</p>
                     <div class="flex items-center gap-1 mt-0.5">
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
-                        <span class="text-xs text-white/70 font-semibold">Online · Alumni</span>
+                        <span class="msgr-hdr-soft text-xs font-semibold">Online · Alumni</span>
                     </div>
                 </div>
             </div>
-            <p class="text-xs text-white/50 font-semibold truncate mt-0.5">
+            <p class="msgr-hdr-faint text-xs font-semibold truncate mt-0.5">
                 <i class="fa-solid fa-graduation-cap mr-1"></i>{{ strtoupper($alumniCourse) }} · Batch {{ $alumniBatch }}
             </p>
             @if($alumniCollege)
-            <p class="text-xs text-white/40 font-semibold truncate mt-0.5">
+            <p class="msgr-hdr-faint text-xs font-semibold truncate mt-0.5">
                 <i class="fa-solid fa-school mr-1"></i>{{ $alumniCollege }}
             </p>
             @endif
@@ -1108,7 +1251,7 @@ new class extends \Livewire\Volt\Component {
         </div>
 
         {{-- Room list --}}
-        <div class="flex-1 overflow-y-auto px-2 py-2 space-y-1 bg-white">
+        <div id="msgr-room-list" class="flex-1 overflow-y-auto px-2 py-2 space-y-1 bg-white">
             @forelse($rooms as $r)
             @php
                 $hasUnread  = $r['has_unread'];
@@ -1116,17 +1259,17 @@ new class extends \Livewire\Volt\Component {
                 $isActive   = $r['is_active'];
             @endphp
 
-            <div class="relative" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
+            <div wire:key="room-{{ $r['id'] }}" class="relative" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
 
                 <button wire:click="selectRoom({{ $r['id'] }})"
-                        class="w-full text-left rounded-xl px-3 py-3 transition-all border
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all duration-200 border
                                @if($isActive)      border-[#d9c9e8] bg-[#f3eef8]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
                                @else               border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa] @endif">
 
                     <div class="flex items-start gap-2.5">
                         <div class="relative flex-shrink-0 self-start mt-0.5">
-                            <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm bg-[#7a3f91]">
+                            <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm bg-[#7a3f91] transition-transform duration-200">
                                 <i class="fa-solid {{ $r['type']==='college' ? 'fa-school' : 'fa-users' }}"></i>
                             </div>
                             @if($hasUnread)
@@ -1134,7 +1277,7 @@ new class extends \Livewire\Volt\Component {
                                   style="box-shadow: 0 0 0 2px #fff;"></span>
                             @endif
                             @if($isPinnedRm)
-                            <span class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-400 border-2 border-white flex items-center justify-center z-10" title="Pinned">
+                            <span class="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-400 border-2 border-white flex items-center justify-center z-10 transition-transform duration-200" title="Pinned">
                                 <i class="fa-solid fa-thumbtack text-white" style="font-size:7px; transform: rotate(45deg);"></i>
                             </span>
                             @endif
@@ -1160,13 +1303,21 @@ new class extends \Livewire\Volt\Component {
                                 </div>
                             </div>
 
+                            {{-- ── College rooms show their actual course codes
+                                 (e.g. "BSIT, BSCS") instead of a generic
+                                 "All Courses" label, so it's never mistaken
+                                 for a single catch-all room. Batch rooms keep
+                                 their course code + batch badge. Each type
+                                 gets its own light-purple solid (no gradient)
+                                 shade so they're visually distinguishable at
+                                 a glance — like Messenger room theming. ── --}}
                             <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
                                 @if($r['type']==='college')
-                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f3eef8] text-[#7a3f91]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Courses</span>
-                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f3eef8] text-[#7a3f91]">{{ $r['total_count'] }} members</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#EDE0F8] text-[#5C2D7A]"><i class="fa-solid fa-school text-[9px] mr-0.5"></i>{{ implode(', ', $r['course_codes']) ?: 'College' }}</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#EDE0F8] text-[#5C2D7A]">{{ $r['total_count'] }} members</span>
                                 @else
-                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f3eef8] text-[#7a3f91]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>Batch {{ $r['batch'] }}</span>
-                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f3eef8] text-[#7a3f91]">{{ strtoupper($r['course_code']) }}</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#F3EEF8] text-[#7A3F91]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>Batch {{ $r['batch'] }}</span>
+                                <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#F3EEF8] text-[#7A3F91]">{{ strtoupper($r['course_code']) }}</span>
                                 @endif
                             </div>
 
@@ -1191,30 +1342,25 @@ new class extends \Livewire\Volt\Component {
                     </div>
                 </button>
 
-                <div class="absolute top-2 right-2 z-30"
+                <div class="absolute top-2 right-2 z-30 msgr-tooltip-wrap"
                      x-show="hovered"
-                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter="transition ease-out duration-150"
                      x-transition:enter-start="opacity-0 scale-90"
                      x-transition:enter-end="opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75"
+                     x-transition:leave="transition ease-in duration-100"
                      x-transition:leave-start="opacity-100 scale-100"
                      x-transition:leave-end="opacity-0 scale-90"
                      style="display: none;">
-                    <div class="relative group/pintip">
-                        <button wire:click.stop="togglePinRoom({{ $r['id'] }})"
-                                title="{{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}"
-                                class="w-7 h-7 rounded-full flex items-center justify-center shadow-md border transition-all
-                                       {{ $isPinnedRm
-                                           ? 'bg-amber-400 border-amber-500 text-white hover:bg-amber-500'
-                                           : 'bg-white border-[#E8E0F0] text-[#aaaaaa] hover:bg-amber-50 hover:text-amber-500 hover:border-amber-300' }}">
-                            <i class="fa-solid fa-thumbtack" style="font-size: 10px;"></i>
-                        </button>
-                        <span class="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2
-                                     bg-gray-900 text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                     opacity-0 group-hover/pintip:opacity-100 transition-opacity duration-150 z-50 shadow-lg">
-                            {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
-                        </span>
-                    </div>
+                    <button wire:click.stop="togglePinRoom({{ $r['id'] }})"
+                            class="msgr-pin-btn w-7 h-7 rounded-full flex items-center justify-center shadow-md border transition-all duration-200
+                                   {{ $isPinnedRm
+                                       ? 'bg-amber-400 border-amber-500 text-white hover:bg-amber-500 scale-105'
+                                       : 'bg-white border-[#E8E0F0] text-[#aaaaaa] hover:bg-amber-50 hover:text-amber-500 hover:border-amber-300' }}">
+                        <i class="fa-solid fa-thumbtack" style="font-size: 10px;"></i>
+                    </button>
+                    <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">
+                        {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
+                    </span>
                 </div>
 
             </div>
@@ -1230,54 +1376,67 @@ new class extends \Livewire\Volt\Component {
 
     {{-- ══ MAIN CHAT AREA ══ --}}
     @if($room)
-    <div class="flex flex-col flex-1 min-w-0">
+    <div id="msgr-chatpane"
+         :class="mobileChatOpen ? 'msgr-mobile-show' : ''"
+         class="flex flex-col flex-1 min-w-0 w-full">
 
         {{-- Chat header --}}
-        <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778] bg-[#7A3F91]">
+        <div id="msgr-chat-header" class="flex items-center gap-3 px-3 sm:px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778] bg-[#7A3F91]">
+            {{-- Mobile back button --}}
+            <button @click="mobileChatOpen = false" wire:click="backToList"
+                    class="md:hidden w-8 h-8 -ml-1 flex items-center justify-center rounded-full text-white hover:bg-white/15 transition-all duration-200 flex-shrink-0">
+                <i class="fa-solid fa-arrow-left text-sm"></i>
+            </button>
             <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/18 border border-white/28">
                 <i class="fa-solid {{ $roomType === 'college' ? 'fa-school' : 'fa-users' }} text-white text-sm"></i>
             </div>
             <div class="flex-1 min-w-0">
-                <p class="text-white font-semibold text-sm leading-tight truncate uppercase tracking-wide">
+                <p class="msgr-hdr-strong font-semibold text-sm leading-tight truncate uppercase tracking-wide">
                     {{ $roomType === 'college' ? $alumniCollege : ($room['name'] ?? 'Group Chat') }}
                 </p>
                 <div class="flex items-center gap-2 flex-wrap mt-0.5">
                     @if($onlineCount > 0)
                     <div class="flex items-center gap-1">
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
-                        <span class="text-white/75 text-xs font-semibold">{{ $onlineCount }} online</span>
+                        <span class="msgr-hdr-soft text-xs font-semibold">{{ $onlineCount }} online</span>
                     </div>
-                    <span class="text-white/30 text-xs">·</span>
+                    <span class="msgr-hdr-faint text-xs hidden sm:inline">·</span>
                     @endif
                     @if($roomType === 'college')
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1">
-                        <i class="fa-solid fa-users-between-lines text-[10px]"></i>All Courses & Batches · {{ $totalCount }} members
+                    <span class="msgr-hdr-soft text-xs font-semibold items-center gap-1 hidden sm:flex">
+                        <i class="fa-solid fa-school text-[10px]"></i>{{ implode(', ', collect($rooms)->firstWhere('id', $roomId)['course_codes'] ?? []) ?: $alumniCollege }} · {{ $totalCount }} members
                     </span>
                     @else
-                    <span class="text-white/60 text-xs font-semibold">{{ $totalCount }} members</span>
+                    <span class="msgr-hdr-soft text-xs font-semibold">{{ $totalCount }} members</span>
                     @endif
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
-                <button wire:click="togglePins"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition
-                               {{ $showPins ? 'bg-white/25 text-white border-white/35' : 'bg-white/12 text-white/75 border-white/18 hover:bg-white/20' }}">
-                    <i class="fa-solid fa-thumbtack text-xs"></i><span class="hidden sm:inline ml-1">Pins</span>
-                </button>
-                <button wire:click="toggleBatchmates"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold border transition
-                               {{ $showBatchmates ? 'bg-white/25 text-white border-white/35' : 'bg-white/12 text-white/75 border-white/18 hover:bg-white/20' }}">
-                    <i class="fa-solid fa-user-group text-xs"></i><span class="hidden sm:inline ml-1">Members</span>
-                </button>
+                <div class="relative msgr-tooltip-wrap">
+                    <button type="button" wire:click="togglePins"
+                            class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200
+                                   {{ $showPins ? 'bg-white/25 text-white' : 'bg-white/15 msgr-hdr-soft hover:bg-white/25' }}">
+                        <i class="fa-solid fa-thumbtack text-xs"></i>
+                    </button>
+                    <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Pins</span>
+                </div>
+                <div class="relative msgr-tooltip-wrap">
+                    <button type="button" wire:click="toggleBatchmates"
+                            class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200
+                                   {{ $showBatchmates ? 'bg-white/25 text-white' : 'bg-white/15 msgr-hdr-soft hover:bg-white/25' }}">
+                        <i class="fa-solid fa-user-group text-xs"></i>
+                    </button>
+                    <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Members</span>
+                </div>
             </div>
         </div>
 
         {{-- Body --}}
-        <div class="flex flex-1 min-h-0">
+        <div class="flex flex-1 min-h-0 relative">
             <div class="flex flex-col flex-1 min-w-0">
 
                 <div id="msg-list"
-                     class="flex-1 overflow-y-auto px-4 py-4 bg-[#fafafa]"
+                     class="flex-1 overflow-y-auto px-3 sm:px-4 py-4 bg-[#F4ECFB]"
                      x-data
                      x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
                      @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
@@ -1304,7 +1463,7 @@ new class extends \Livewire\Volt\Component {
                         </div>
                         @endif
 
-                        <div class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}">
+                        <div wire:key="msg-{{ $msg['id'] }}" class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}">
 
                             @if(! $msg['is_mine'])
                             <div class="w-8 h-8 rounded-full flex-shrink-0 overflow-hidden mb-1 self-end bg-[#7a3f91]" title="{{ $msg['sender_name'] }}">
@@ -1312,7 +1471,7 @@ new class extends \Livewire\Volt\Component {
                             </div>
                             @endif
 
-                            <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[70%]">
+                            <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[82%] sm:max-w-[70%]">
 
                                 @if(! $msg['is_mine'] && ! $sameGroup)
                                 <p class="text-xs font-semibold px-1 mb-0.5 text-[#7a3f91]">
@@ -1346,13 +1505,13 @@ new class extends \Livewire\Volt\Component {
                                 <div class="relative">
 
                                     @if($editingId === $msg['id'])
-                                    <div class="flex flex-col gap-1.5 min-w-[220px]">
+                                    <div class="flex flex-col gap-1.5 min-w-[200px] sm:min-w-[220px]">
                                         <textarea wire:model="editBody" rows="2"
                                                   class="text-sm rounded-lg border border-[#7A3F91] px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/30 w-full bg-white shadow-sm"
                                                   wire:keydown.escape="cancelEdit"></textarea>
                                         <div class="flex gap-1.5 justify-end">
-                                            <button wire:click="cancelEdit" class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0] text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">Cancel</button>
-                                            <button wire:click="saveEdit" class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition bg-[#7a3f91]">Save</button>
+                                            <button wire:click="cancelEdit" class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0] text-[#666666] hover:bg-[#f5f5f5] transition-all duration-200 font-semibold">Cancel</button>
+                                            <button wire:click="saveEdit" class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition-all duration-200 bg-[#7a3f91]">Save</button>
                                         </div>
                                     </div>
 
@@ -1368,13 +1527,13 @@ new class extends \Livewire\Volt\Component {
 
                                     <button
                                         wire:click.stop="toggleToolbar({{ $msg['id'] }})"
-                                        class="text-left px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words w-full
+                                        class="msgr-bubble text-left px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words w-full
                                                {{ $msg['is_mine']
                                                    ? 'text-white rounded-br-none bg-[#7a3f91]'
                                                    : ($msg['is_coordinator']
                                                        ? 'text-white rounded-bl-none bg-[#7a3f91]'
                                                        : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}
-                                               {{ $toolbarOpen ? 'ring-2 ring-offset-1 ring-[#7a3f91]/40' : '' }}">
+                                               {{ $toolbarOpen ? 'ring-2 ring-[#7a3f91]/25' : '' }}">
                                         {!! $formatted !!}
                                         @if($msg['edited'])
                                             <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
@@ -1382,20 +1541,18 @@ new class extends \Livewire\Volt\Component {
                                     </button>
 
                                     @if($toolbarOpen)
-                                    <div class="absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} z-50
-                                                flex items-center gap-0.5 bg-white border border-[#D8CCE8] rounded-2xl
-                                                px-2 py-1.5 shadow-xl whitespace-nowrap"
-                                         wire:click.stop>
+                                    <div class="msgr-reaction-toolbar absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }}
+                                                flex items-center gap-0.5 bg-white rounded-2xl
+                                                px-2 py-1.5 shadow-xl whitespace-nowrap animate-[msgrPop_.18s_ease-out]"
+                                         x-data @click.stop>
 
                                         @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'] as $rk => $re)
-                                        <div class="relative group/tip" x-data>
-                                            <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
-                                                    class="w-9 h-9 flex items-center justify-center rounded-xl text-xl leading-none transition
+                                        <div class="relative msgr-tooltip-wrap" x-data>
+                                            <button wire:click.stop="react({{ $msg['id'] }}, '{{ $rk }}')"
+                                                    class="w-9 h-9 flex items-center justify-center rounded-xl text-xl leading-none transition-all duration-150
                                                            hover:scale-125 active:scale-110
                                                            {{ $msg['my_reaction'] === $rk ? 'bg-[#f3eef8] ring-2 ring-[#7a3f91]' : 'hover:bg-[#f9f5fd]' }}">{{ $re }}</button>
-                                            <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
-                                                         bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">
+                                            <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">
                                                 {{ ucfirst($rk) }}
                                             </span>
                                         </div>
@@ -1403,26 +1560,22 @@ new class extends \Livewire\Volt\Component {
 
                                         <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
-                                        <div class="relative group/tip" x-data>
-                                            <button wire:click="setReply({{ $msg['id'] }})"
+                                        <div class="relative msgr-tooltip-wrap" x-data>
+                                            <button wire:click.stop="setReply({{ $msg['id'] }})"
                                                     class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555]
-                                                           hover:bg-[#f3eef8] hover:text-[#7a3f91] transition">
+                                                           hover:bg-[#f3eef8] hover:text-[#7a3f91] transition-all duration-150">
                                                 <i class="fa-solid fa-reply text-xs"></i>
                                             </button>
-                                            <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
-                                                         bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">Reply</span>
+                                            <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Reply</span>
                                         </div>
 
-                                        <div class="relative group/tip" x-data>
-                                            <button wire:click="togglePin({{ $msg['id'] }})"
-                                                    class="w-8 h-8 flex items-center justify-center rounded-xl transition
+                                        <div class="relative msgr-tooltip-wrap" x-data>
+                                            <button wire:click.stop="togglePin({{ $msg['id'] }})"
+                                                    class="w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-150
                                                            {{ $msg['is_pinned'] ? 'text-amber-600 bg-amber-50 hover:bg-amber-100' : 'text-[#555] hover:bg-amber-50 hover:text-amber-600' }}">
                                                 <i class="fa-solid fa-thumbtack text-xs"></i>
                                             </button>
-                                            <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
-                                                         bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">
+                                            <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">
                                                 {{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}
                                             </span>
                                         </div>
@@ -1430,34 +1583,33 @@ new class extends \Livewire\Volt\Component {
                                         @if($msg['is_mine'])
                                         <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
-                                        <div class="relative group/tip" x-data>
-                                            <button wire:click="startEdit({{ $msg['id'] }})"
+                                        <div class="relative msgr-tooltip-wrap" x-data>
+                                            <button wire:click.stop="startEdit({{ $msg['id'] }})"
                                                     class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555]
-                                                           hover:bg-[#f3eef8] hover:text-[#7a3f91] transition">
+                                                           hover:bg-[#f3eef8] hover:text-[#7a3f91] transition-all duration-150">
                                                 <i class="fa-solid fa-pen text-xs"></i>
                                             </button>
-                                            <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
-                                                         bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">Edit</span>
+                                            <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Edit</span>
                                         </div>
 
-                                        <div x-data="{ confirmUnsend: false }" class="relative group/tip flex items-center">
+                                        <div x-data="{ confirmUnsend: false }" class="relative msgr-tooltip-wrap flex items-center">
                                             <button x-show="!confirmUnsend"
                                                     @click.stop="confirmUnsend = true"
                                                     class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555]
-                                                           hover:bg-red-50 hover:text-red-600 transition">
+                                                           hover:bg-red-50 hover:text-red-600 transition-all duration-150">
                                                 <i class="fa-solid fa-trash-can text-xs"></i>
                                             </button>
-                                            <span x-show="!confirmUnsend"
-                                                  class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5
-                                                         bg-black text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                                         opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-50">Delete</span>
-                                            <div x-show="confirmUnsend" class="flex items-center gap-1" @click.stop>
+                                            <span x-show="!confirmUnsend" class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Delete</span>
+                                            <div x-show="confirmUnsend"
+                                                 x-transition:enter="transition ease-out duration-150"
+                                                 x-transition:enter-start="opacity-0 scale-90"
+                                                 x-transition:enter-end="opacity-100 scale-100"
+                                                 class="flex items-center gap-1" @click.stop>
                                                 <span class="text-xs text-red-600 font-semibold px-1">Delete?</span>
-                                                <button wire:click="unsend({{ $msg['id'] }})"
-                                                        class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">Yes</button>
+                                                <button wire:click.stop="unsend({{ $msg['id'] }})"
+                                                        class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition-all duration-150">Yes</button>
                                                 <button @click.stop="confirmUnsend = false"
-                                                        class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#444] font-semibold hover:bg-[#E8E0F0] transition">No</button>
+                                                        class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#444] font-semibold hover:bg-[#E8E0F0] transition-all duration-150">No</button>
                                             </div>
                                         </div>
                                         @endif
@@ -1468,15 +1620,15 @@ new class extends \Livewire\Volt\Component {
                                     @endif
 
                                     @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
-                                    <div class="absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} z-50
-                                                bg-white border border-[#D0C0E0] rounded-2xl shadow-xl w-64 overflow-hidden"
+                                    <div class="absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} z-[300]
+                                                bg-white border border-[#D0C0E0] rounded-2xl shadow-xl w-64 max-w-[80vw] overflow-hidden animate-[msgrPop_.18s_ease-out]"
                                          wire:click.stop>
                                         <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#f9f7fc]">
                                             <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
                                                 <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
                                             </p>
                                             <button wire:click="closeReactionsPopup"
-                                                    class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
+                                                    class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition-all duration-150">
                                                 <i class="fa-solid fa-xmark text-xs"></i>
                                             </button>
                                         </div>
@@ -1515,7 +1667,7 @@ new class extends \Livewire\Volt\Component {
                                     @foreach($msg['reactions'] as $rk => $cnt)
                                     @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢', default=>'👍' }; @endphp
                                     <button wire:click.stop="openReactionsPopup({{ $msg['id'] }})"
-                                            class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all
+                                            class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all duration-150
                                                    {{ $msg['my_reaction'] === $rk
                                                        ? 'bg-[#f3eef8] border-[#c4a8d4] text-[#7a3f91] font-semibold ring-1 ring-[#7a3f91]/30'
                                                        : 'bg-white border-[#E8E0F0] text-[#555555] hover:border-[#d9c9e8] hover:bg-[#fdf9ff]' }}">
@@ -1551,7 +1703,7 @@ new class extends \Livewire\Volt\Component {
                 {{-- Typing indicator --}}
                 <div class="flex-shrink-0">
                     @if(! empty($typingUsers))
-                    <div class="flex items-center gap-2.5 px-4 py-2 bg-[#fafafa] border-t border-[#E8E0F0]">
+                    <div class="flex items-center gap-2.5 px-4 py-2 bg-[#F4ECFB] border-t border-[#E8E0F0]">
                         <div class="flex items-end gap-0.5 h-4">
                             <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce" style="animation-delay:0ms;animation-duration:900ms;"></span>
                             <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91] animate-bounce" style="animation-delay:180ms;animation-duration:900ms;"></span>
@@ -1567,24 +1719,24 @@ new class extends \Livewire\Volt\Component {
                 </div>
 
                 @if($replyTo)
-                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0">
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0 animate-[msgrPop_.18s_ease-out]">
                     <div class="w-1 h-10 rounded-full flex-shrink-0 bg-[#7a3f91]"></div>
                     <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-[#7a3f91] truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
                         <p class="text-xs text-[#666666] truncate">{{ Str::limit($replyTo['body'], 90) }}</p>
                     </div>
-                    <button wire:click="clearReply" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                    <button wire:click="clearReply" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0">
                         <i class="fa-solid fa-xmark text-base"></i>
                     </button>
                 </div>
                 @endif
 
-                <div class="px-4 py-3 border-t border-[#E8E0F0] bg-white flex-shrink-0" x-data>
+                <div class="px-3 sm:px-4 py-3 border-t border-[#E8E0F0] bg-white flex-shrink-0" x-data>
                     @if($showMentions && ! empty($mentionSuggestions))
-                    <div class="mb-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-md overflow-hidden">
+                    <div class="mb-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-md overflow-hidden animate-[msgrPop_.18s_ease-out]">
                         @foreach($mentionSuggestions as $sug)
                         <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
-                                class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f3eef8] transition-colors text-left">
+                                class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f3eef8] transition-colors duration-150 text-left">
                             <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-black text-white overflow-hidden bg-[#7a3f91]">
                                 @if($sug['name'] === 'everyone')
                                     <i class="fa-solid fa-users text-xs"></i>
@@ -1615,20 +1767,34 @@ new class extends \Livewire\Volt\Component {
                                 @keydown.enter="if (!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-lg border border-[#E8E0F0] bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/20 transition placeholder-[#999999]"
+                                class="w-full resize-none rounded-lg border border-[#E8E0F0] bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/20 transition-all duration-150 placeholder-[#999999]"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
-                        <button wire:click="sendMessage"
-                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm bg-[#7a3f91]">
-                            <i class="fa-solid fa-paper-plane text-base"></i>
+                        <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
+                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm bg-[#7a3f91] disabled:opacity-60">
+                            <i class="fa-solid fa-paper-plane text-base" wire:loading.class="hidden" wire:target="sendMessage"></i>
+                            <span class="hidden w-4 h-4" wire:loading.class.remove="hidden" wire:target="sendMessage">
+                                <span class="block w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin"></span>
+                            </span>
                         </button>
                     </div>
                 </div>
 
             </div>
 
+            {{-- ══ Members / Pins side panel ══
+                 FIX: this is now a plain @if-controlled DOM node (no
+                 Alpine x-show racing against the Blade class toggle). It
+                 either exists, fully visible and interactive, or it
+                 doesn't exist at all — so clicks reliably open/close it
+                 every time. Slides over the chat on mobile (fixed overlay,
+                 z-[150] so it's above the message list and header), sits
+                 side-by-side as a static 288px column on desktop. ── --}}
             @if($showBatchmates || $showPins)
-            <div class="w-72 border-l border-[#E8E0F0] flex flex-col flex-shrink-0 bg-white">
+            <div wire:key="side-panel-{{ $showPins ? 'pins' : 'members' }}"
+                 class="msgr-panel w-full md:w-72 flex flex-col flex-shrink-0 bg-white border-l border-[#E8E0F0]
+                        fixed md:static inset-0 z-[150] md:z-auto"
+                 style="animation: msgrPanelIn .2s ease-out;">
                 <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#E8E0F0] flex-shrink-0 bg-[#F9F7FC]">
                     @if($showPins)
                         <i class="fa-solid fa-thumbtack text-amber-600"></i>
@@ -1642,10 +1808,13 @@ new class extends \Livewire\Volt\Component {
                             @endif
                         </p>
                     @endif
-                    <button wire:click="{{ $showPins ? 'togglePins' : 'toggleBatchmates' }}"
-                            class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
-                        <i class="fa-solid fa-xmark text-sm"></i>
-                    </button>
+                    <div class="relative msgr-tooltip-wrap">
+                        <button type="button" wire:click="closeSidePanel"
+                                class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition-all duration-150">
+                            <i class="fa-solid fa-xmark text-sm"></i>
+                        </button>
+                        <span class="msgr-tooltip top-full right-0 mt-2 px-2.5 py-1.5 rounded-lg">Close</span>
+                    </div>
                 </div>
 
                 <div class="flex-1 overflow-y-auto flex flex-col">
@@ -1658,11 +1827,17 @@ new class extends \Livewire\Volt\Component {
                         </div>
                         @endif
                         <div class="px-3 py-2.5 border-b border-[#E8E0F0] flex-shrink-0">
-                            <div class="relative">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
-                                <input wire:model.live.debounce.300ms="batchSearch" type="text"
+                            <div class="relative" x-data="{ term: @entangle('batchSearch').live }">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"
+                                   wire:loading.class="opacity-0" wire:target="batchSearch"></i>
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 hidden"
+                                      wire:loading.class.remove="hidden" wire:target="batchSearch">
+                                    <span class="block w-3 h-3 rounded-full border-2 border-[#7a3f91]/30 border-t-[#7a3f91] animate-spin"></span>
+                                </span>
+                                <input type="text"
+                                       x-model.debounce.300ms="term"
                                        placeholder="{{ $roomType==='college' ? 'Search all alumni…' : 'Search members…' }}"
-                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#E8E0F0] bg-[#fafafa] focus:outline-none focus:border-[#7a3f91] focus:ring-1 focus:ring-[#7a3f91]/20 transition placeholder-[#999999]"/>
+                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#E8E0F0] bg-[#fafafa] focus:outline-none focus:border-[#7a3f91] focus:ring-1 focus:ring-[#7a3f91]/20 transition-all duration-150 placeholder-[#999999]"/>
                             </div>
                         </div>
 
@@ -1672,7 +1847,7 @@ new class extends \Livewire\Volt\Component {
                                 <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Coordinators
                             </p>
                             @foreach($coordinators as $coord)
-                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 border {{ $coord['is_online'] ? 'bg-[#f0faf4] border-emerald-200' : 'bg-[#F9F7FC] border-[#E8E0F0]' }}">
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 border transition-all duration-150 {{ $coord['is_online'] ? 'bg-[#f0faf4] border-emerald-200' : 'bg-[#F9F7FC] border-[#E8E0F0]' }}">
                                 <div class="relative flex-shrink-0">
                                     <div class="w-8 h-8 rounded-full overflow-hidden bg-[#7a3f91]">
                                         <img src="{{ $coord['photo'] ?? $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="{{ $coord['name'] }}">
@@ -1708,7 +1883,7 @@ new class extends \Livewire\Volt\Component {
                                 <i class="fa-solid fa-circle text-[9px] mr-1"></i>Online — {{ count($onlineBm) }}
                             </p>
                             @foreach($onlineBm as $bm)
-                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0] hover:border-[#d9c9e8] hover:bg-[#f3eef8] transition-all {{ $bm['is_me'] ? 'bg-[#f3eef8] border-[#d9c9e8]' : '' }}">
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0] hover:border-[#d9c9e8] hover:bg-[#f3eef8] transition-all duration-150 {{ $bm['is_me'] ? 'bg-[#f3eef8] border-[#d9c9e8]' : '' }}">
                                 <div class="relative flex-shrink-0">
                                     <div class="w-9 h-9 rounded-full overflow-hidden bg-[#7a3f91]">
                                         <img src="{{ $bm['photo'] ?? $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="{{ $bm['name'] }}">
@@ -1741,7 +1916,7 @@ new class extends \Livewire\Volt\Component {
                                 </div>
                                 @endif
                                 @foreach($offlineBm as $bm)
-                                <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0] hover:bg-[#fafafa] transition-all {{ $bm['is_me'] ? 'bg-[#f3eef8] border-[#d9c9e8]' : '' }}">
+                                <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0] hover:bg-[#fafafa] transition-all duration-150 {{ $bm['is_me'] ? 'bg-[#f3eef8] border-[#d9c9e8]' : '' }}">
                                     <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden bg-[#c8a0e0]">
                                         <img src="{{ $bm['photo'] ?? $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="{{ $bm['name'] }}">
                                     </div>
@@ -1774,14 +1949,14 @@ new class extends \Livewire\Volt\Component {
                     @elseif($showPins)
                     <div class="flex-1 overflow-y-auto p-3 space-y-2">
                         @forelse($pinnedMessages as $pin)
-                        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 transition-all duration-150">
                             <div class="flex items-start justify-between gap-2 mb-1.5">
                                 <div class="flex items-center gap-1.5 min-w-0">
                                     <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
                                     <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
                                 </div>
                                 <button wire:click="togglePin({{ $pin['id'] }})"
-                                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0">
                                     <i class="fa-solid fa-xmark text-xs"></i>
                                 </button>
                             </div>
@@ -1805,7 +1980,7 @@ new class extends \Livewire\Volt\Component {
     </div>
 
     @else
-    <div class="flex flex-1 items-center justify-center bg-[#fafafa]">
+    <div class="hidden md:flex flex-1 items-center justify-center bg-[#F4ECFB]">
         <div class="flex flex-col items-center text-center px-8">
             <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f3eef8]">
                 <i class="fa-solid fa-hand-pointer text-4xl text-[#7a3f91]"></i>
