@@ -276,8 +276,8 @@ new class extends Component {
             return;
         }
         $this->resetFormFields();
-        $this->start_time     = '08:00';
-        $this->end_time       = '17:00';
+        $this->start_time     = '18:00'; // 6:00 PM default
+        $this->end_time       = '23:59'; // 11:59 PM default
         $this->contact_person = $this->organizerName;
         $this->contact_email  = $this->organizerEmail;
         $this->isEditing      = false;
@@ -534,8 +534,8 @@ new class extends Component {
 
         $this->resetFormFields();
 
-        $this->start_time = '08:00';
-        $this->end_time   = '17:00';
+        $this->start_time = '18:00'; // 6:00 PM default
+        $this->end_time   = '23:59'; // 11:59 PM default
 
         $this->editingEventId = $savedId;
         $this->isEditing      = $savedIsEditing;
@@ -1055,7 +1055,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col" style="height: calc(100vh - 120px); max-height: calc(100vh - 120px); overflow: hidden;">
 
 <style>
 @keyframes modalIn {
@@ -1102,9 +1102,32 @@ select.tw-select-arrow {
     appearance: none;
     cursor: pointer;
 }
+
+/* ── Upcoming indicator badge ── */
+.eo-upcoming-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 999px;
+    background: #ECFDF5; color: #059669; border: 1px solid #6ee7b7;
+    white-space: nowrap;
+}
+
+/* ── Search / filter loading progress bar (same pattern as Alumni Records) ── */
+.eo-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
+.eo-filter-progress-bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
+    animation: eoFilterProgress 1s ease-in-out infinite;
+}
+@keyframes eoFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* ── Tooltips: never show on touch / small screens ── */
+@media (max-width: 768px), (hover: none) {
+    #eo-hover-tip { display: none !important; }
+}
 </style>
 
-{{-- Hover tooltip --}}
+{{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
 <div id="eo-hover-tip"
      class="fixed bg-[#1a1a1a] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)]"
      style="transform: translate(12px, -110%);">
@@ -1139,16 +1162,16 @@ select.tw-select-arrow {
 {{-- ══ MAIN LAYOUT ══ --}}
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
-    {{-- ══ PAGE HEADER ══ --}}
+    {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left) ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-calendar-days text-white text-lg"></i>
+        <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-calendar-days text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Event Management</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Event Management</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
                     Manage and submit events for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
                         <i class="fas fa-building-columns text-[9px]"></i>
@@ -1186,11 +1209,12 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 75vh; max-height: 75vh; overflow: hidden;">
+    {{-- ══ UNIFIED TABLE BLOCK (fixed-height card, scrolls internally — same pattern as Alumni Records) ══ --}}
+    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
@@ -1252,21 +1276,29 @@ select.tw-select-arrow {
             </button>
         </div>
 
-        {{-- ── TABLE WRAPPER ── --}}
-        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {{-- Filtering / searching progress bar --}}
+        <div class="eo-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus">
+            <div class="eo-filter-progress-bar"></div>
+        </div>
+
+        {{-- ── TABLE WRAPPER (fixed-height card, scrolls internally — same pattern as Alumni Records) ── --}}
+        <div class="relative flex-1 min-h-0">
+            <div id="eo-table-scroll"
+                 class="scroll-c h-full overflow-y-auto transition-opacity duration-200"
+                 wire:loading.class="opacity-60" wire:target="search,filterStatus">
 
             @if($this->events->count() > 0)
 
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
+            <div class="overflow-x-auto bg-white">
                 <table class="w-full bg-white border-collapse">
-                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
+                    <thead class="bg-white sticky top-0 z-10" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Date &amp; Time</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden xl:table-cell text-[#555555]">Course</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Date &amp; Time</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden xl:table-cell text-[#555555]">Course</th>
+                            <th class="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
+                            <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -1285,6 +1317,7 @@ select.tw-select-arrow {
 
                             $eventDate  = $event->event_date->setTimezone('Asia/Manila');
                             $rowNum     = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
+                            $isUpcoming = $isApproved && $eventDate->isFuture();
                         @endphp
 
                         <tr class="transition-colors duration-100 cursor-pointer {{ $isDeleted ? 'bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60' : 'bg-white hover:bg-[#f5f0fa]' }}"
@@ -1292,18 +1325,23 @@ select.tw-select-arrow {
                             wire:key="event-row-{{ $event->id }}"
                             data-eo-row>
 
-                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
+                            <td class="px-4 py-2.5 text-xs font-semibold text-purple-400 text-center">
                                 {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
                             </td>
 
-                            <td class="px-4 py-3.5">
+                            <td class="px-4 py-2.5">
                                 <div class="max-w-[240px]">
-                                    <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isDeleted ? 'text-red-400 line-through' : 'text-[#333333]' }}">{{ $event->title }}</p>
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isDeleted ? 'text-red-400 line-through' : 'text-[#333333]' }}">{{ $event->title }}</p>
+                                        @if($isUpcoming)
+                                            <span class="eo-upcoming-badge"><i class="fas fa-circle text-[6px]"></i>Upcoming</span>
+                                        @endif
+                                    </div>
                                     <p class="text-xs mt-0.5 text-[#666666]">{{ $eventDate->diffForHumans() }}</p>
                                 </div>
                             </td>
 
-                            <td class="px-4 py-3.5 hidden md:table-cell whitespace-nowrap">
+                            <td class="px-4 py-2.5 hidden md:table-cell whitespace-nowrap">
                                 <p class="text-sm font-semibold {{ $isDeleted ? 'text-red-300' : 'text-[#333333]' }}">{{ $eventDate->format('M d, Y') }}</p>
                                 <p class="text-xs mt-0.5 text-[#555555]">
                                     {{ $eventDate->format('g:i A') }}
@@ -1313,7 +1351,7 @@ select.tw-select-arrow {
                                 </p>
                             </td>
 
-                            <td class="px-4 py-3.5 hidden xl:table-cell">
+                            <td class="px-4 py-2.5 hidden xl:table-cell">
                                 <div class="flex flex-col gap-1">
                                     <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-100 w-fit max-w-[160px] truncate block">
                                         {{ Str::limit($displayCourses, 20) }}
@@ -1326,7 +1364,7 @@ select.tw-select-arrow {
                                 </div>
                             </td>
 
-                            <td class="px-4 py-3.5 text-center">
+                            <td class="px-4 py-2.5 text-center">
                                 @if($isCompleted)
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
                                         <i class="fas fa-circle-check text-[9px] mr-1"></i>Completed
@@ -1350,7 +1388,7 @@ select.tw-select-arrow {
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5">
+                            <td class="px-4 py-2.5">
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
 
                                     @if($isApproved || $isCompleted)
@@ -1407,7 +1445,7 @@ select.tw-select-arrow {
             </div>
 
             @else
-            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-calendar-days text-xl text-gray-400"></i>
                 </div>
@@ -1432,6 +1470,7 @@ select.tw-select-arrow {
             </div>
             @endif
 
+            </div>
         </div>
 
         {{-- ── PAGINATION ── --}}
@@ -1747,10 +1786,14 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    {{-- ══ ROW: on mobile it stacks vertically and the WHOLE row scrolls together
+         (no more per-column overflow-hidden clipping that was hiding Description/Notes),
+         on desktop (lg:) it goes back to fixed-height side-by-side columns each
+         scrolling independently, same as before. ══ --}}
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
         {{-- LEFT COLUMN --}}
-        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white"
+        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-visible lg:overflow-y-auto bg-white"
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
@@ -1934,8 +1977,8 @@ select.tw-select-arrow {
         </div>
 
         {{-- MIDDLE COLUMN --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
-            <div class="flex-1 min-h-0 overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
+        <div class="flex-1 min-w-0 flex flex-col overflow-visible lg:overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+            <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
                 <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
@@ -1983,7 +2026,7 @@ select.tw-select-arrow {
                                 </label>
                                 <div wire:ignore
                                      x-data="{
-                                         h: '8', m: '00', p: 'AM',
+                                         h: '6', m: '00', p: 'PM',
                                          init() {
                                              const raw = $wire.start_time;
                                              if (raw && raw.includes(':')) {
@@ -2003,7 +2046,7 @@ select.tw-select-arrow {
                                              $wire.set('start_time', String(hi).padStart(2, '0') + ':' + this.m);
                                          }
                                      }"
-                                     @reset-time-selects.window="h='8';m='00';p='AM';sync()"
+                                     @reset-time-selects.window="h='6';m='00';p='PM';sync()"
                                      class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['start_time']) ? 'border-red-400 bg-red-50' : 'border-gray-300 focus-within:border-[#7a3f91]' }}">
                                     <span class="flex items-center justify-center px-2 bg-white border-r border-gray-200">
                                         <i class="fas fa-clock text-gray-300 text-xs"></i>
@@ -2014,8 +2057,9 @@ select.tw-select-arrow {
                                         @endforeach
                                     </select>
                                     <span class="flex items-center px-1 bg-white border-x border-gray-200 text-[#555] font-semibold text-sm select-none">:</span>
+                                    {{-- Start time minutes: no :59 (only up to :50) --}}
                                     <select x-model="m" @change="sync()" class="text-[#333333]" title="Minute">
-                                        @foreach(['00','05','10','15','20','25','30','35','40','45','50','59'] as $mn)
+                                        @foreach(['00','05','10','15','20','25','30','35','40','45','50'] as $mn)
                                             <option value="{{ $mn }}">{{ $mn }}</option>
                                         @endforeach
                                     </select>
@@ -2033,7 +2077,7 @@ select.tw-select-arrow {
                                 </label>
                                 <div wire:ignore
                                      x-data="{
-                                         h: '5', m: '00', p: 'PM',
+                                         h: '11', m: '59', p: 'PM',
                                          init() {
                                              const raw = $wire.end_time;
                                              if (raw && raw.includes(':')) {
@@ -2053,7 +2097,7 @@ select.tw-select-arrow {
                                              $wire.set('end_time', String(hi).padStart(2, '0') + ':' + this.m);
                                          }
                                      }"
-                                     @reset-time-selects.window="h='5';m='00';p='PM';sync()"
+                                     @reset-time-selects.window="h='11';m='59';p='PM';sync()"
                                      class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['end_time']) ? 'border-red-400 bg-red-50' : 'border-gray-300 focus-within:border-[#7a3f91]' }}">
                                     <span class="flex items-center justify-center px-2 bg-white border-r border-gray-200">
                                         <i class="fas fa-clock text-gray-300 text-xs"></i>
@@ -2124,7 +2168,7 @@ select.tw-select-arrow {
         </div>
 
         {{-- RIGHT COLUMN --}}
-        <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto" style="scrollbar-width:thin;">
+        <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-visible lg:overflow-y-auto" style="scrollbar-width:thin;">
             <div class="p-3 space-y-3 flex-1">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -2334,6 +2378,9 @@ select.tw-select-arrow {
                     <p class="text-xs font-bold uppercase tracking-widest mb-1 text-[#333333]">Date &amp; Time</p>
                     <p class="text-lg font-bold text-[#333333]">{{ $eventDatePH->format('F d, Y') }}</p>
                     <p class="text-base font-semibold mt-0.5 text-[#333333]">{{ $timeDisplay }}</p>
+                    @if($isApproved && $eventDatePH->isFuture())
+                        <span class="eo-upcoming-badge mt-2"><i class="fas fa-circle text-[6px]"></i>Upcoming</span>
+                    @endif
                 </div>
 
                 @if($ev->venue)
@@ -2821,13 +2868,18 @@ select.tw-select-arrow {
 (function () {
     var tip = document.getElementById('eo-hover-tip');
 
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
+    }
+
     function bindRows() {
         document.querySelectorAll('[data-eo-row]').forEach(function (row) {
             if (row._eoTipBound) return;
             row._eoTipBound = true;
 
             row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
+                if (!tip || !isHoverCapable()) return;
                 var shareWrap = e.target.closest('[data-eo-share]');
                 if (shareWrap) {
                     tip.style.opacity = '0';

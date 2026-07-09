@@ -325,7 +325,7 @@ new class extends Component {
         <div class="org-profile-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
             {{-- Photo banner — organizer's actual profile picture, not an icon --}}
-            <div class="relative w-full overflow-hidden shrink-0 h-[300px] sm:h-[220px] bg-[#EDE0F5]">
+          <div class="relative w-full overflow-hidden shrink-0 h-[400px] sm:h-[240px] bg-[#EDE0F5]">
                 <img src="{{ $orgPhotoUrl }}"
                      alt="{{ $this->organizerName }}"
                      class="w-full h-full object-cover object-top"
@@ -411,7 +411,7 @@ new class extends Component {
                class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
                       active:scale-[.985] cursor-pointer block">
-                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employment Tracking</span>
+               <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Total Alumni</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow"
                          style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">

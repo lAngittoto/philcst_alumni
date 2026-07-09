@@ -255,34 +255,19 @@ new #[Layout('app')] class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Back to Home — LOG OUT
-    // ─────────────────────────────────────────────────────────────
-
-    public function backToHome(): void
-    {
-        $alumni = $this->getAlumni();
-        if ($alumni) {
-            if (!$alumni->isOtpStillActive()) {
-                $this->clearWizardCache($alumni->id);
-            }
-        }
-        Auth::logout();
-        session()->invalidate();
-        session()->regenerateToken();
-        $this->redirect('/');
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // Back to Login — LOG OUT (used by mid-wizard back buttons)
+    // Back to Login — LOG OUT
     //
-    // Previously, going back within Steps 2/3 just decremented the
-    // step (and blocked entirely while an OTP was still active,
-    // surfacing a "Back locked" warning). That's been removed —
-    // going back now always logs the alumni out and sends them to
-    // the login screen (route('login')), matching the forgot-password
-    // flow: they must re-authenticate before reaching the OTP step
-    // again. This always redirects to the LOGIN page, never to Home —
-    // "Back to Home" is a separate, distinct action (see backToHome()).
+    // FIX: previously this redirected to the literal string 'login'
+    // instead of route('login'). A raw string like that is resolved as
+    // a RELATIVE path off the current URL (e.g. /alumni/change-password
+    // → /alumni/login), which is why it 404'd instead of landing on the
+    // real /login page. Always use route('login') here.
+    //
+    // Note: this button used to be labeled "Back to Home" but always
+    // just logged the user out and (was meant to) send them to Login —
+    // there is no separate "Home" destination in this wizard. Renamed
+    // to backToLogin() to match what it actually does; the button label
+    // in the markup below now also reads "Back to Login".
     // ─────────────────────────────────────────────────────────────
 
     public function backToLogin(): void
@@ -624,22 +609,22 @@ new #[Layout('app')] class extends Component {
     {{-- Dark overlay --}}
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm z-0"></div>
 
-    {{-- Back to Home --}}
+    {{-- Back to Login --}}
     <div class="relative z-10 w-full max-w-2xl mb-4">
         <button
-            wire:click="backToHome"
+            wire:click="backToLogin"
             wire:loading.attr="disabled"
-            wire:target="backToHome"
+            wire:target="backToLogin"
             class="inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors font-semibold text-sm group">
             <div class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/30 bg-white/10 group-hover:border-white/60 group-hover:bg-white/20 transition-all shadow-sm">
-                <span wire:loading.remove wire:target="backToHome"><i class="fa-solid fa-arrow-left text-sm"></i></span>
-                <span wire:loading wire:target="backToHome" x-cloak class="flex gap-0.5">
+                <span wire:loading.remove wire:target="backToLogin"><i class="fa-solid fa-arrow-left text-sm"></i></span>
+                <span wire:loading wire:target="backToLogin" x-cloak class="flex gap-0.5">
                     <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
                     <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
                     <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
                 </span>
             </div>
-            <span>Back to Home</span>
+            <span>Back to Login</span>
         </button>
     </div>
 
