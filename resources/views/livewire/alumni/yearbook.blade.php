@@ -173,7 +173,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow:hidden;">
 
 <style>
 /* ── Base ──────────────────────────────────────────────── */
@@ -395,7 +395,7 @@ new class extends Component {
 }
 </style>
 
-<div class="flex flex-col gap-4 px-4 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col gap-4 px-4 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow:hidden;">
 
     {{-- PAGE HEADER --}}
     <div class="flex flex-col gap-3 flex-shrink-0">

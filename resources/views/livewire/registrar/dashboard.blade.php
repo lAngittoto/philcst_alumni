@@ -405,6 +405,11 @@ new class extends Component {
         .ar-filter-progress-track { height:2px;width:100%;overflow:hidden;background:transparent;position:relative; }
         .ar-filter-progress-bar { position:absolute;top:0;left:0;height:100%;width:40%;border-radius:99px;background:linear-gradient(135deg,#7A3F91,#9b59b6);animation:arFilterProgress 1s ease-in-out infinite; }
         @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
+
+        /* ── Mobile: hover tooltips don't work on touch, hide them ─── */
+        @media (max-width: 1023px) {
+            .ar-tip { display: none !important; }
+        }
     </style>
 
     <div id="__dash_batch_data" class="hidden"
@@ -437,7 +442,7 @@ new class extends Component {
             <a href="{{ route('registrar.alumni') }}?profile_filter=all"
                class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] block no-underline">
-                <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
+                <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
                              opacity-0 z-50 shadow-lg
@@ -466,7 +471,7 @@ new class extends Component {
             <a href="{{ route('registrar.alumni') }}?profile_filter=complete"
                class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985] block no-underline">
-                <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
+                <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
                              opacity-0 z-50 shadow-lg
@@ -494,7 +499,7 @@ new class extends Component {
             <a href="{{ route('registrar.alumni') }}?profile_filter=incomplete"
                class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] block no-underline">
-                <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
+                <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
                              opacity-0 z-50 shadow-lg
@@ -522,7 +527,7 @@ new class extends Component {
             <div wire:click="openAlumniModal('courses')"
                  class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                         hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985]">
-                <span class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
+                <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
                              opacity-0 z-50 shadow-lg
@@ -590,28 +595,18 @@ new class extends Component {
                         <canvas id="dashEmpPieChart" style="max-width:100%; max-height:100%;"></canvas>
                     </div>
 
-                    {{-- Legend --}}
+                    {{-- Legend (display-only — not clickable, no tooltip) --}}
                     <div class="grid grid-cols-2 gap-1.5" id="dashEmpPieLegend">
                         @php
                             $legendRows = [
-                                ['label'=>'Employed',      'count'=>$ec['employed'],   'color'=>'#7A3F91', 'filter'=>'employed',      'tip'=>'View Employed'],
-                                ['label'=>'Self-Employed', 'count'=>$ec['self'],        'color'=>'#2563eb', 'filter'=>'self_employed',  'tip'=>'View Self-Employed'],
-                                ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'color'=>'#d97706', 'filter'=>'unemployed',     'tip'=>'View Unemployed'],
-                                ['label'=>'No Record',     'count'=>$ec['noRecord'],   'color'=>'#b0b7c3', 'filter'=>'no_record',      'tip'=>'View No Record'],
+                                ['label'=>'Employed',      'count'=>$ec['employed'],   'color'=>'#7A3F91'],
+                                ['label'=>'Self-Employed', 'count'=>$ec['self'],       'color'=>'#2563eb'],
+                                ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'color'=>'#d97706'],
+                                ['label'=>'No Record',     'count'=>$ec['noRecord'],   'color'=>'#b0b7c3'],
                             ];
                         @endphp
                         @foreach($legendRows as $leg)
-                        <div wire:click="openEmpModal('{{ $leg['filter'] }}')"
-                             class="relative overflow-visible flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer
-                                    hover:bg-gray-50 active:scale-95 transition-all duration-100 group">
-                            <span class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2
-                                         bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
-                                         px-[10px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
-                                         opacity-0 group-hover:opacity-100 z-50 shadow-lg transition-opacity duration-150
-                                         before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
-                                         before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]">
-                                <i class="fas fa-eye mr-1" style="font-size:.6rem;"></i>{{ $leg['tip'] }}
-                            </span>
+                        <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg">
                             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $leg['color'] }};"></span>
                             <span class="text-[11px] font-semibold text-[#111111] truncate">{{ $leg['label'] }}</span>
                             <span class="text-[11px] font-bold ml-auto shrink-0" style="color:{{ $leg['color'] }};">{{ number_format($leg['count']) }}</span>
@@ -718,7 +713,7 @@ new class extends Component {
                         class="relative flex items-center justify-center w-9 h-9 rounded-[10px]
                                bg-white/[.12] border border-white/20 text-white cursor-pointer
                                hover:bg-white/[.22] transition-colors duration-150 overflow-visible group">
-                    <span class="absolute top-[calc(100%+8px)] right-0
+                    <span class="ar-tip absolute top-[calc(100%+8px)] right-0
                                  bg-[rgba(27,6,46,.88)] text-white text-[10px] font-bold tracking-[.08em] uppercase
                                  px-[10px] py-1 rounded-[7px] whitespace-nowrap pointer-events-none
                                  opacity-0 group-hover:opacity-100 z-50 shadow-lg
@@ -1097,7 +1092,7 @@ new class extends Component {
                         class="relative flex items-center justify-center w-9 h-9 rounded-[10px]
                                bg-white/[.12] border border-white/20 text-white cursor-pointer
                                hover:bg-white/[.22] transition-colors duration-150 overflow-visible group">
-                    <span class="absolute top-[calc(100%+8px)] right-0
+                    <span class="ar-tip absolute top-[calc(100%+8px)] right-0
                                  bg-[rgba(27,6,46,.88)] text-white text-[10px] font-bold tracking-[.08em] uppercase
                                  px-[10px] py-1 rounded-[7px] whitespace-nowrap pointer-events-none
                                  opacity-0 group-hover:opacity-100 z-50 shadow-lg

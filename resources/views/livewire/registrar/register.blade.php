@@ -987,6 +987,10 @@ new class extends Component {
         border-top-color: #1a1a1a;
     }
     .import-btn-wrap:hover .import-btn-tooltip { opacity: 1; }
+    /* Tooltip never shows on touch / small screens */
+    @media (max-width: 768px), (hover: none) {
+        .import-btn-tooltip { display: none !important; }
+    }
 
     /* ══ SUCCESS TOAST — compact auto-dismiss ══ */
     @keyframes successSlideIn {
@@ -1003,18 +1007,6 @@ new class extends Component {
     }
     .success-toast.dismissing {
         animation: successSlideOut .3s cubic-bezier(.4,0,.2,1) forwards;
-    }
-    @keyframes toastDrain {
-        from { width: 100%; }
-        to   { width: 0%; }
-    }
-    .toast-progress {
-        position: absolute;
-        bottom: 0; left: 0;
-        height: 3px;
-        border-radius: 0 0 0 10px;
-        background: linear-gradient(90deg, #059669, #34d399);
-        animation: toastDrain 5s linear forwards;
     }
 
     /* ── Dropzone shimmer ── */
@@ -1176,30 +1168,50 @@ new class extends Component {
     }
     .import-result-list::-webkit-scrollbar { width: 4px; }
     .import-result-list::-webkit-scrollbar-thumb { background: #c49ed8; border-radius: 99px; }
+
+    /* ── Modal close-button tooltip: hide on mobile / touch ── */
+    @media (max-width: 768px), (hover: none) {
+        .import-modal-box .group span.pointer-events-none { display: none !important; }
+    }
+
+    /* ── Page scroll area (contains the page inside the viewport, no bottom buffer) ── */
+    #reg-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: #d4b8e8 transparent;
+    }
+    #reg-scroll::-webkit-scrollbar { width: 6px; }
+    #reg-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+
+    /* ── Panel entrance animation (same as alumni-records) ── */
+    @keyframes regPanelIn {
+        from { opacity:0; transform:translateY(10px) scale(.99); }
+        to   { opacity:1; transform:none; }
+    }
+    .reg-panel { animation: regPanelIn .18s cubic-bezier(.4,0,.2,1) both; }
 </style>
 
 {{-- ══ PAGE ══ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-4 max-w-screen-2xl mx-auto" style="min-height:90vh;">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-3 max-w-screen-2xl mx-auto" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
     {{-- Header --}}
-    <div class="flex items-center justify-between gap-3 mb-6">
+    <div class="flex items-center justify-between gap-3 mb-3 shrink-0">
         <div class="flex items-center gap-3">
-            <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center shadow-md shrink-0"
-                 style="background:linear-gradient(135deg,#8A4DA3,#6E3680);">
-                <i class="fas fa-user-plus text-white text-lg"></i>
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-user-plus text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-2xl sm:text-3xl font-bold text-[#2A2A2A] leading-tight tracking-tight">Register Alumni</h1>
-                <p class="text-[#777777] text-sm font-medium mt-0.5">Add new alumni to the system with their details and credentials</p>
+                <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Register Alumni</h1>
+                <p class="text-[#666666] text-xs sm:text-sm font-normal">Add new alumni to the system with their details and credentials</p>
             </div>
         </div>
 
         <div class="import-btn-wrap">
             <span class="import-btn-tooltip">Import from Excel</span>
             <button wire:click="openImportModal"
-                    class="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center text-white shadow-md transition hover:shadow-lg hover:-translate-y-0.5 active:scale-95 shrink-0"
-                    style="background:linear-gradient(135deg,#8A4DA3,#6E3680);">
-                <i class="fas fa-file-import text-base"></i>
+                    class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-white shadow-lg transition hover:shadow-xl hover:-translate-y-0.5 active:scale-95 shrink-0"
+                    style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-file-import text-sm"></i>
             </button>
         </div>
     </div>
@@ -1222,9 +1234,8 @@ new class extends Component {
                 setTimeout(() => { $wire.clearSuccess(); }, 300);
             }
         }"
-        class="success-toast relative mb-4 inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm self-start"
+        class="success-toast relative mb-3 shrink-0 inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm self-start"
         style="min-width:0; max-width:560px;">
-        <span class="toast-progress"></span>
         <i class="fas fa-circle-check text-emerald-500 text-base shrink-0"></i>
         <p class="text-sm font-semibold text-emerald-800 leading-snug pr-1">{{ $successMsg }}</p>
         <button @click="dismiss()"
@@ -1234,15 +1245,16 @@ new class extends Component {
     </div>
     @endif
 
-    {{-- Main Layout --}}
-    <div class="flex-1 flex items-start justify-center pt-1">
+    {{-- ══ Scrollable body (fills remaining height, no page-level scroll/buffer) ══ --}}
+    <div id="reg-scroll" class="flex-1 min-h-0 overflow-y-auto">
+    <div class="flex items-start justify-center pt-1 pb-4">
         <div class="w-full flex gap-5 items-start justify-center
                     {{ count($formErrors) > 0 ? 'max-w-5xl' : 'max-w-2xl' }}
                     transition-all duration-300">
 
             {{-- ── Form Column ── --}}
             <div class="{{ count($formErrors) > 0 ? 'flex-1 min-w-0' : 'w-full' }}">
-                <div class="reg-card">
+                <div class="reg-card reg-panel">
                     <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-5 pb-7">
 
                         {{-- Full Name --}}
@@ -1619,6 +1631,7 @@ new class extends Component {
 
         </div>
     </div>
+    </div>{{-- end reg-scroll --}}
 </div>
 
 {{-- ══ IMPORT MODAL ══ --}}

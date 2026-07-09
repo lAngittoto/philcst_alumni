@@ -564,8 +564,45 @@ new #[Layout('app')] class extends Component {
             transform: translateY(-50%) translateX(0);
         }
 
+        /* FIX: on mobile there's no real hover state — touch simulates it,
+           which made this tooltip pop up and sometimes get stuck visible.
+           Hide it entirely on small/mobile screens; desktop hover stays. */
+        @media (max-width: 640px) {
+            .lg-back-tooltip { display: none !important; }
+        }
+
         /* ── Guide modal ── */
         .guide-bd { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+
+        /* ── Guide modal card: wide/landscape on desktop, full-screen on mobile ── */
+        .guide-modal-card {
+            position: relative;
+            width: 100%;
+            max-width: 860px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            max-height: 90vh;
+        }
+
+        /* Steps laid out side-by-side (landscape) on wider screens */
+        .guide-steps-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.75rem;
+        }
+        @media (min-width: 640px) {
+            .guide-steps-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            .guide-step {
+                flex-direction: column;
+                gap: 0.6rem;
+            }
+        }
 
         /* ── Guide step row ── */
         .guide-step {
@@ -702,6 +739,37 @@ new #[Layout('app')] class extends Component {
         }
         .guide-close-btn:hover  { background: #6B3680; transform: translateY(-1px); }
         .guide-close-btn:active { transform: scale(0.985); }
+
+        /* ── MOBILE: full-screen guide modal, no scroll, compact type ── */
+        @media (max-width: 640px) {
+            .guide-bd { padding: 0 !important; align-items: stretch !important; }
+
+            .guide-modal-card {
+                max-width: 100%;
+                width: 100%;
+                height: 100dvh;
+                max-height: 100dvh;
+                border-radius: 0;
+            }
+
+            .guide-modal-header { padding: 1.1rem 1.25rem 0.9rem !important; }
+            .guide-modal-body   { padding: 1rem 1.25rem !important; gap: 0.6rem !important; }
+
+            .guide-step        { padding: 0.8rem 1rem; gap: 0.75rem; }
+            .guide-step-num    { width: 22px; height: 22px; font-size: 0.68rem; }
+            .guide-step-title  { font-size: 0.65rem; }
+            .guide-step-body   { font-size: 0.82rem; line-height: 1.5; }
+
+            .guide-formula        { padding: 0.85rem 1rem; }
+            .guide-formula-label  { font-size: 0.6rem; margin-bottom: 0.55rem; }
+            .guide-chip            { font-size: 0.75rem; padding: 0.2rem 0.55rem; }
+            .guide-example          { margin-top: 0.55rem; padding-top: 0.55rem; }
+
+            .guide-warning     { padding: 0.75rem 0.9rem; }
+            .guide-warning-txt { font-size: 0.8rem; line-height: 1.55; }
+
+            .guide-close-btn { padding: 0.85rem; font-size: 0.75rem; }
+        }
     </style>
 
     {{-- Back button — hidden when guide modal is open --}}
@@ -873,40 +941,42 @@ new #[Layout('app')] class extends Component {
              x-transition:leave-start="opacity-100 scale-100 translate-y-0"
              x-transition:leave-end="opacity-0 scale-95 translate-y-3"
              @click.stop="null"
-             class="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+             class="guide-modal-card">
 
             {{-- Modal Header --}}
-            <div class="px-8 pt-7 pb-6 border-b border-[#F0F0F0] shrink-0">
+            <div class="guide-modal-header px-8 pt-7 pb-6 border-b border-[#F0F0F0] shrink-0">
                 <p style="font-family:'Inter',sans-serif; font-size:0.62rem; font-weight:700; letter-spacing:0.2em; text-transform:uppercase; color:#333333; margin-bottom:0.3rem;">First-Time Login Guide</p>
                 <h2 style="font-family:'Inter',sans-serif; font-size:1.2rem; font-weight:700; color:#7A3F91; margin:0; line-height:1.25;">Welcome, Alumni</h2>
                 <p style="font-family:'Inter',sans-serif; font-size:0.875rem; color:#333333; margin:0.3rem 0 0; line-height:1.5;">Follow these steps to access your account for the first time.</p>
             </div>
 
             {{-- Modal Body --}}
-            <div class="px-8 py-6 overflow-y-auto space-y-3" style="scrollbar-width:thin; scrollbar-color:#DDDDDD #F9F9F9;">
+            <div class="guide-modal-body px-8 py-6 overflow-y-auto flex flex-col gap-3" style="scrollbar-width:thin; scrollbar-color:#DDDDDD #F9F9F9;">
 
-                {{-- Steps --}}
-                <div class="guide-step">
-                    <div class="guide-step-num">1</div>
-                    <div>
-                        <p class="guide-step-title">Enter Your Student ID</p>
-                        <p class="guide-step-body">Use your 8-digit Student ID as your username (e.g. <span class="guide-code">00037801</span>).</p>
+                {{-- Steps — side-by-side on wider screens, stacked on mobile --}}
+                <div class="guide-steps-grid">
+                    <div class="guide-step">
+                        <div class="guide-step-num">1</div>
+                        <div>
+                            <p class="guide-step-title">Enter Your Student ID</p>
+                            <p class="guide-step-body">Use your 8-digit Student ID as your username (e.g. <span class="guide-code">00037801</span>).</p>
+                        </div>
                     </div>
-                </div>
 
-                <div class="guide-step">
-                    <div class="guide-step-num">2</div>
-                    <div>
-                        <p class="guide-step-title">Use the Default Password</p>
-                        <p class="guide-step-body">Your default password is your Student ID + underscore + first 2 letters of your last name.</p>
+                    <div class="guide-step">
+                        <div class="guide-step-num">2</div>
+                        <div>
+                            <p class="guide-step-title">Use the Default Password</p>
+                            <p class="guide-step-body">Your default password is your Student ID + underscore + first 2 letters of your last name.</p>
+                        </div>
                     </div>
-                </div>
 
-                <div class="guide-step">
-                    <div class="guide-step-num">3</div>
-                    <div>
-                        <p class="guide-step-title">Set Up Your Account</p>
-                        <p class="guide-step-body">After logging in, you will be guided to change your password and complete your profile.</p>
+                    <div class="guide-step">
+                        <div class="guide-step-num">3</div>
+                        <div>
+                            <p class="guide-step-title">Set Up Your Account</p>
+                            <p class="guide-step-body">After logging in, you will be guided to change your password and complete your profile.</p>
+                        </div>
                     </div>
                 </div>
 

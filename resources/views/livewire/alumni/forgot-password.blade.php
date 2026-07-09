@@ -26,7 +26,27 @@ new #[Layout('app')] class extends Component {
     public bool   $otpLocked  = false;
     public string $maskedEmail = '';
 
+    // ── OTP countdown source of truth ────────────────────────────────────
+    // Epoch milliseconds when the current OTP expires. This ALWAYS comes
+    // straight from the alumni.otp_expires_at DB column (never guessed on
+    // the front-end), and is entangled with the Alpine timer component so
+    // the visible countdown can never drift from the real deadline —
+    // whether the page is freshly loaded, restored via browser back/
+    // forward, or a brand-new code was just requested.
+    public int $otpExpiresAtMs = 0;
+
     public int $step3RemainingSeconds = 600;
+
+    // ── "Request New Code" lockout (Step 1 button) ───────────────────────
+    // After MAX_RESEND_ATTEMPTS (3) sends within the current window, the
+    // account is locked for RESEND_LOCK_MINUTES (30 mins). This is tracked
+    // independently of the normal wizard session (via the
+    // 'alumni_forgot_locked_id' session key) so that even if the user
+    // resets back to Step 1 — via browser Back, refresh, or restarting —
+    // the "Send Verification Code" button on Step 1 stays disabled with a
+    // live countdown for as long as the lock is genuinely still active.
+    public bool $sendLocked        = false;
+    public int  $sendLockedUntilMs = 0;
 
     public string $password              = '';
     public string $password_confirmation = '';
@@ -39,14 +59,21 @@ new #[Layout('app')] class extends Component {
     public string $studentIdError   = '';
     public string $emailError       = '';
     public bool   $showSuccessModal = false;
+    public bool   $showResendLockedModal = false;
 
-    private const STEP3_TTL_MINUTES = 10;
+    private const STEP3_TTL_MINUTES     = 10;
+    private const MAX_RESEND_ATTEMPTS   = 3;
+    private const RESEND_LOCK_MINUTES   = 30;
 
-    private function cacheEmailKey(int $id): string         { return "fp_email:{$id}"; }
-    private function cacheOtpLockKey(int $id): string       { return "fp_otp_locked:{$id}"; }
-    private function cacheOtpAttemptsKey(int $id): string   { return "fp_otp_attempts:{$id}"; }
-    private function cacheLastResetKey(int $id): string     { return "fp_last_reset:{$id}"; }
-    private function cacheStep3DeadlineKey(int $id): string { return "fp_step3_deadline:{$id}"; }
+    private const SESSION_LOCKED_ID_KEY = 'alumni_forgot_locked_id';
+
+    private function cacheEmailKey(int $id): string           { return "fp_email:{$id}"; }
+    private function cacheOtpLockKey(int $id): string         { return "fp_otp_locked:{$id}"; }
+    private function cacheOtpAttemptsKey(int $id): string     { return "fp_otp_attempts:{$id}"; }
+    private function cacheLastResetKey(int $id): string       { return "fp_last_reset:{$id}"; }
+    private function cacheStep3DeadlineKey(int $id): string   { return "fp_step3_deadline:{$id}"; }
+    private function cacheResendAttemptsKey(int $id): string  { return "fp_resend_attempts:{$id}"; }
+    private function cacheResendLockKey(int $id): string      { return "fp_resend_locked:{$id}"; }
     private function rateLimitKey(): string                  { return 'fp_verify_' . request()->ip(); }
 
     private function clearAllErrors(): void
@@ -97,6 +124,141 @@ new #[Layout('app')] class extends Component {
         return $id ? Alumni::find($id) : null;
     }
 
+    /**
+     * Sync the front-end countdown to the REAL otp_expires_at column for
+     * this alumni. Called any time we (re)enter step 2 — fresh send,
+     * resend, or restoring after browser back/forward/refresh — so the
+     * visible timer is always derived from the database, never guessed.
+     */
+    private function syncOtpExpiry(Alumni $alumni): void
+    {
+        $this->otpExpiresAtMs = $alumni->otp_expires_at
+            ? $alumni->otp_expires_at->getTimestamp() * 1000
+            : 0;
+    }
+
+    /**
+     * Sync the "Request New Code" lockout state from the DB/cache, and
+     * decide whether Step 1's send button should be disabled with a live
+     * countdown. Driven by an independent session key
+     * (SESSION_LOCKED_ID_KEY) rather than the normal wizard session, so
+     * the lock survives a full reset back to Step 1 — the whole point is
+     * that going back to Step 1 does NOT clear a real, still-active lock.
+     *
+     * The cache value under cacheResendLockKey() now stores the ISO8601
+     * expiry timestamp itself (not just `true`), so the exact remaining
+     * time can be shown instead of a static "30 minutes" message.
+     */
+    private function checkAndSyncSendLock(): void
+    {
+        $lockedId = session(self::SESSION_LOCKED_ID_KEY);
+
+        if (!$lockedId) {
+            $this->sendLocked        = false;
+            $this->sendLockedUntilMs = 0;
+            return;
+        }
+
+        $expiry = cache()->get($this->cacheResendLockKey((int) $lockedId));
+
+        if ($expiry && \Carbon\Carbon::parse($expiry)->isFuture()) {
+            $this->sendLocked        = true;
+            $this->sendLockedUntilMs = \Carbon\Carbon::parse($expiry)->getTimestamp() * 1000;
+        } else {
+            $this->sendLocked        = false;
+            $this->sendLockedUntilMs = 0;
+            session()->forget(self::SESSION_LOCKED_ID_KEY);
+        }
+    }
+
+    /**
+     * Marks the given alumni as locked out of sending any new code (fresh
+     * OR resend) for RESEND_LOCK_MINUTES, and immediately syncs the
+     * front-end lock state so Step 1's button reflects it right away.
+     */
+    private function lockSending(int $alumniId): void
+    {
+        $expiry = now()->addMinutes(self::RESEND_LOCK_MINUTES);
+        cache()->put($this->cacheResendLockKey($alumniId), $expiry->toIso8601String(), $expiry);
+        cache()->forget($this->cacheResendAttemptsKey($alumniId));
+
+        session([self::SESSION_LOCKED_ID_KEY => $alumniId]);
+        $this->checkAndSyncSendLock();
+        $this->showResendLockedModal = true;
+    }
+
+    // ── Shared step-restoration helpers ─────────────────────────────────────
+    // Used by both mount() (page load / refresh) and goToWizardStep()
+    // (browser back/forward navigation), so both entry points behave
+    // identically and neither one ever triggers a fresh OTP send.
+
+    private function tryRestoreStep2(int $alumniId): bool
+    {
+        $alumni = Alumni::find($alumniId);
+
+        // Only restore Step 2 if there is a REAL, still-valid OTP in the
+        // database for this alumni. Previously this only checked whether a
+        // cache key existed, which meant Step 2 could be "restored" with an
+        // already-expired OTP and a timer that lied about how much time was
+        // left. Checking the DB directly is what actually fixes that.
+        if (!$alumni || !$alumni->isOtpStillActive()) {
+            return false;
+        }
+
+        $cachedEmail  = cache()->get($this->cacheEmailKey($alumniId));
+        $displayEmail = $cachedEmail ?: $alumni->email;
+
+        if (!$displayEmail) {
+            return false;
+        }
+
+        $this->maskedEmail           = $this->maskEmail($displayEmail);
+        $this->otpLocked             = cache()->has($this->cacheOtpLockKey($alumniId));
+        $this->otpSent               = true;
+        $this->otp                   = '';
+        $this->password              = '';
+        $this->password_confirmation = '';
+        $this->syncOtpExpiry($alumni);
+        $this->step                  = 2;
+        return true;
+    }
+
+    private function tryRestoreStep3(int $alumniId): bool
+    {
+        $deadline = cache()->get($this->cacheStep3DeadlineKey($alumniId));
+        if (!$deadline || \Carbon\Carbon::parse($deadline)->isPast()) {
+            return false;
+        }
+
+        $cached                      = cache()->get($this->cacheEmailKey($alumniId));
+        $this->maskedEmail           = $cached ? $this->maskEmail($cached) : '';
+        $this->step3RemainingSeconds = max(0, \Carbon\Carbon::parse($deadline)->getTimestamp() - now()->getTimestamp());
+        $this->step                  = 3;
+        return true;
+    }
+
+    private function resetToStep1(): void
+    {
+        $alumniId = session('alumni_forgot_id');
+        if ($alumniId) {
+            cache()->forget($this->cacheStep3DeadlineKey($alumniId));
+        }
+        session()->forget(['alumni_forgot_id', 'alumni_forgot_step']);
+
+        $this->reset([
+            'studentId', 'email', 'otp', 'password', 'password_confirmation',
+            'otpSent', 'otpLocked', 'maskedEmail', 'showSuccessModal', 'otpExpiresAtMs',
+        ]);
+        $this->clearAllErrors();
+        $this->step = 1;
+
+        // Deliberately NOT forgetting SESSION_LOCKED_ID_KEY here — a real,
+        // still-active "too many requests" lock must keep Step 1's send
+        // button disabled even after a full wizard reset. It only clears
+        // itself once it's genuinely expired (see checkAndSyncSendLock()).
+        $this->checkAndSyncSendLock();
+    }
+
     public function mount(): void
     {
         if (Auth::check()) {
@@ -112,37 +274,90 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // Sync the Step 1 "Request New Code" lockout state unconditionally
+        // — independent of which step we end up landing on below — so it's
+        // always accurate the moment Step 1 is (re)rendered.
+        $this->checkAndSyncSendLock();
+
         $alumniId = session('alumni_forgot_id');
         $step     = session('alumni_forgot_step', 1);
 
         if ($alumniId && $step === 3) {
-            $deadline = cache()->get($this->cacheStep3DeadlineKey($alumniId));
-
-            if (!$deadline || \Carbon\Carbon::parse($deadline)->isPast()) {
-                session()->forget(['alumni_forgot_id', 'alumni_forgot_step']);
-                cache()->forget($this->cacheStep3DeadlineKey($alumniId));
-                $this->errorMessage = 'For your security, this password reset session has expired. Please verify your identity again.';
-                $this->step = 1;
+            if ($this->tryRestoreStep3($alumniId)) {
                 return;
             }
-
-            $cached                      = cache()->get($this->cacheEmailKey($alumniId));
-            $this->maskedEmail           = $cached ? $this->maskEmail($cached) : '';
-            $this->step3RemainingSeconds = max(0, \Carbon\Carbon::parse($deadline)->getTimestamp() - now()->getTimestamp());
-            $this->step                  = 3;
+            session()->forget(['alumni_forgot_id', 'alumni_forgot_step']);
+            $this->errorMessage = 'For your security, this password reset session has expired. Please verify your identity again.';
+            $this->step = 1;
             return;
         }
 
+        // FIX: previously, refreshing the page while on Step 2 (OTP) would
+        // unconditionally forget the session and force the user back to
+        // Step 1 — kicking them back to the "login"/verify screen even
+        // though their OTP session was still valid. Now we restore Step 2
+        // the same way Step 3 is restored above, only resetting to Step 1
+        // if the OTP session has genuinely expired.
         if ($alumniId && $step === 2) {
+            if ($this->tryRestoreStep2($alumniId)) {
+                return;
+            }
             session()->forget(['alumni_forgot_id', 'alumni_forgot_step']);
+            $this->errorMessage = 'For your security, this password reset session has expired. Please verify your identity again.';
+            $this->step = 1;
+            return;
         }
 
         $this->step = 1;
     }
 
+    /**
+     * FIX: browser Back/Forward (popstate) now navigates the wizard itself
+     * instead of leaving the page or doing nothing. Pressing Back always
+     * lands cleanly on Step 1 WITHOUT sending a new OTP — it just restores
+     * the form. Pressing Forward again restores whichever step is still
+     * legitimately valid (based on cache/session), also without re-sending
+     * or re-verifying anything. Called from the front-end via $wire.
+     *
+     * IMPORTANT: this method NEVER calls _sendOtp(). Restoring Step 2 only
+     * ever re-displays the existing, still-valid OTP window (via
+     * tryRestoreStep2 → syncOtpExpiry) — it never generates or emails a new
+     * code. Requesting a new code is only ever possible through the
+     * explicit "Request New Code" button (resendOtp()).
+     */
+    public function goToWizardStep(int $targetStep): void
+    {
+        $targetStep = max(1, min(3, $targetStep));
+        $this->clearAllErrors();
+
+        $alumniId = session('alumni_forgot_id');
+
+        if ($targetStep === 3 && $alumniId && $this->tryRestoreStep3($alumniId)) {
+            return;
+        }
+
+        if ($targetStep >= 2 && $alumniId && $this->tryRestoreStep2($alumniId)) {
+            return;
+        }
+
+        // Target was Step 1, or nothing above could be legitimately
+        // restored — always a clean restart, never an OTP resend.
+        $this->resetToStep1();
+    }
+
     public function verifyAndSend(): void
     {
         $this->clearAllErrors();
+
+        // ── "Request New Code" lockout — checked FIRST, before anything
+        //    else, so a locked-out user can't bypass it just by re-typing
+        //    their Student ID / email on Step 1. This mirrors the state
+        //    already shown (disabled button + countdown) on the page.
+        $this->checkAndSyncSendLock();
+        if ($this->sendLocked) {
+            $this->showResendLockedModal = true;
+            return;
+        }
 
         // ── Rate limit ────────────────────────────────────────────────────
         if (RateLimiter::tooManyAttempts($this->rateLimitKey(), 10)) {
@@ -186,8 +401,14 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // Restarting — clear any leftover Step 3 window from a previous attempt
-        cache()->forget($this->cacheStep3DeadlineKey($alumni->id));
+        // ── Resend lockout still active — block re-entry via Step 1 too,
+        //    otherwise the lock could be bypassed by simply restarting.
+        if (cache()->has($this->cacheResendLockKey($alumni->id))) {
+            session([self::SESSION_LOCKED_ID_KEY => $alumni->id]);
+            $this->checkAndSyncSendLock();
+            $this->showResendLockedModal = true;
+            return;
+        }
 
         // ── Account not yet set up ────────────────────────────────────────
         if ($alumni->needsAccountSetup() || $alumni->hasTemporaryPassword() || $alumni->password_changed_at === null) {
@@ -216,6 +437,19 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ── Step 3 window still active — skip OTP entirely, go straight to
+        //    Change Password. FIX: dati, bawat pag-verify dito ay
+        //    nagfo-forget ng Step 3 deadline agad kaya laging bumabalik sa
+        //    OTP step kahit may 10-min Step 3 session pa (hal. galing sa
+        //    browser back/forward). Ngayon, kung may valid pa palang Step 3
+        //    window (di pa nag-expire), diretso doon — hindi na kailangan
+        //    mag-request ng OTP ulit.
+        if ($this->tryRestoreStep3($alumni->id)) {
+            RateLimiter::clear($this->rateLimitKey());
+            session(['alumni_forgot_id' => $alumni->id, 'alumni_forgot_step' => 3]);
+            return;
+        }
+
         // ── Active OTP already exists — restore timer ─────────────────────
         if ($alumni->isOtpStillActive()) {
             RateLimiter::clear($this->rateLimitKey());
@@ -227,7 +461,8 @@ new #[Layout('app')] class extends Component {
             $this->otpSent        = true;
             $this->otpLocked      = cache()->has($this->cacheOtpLockKey($alumni->id));
             $this->otp            = '';
-            $this->successMessage = "A verification code was already sent to {$this->maskedEmail}. Please check your inbox or wait for it to expire before requesting a new one.";
+            $this->syncOtpExpiry($alumni);
+            $this->successMessage = "A verification code was already sent to {$this->maskedEmail}. Please check your inbox.";
             $this->dispatch('otp-sent');
             return;
         }
@@ -240,17 +475,77 @@ new #[Layout('app')] class extends Component {
         $this->_sendOtp($alumni, $dbEmail);
     }
 
+    /**
+     * FIX: previously used Mail::to()->queue(...) which only pushes the
+     * mailable into the `jobs` table. If QUEUE_CONNECTION is not `sync`
+     * and no `php artisan queue:work` worker is running, the email NEVER
+     * actually leaves the app — it just silently sits queued forever.
+     * Switched to Mail::to()->send(...) so it goes out immediately, and
+     * the failure is now surfaced to the user instead of only logged.
+     *
+     * FIX 2: this is now the SINGLE choke point for every actual OTP send —
+     * both the initial send from Step 1 and every resend from Step 2
+     * ("Request New OTP") pass through here. That means the 3-sends-then-
+     * lock-30-minutes rule (same shape as the wrong-code lockout) applies
+     * uniformly no matter which button triggered the send. Previously the
+     * counter only lived inside resendOtp(), so the very first send from
+     * Step 1 was "free" and didn't count toward the limit.
+     */
     private function _sendOtp(Alumni $alumni, string $targetEmail): void
     {
+        $resendLockKey     = $this->cacheResendLockKey($alumni->id);
+        $resendAttemptsKey = $this->cacheResendAttemptsKey($alumni->id);
+
+        // Already locked out from a previous 4th attempt.
+        if (cache()->has($resendLockKey)) {
+            session([self::SESSION_LOCKED_ID_KEY => $alumni->id]);
+            $this->checkAndSyncSendLock();
+            $this->showResendLockedModal = true;
+            return;
+        }
+
+        // Enforce max 3 OTP sends per rolling window — the 4th attempt
+        // locks the account for 30 minutes instead of sending anything.
+        $sendAttempts = cache()->get($resendAttemptsKey, 0);
+        if ($sendAttempts >= self::MAX_RESEND_ATTEMPTS) {
+            $this->lockSending($alumni->id);
+            return;
+        }
+
         try {
+            // Generate + hash the OTP first (this also sets a provisional
+            // otp_expires_at), but DON'T treat that timestamp as the real
+            // start of the 10-minute window yet — Mail::send() is
+            // synchronous and can take a few seconds (sometimes longer on a
+            // slow SMTP connection). If we started the clock here, the user
+            // would open their inbox and already see e.g. 9:50 instead of
+            // 10:00, because those seconds ticked away while the email was
+            // still being sent.
             $otp = $alumni->generateOtp();
 
             try {
-                Mail::to($targetEmail)->queue(new AlumniPasswordReset($alumni, $otp));
-                Log::info("Forgot-password OTP queued for: {$targetEmail}");
+                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+                Log::info("Forgot-password OTP sent to: {$targetEmail}");
             } catch (\Exception $e) {
-                Log::warning("Forgot-password OTP mail failed: " . $e->getMessage());
+                Log::error("Forgot-password OTP mail FAILED to send: " . $e->getMessage());
+
+                // Surface the failure instead of pretending it worked.
+                $this->errorMessage = 'We could not send the verification code to your email right now. Please check your mail settings or try again in a moment.';
+                return;
             }
+
+            // Only count this attempt once the email has genuinely left the
+            // server — a failed send above returns early and does NOT burn
+            // one of the 3 attempts. The attempts counter itself expires
+            // after RESEND_LOCK_MINUTES so a clean, non-locked user isn't
+            // stuck being counted forever.
+            cache()->put($resendAttemptsKey, $sendAttempts + 1, now()->addMinutes(self::RESEND_LOCK_MINUTES));
+
+            // NOW that the email has actually left the server, restart the
+            // 10-minute window from this exact moment. This is what makes
+            // the visible countdown genuinely start at 10:00 instead of
+            // already being a few seconds short.
+            $alumni->update(['otp_expires_at' => now()->addMinutes(10)]);
 
             cache()->forget($this->cacheOtpAttemptsKey($alumni->id));
             cache()->forget($this->cacheOtpLockKey($alumni->id));
@@ -260,6 +555,10 @@ new #[Layout('app')] class extends Component {
             $this->otpSent        = true;
             $this->otpLocked      = false;
             $this->otp            = '';
+            // otp_expires_at now reflects the moment sending finished —
+            // this is what actually resets the visible countdown, every
+            // single time, without needing a page refresh.
+            $this->syncOtpExpiry($alumni);
             $this->successMessage = "Verification code sent to {$this->maskedEmail}. Check your inbox.";
             $this->dispatch('otp-sent-fresh');
 
@@ -335,8 +634,10 @@ new #[Layout('app')] class extends Component {
         session(['alumni_forgot_step' => 3]);
         $this->step                  = 3;
         $this->otp                   = '';
+        $this->otpExpiresAtMs        = 0;
         $this->step3RemainingSeconds = self::STEP3_TTL_MINUTES * 60;
         $this->successMessage        = 'Email verified! Please set your new password below.';
+        $this->dispatch('otp-verified');
     }
 
     public function resendOtp(): void
@@ -347,6 +648,16 @@ new #[Layout('app')] class extends Component {
         if (!$alumni) {
             $this->errorMessage = 'Session expired. Please start over.';
             $this->step = 1;
+            return;
+        }
+
+        // Early exit for quick UX — yung totoong 3x + 30-min-lock logic ay
+        // nasa _sendOtp() na, applied uniformly sa bawat aktwal na send
+        // (initial send man sa Step 1 o resend dito sa Step 2).
+        if (cache()->has($this->cacheResendLockKey($alumni->id))) {
+            session([self::SESSION_LOCKED_ID_KEY => $alumni->id]);
+            $this->checkAndSyncSendLock();
+            $this->showResendLockedModal = true;
             return;
         }
 
@@ -496,17 +807,20 @@ new #[Layout('app')] class extends Component {
         session()->forget(['alumni_forgot_step', 'alumni_forgot_id']);
         $this->successMessage = '';
         $this->errorMessage   = 'For your security, this password reset session has expired. Please verify your identity again.';
+        $this->otpExpiresAtMs = 0;
         $this->step            = 1;
+        $this->checkAndSyncSendLock();
     }
 }; ?>
 
 <div class="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-5 antialiased"
      style="background-image: url('{{ asset('images/school-1.jpg') }}'); background-size: cover; background-position: center; background-repeat: no-repeat; background-attachment: fixed;"
-     x-data="alumniOtpTimer()"
-     x-init="initTimer({{ $step }})"
-     x-on:otp-sent-fresh.window="startFresh()"
-     x-on:otp-sent.window="restoreOrStart()"
-     x-on:otp-restore.window="restoreOnly()">
+     x-data="wizardNav()"
+     x-init="initHistory({{ $step }})"
+     x-on:otp-sent-fresh.window="pushStepState(2)"
+     x-on:otp-sent.window="pushStepState(2)"
+     x-on:otp-verified.window="pushStepState(3)"
+     x-on:popstate.window="handlePopState($event)">
 
     {{-- Dark overlay --}}
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm z-0"></div>
@@ -560,6 +874,65 @@ new #[Layout('app')] class extends Component {
                             class="w-full text-white py-3 sm:py-3.5 rounded-xl font-bold text-sm sm:text-base shadow-lg hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                             style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
                         <span wire:loading.remove wire:target="goToLogin">Go to Login</span>
+                        <span wire:loading wire:target="goToLogin" x-cloak class="flex items-center gap-1.5">
+                            <span class="flex gap-0.5">
+                                <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
+                                <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
+                                <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
+                            </span>
+                            <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Redirecting</span>
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    {{-- ══ Resend Locked Modal ══ --}}
+    @if ($showResendLockedModal)
+        <div class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+             x-data="{ visible: false }"
+             x-init="$nextTick(() => { visible = true })">
+            <div class="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                 x-show="visible"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0"
+                 x-transition:enter-end="opacity-100"></div>
+
+            <div class="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden text-center"
+                 x-show="visible"
+                 x-transition:enter="transition ease-out duration-400"
+                 x-transition:enter-start="opacity-0 scale-90 translate-y-6"
+                 x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 x-data="sendLockTimer($wire.entangle('sendLockedUntilMs'))">
+                <div class="h-1 w-full" style="background: linear-gradient(90deg, #DC2626, #7A3F91, #DC2626);"></div>
+
+                <div class="px-6 sm:px-8 pt-8 pb-7 space-y-5">
+                    <div class="flex justify-center">
+                        <div class="relative w-20 h-20">
+                            <div class="absolute inset-0 rounded-full bg-red-100 animate-ping opacity-40"></div>
+                            <div class="relative w-20 h-20 rounded-full flex items-center justify-center shadow-lg"
+                                 style="background: linear-gradient(135deg, #f87171, #dc2626);">
+                                <i class="fa-solid fa-lock text-white text-2xl sm:text-3xl"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-1.5">
+                        <h2 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Too Many Code Requests</h2>
+                        <p class="text-sm sm:text-base font-medium" style="color: #333333;">You've reached the maximum number of code requests (3).</p>
+                        <p class="text-sm" style="color: #555555; line-height: 1.6;">
+                            For your account's security, Forgot Password has been disabled.
+                            <span x-show="locked">You can try again in <strong class="font-mono" x-text="formattedTime"></strong>.</span>
+                        </p>
+                    </div>
+
+                    <button wire:click="goToLogin"
+                            wire:loading.attr="disabled"
+                            wire:target="goToLogin"
+                            class="w-full text-white py-3 sm:py-3.5 rounded-xl font-bold text-sm sm:text-base shadow-lg hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                        <span wire:loading.remove wire:target="goToLogin">Back to Login</span>
                         <span wire:loading wire:target="goToLogin" x-cloak class="flex items-center gap-1.5">
                             <span class="flex gap-0.5">
                                 <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
@@ -635,10 +1008,23 @@ new #[Layout('app')] class extends Component {
 
             {{-- ══ STEP 1: Verify Identity ══ --}}
             @if ($step == 1)
-                <div class="space-y-5">
+                <div class="space-y-5" x-data="sendLockTimer($wire.entangle('sendLockedUntilMs'))">
                     <div>
                         <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Verify Your Identity</h2>
                         <p class="text-sm mt-1" style="color: #555555;">Enter your Student ID and registered email to receive a verification code.</p>
+                    </div>
+
+                    {{-- ── Locked-out notice — shown instead of relying only on the modal,
+                         so the button is visibly disabled with a live countdown even
+                         before the user submits anything. ── --}}
+                    <div wire:ignore x-show="locked" x-cloak
+                         class="rounded-lg border px-4 py-3 flex items-start gap-3" style="background:#FEF2F2; border-color:#FECACA;">
+                        <i class="fa-solid fa-lock text-red-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                        <p class="text-xs sm:text-sm font-medium text-red-700">
+                            Too many code requests. Please wait
+                            <span class="font-mono font-bold" x-text="formattedTime"></span>
+                            before requesting a new code.
+                        </p>
                     </div>
 
                     {{-- ── Student ID — floating label ── --}}
@@ -657,6 +1043,7 @@ new #[Layout('app')] class extends Component {
                                    type="text"
                                    placeholder=" "
                                    autocomplete="username"
+                                   x-bind:disabled="locked"
                                    class="fp-fl-input {{ $studentIdError ? 'fp-fl-error' : '' }}">
                             <label class="fp-fl-label">Student ID</label>
                         </div>
@@ -670,6 +1057,7 @@ new #[Layout('app')] class extends Component {
                                    type="email"
                                    placeholder=" "
                                    autocomplete="email"
+                                   x-bind:disabled="locked"
                                    class="fp-fl-input {{ $emailError ? 'fp-fl-error' : '' }}">
                             <label class="fp-fl-label">Registered Email</label>
                         </div>
@@ -686,10 +1074,15 @@ new #[Layout('app')] class extends Component {
                     <button wire:click="verifyAndSend"
                             wire:loading.attr="disabled"
                             wire:target="verifyAndSend"
+                            x-bind:disabled="locked"
+                            :class="locked ? 'opacity-50 cursor-not-allowed' : ''"
                             class="fp-submit-btn">
-                        <span wire:loading.remove wire:target="verifyAndSend" class="flex items-center justify-center gap-2">
+                        <span wire:loading.remove wire:target="verifyAndSend" x-show="!locked" class="flex items-center justify-center gap-2">
                             Send Verification Code
                             <i class="fa-solid fa-paper-plane" style="font-size:0.72rem;"></i>
+                        </span>
+                        <span x-show="locked" x-cloak class="flex items-center justify-center gap-2">
+                            Try again in <span class="font-mono" x-text="formattedTime"></span>
                         </span>
                         <span wire:loading wire:target="verifyAndSend" x-cloak class="flex items-center justify-center gap-2">
                             <span class="flex gap-0.5">
@@ -713,7 +1106,7 @@ new #[Layout('app')] class extends Component {
 
             {{-- ══ STEP 2: OTP ══ --}}
             @if ($step == 2)
-                <div class="space-y-5">
+                <div class="space-y-5" x-data="otpTimer($wire.entangle('otpExpiresAtMs'))">
                     <div>
                         <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Enter One-Time Password</h2>
                         <p class="text-sm mt-1" style="color: #555555;">A 6-digit OTP was sent to <strong style="color: #7A3F91;">{{ $maskedEmail }}</strong></p>
@@ -721,11 +1114,11 @@ new #[Layout('app')] class extends Component {
 
                     {{-- Timer + OTP side by side --}}
                     <div class="grid grid-cols-2 gap-4">
-                        <div class="rounded-lg border p-4 text-center flex flex-col items-center justify-center" style="background: #F8F4FC; border-color: #E8E8E8;">
+                        <div wire:ignore class="rounded-lg border p-4 text-center flex flex-col items-center justify-center" style="background: #F8F4FC; border-color: #E8E8E8;">
                             <p class="text-xs font-semibold uppercase mb-1.5" style="color: #555555; letter-spacing: 0.08em;">OTP Expires In</p>
                             <div class="text-3xl sm:text-4xl font-bold font-mono tabular-nums transition-colors duration-300"
-                                 :class="seconds <= 60 ? 'text-red-600' : ''"
-                                 :style="seconds > 60 ? 'color: #7A3F91;' : ''"
+                                 style="color: #7A3F91;"
+                                 :style="seconds <= 60 ? 'color: #dc2626;' : 'color: #7A3F91;'"
                                  x-text="formattedTime">10:00</div>
                             <p x-show="expired" x-cloak class="text-red-600 text-xs mt-1.5 font-semibold">OTP expired.</p>
                         </div>
@@ -782,7 +1175,7 @@ new #[Layout('app')] class extends Component {
                             class="w-full py-3 rounded-lg font-semibold text-sm border transition-all flex items-center justify-center gap-2"
                             :style="canResend ? 'background:#FFFFFF; border-color:#7A3F91; color:#7A3F91;' : 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;'">
                         <span wire:loading.remove wire:target="resendOtp">
-                            <span x-show="!canResend">Resend in <span class="font-bold" x-text="formattedTime"></span></span>
+                            <span x-show="!canResend" wire:ignore>Resend in <span class="font-bold" x-text="formattedTime"></span></span>
                             <span x-show="canResend">Request New OTP</span>
                         </span>
                         <span wire:loading wire:target="resendOtp" x-cloak class="flex items-center gap-1.5">
@@ -977,6 +1370,11 @@ new #[Layout('app')] class extends Component {
             border-color: #EF4444;
             box-shadow: 0 0 0 3px rgba(239,68,68,0.08);
         }
+        .fp-fl-input:disabled {
+            background: #F5F5F5;
+            color: #999999;
+            cursor: not-allowed;
+        }
 
         .fp-fl-label {
             position: absolute;
@@ -1067,18 +1465,51 @@ new #[Layout('app')] class extends Component {
         }
         .fp-back-link:hover { opacity: 0.75; }
     </style>
-</div>
 
-@script
-<script>
-    Alpine.data('alumniOtpTimer', () => {
-        const STORAGE_KEY = 'alumni_fp_otp_timer_expiry';
-        const DURATION_MS = 10 * 60 * 1000;
+    @script
+    <script>
+        // ── Wizard step history (browser Back/Forward) ──────────────────────
+        // This ONLY manages which step is shown when the user presses the
+        // browser's Back/Forward buttons. It never sends OTPs — going back
+        // to Step 1 or forward to Step 2 just re-displays whatever the
+        // server confirms is still valid (see goToWizardStep() in the PHP
+        // class). Requesting an actual new code always requires an explicit
+        // tap on "Request New OTP".
+        Alpine.data('wizardNav', () => ({
+            initHistory(step) {
+                if (!history.state || typeof history.state.step === 'undefined') {
+                    history.replaceState({ step: step }, '', window.location.href);
+                }
+            },
 
-        return {
-            seconds:   600,
-            expired:   false,
-            canResend: false,
+            pushStepState(step) {
+                if (!history.state || history.state.step !== step) {
+                    history.pushState({ step: step }, '', window.location.href);
+                }
+            },
+
+            handlePopState(event) {
+                const targetStep = (event.state && event.state.step) ? event.state.step : 1;
+                this.$wire.goToWizardStep(targetStep);
+            }
+        }));
+
+        // ── OTP countdown ─────────────────────────────────────────────────
+        // The countdown is derived ENTIRELY from `otpExpiresAtMs`, which is
+        // entangled with the server-side property of the same name. That
+        // property is only ever set from the real `alumni.otp_expires_at`
+        // database column (see syncOtpExpiry() in the PHP class), so:
+        //   - A fresh code (verifyAndSend / resendOtp) sets a brand-new
+        //     deadline, and the $watch below picks it up immediately —
+        //     no page refresh needed.
+        //   - Restoring Step 2 (page refresh, browser back/forward) reflects
+        //     the REAL remaining time, so the timer can never falsely
+        //     "restart" back to 10:00 unless a new code was truly just sent.
+        Alpine.data('otpTimer', (expiresAtMs) => ({
+            expiresAtMs,
+            seconds: 0,
+            expired: true,
+            canResend: true,
             _interval: null,
 
             get formattedTime() {
@@ -1087,54 +1518,24 @@ new #[Layout('app')] class extends Component {
                 return `${m}:${s}`;
             },
 
-            initTimer(step) {
-                if (step === 2) this.restoreOrStart();
+            init() {
+                this.recalc();
+                this._interval = setInterval(() => this.recalc(), 500);
+                this.$watch('expiresAtMs', () => this.recalc());
             },
 
-            startFresh() {
-                const expiry = Date.now() + DURATION_MS;
-                localStorage.setItem(STORAGE_KEY, expiry.toString());
-                this._beginCountdown(expiry);
-            },
-
-            restoreOrStart() {
-                const stored = localStorage.getItem(STORAGE_KEY);
-                if (stored) {
-                    const expiry    = parseInt(stored, 10);
-                    const remaining = Math.floor((expiry - Date.now()) / 1000);
-                    if (remaining > 0) {
-                        this.seconds   = remaining;
-                        this.expired   = false;
-                        this.canResend = false;
-                        this._tick(expiry);
-                    } else {
-                        this.seconds   = 0;
-                        this.expired   = true;
-                        this.canResend = true;
-                        localStorage.removeItem(STORAGE_KEY);
-                    }
-                } else {
-                    this.startFresh();
+            recalc() {
+                if (!this.expiresAtMs) {
+                    this.seconds   = 0;
+                    this.expired   = true;
+                    this.canResend = true;
+                    return;
                 }
-            },
-
-            restoreOnly() {
-                const stored = localStorage.getItem(STORAGE_KEY);
-                if (stored) {
-                    const expiry    = parseInt(stored, 10);
-                    const remaining = Math.floor((expiry - Date.now()) / 1000);
-                    if (remaining > 0) {
-                        this._clearInterval();
-                        this.seconds   = remaining;
-                        this.expired   = false;
-                        this.canResend = false;
-                        this._tick(expiry);
-                    } else {
-                        this.seconds   = 0;
-                        this.expired   = true;
-                        this.canResend = true;
-                        localStorage.removeItem(STORAGE_KEY);
-                    }
+                const remaining = Math.floor((this.expiresAtMs - Date.now()) / 1000);
+                if (remaining > 0) {
+                    this.seconds   = remaining;
+                    this.expired   = false;
+                    this.canResend = false;
                 } else {
                     this.seconds   = 0;
                     this.expired   = true;
@@ -1142,72 +1543,90 @@ new #[Layout('app')] class extends Component {
                 }
             },
 
-            resetTimer() {
-                this._clearInterval();
-                this.seconds   = 0;
-                this.expired   = true;
-                this.canResend = true;
-                localStorage.setItem(STORAGE_KEY, '0');
-            },
-
-            _beginCountdown(expiry) {
-                this._clearInterval();
-                this.seconds   = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
-                this.expired   = false;
-                this.canResend = false;
-                this._tick(expiry);
-            },
-
-            _tick(expiry) {
-                this._interval = setInterval(() => {
-                    const remaining = Math.floor((expiry - Date.now()) / 1000);
-                    if (remaining > 0) {
-                        this.seconds = remaining;
-                    } else {
-                        this.seconds   = 0;
-                        this.expired   = true;
-                        this.canResend = true;
-                        localStorage.removeItem(STORAGE_KEY);
-                        this._clearInterval();
-                    }
-                }, 500);
-            },
-
-            _clearInterval() {
+            destroy() {
                 if (this._interval) {
                     clearInterval(this._interval);
                     this._interval = null;
                 }
             }
-        };
-    });
+        }));
 
-    Alpine.data('passwordSessionTimer', (initialSeconds) => ({
-        seconds:   initialSeconds,
-        expired:   initialSeconds <= 0,
-        _interval: null,
+        // ── "Request New Code" lockout countdown (Step 1 button + modal) ───
+        // Derived ENTIRELY from `sendLockedUntilMs`, entangled with the
+        // server-side property of the same name. That property only ever
+        // reflects a REAL lock stored in cache (see checkAndSyncSendLock()
+        // in the PHP class) — so this timer can never show a fake lock, and
+        // it survives page refresh / browser back / a full wizard reset for
+        // as long as the underlying 30-minute lock is genuinely still active.
+        Alpine.data('sendLockTimer', (expiresAtMs) => ({
+            expiresAtMs,
+            seconds: 0,
+            locked: false,
+            _interval: null,
 
-        get formatted() {
-            const m = String(Math.floor(this.seconds / 60)).padStart(2, '0');
-            const s = String(this.seconds % 60).padStart(2, '0');
-            return `${m}:${s}`;
-        },
+            get formattedTime() {
+                const m = String(Math.floor(this.seconds / 60)).padStart(2, '0');
+                const s = String(this.seconds % 60).padStart(2, '0');
+                return `${m}:${s}`;
+            },
 
-        start() {
-            if (this.seconds <= 0) {
-                this.expired = true;
-                return;
-            }
-            this._interval = setInterval(() => {
-                this.seconds--;
-                if (this.seconds <= 0) {
+            init() {
+                this.recalc();
+                this._interval = setInterval(() => this.recalc(), 1000);
+                this.$watch('expiresAtMs', () => this.recalc());
+            },
+
+            recalc() {
+                if (!this.expiresAtMs) {
                     this.seconds = 0;
-                    this.expired = true;
+                    this.locked  = false;
+                    return;
+                }
+                const remaining = Math.floor((this.expiresAtMs - Date.now()) / 1000);
+                if (remaining > 0) {
+                    this.seconds = remaining;
+                    this.locked  = true;
+                } else {
+                    this.seconds = 0;
+                    this.locked  = false;
+                }
+            },
+
+            destroy() {
+                if (this._interval) {
                     clearInterval(this._interval);
                     this._interval = null;
                 }
-            }, 1000);
-        }
-    }));
-</script>
-@endscript
+            }
+        }));
+
+        Alpine.data('passwordSessionTimer', (initialSeconds) => ({
+            seconds:   initialSeconds,
+            expired:   initialSeconds <= 0,
+            _interval: null,
+
+            get formatted() {
+                const m = String(Math.floor(this.seconds / 60)).padStart(2, '0');
+                const s = String(this.seconds % 60).padStart(2, '0');
+                return `${m}:${s}`;
+            },
+
+            start() {
+                if (this.seconds <= 0) {
+                    this.expired = true;
+                    return;
+                }
+                this._interval = setInterval(() => {
+                    this.seconds--;
+                    if (this.seconds <= 0) {
+                        this.seconds = 0;
+                        this.expired = true;
+                        clearInterval(this._interval);
+                        this._interval = null;
+                    }
+                }, 1000);
+            }
+        }));
+    </script>
+    @endscript
+</div>

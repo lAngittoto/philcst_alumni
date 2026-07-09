@@ -4,58 +4,65 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Coordinator</title>
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-
     @livewireStyles
 
     <style>
         [x-cloak] { display: none !important; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            overscroll-behavior-y: contain;
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
-        #coord-bell-btn {
+        /* ── Mobile viewport height fix ──
+           h-screen (100vh) is unreliable on mobile browsers because the
+           address bar resizes the viewport and 100vh gets computed against
+           the LARGEST possible viewport, not the current visible one. That
+           mismatch is what breaks scroll on mobile. h-dvh (dynamic
+           viewport height) tracks the real visible viewport instead. */
+        .coord-app-shell {
+            height: 100vh;      /* fallback for older browsers */
+            height: 100dvh;
+        }
+
+        /* ── Topbar bell (all screen sizes) ── */
+        .coord-topbar-bell {
             background: transparent !important;
             border: none !important;
             outline: none !important;
             box-shadow: none !important;
-            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            appearance: none;
+            padding: 6px;
+            margin: 0;
             cursor: pointer;
             position: relative;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            align-self: flex-end;
-            margin-bottom: 10px;
+            line-height: 0;
         }
-        #coord-bell-btn:hover,
-        #coord-bell-btn:focus,
-        #coord-bell-btn:active {
+        .coord-topbar-bell:hover,
+        .coord-topbar-bell:focus,
+        .coord-topbar-bell:focus-visible,
+        .coord-topbar-bell:active {
             background: transparent !important;
             outline: none !important;
             box-shadow: none !important;
+            border: none !important;
         }
+
         .bell-badge { pointer-events: none; }
         .notif-item { cursor: pointer; position: relative; }
-        .notif-hover-label {
-            pointer-events: none;
-            position: fixed;
-            background: rgba(0,0,0,0.82);
-            color: #fff;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            padding: 4px 10px;
-            border-radius: 20px;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            white-space: nowrap;
-            z-index: 99999;
-        }
-        .notif-item:hover .notif-hover-label { opacity: 1; }
 
         .notif-close-wrap {
             position: relative;
@@ -92,9 +99,182 @@
             border-bottom-color: #1a1a1a;
         }
         .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
+        @media (max-width: 1023px) {
+            .notif-close-tip { display: none !important; }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           COORDINATOR SIDEBAR — WHITE (baliktad ng dark version)
+        ════════════════════════════════════════════════════════ */
+        #coord-sidebar-aside {
+            background: #FFFFFF;
+            border-right: 1px solid #E8E0F0;
+        }
+
+        .coord-sidebar-header {
+            border-bottom: 1px solid #E8E0F0;
+        }
+        .coord-badge-icon {
+            width: 42px; height: 42px;
+            border-radius: 12px;
+            background: #F3EBFA;
+            border: 1px solid #ECE2F8;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            color: #7A3F91;
+        }
+
+        .coord-nav-panel {
+            background: #7A3F91;
+        }
+
+        .coord-nav-link {
+            position: relative;
+            border-left: 3px solid transparent;
+            transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+        }
+        .coord-nav-link:not(.is-active):hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .coord-nav-link:not(.is-active):hover .coord-nav-icon {
+            transform: scale(1.07);
+        }
+        .coord-nav-link.is-active {
+            background: rgba(255,255,255,0.18);
+            border-left-color: #FFFFFF;
+        }
+        .coord-nav-icon { transition: transform 0.2s ease; }
+
+        .coord-section-label {
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: rgba(255,255,255,0.55);
+            padding: 0 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Logout button + spinner */
+        .coord-logout-btn {
+            position: relative;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 1rem 1rem;
+            border-radius: 14px;
+            font-weight: 800;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: #7A3F91;
+            background: #FFFFFF;
+            border: none;
+            cursor: pointer;
+            overflow: hidden;
+            box-shadow: 0 8px 18px -6px rgba(0,0,0,0.25);
+            transition: filter 0.2s ease, transform 0.15s ease;
+        }
+        .coord-logout-btn:hover   { background: #F3EBFA; }
+        .coord-logout-btn:active  { transform: scale(0.97); }
+        .coord-logout-btn:disabled {
+            cursor: not-allowed;
+            filter: grayscale(0.15) brightness(0.9);
+        }
+        .coord-logout-spinner {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(122,63,145,0.25);
+            border-top-color: #7A3F91;
+            animation: coord-spin 0.7s linear infinite;
+            display: inline-block;
+        }
+        @keyframes coord-spin { to { transform: rotate(360deg); } }
+        .coord-logout-text-swap { display: inline-flex; align-items: center; }
+
+        @media (max-width: 1023px) {
+            #coord-sidebar-aside {
+                box-shadow: 0 0 60px rgba(0,0,0,0.35);
+                width: 5.5rem;
+                min-width: 5.5rem;
+            }
+
+            /* Hide the header block (icon + Coordinator/Event Management) on mobile */
+            #coord-sidebar-aside .coord-sidebar-header {
+                display: none !important;
+            }
+
+            /* Icon-only nav on mobile: hide labels + section title */
+            #coord-sidebar-aside .coord-section-label,
+            #coord-sidebar-aside .coord-nav-link span:not(.coord-nav-icon) {
+                display: none !important;
+            }
+            #coord-sidebar-aside .coord-nav-link {
+                justify-content: center;
+                padding: 0.85rem;
+                border-left: none;
+                border-top: 3px solid transparent;
+            }
+            #coord-sidebar-aside .coord-nav-link.is-active {
+                border-top-color: #FFFFFF;
+            }
+            #coord-sidebar-aside .coord-nav-icon {
+                margin-right: 0 !important;
+            }
+
+            /* Icon-only logout button on mobile */
+            #coord-sidebar-aside .coord-logout-btn {
+                gap: 0;
+                padding: 1rem;
+            }
+            #coord-sidebar-aside .coord-logout-text-swap span:not(.coord-logout-spinner) {
+                display: none;
+            }
+            #coord-sidebar-aside .coord-logout-btn i.fa-right-from-bracket,
+            #coord-sidebar-aside .coord-logout-spinner {
+                margin-right: 0 !important;
+            }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           NOTIFICATION PANEL — desktop dropdown, mobile FULL SCREEN
+        ════════════════════════════════════════════════════════ */
+        #coord-notif-panel {
+            max-width: calc(100vw - 16px);
+        }
+        @media (max-width: 1023px) {
+            #coord-notif-panel {
+                position: fixed !important;
+                inset: 0 !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 100% !important;
+                min-height: 100% !important;
+                max-height: 100% !important;
+                border-radius: 0 !important;
+                border: none !important;
+            }
+            #coord-notif-panel .notif-list-scroll {
+                max-height: calc(100vh - 190px) !important;
+            }
+        }
     </style>
 
     <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    //  BFCACHE FIX
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) {
+            window.location.reload();
+        }
+    });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  ROUTE MAP
     // ─────────────────────────────────────────────────────────────────────────
@@ -105,6 +285,29 @@
         'organizer.alumni/employment': '/organizer/alumni/employment',
         'organizer.chat/alumni':       '/organizer/chat/alumni',
         'organizer.yearbook':          '/organizer/yearbook',
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PER-ICON COLOR MAP (each notif type gets its own color)
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__coordIconColors = {
+        'comments':        { bg: '#F3EBFA', color: '#7A3F91' }, // messages — purple
+        'briefcase':       { bg: '#FDEBD3', color: '#B45309' }, // job posted — amber
+        'circle-check':    { bg: '#D1FAE5', color: '#059669' }, // job activated — green
+        'circle-pause':    { bg: '#FEF3C7', color: '#D97706' }, // job deactivated — orange
+        'rotate-left':     { bg: '#DBEAFE', color: '#0284C7' }, // job restored — blue
+        'calendar-check':  { bg: '#D1FAE5', color: '#059669' }, // event approved — green
+        'calendar':        { bg: '#FEE2E2', color: '#DC2626' }, // event rejected — red
+        'chart-line':      { bg: '#DBEAFE', color: '#0369A1' }, // employment — blue
+        'user-plus':       { bg: '#FFE8D1', color: '#B45309' }, // alumni registered — amber
+        'user-group':      { bg: '#FFE8D1', color: '#B45309' }, // alumni — amber
+        'bell':            { bg: '#F3F4F6', color: '#6B7280' }, // default — gray
+    };
+    window.__coordIconBg = function (icon) {
+        return (window.__coordIconColors[icon] || window.__coordIconColors['bell']).bg;
+    };
+    window.__coordIconColor = function (icon) {
+        return (window.__coordIconColors[icon] || window.__coordIconColors['bell']).color;
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -407,42 +610,23 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  PANEL POSITIONING
+    //  PANEL POSITIONING — desktop only (mobile is handled entirely by CSS, full screen)
     // ─────────────────────────────────────────────────────────────────────────
     function positionCoordPanel() {
+        if (window.innerWidth < 1024) return; // mobile = full screen via CSS, no inline positioning needed
         var btn   = document.getElementById('coord-bell-btn');
         var panel = document.getElementById('coord-notif-panel');
-        var aside = document.querySelector('aside');
         if (!btn || !panel) return;
         var btnRect = btn.getBoundingClientRect();
-        if (aside && window.innerWidth >= 1024) {
-            var asideRect = aside.getBoundingClientRect();
-            panel.style.left  = (asideRect.right + 12) + 'px';
-            panel.style.top   = (btnRect.bottom  + 8)  + 'px';
-            panel.style.width = '400px';
-        } else {
-            panel.style.left  = '8px';
-            panel.style.top   = (btnRect.bottom + 8) + 'px';
-            panel.style.width = (window.innerWidth - 16) + 'px';
-        }
+        panel.style.left  = (btnRect.right - 400) + 'px';
+        panel.style.top   = (btnRect.bottom + 8) + 'px';
+        panel.style.width = '400px';
     }
     window.positionCoordPanel = positionCoordPanel;
 
     window.addEventListener('resize', function () {
         var s = window.__safeCoordNotifsStore();
         if (s && s.open) positionCoordPanel();
-    });
-
-    // Cursor-following tooltip
-    document.addEventListener('mousemove', function (e) {
-        var target = e.target;
-        if (!target || typeof target.closest !== 'function') return;
-        var item = target.closest('.notif-item');
-        if (!item) return;
-        var label = item.querySelector('.notif-hover-label');
-        if (!label) return;
-        label.style.left = (e.clientX + 14) + 'px';
-        label.style.top  = (e.clientY + 14) + 'px';
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -625,84 +809,52 @@
 
 <body
     class="antialiased"
-    x-data="{ open: false }"
+    x-data="{ open: false, loggingOut: false }"
     @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()">
 
-<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
     {{-- Mobile overlay --}}
     <div
         x-show="open"
-        x-transition:enter="transition ease-out duration-300"
+        x-transition:enter="transition opacity-ease-out duration-300"
         x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100"
-        x-transition:leave="transition ease-in duration-300"
+        x-transition:leave="transition opacity-ease-in duration-300"
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
         @click="open = false"
         class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR ══ --}}
+    {{-- ══ SIDEBAR — dark, distinct coordinator theme ══ --}}
     <aside
+        id="coord-sidebar-aside"
         :class="open ? 'translate-x-0' : '-translate-x-full'"
         class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
-               shadow-2xl lg:translate-x-0 lg:static lg:inset-0
-               flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
-        style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
+               lg:translate-x-0 lg:static lg:inset-0
+               flex flex-col h-full overflow-hidden shrink-0">
 
         {{-- Sidebar header --}}
-        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
-
-            <div class="text-left min-w-0 flex-1 pr-2">
-                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
-                    Coordinator<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
-                </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
-                    Event Management
-                </p>
+        <div class="coord-sidebar-header flex items-center h-24 px-5 shrink-0">
+            <div class="flex items-center gap-3 min-w-0 flex-1">
+                <div class="coord-badge-icon">
+                    <i class="fa-solid fa-diagram-project" style="font-size:17px;"></i>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="text-[19px] font-bold tracking-tight text-[#333333] leading-tight truncate">
+                        Coordinator<span class="font-semibold text-[#7A3F91]">Portal</span>
+                    </h1>
+                    <p class="text-[10px] uppercase tracking-[0.2em] text-[#9A8AA8] font-semibold">
+                        Management
+                    </p>
+                </div>
             </div>
-
-            {{-- Bell Button --}}
-            <button
-                id="coord-bell-btn"
-                type="button"
-                @click.stop="$store.coordNotifs && $store.coordNotifs.toggle(); positionCoordPanel();"
-                title="Notifications"
-                aria-label="Open notifications">
-
-                <i class="bell-icon fas fa-bell"
-                   :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
-                          --fa-animation-duration:4s;
-                          --fa-animation-iteration-count:infinite;
-                          pointer-events:none;"></i>
-
-                <span
-                    x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
-                    x-cloak
-                    x-transition:enter="transition ease-out duration-200"
-                    x-transition:enter-start="opacity-0 scale-0"
-                    x-transition:enter-end="opacity-100 scale-100"
-                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
-                           bg-red-500 text-white text-[9px] font-black
-                           flex items-center justify-center px-1 leading-none
-                           shadow-md ring-2 ring-white"
-                    x-text="$store.coordNotifs && $store.coordNotifs.unread > 99
-                                ? '99+'
-                                : ($store.coordNotifs ? $store.coordNotifs.unread : 0)">
-                </span>
-            </button>
-
-            {{-- Mobile close --}}
-            <button @click="open = false"
-                    class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
-                <i class="fa-solid fa-circle-xmark text-xl"></i>
-            </button>
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+        <nav class="coord-nav-panel flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+            <p class="coord-section-label">MENU</p>
 
             @php
                 $sidebarLinks = [
@@ -749,26 +901,21 @@
                 @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
-                   @click="window.__coordSidebarNotifsMarkRead('{{ $link['route'] }}')"
-                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive
-                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
-                              : 'hover:bg-[#F9F7FC]' }}">
+                   @click="window.__coordSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
+                   class="coord-nav-link {{ $isActive ? 'is-active' : '' }}
+                          flex items-center px-4 py-3 rounded-r-xl group">
 
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg
-                                transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         style="background-color:{{ $isActive ? '#EDE9F8' : '#F9F7FC' }};color:#7A3F91;">
+                    <div class="coord-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
+                         style="background-color:{{ $isActive ? '#FFFFFF' : 'rgba(255,255,255,0.14)' }};
+                                color:{{ $isActive ? '#7A3F91' : '#FFFFFF' }};
+                                box-shadow:{{ $isActive ? '0 2px 6px rgba(0,0,0,0.15)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="font-medium tracking-wide flex-1
-                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                    <span class="font-medium tracking-wide flex-1 text-[14px]
+                                 {{ $isActive ? 'text-white font-bold' : 'text-white/75' }}">
                         {{ $link['label'] }}
                     </span>
-
-                    @if($isActive)
-                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
-                    @endif
                 </a>
             @endforeach
         </nav>
@@ -777,42 +924,97 @@
         @livewire('organizer.coord-notif-poller')
 
         {{-- Logout --}}
-        <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            <form method="POST" action="{{ route('logout') }}">
+        <div class="coord-nav-panel p-4 mt-auto border-t border-white/15 shrink-0">
+            <form method="POST"
+                  action="{{ route('logout') }}"
+                  @submit="loggingOut = true">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
-                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
-                    <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                        :disabled="loggingOut"
+                        class="coord-logout-btn">
+                    <template x-if="!loggingOut">
+                        <span class="coord-logout-text-swap">
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                            <span>Logout</span>
+                        </span>
+                    </template>
+                    <template x-if="loggingOut">
+                        <span class="coord-logout-text-swap">
+                            <span class="coord-logout-spinner mr-2"></span>
+                            <span>Logging out…</span>
+                        </span>
+                    </template>
                 </button>
             </form>
         </div>
     </aside>
 
     {{-- ══ MAIN CONTENT ══ --}}
-    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 min-h-0">
 
-        {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
-                       lg:hidden shrink-0 z-30">
-            <button @click.stop="open = !open"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
-                <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="open ? 'rotate-45 translate-y-2' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
-                    <span :class="open ? 'opacity-0' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
-                    <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
-                </div>
+        {{-- Top bar — visible on ALL screen sizes. Hamburger only shows on mobile.
+             Bell always sits on the right, icon-only. --}}
+        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+                       shrink-0 z-30">
+            <div class="flex items-center gap-3">
+                <button @click="open = !open"
+                        class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
+                    <div class="w-6 h-5 relative flex flex-col justify-between">
+                        <span :class="open ? 'rotate-45 translate-y-2' : ''"
+                              class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                        <span :class="open ? 'opacity-0' : ''"
+                              class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
+                        <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
+                              class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                    </div>
+                </button>
+            </div>
+
+            <span class="hidden lg:block"></span>
+
+            {{-- Notifications bell — right side, icon-only on every screen size --}}
+            <button
+                id="coord-bell-btn"
+                type="button"
+                @click.stop="$store.coordNotifs && $store.coordNotifs.toggle(); positionCoordPanel();"
+                title="Notifications"
+                aria-label="Open notifications"
+                class="coord-topbar-bell">
+                <i class="bell-icon fas fa-bell"
+                   :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'fa-shake' : ''"
+                   style="font-size:20px; color:#7A3F91;
+                          --fa-animation-duration:4s;
+                          --fa-animation-iteration-count:infinite;
+                          pointer-events:none;"></i>
+                <span
+                    x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
+                    x-cloak
+                    x-transition:enter="transition ease-out duration-200"
+                    x-transition:enter-start="opacity-0 scale-0"
+                    x-transition:enter-end="opacity-100 scale-100"
+                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                           bg-red-500 text-white text-[9px] font-black
+                           flex items-center justify-center px-1 leading-none
+                           shadow-md ring-2 ring-white"
+                    x-text="$store.coordNotifs && $store.coordNotifs.unread > 99
+                                ? '99+'
+                                : ($store.coordNotifs ? $store.coordNotifs.unread : 0)">
+                </span>
             </button>
-            <h2 class="text-lg font-bold text-[#333333]">Coordinator Portal</h2>
-            <div class="w-10"></div>
         </header>
 
-        {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8">
+        {{-- Page content — scroll container. min-height:0 is REQUIRED here:
+             without it, this flex child refuses to shrink below its content
+             size, so it grows past the screen instead of scrolling, and the
+             outer `overflow-hidden` wrapper just clips the excess.
+             That's what was causing both the "cut off" look AND the frozen
+             mobile scroll — same bug, two symptoms.
+             overscroll-behavior-y: contain (in .no-scrollbar) stops mobile
+             browsers from bubbling the scroll gesture up to the body when
+             this container hits its top/bottom edge, which is the other
+             common cause of "hindi ako maka-scroll" on phones. --}}
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+             style="min-height: 0; -webkit-overflow-scrolling: touch;">
             <div class="container mx-auto">
                 @yield('content')
             </div>
@@ -822,7 +1024,7 @@
 </div>
 
 {{-- ══════════════════════════════════════════════════════════════════════════
-     COORDINATOR NOTIFICATION PANEL
+     COORDINATOR NOTIFICATION PANEL — dropdown on desktop, full screen on mobile
 ════════════════════════════════════════════════════════════════════════════ --}}
 <div
     id="coord-notif-panel"
@@ -851,10 +1053,13 @@
 
     {{-- Panel Header --}}
     <div class="flex items-center justify-between px-5 py-4 shrink-0"
-         style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+         style="background:#7A3F91;">
         <div class="flex items-center gap-2.5">
-            <i class="fas fa-bell text-white" style="font-size:15px;"></i>
-            <span class="text-white font-bold" style="font-size:16px;">Notifications</span>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center"
+                 style="background:rgba(255,255,255,0.14);">
+                <i class="fas fa-bell text-white" style="font-size:13px;"></i>
+            </div>
+            <span class="text-white font-bold" style="font-size:15px;">Notifications</span>
             <span x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
                   x-cloak
                   class="bg-red-500 text-white font-black px-2 py-0.5 rounded-full leading-none"
@@ -885,14 +1090,25 @@
         </div>
     </div>
 
+    {{-- Sub-header --}}
+    <div class="px-5 py-2.5 flex items-center justify-between shrink-0"
+         style="background:#FAF6FE; border-bottom:1px solid #ECE2F8;">
+        <span style="font-size:11px; font-weight:700; color:#7A3F91; letter-spacing:0.08em; text-transform:uppercase;">
+            Recent Activity
+        </span>
+        <span style="font-size:11px; color:#9A8AA8; font-weight:500;"
+              x-text="($store.coordNotifs ? $store.coordNotifs.items.length : 0) + ' notification(s)'">
+        </span>
+    </div>
+
     {{-- Scrollable notification list --}}
-    <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+    <div class="notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 420px;">
 
         <template x-if="$store.coordNotifs && $store.coordNotifs.items.length === 0">
             <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
                 <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-                     style="background:#F5F5F5;">
-                    <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
+                     style="background:#F9F7FC; border:1px solid #ECE2F8;">
+                    <i class="fas fa-bell-slash" style="font-size:26px;color:#D7C8E6;"></i>
                 </div>
                 <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
                 <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
@@ -907,7 +1123,7 @@
                     class="notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#F8F5FD] hover:bg-[#F0E9FA]'"
+                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
                     @click.stop="
                         $store.coordNotifs.markRead(notif);
                         $store.coordNotifs.close();
@@ -917,12 +1133,12 @@
                         }
                     ">
 
-                    {{-- Icon --}}
+                    {{-- Icon — colored per notif type --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
-                        <i class="fas text-[#7A3F91]"
+                         :style="'background:' + window.__coordIconBg(notif.icon) + ';'">
+                        <i class="fas"
                            :class="'fa-' + (notif.icon || 'bell')"
-                           style="font-size:15px;"></i>
+                           :style="'font-size:15px;color:' + window.__coordIconColor(notif.icon) + ';'"></i>
                     </div>
 
                     {{-- Content --}}
@@ -961,7 +1177,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:#B45309;">
                                     JOB
                                 </span>
 
@@ -971,7 +1187,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                           background:#059669;">
                                     JOB
                                 </span>
 
@@ -981,7 +1197,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#d97706,#b45309);">
+                                           background:#D97706;">
                                     JOB
                                 </span>
 
@@ -991,7 +1207,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                           background:#0284C7;">
                                     JOB
                                 </span>
 
@@ -1001,7 +1217,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                           background:#059669;">
                                     EVENT
                                 </span>
 
@@ -1011,7 +1227,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#dc2626,#b91c1c);">
+                                           background:#DC2626;">
                                     EVENT
                                 </span>
 
@@ -1021,7 +1237,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                           background:#0369A1;">
                                     EMPLOYMENT
                                 </span>
 
@@ -1031,7 +1247,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:#7A3F91;">
                                     MESSAGES
                                 </span>
 
@@ -1041,7 +1257,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#d97706,#b45309);">
+                                           background:#B45309;">
                                     ALUMNI
                                 </span>
                             </div>
@@ -1072,9 +1288,6 @@
                         </div>
                     </div>
 
-                    <span class="notif-hover-label">
-                        <i class="fas fa-eye" style="font-size:10px;margin-right:5px;"></i>View Details
-                    </span>
                 </div>
             </template>
         </template>
@@ -1090,12 +1303,13 @@
 
 @livewireScripts
 
-{{-- CLOSE ON OUTSIDE CLICK --}}
+{{-- ✅ CLOSE ON OUTSIDE CLICK (no-op on mobile since panel is full screen) --}}
 <div
+    x-data
     x-show="$store.coordNotifs && $store.coordNotifs.open"
     x-cloak
     @click="$store.coordNotifs && $store.coordNotifs.close()"
-    class="fixed inset-0"
+    class="fixed inset-0 lg:block hidden"
     style="z-index: 9998; background: transparent;">
 </div>
 

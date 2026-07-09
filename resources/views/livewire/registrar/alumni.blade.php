@@ -256,7 +256,7 @@ new class extends Component {
         font-weight: 700;
     }
 
-    /* ── Hover tooltip ───────────────────────────────────────────── */
+    /* ── Hover tooltip (desktop only — see JS + media query below) ── */
     .ar-hover-tip {
         position: fixed;
         background: #1a1a1a;
@@ -283,6 +283,10 @@ new class extends Component {
         border: 5px solid transparent;
         border-top-color: #1a1a1a;
     }
+    /* Tooltip never shows on touch / small screens */
+    @media (max-width: 768px), (hover: none) {
+        .ar-hover-tip { display: none !important; }
+    }
 
     /* ── Table rows ──────────────────────────────────────────────── */
     .ar-row {
@@ -292,6 +296,21 @@ new class extends Component {
         transition: background .12s ease;
     }
     .ar-row:hover { background: #F0ECF5 !important; }
+
+    /* ── Mobile card rows (no horizontal scroll) ───────────────── */
+    .ar-mrow {
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        background: #fff;
+        border-bottom: 1px solid #F0ECF5;
+        padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        transition: background .12s ease;
+    }
+    .ar-mrow:active { background: #F0ECF5; }
 
     /* ── Pagination ──────────────────────────────────────────────── */
     .ar-pg-btn {
@@ -343,6 +362,9 @@ new class extends Component {
         border-bottom-color: rgba(27,6,46,.88);
     }
     .ar-close-btn:hover .ar-close-tip { opacity: 1; }
+    @media (max-width: 768px), (hover: none) {
+        .ar-close-tip { display: none !important; }
+    }
 
     /* ── Filter bar ──────────────────────────────────────────────── */
     .ar-filter-label { pointer-events: none; }
@@ -582,6 +604,25 @@ new class extends Component {
     @media (max-width: 600px) {
         .ar-emp-grid { grid-template-columns: 1fr; }
     }
+
+    /* ── Mobile: darker, readable text on card rows ─────────────── */
+    @media (max-width: 768px) {
+        .ar-mrow .font-mono.text-\[\#666666\],
+        .ar-mrow p.text-\[\#666666\] {
+            color: #333333 !important;
+        }
+    }
+
+    /* ── Pagination footer: keep it above the very bottom edge on mobile ── */
+    .ar-pg-footer {
+        padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));
+    }
+    @media (max-width: 640px) {
+        .ar-pg-footer {
+            margin-bottom: 8px;
+            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        }
+    }
 </style>
 
 <div id="ar-hover-tip" class="ar-hover-tip">
@@ -616,17 +657,17 @@ new class extends Component {
 </div>
 
 {{-- ══ PAGE ══════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-4 max-w-screen-2xl mx-auto" style="height:90vh;overflow:hidden;">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-3 max-w-screen-2xl mx-auto" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
     {{-- Header --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 shrink-0">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 shrink-0">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-2xl sm:text-3xl font-semibold text-[#333333] leading-tight">Alumni Records</h1>
+                <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Alumni Records</h1>
                 <p class="text-[#666666] text-xs sm:text-sm font-normal">View and manage alumni information and records.</p>
             </div>
         </div>
@@ -735,12 +776,14 @@ new class extends Component {
             @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
         </style>
 
-        {{-- Table wrapper --}}
+        {{-- Records wrapper --}}
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
-                 class="h-full overflow-y-auto overflow-x-auto transition-opacity duration-200"
+                 class="h-full overflow-y-auto transition-opacity duration-200"
                  wire:loading.class="opacity-40" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
-                <table class="w-full border-collapse table-fixed" style="min-width:620px;">
+
+                {{-- ── DESKTOP / TABLET: table view (hidden on mobile, no horizontal scroll needed since it fits) ── --}}
+                <table class="w-full border-collapse table-fixed hidden md:table">
                     <colgroup>
                         <col style="width:28%;"><col style="width:18%;"><col style="width:14%;"><col style="width:12%;"><col style="width:28%;">
                     </colgroup>
@@ -750,7 +793,7 @@ new class extends Component {
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Student ID</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Course</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Batch</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest hidden md:table-cell">Email</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F0ECF5]">
@@ -785,7 +828,7 @@ new class extends Component {
                             <td class="px-4 py-3 text-center overflow-hidden">
                                 <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
-                            <td class="px-4 py-3 hidden md:table-cell overflow-hidden">
+                            <td class="px-4 py-3 overflow-hidden">
                                 {{-- Email: preserve original casing from DB --}}
                                 <span class="text-[#333333] text-sm font-normal truncate block">
                                     {!! $this->highlight($item->email ?? '', $this->alumniSearch) !!}
@@ -807,6 +850,51 @@ new class extends Component {
                         @endforelse
                     </tbody>
                 </table>
+
+                {{-- ── MOBILE: stacked card list (no horizontal scroll, no email column, no tooltip) ── --}}
+                <div class="block md:hidden">
+                    @forelse($this->alumniRecords as $item)
+                    @php
+                        $displayName = $this->formatDisplayName(
+                            $item->first_name ?? '', $item->middle_initial ?? '',
+                            $item->last_name ?? '', $item->suffix ?? ''
+                        );
+                    @endphp
+                    <div class="ar-mrow" wire:click="viewProfile({{ $item->id }})">
+                        <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
+                             class="w-10 h-10 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-semibold text-[#333333] text-sm uppercase truncate">
+                                {!! $this->highlight($displayName, $this->alumniSearch) !!}
+                            </p>
+                            <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                                <span class="font-mono text-[#333333] text-xs font-semibold uppercase">
+                                    {!! $this->highlight($item->student_id ?? '', $this->alumniSearch) !!}
+                                </span>
+                                <span class="text-[#CCCCCC] text-xs">&bull;</span>
+                                <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase"
+                                      style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
+                                    {!! $this->highlight($item->course_code ?? '—', $this->alumniSearch) !!}
+                                </span>
+                                <span class="text-[#CCCCCC] text-xs">&bull;</span>
+                                <span class="font-mono text-[#333333] text-xs font-semibold">Batch {{ $item->batch }}</span>
+                            </div>
+                        </div>
+                        <i class="fas fa-chevron-right text-[#CCCCCC] text-xs shrink-0"></i>
+                    </div>
+                    @empty
+                    <div class="py-24 text-center px-4">
+                        <div class="flex flex-col items-center gap-3">
+                            <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
+                                <i class="fas fa-users text-2xl" style="color:#c89de0;"></i>
+                            </div>
+                            <p class="font-semibold text-[#666666] text-xl">No alumni found</p>
+                            <p class="text-sm text-[#999999] font-normal">Try adjusting your filters</p>
+                        </div>
+                    </div>
+                    @endforelse
+                </div>
+
             </div>
 
             <button x-show="showTop" @click="document.getElementById('alumni-scroll').scrollTo({top:0,behavior:'smooth'})"
@@ -827,7 +915,7 @@ new class extends Component {
             $pgStart  = max(1, $cp - 2);
             $pgEnd    = min($lastPage, $cp + 2);
         @endphp
-        <div class="px-4 py-2.5 border-t border-[#7A3F91]/30 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+        <div class="px-4 py-2.5 border-t border-[#7A3F91]/30 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ar-pg-footer"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             <p class="text-white/70 text-sm font-normal">
                 Showing <strong class="text-white font-semibold">{{ $from }}–{{ $to }}</strong>
@@ -1397,12 +1485,18 @@ new class extends Component {
 (function () {
     var tip = document.getElementById('ar-hover-tip');
 
+    // Tooltip only makes sense on devices with real hover + a mouse (desktop).
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
+    }
+
     function bindRows() {
         document.querySelectorAll('.ar-row').forEach(function (row) {
             if (row._arTipBound) return;
             row._arTipBound = true;
             row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
+                if (!tip || !isHoverCapable()) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
                 tip.classList.add('visible');

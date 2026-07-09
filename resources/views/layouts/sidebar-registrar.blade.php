@@ -12,25 +12,6 @@
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
-        #bell-btn {
-            background: transparent !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-            padding: 0;
-            cursor: pointer;
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        #bell-btn:hover,
-        #bell-btn:focus,
-        #bell-btn:active {
-            background: transparent !important;
-            outline: none !important;
-            box-shadow: none !important;
-        }
         .bell-badge { pointer-events: none; }
 
         /* ════════════════════════════════════════════════════════
@@ -74,6 +55,7 @@
             font-size: 0.9rem;
             letter-spacing: 0.01em;
             color: #000000;
+            white-space: nowrap;
         }
         .reg-nav-link.is-active .reg-nav-label { color: #FFFFFF; font-weight: 700; }
 
@@ -131,8 +113,56 @@
         @keyframes reg-spin { to { transform: rotate(360deg); } }
         .reg-logout-text-swap { display: inline-flex; align-items: center; }
 
+        /* Top bar bell (single source of truth, replaces old sidebar bell) */
+        .reg-topbar-bell {
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            padding: 0;
+            cursor: pointer;
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .reg-topbar-bell:hover,
+        .reg-topbar-bell:focus,
+        .reg-topbar-bell:active {
+            background: transparent !important;
+            outline: none !important;
+            box-shadow: none !important;
+        }
+
         @media (max-width: 1023px) {
             .reg-sidebar { box-shadow: 0 0 60px rgba(0,0,0,0.18); }
+
+            /* ── Icon-only nav on mobile: hide labels, section titles, active dots ── */
+            .reg-nav-label,
+            .reg-nav-section-label,
+            .reg-nav-dot {
+                display: none !important;
+            }
+            .reg-nav-link {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            .reg-nav-icon {
+                margin-right: 0;
+            }
+
+            /* ── Icon-only logout button on mobile ── */
+            .reg-logout-btn {
+                gap: 0;
+                padding: 0.9rem;
+            }
+            .reg-logout-label-text {
+                display: none;
+            }
+            .reg-logout-btn i.fa-right-from-bracket,
+            .reg-logout-spinner {
+                margin-right: 0 !important;
+            }
         }
 
         /* ════════════════════════════════════════════════════════
@@ -165,6 +195,7 @@
         .notif-icon-alumni  { background: #F0E9F8; color: #7A3F91; }
         .notif-icon-import  { background: #EAFAF3; color: #0E8058; }
         .notif-icon-chat    { background: #FEF0E6; color: #C06A20; }
+        .notif-icon-profile { background: #FDECEF; color: #B4326B; }
         .notif-icon-default { background: #F3F3F3; color: #888888; }
 
         .notif-body         { flex: 1; min-width: 0; }
@@ -190,10 +221,11 @@
             text-transform: uppercase;
             flex-shrink: 0;
         }
-        .notif-tag-emp    { background: #DBEAFE; color: #1347A0; }
-        .notif-tag-alumni { background: #EDE1F9; color: #5A2270; }
-        .notif-tag-import { background: #D1FAE5; color: #065F46; }
-        .notif-tag-chat   { background: #FEE8D1; color: #953F0E; }
+        .notif-tag-emp     { background: #DBEAFE; color: #1347A0; }
+        .notif-tag-alumni  { background: #EDE1F9; color: #5A2270; }
+        .notif-tag-import  { background: #D1FAE5; color: #065F46; }
+        .notif-tag-chat    { background: #FEE8D1; color: #953F0E; }
+        .notif-tag-profile { background: #FBD9E3; color: #8A2049; }
 
         .notif-count-badge {
             display: inline-flex;
@@ -230,6 +262,32 @@
 
         .notif-time-row { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #AAAAAA; }
         .notif-time-row i { font-size: 10px; }
+
+        /* ── MOBILE: full-screen notification panel (Messenger-style) ──────────
+           Overrides the desktop floating-panel inline styles (top/left/width/
+           border-radius/etc. set via style="" + positionPanel()) using
+           !important, since an !important rule in an external stylesheet
+           always wins over a non-important inline style. No JS changes
+           needed — positionPanel() can keep writing left/top/width, this
+           simply overrides it on small screens. ── */
+        @media (max-width: 1023px) {
+            #notif-panel {
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                min-height: 100% !important;
+                max-height: 100% !important;
+                border-radius: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            #notif-list {
+                max-height: none !important;
+            }
+        }
     </style>
 
     <script>
@@ -308,10 +366,17 @@
                             rawDedup === 'imported' ||
                             n.title  === 'Bulk Import Complete'
                         );
+                        var isProfileEvent = (
+                            rawDedup.startsWith('profile_update::') ||
+                            n.title === 'Alumni Profile Updated'    ||
+                            n.icon  === 'user-pen'
+                        );
 
                         var groupKey;
                         if (isEmpEvent) {
                             groupKey = 'employment_day::' + day;
+                        } else if (isProfileEvent) {
+                            groupKey = 'profile_day::' + day;
                         } else if (isChatMsg) {
                             var roomSlug = rawDedup.replace('chat_msg::', '') || 'chat';
                             groupKey = 'chat_msg::' + roomSlug + '::' + day;
@@ -334,6 +399,9 @@
                             if (isEmpEvent) {
                                 g.message = g.count + ' employment status update(s) today.';
                                 g.title   = 'Employment Status Updated';
+                            } else if (isProfileEvent) {
+                                g.message = g.count + ' alumni profile update(s) today.';
+                                g.title   = 'Alumni Profile Updated';
                             } else if (isChatMsg) {
                                 var rName = g._roomName || 'group chat';
                                 g.message = g.count + ' new message(s) in ' + rName + '.';
@@ -350,13 +418,15 @@
                                 _ids:       [n.id],
                                 _roomName:  n._roomName || '',
                                 created_at: nTimestamp || n.created_at,
-                                title: isEmpEvent    ? 'Employment Status Updated'
-                                     : isChatMsg     ? (n.title || 'New Chat Message')
-                                     : isAlumniEvent ? 'New Alumni Registered'
-                                     : isImportEvent ? 'Bulk Import Complete'
+                                title: isEmpEvent     ? 'Employment Status Updated'
+                                     : isProfileEvent ? 'Alumni Profile Updated'
+                                     : isChatMsg      ? (n.title || 'New Chat Message')
+                                     : isAlumniEvent  ? 'New Alumni Registered'
+                                     : isImportEvent  ? 'Bulk Import Complete'
                                      : n.title,
-                                icon: isEmpEvent    ? 'arrow-rotate-right'
-                                    : isChatMsg     ? 'comment-dots'
+                                icon: isEmpEvent     ? 'arrow-rotate-right'
+                                    : isProfileEvent ? 'user-pen'
+                                    : isChatMsg      ? 'comment-dots'
                                     : (n.icon || 'bell'),
                             }));
                         }
@@ -514,15 +584,16 @@
         var aside = document.querySelector('aside');
         if (!btn || !panel) return;
         var btnRect = btn.getBoundingClientRect();
-        if (aside && window.innerWidth >= 1024) {
-            var asideRect = aside.getBoundingClientRect();
-            panel.style.left  = (asideRect.right + 12) + 'px';
+        if (window.innerWidth >= 1024) {
+            panel.style.left  = (btnRect.right - 400) + 'px';
             panel.style.top   = (btnRect.bottom  + 8)  + 'px';
             panel.style.width = '400px';
         } else {
-            panel.style.left  = '8px';
-            panel.style.top   = (btnRect.bottom + 8) + 'px';
-            panel.style.width = (window.innerWidth - 16) + 'px';
+            // Mobile: the CSS media query (#notif-panel !important rules)
+            // forces this full-screen regardless of what's set here.
+            panel.style.left  = '0px';
+            panel.style.top   = '0px';
+            panel.style.width = '100%';
         }
     }
     window.positionPanel = positionPanel;
@@ -628,6 +699,23 @@
             });
         });
 
+        // Alumni profile updates (personal info form) — grouped per day,
+        // same pattern as employment-updated above, with the alumnus'
+        // actual name in the message instead of a generic placeholder.
+        window.addEventListener('profile-updated', function (e) {
+            var d = _detail(e);
+            var today = new Date().toISOString().slice(0, 10);
+            var who = d.name || 'An alumnus';
+            _saveNotif({
+                icon:       'user-pen',
+                title:      'Alumni Profile Updated',
+                message:    who + ' updated their profile information.',
+                link_route: 'registrar.alumni',
+                link_label: 'View Alumni',
+                dedup_key:  'profile_update::' + today,
+            });
+        });
+
         window.addEventListener('message-received', function (e) {
             var d = _detail(e);
             var sender   = d.sender   || 'Someone';
@@ -669,14 +757,14 @@
 
     {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
     <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-           class="reg-sidebar fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
+           class="reg-sidebar fixed inset-y-0 left-0 z-50 w-20 min-w-[5rem] lg:w-72 lg:min-w-[18rem] transform
                   transition-transform duration-300
                   lg:translate-x-0 lg:static lg:inset-0
                   flex flex-col h-full text-[#333333] shrink-0">
 
         {{-- Sidebar Header --}}
-        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E5E5E5] shrink-0">
-            <div class="min-w-0">
+        <div class="flex items-center justify-center lg:justify-start h-24 px-2 lg:px-5 border-b border-[#E5E5E5] shrink-0">
+            <div class="min-w-0 hidden lg:block">
                 <p class="text-[15px] uppercase tracking-[0.18em] font-extrabold text-[#7A3F91] leading-none">
                     PHILCST
                 </p>
@@ -684,14 +772,91 @@
                     Records Management
                 </p>
             </div>
+        </div>
 
-            {{-- Bell Button --}}
+        {{-- Navigation --}}
+        <nav class="flex-1 px-2 lg:px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+            <p class="reg-nav-section-label">MENU</p>
+            @php
+                $sidebarLinks = [
+                    ['route' => 'registrar.dashboard',           'icon' => 'gauge-high',  'label' => 'Dashboard'],
+                    ['route' => 'registrar.alumni',              'icon' => 'users',        'label' => 'Alumni Records'],
+                    ['route' => 'registrar.alumni.register',     'icon' => 'user-plus',    'label' => 'Register Alumni'],
+                    ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',   'label' => 'Employment Tracking'],
+                ];
+            @endphp
+            @foreach($sidebarLinks as $link)
+                @php $isActive = request()->routeIs($link['route']); @endphp
+                <a href="{{ route($link['route']) }}"
+                   wire:navigate
+                   title="{{ $link['label'] }}"
+                   @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}'); sidebarOpen = false;"
+                   class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
+                    <div class="reg-nav-icon">
+                        <i class="fa-solid fa-{{ $link['icon'] }}"></i>
+                    </div>
+                    <span class="reg-nav-label">{{ $link['label'] }}</span>
+                    @if($isActive)
+                        <span class="reg-nav-dot"></span>
+                    @endif
+                </a>
+            @endforeach
+        </nav>
+
+        {{-- Logout --}}
+        <div class="p-2 lg:p-4 mt-auto border-t border-[#E5E5E5] shrink-0">
+            <form method="POST"
+                  action="{{ route('logout') }}"
+                  @submit="loggingOut = true">
+                @csrf
+                <button type="submit"
+                        :disabled="loggingOut"
+                        title="Logout"
+                        class="reg-logout-btn">
+                    <template x-if="!loggingOut">
+                        <span class="reg-logout-text-swap">
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                            <span class="reg-logout-label-text">Logout</span>
+                        </span>
+                    </template>
+                    <template x-if="loggingOut">
+                        <span class="reg-logout-text-swap">
+                            <span class="reg-logout-spinner mr-2"></span>
+                            <span class="reg-logout-label-text">Logging out…</span>
+                        </span>
+                    </template>
+                </button>
+            </form>
+        </div>
+    </aside>
+
+    {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
+    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+
+        {{-- Top bar (universal — hamburger on mobile only, single bell always) --}}
+        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+                       shrink-0 z-30">
+            <button @click="sidebarOpen = !sidebarOpen"
+                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
+                <div class="w-6 h-5 relative flex flex-col justify-between">
+                    <span :class="sidebarOpen ? 'rotate-45 translate-y-2' : ''"
+                          class="reg-hamburger-line w-full h-0.5 transition-all duration-300 origin-center"></span>
+                    <span :class="sidebarOpen ? 'opacity-0' : ''"
+                          class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
+                    <span :class="sidebarOpen ? '-rotate-45 -translate-y-2.5' : ''"
+                          class="reg-hamburger-line w-full h-0.5 transition-all duration-300 origin-center"></span>
+                </div>
+            </button>
+            <span class="hidden lg:block"></span>
+
+            {{-- Notifications bell (single source of truth for the whole layout) --}}
             <button
                 id="bell-btn"
                 type="button"
                 @click.stop="$store.notifs && $store.notifs.toggle(); positionPanel();"
                 title="Notifications"
-                aria-label="Open notifications">
+                aria-label="Open notifications"
+                class="reg-topbar-bell">
                 <i class="bell-icon fas fa-bell"
                    :class="$store.notifs && $store.notifs.unread > 0 ? 'fa-shake' : ''"
                    style="font-size:20px; color:#7A3F91;
@@ -713,75 +878,6 @@
                                 : ($store.notifs ? $store.notifs.unread : 0)">
                 </span>
             </button>
-        </div>
-
-        {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
-            <p class="reg-nav-section-label">MENU</p>
-            @php
-                $sidebarLinks = [
-                    ['route' => 'registrar.dashboard',           'icon' => 'gauge-high',  'label' => 'Dashboard'],
-                    ['route' => 'registrar.alumni',              'icon' => 'users',        'label' => 'Alumni Records'],
-                    ['route' => 'registrar.alumni.register',     'icon' => 'user-plus',    'label' => 'Register Alumni'],
-                    ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',   'label' => 'Employment Tracking'],
-                ];
-            @endphp
-            @foreach($sidebarLinks as $link)
-                @php $isActive = request()->routeIs($link['route']); @endphp
-                <a href="{{ route($link['route']) }}"
-                   wire:navigate
-                   @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}'); sidebarOpen = false;"
-                   class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
-                    <div class="reg-nav-icon">
-                        <i class="fa-solid fa-{{ $link['icon'] }}"></i>
-                    </div>
-                    <span class="reg-nav-label">{{ $link['label'] }}</span>
-                    @if($isActive)
-                        <span class="reg-nav-dot"></span>
-                    @endif
-                </a>
-            @endforeach
-        </nav>
-
-        {{-- Logout --}}
-        <div class="p-4 mt-auto border-t border-[#E5E5E5] shrink-0">
-            <form method="POST"
-                  action="{{ route('logout') }}"
-                  @submit="loggingOut = true">
-                @csrf
-                <button type="submit"
-                        :disabled="loggingOut"
-                        class="reg-logout-btn">
-                    <template x-if="!loggingOut">
-                        <span class="reg-logout-text-swap">
-                            <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
-                        </span>
-                    </template>
-                    <template x-if="loggingOut">
-                        <span class="reg-logout-text-swap">
-                            <span class="reg-logout-spinner mr-2"></span> Logging out…
-                        </span>
-                    </template>
-                </button>
-            </form>
-        </div>
-    </aside>
-
-    {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
-    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-
-        {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
-                       lg:hidden shrink-0 z-30">
-            <button @click="sidebarOpen = !sidebarOpen"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
-                <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
-                    <span class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
-                    <span class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
-                </div>
-            </button>
-            <div class="w-10"></div>
         </header>
 
         {{-- Page content --}}
@@ -795,6 +891,9 @@
 
 {{-- ══════════════════════════════════════════════════════════════════════════
      NOTIFICATION PANEL
+     Desktop: small floating card near the bell (positioned via positionPanel()).
+     Mobile (<1024px): forced full-screen, Messenger-style, via the
+     "#notif-panel" !important media query in <style> above.
 ════════════════════════════════════════════════════════════════════════════ --}}
 <div
     id="notif-panel"
@@ -847,9 +946,10 @@
                     onmouseout="this.style.background='transparent'">
                 Mark all read
             </button>
+            {{-- Close (X) button: no tooltip/title anywhere (mobile & desktop) --}}
             <button type="button"
                     @click.stop="$store.notifs && $store.notifs.close()"
-                    title="Close notifications"
+                    aria-label="Close notifications"
                     style="width:28px; height:28px; background:transparent; border:none; color:rgba(255,255,255,0.55); font-size:14px; cursor:pointer; border-radius:7px; display:flex; align-items:center; justify-content:center; transition:background 0.15s, color 0.15s;"
                     onmouseover="this.style.background='rgba(255,255,255,0.12)'; this.style.color='#fff';"
                     onmouseout="this.style.background='transparent'; this.style.color='rgba(255,255,255,0.55)';">
@@ -867,7 +967,7 @@
     </div>
 
     {{-- Scrollable list --}}
-    <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+    <div id="notif-list" class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
         {{-- Empty state --}}
         <template x-if="$store.notifs && $store.notifs.items.length === 0">
@@ -877,7 +977,7 @@
                 </div>
                 <p style="font-size:14px; font-weight:600; color:#888888; margin-bottom:6px;">No notifications yet</p>
                 <p style="font-size:12px; color:#BBBBBB; line-height:1.6;">
-                    Alumni registrations, bulk imports, employment updates,<br>and chat messages will appear here.
+                    Alumni registrations, bulk imports, employment updates,<br>profile updates, and chat messages will appear here.
                 </p>
             </div>
         </template>
@@ -904,7 +1004,8 @@
                              'notif-icon-alumni':  notif.icon === 'user-graduate',
                              'notif-icon-import':  notif.icon === 'file-import',
                              'notif-icon-chat':    notif.icon === 'comment-dots',
-                             'notif-icon-default': !['arrow-rotate-right','user-graduate','file-import','comment-dots'].includes(notif.icon)
+                             'notif-icon-profile': notif.icon === 'user-pen',
+                             'notif-icon-default': !['arrow-rotate-right','user-graduate','file-import','comment-dots','user-pen'].includes(notif.icon)
                          }">
                         <i class="fas" :class="'fa-' + (notif.icon || 'bell')"></i>
                     </div>
@@ -929,6 +1030,8 @@
                                       class="notif-tag notif-tag-import">Import</span>
                                 <span x-show="notif.icon === 'comment-dots'" x-cloak
                                       class="notif-tag notif-tag-chat">Message</span>
+                                <span x-show="notif.icon === 'user-pen'" x-cloak
+                                      class="notif-tag notif-tag-profile">Profile</span>
 
                                 {{-- Count badge --}}
                                 <span x-show="Number(notif.count) > 1" x-cloak

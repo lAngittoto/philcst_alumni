@@ -19,6 +19,14 @@ new class extends Component {
     public ?int   $viewingEventId    = null;
     public ?string $viewingEventType = null;
 
+    // ── Tracks whether the currently-open View Details modal was opened
+    //    via a deep link (?event=...&type=...) rather than a normal card
+    //    click. mount() forces filterStatus to '' (All Events) so a deep
+    //    link always resolves, even for a completed event. Without this
+    //    flag, closing the modal would leave the filter stuck on "All
+    //    Events" instead of going back to "Upcoming". ─────────────────────
+    public bool   $deepLinkedView    = false;
+
     public bool   $showRsvpModal = false;
     public ?string $rsvpResponse  = null;
     public string $rsvpMessage    = '';
@@ -43,6 +51,15 @@ new class extends Component {
     public int    $alumniId     = 0;
     public int    $alumniRoomId = 0;
 
+    // The alumni's chat rooms (batch chat + college-wide chat), used by the
+    // "forward"-style destination picker in the Share modal — mirrors the
+    // same pattern used in job-opportunities.blade.php.
+    public array  $alumniChatRooms = [];
+
+    // Forward-to-chat destination picker (Messenger-forward style)
+    public bool   $showForwardModal = false;
+    public array  $selectedRoomIds  = [];
+
     public int $page    = 1;
     public int $perPage = 20;
 
@@ -63,6 +80,34 @@ new class extends Component {
             ->first();
         $this->alumniRoomId = $room ? (int) $room->id : 0;
 
+        // Build the list of chat rooms this alumni can forward an event post
+        // to. Room 1: their own batch chat (course_code + batch). Room 2:
+        // the COLLEGE-wide chat — stored the same way messenger.blade.php's
+        // ensureRoomsExist() creates it: `department` = college name,
+        // `course_code` = the CLG_ marker, `batch` = 0.
+        $chatRooms = collect();
+        if ($this->alumniRoomId) {
+            $chatRooms->push([
+                'id'    => $this->alumniRoomId,
+                'label' => 'Batch ' . ($alumni->batch ?? '') . ' Chat',
+            ]);
+        }
+        if ($this->alumniCollege) {
+            $marker = $this->collegeMarker($this->alumniCollege);
+            $generalRoom = DB::table('chat_rooms')
+                ->where('department', $this->alumniCollege)
+                ->where('course_code', $marker)
+                ->where('batch', 0)
+                ->first();
+            if ($generalRoom && (int) $generalRoom->id !== $this->alumniRoomId) {
+                $chatRooms->push([
+                    'id'    => (int) $generalRoom->id,
+                    'label' => $generalRoom->name ?? ($this->alumniCollege . ' Chat'),
+                ]);
+            }
+        }
+        $this->alumniChatRooms = $chatRooms->values()->toArray();
+
         // Read filter flashed from dashboard navigation
         $filter = session()->pull('events_filter');
         if ($filter === 'upcoming') {
@@ -70,6 +115,36 @@ new class extends Component {
         } elseif ($filter === 'all') {
             $this->filterStatus = '';
         }
+
+        // ── Deep-link support: /upcoming/events?event=49&type=ORGANIZER ──
+        // Messenger's "View Event" button and shared event cards both link
+        // here with an `event` + `type` query string. Previously the link
+        // just landed on the plain events list and the person had to find
+        // and click the card themselves. Now the matching event's detail
+        // view opens automatically on load, exactly as if they'd clicked
+        // "View Details" on the card themselves.
+        $eventParam = request()->query('event');
+        $typeParam  = strtoupper((string) request()->query('type', ''));
+
+        if ($eventParam !== null && in_array($typeParam, ['ADMIN', 'ORGANIZER'], true)) {
+            // Make sure filters don't accidentally hide the linked event —
+            // switch to "All Events" so the deep link always resolves,
+            // whether the event is upcoming or already completed.
+            $this->filterStatus  = '';
+            // Remember this was a deep link so closeViewModal() knows to
+            // put the filter back to "Upcoming" instead of leaving it on
+            // "All Events" once the person is done viewing.
+            $this->deepLinkedView = true;
+            $this->viewEvent((int) $eventParam, $typeParam);
+        }
+    }
+
+    // Same marker scheme used in messenger.blade.php's chat_rooms table:
+    // the college-wide room is stored with course_code = 'CLG_' + a short
+    // hash of the college name, and batch = 0.
+    private function collegeMarker(string $college): string
+    {
+        return 'CLG_' . substr(md5($college), 0, 12);
     }
 
     public function resetFilters(): void
@@ -243,6 +318,20 @@ new class extends Component {
         $this->viewingEventId   = null;
         $this->viewingEventType = null;
         $this->resetRsvpModal();
+
+        // ── If this View Details was opened via a deep link (chat share /
+        //    "View Event" button), mount() had forced filterStatus to ''
+        //    (All Events) just so the link could resolve. Now that the
+        //    person is done looking and is closing the modal, snap the
+        //    filter back to "Upcoming" — same as landing on the page
+        //    fresh — instead of leaving them stuck on "All Events". A
+        //    normal card click never sets this flag, so closing that way
+        //    still leaves whatever filter the person had chosen alone. ──
+        if ($this->deepLinkedView) {
+            $this->filterStatus   = 'upcoming';
+            $this->page           = 1;
+            $this->deepLinkedView = false;
+        }
     }
 
     public function openRsvpModal(): void  { $this->showRsvpModal = true; }
@@ -323,10 +412,50 @@ new class extends Component {
         return $base . $path;
     }
 
-    public function postToBatchChat(): void
+    // ── Forward-to-chat destination picker (Messenger-forward style) ──
+    // Mirrors job-opportunities.blade.php: instead of posting straight to
+    // the batch chat, the alumnus picks one or both of their chats first.
+    public function openForwardModal(): void
     {
-        if (!$this->shareEventId || !$this->alumniRoomId) {
-            $this->dispatch('flash-message', type: 'error', message: 'Could not find your batch chat room.');
+        if (empty($this->alumniChatRooms)) {
+            $this->dispatch('flash-message', type: 'error', message: 'No chat rooms found to share to.');
+            return;
+        }
+
+        // Preselect their own batch chat by default.
+        $this->selectedRoomIds  = $this->alumniRoomId ? [$this->alumniRoomId] : [];
+        $this->showForwardModal = true;
+    }
+
+    public function closeForwardModal(): void
+    {
+        $this->showForwardModal = false;
+        $this->selectedRoomIds  = [];
+    }
+
+    public function toggleRoomSelection(int $roomId): void
+    {
+        if (in_array($roomId, $this->selectedRoomIds, true)) {
+            $this->selectedRoomIds = array_values(array_diff($this->selectedRoomIds, [$roomId]));
+        } else {
+            $this->selectedRoomIds[] = $roomId;
+        }
+    }
+
+    // Sends a short marker into each selected chat — mirrors the
+    // job-opportunities marker approach ("[[JOB:{id}]]"). messenger.
+    // blade.php resolves this marker fresh from the DB and renders a
+    // real image+text preview card, instead of a raw (and, since the
+    // portal isn't publicly deployed yet, dead) link.
+    public function confirmSendToChat(): void
+    {
+        if (empty($this->selectedRoomIds)) {
+            $this->dispatch('flash-message', type: 'warning', message: 'Pumili muna ng chat kung saan mo ipapadala.');
+            return;
+        }
+
+        if (!$this->shareEventId) {
+            $this->dispatch('flash-message', type: 'error', message: 'Could not find the event to share.');
             return;
         }
 
@@ -337,63 +466,45 @@ new class extends Component {
 
         if (!$event) { $this->dispatch('flash-message', type: 'error', message: 'Event not found.'); return; }
 
-        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
-        $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
-        $timeStr     = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
         $isCompleted = $this->shareIsCompleted;
+        $body        = "@everyone [[EVENT:{$type}:{$event->id}]]";
+        $now         = now();
 
-        if ($isCompleted) {
-            $lines = [
-                "🏆 Event Highlights",
-                "━━━━━━━━━━━━━━━━━━━━━━━━",
-                "✅ {$event->title}",
-                "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
-            ];
-            if ($event->venue)               $lines[] = "📍 {$event->venue}";
-            if ($event->target_participants) $lines[] = "👥 {$event->target_participants}";
-            $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-            $lines[] = "Thanks to everyone who joined! 🎉 Check the Events page for more → " . $this->eventsBaseUrl();
-        } else {
-            $lines = [
-                "📢 @everyone — Event Alert!",
-                "",
-                "📅 {$event->title}",
-                "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
-            ];
-            if ($event->venue)               $lines[] = "📍 {$event->venue}";
-            if ($event->target_participants) $lines[] = "👥 Open for: {$event->target_participants}";
-            $lines[] = "";
-            $lines[] = "Check it out & RSVP on the Events page! 🎉 → " . $this->eventsBaseUrl();
-        }
-
-        $msgId = DB::table('chat_messages')->insertGetId([
-            'room_id'     => $this->alumniRoomId,
-            'sender_type' => 'alumni',
-            'sender_id'   => $this->alumniId,
-            'body'        => implode("\n", $lines),
-            'reply_to_id' => null,
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-
-        if (!$isCompleted) {
-            DB::table('chat_mentions')->insert([
-                'message_id'   => $msgId,
-                'mention_type' => 'everyone',
-                'mentioned_id' => null,
-                'created_at'   => now(),
-                'updated_at'   => now(),
+        foreach ($this->selectedRoomIds as $roomId) {
+            $msgId = DB::table('chat_messages')->insertGetId([
+                'room_id'     => $roomId,
+                'sender_type' => 'alumni',
+                'sender_id'   => $this->alumniId,
+                'body'        => $body,
+                'reply_to_id' => null,
+                'created_at'  => $now,
+                'updated_at'  => $now,
             ]);
+
+            if (!$isCompleted) {
+                DB::table('chat_mentions')->insert([
+                    'message_id'   => $msgId,
+                    'mention_type' => 'everyone',
+                    'mentioned_id' => null,
+                    'created_at'   => $now,
+                    'updated_at'   => $now,
+                ]);
+            }
         }
 
-        $label = $isCompleted ? 'Event highlights posted to your Batch Chat! 🏆' : 'Event posted to your batch chat! 🎉';
-        $this->dispatch('flash-message', type: 'success', message: $label);
+        $count = count($this->selectedRoomIds);
+        $label = $isCompleted
+            ? ($count > 1 ? "Event highlights posted to {$count} chats! 🏆" : 'Event highlights posted to your Batch Chat! 🏆')
+            : ($count > 1 ? "Event posted to {$count} chats! 🎉" : 'Event posted to your batch chat! 🎉');
+
+        $this->closeForwardModal();
         $this->closeShareModal();
+        $this->dispatch('flash-message', type: 'success', message: $label);
     }
 };
 ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
 <style>
 /* ─────────────────────────────────────────────
@@ -409,27 +520,15 @@ select.filter-input {
     appearance: none;
 }
 
-/* ─────────────────────────────────────────────
-   DETAIL PAGE ENTRANCE
-───────────────────────────────────────────── */
-@keyframes detailIn {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
+@keyframes detailIn { from { opacity: 0; } to { opacity: 1; } }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
 
-/* ─────────────────────────────────────────────
-   SHARE SHEET ENTRANCE
-───────────────────────────────────────────── */
 @keyframes panelIn {
     from { opacity: 0; transform: scale(.97) translateY(8px); }
     to   { opacity: 1; transform: none; }
 }
 .share-sheet { animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
-/* ─────────────────────────────────────────────
-   SCROLLBAR
-───────────────────────────────────────────── */
 .scroll-thin::-webkit-scrollbar       { width: 4px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 
@@ -442,9 +541,7 @@ select.filter-input {
     overflow: hidden;
 }
 
-/* ─────────────────────────────────────────────
-   MOUSE-FOLLOWING "VIEW DETAILS" CURSOR LABEL
-───────────────────────────────────────────── */
+/* Mouse-following "View Details" label — desktop only, hidden on mobile below */
 #ev-cursor-label {
     position: fixed;
     z-index: 99999;
@@ -471,254 +568,176 @@ select.filter-input {
     top: -999px;
 }
 #ev-cursor-label svg {
-    width: 11px;
-    height: 11px;
-    flex-shrink: 0;
-    fill: none;
-    stroke: #fff;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    width: 11px; height: 11px; flex-shrink: 0;
+    fill: none; stroke: #fff; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
 }
 
-/* ─────────────────────────────────────────────
-   CARD HOVER STATE
-───────────────────────────────────────────── */
-[data-ev-card] {
-    transition: border-color .15s ease, box-shadow .15s ease;
-}
+[data-ev-card] { transition: border-color .15s ease, box-shadow .15s ease; }
 [data-ev-card]:hover {
     border-color: #c4b5d4 !important;
     box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
 }
 
-/* ─────────────────────────────────────────────
-   CARDS BODY — always 90vh max, scrollable
-───────────────────────────────────────────── */
-.events-cards-body {
-    max-height: 90vh;
-    overflow-y: auto;
-    flex: 1 1 0;
-    min-height: 0;
-}
-.events-cards-body::-webkit-scrollbar       { width: 4px; }
-.events-cards-body::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-
-/* ─────────────────────────────────────────────
-   CARD SHARE BUTTON (bottom-right of card)
-   Tooltip ABOVE
-───────────────────────────────────────────── */
 .card-share-btn {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
     cursor: pointer;
     transition: background .15s, border-color .15s, transform .1s;
-    flex-shrink: 0;
-    z-index: 2;
+    flex-shrink: 0; z-index: 2;
 }
-.card-share-btn:hover {
-    background: #dbeafe;
-    border-color: #93c5fd;
-    transform: scale(1.08);
-}
-/* Tooltip ABOVE */
+.card-share-btn:hover { background: #dbeafe; border-color: #93c5fd; transform: scale(1.08); }
 .card-share-btn .tip {
-    position: absolute;
-    bottom: calc(100% + 7px);
-    right: 0;
-    background: #111827;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    padding: 4px 10px;
-    border-radius: 6px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s;
-    z-index: 9999;
+    position: absolute; bottom: calc(100% + 7px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
     font-family: ui-sans-serif, system-ui, sans-serif;
 }
 .card-share-btn .tip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    right: 10px;
-    border: 4px solid transparent;
-    border-top-color: #111827;
+    content: ''; position: absolute; top: 100%; right: 10px;
+    border: 4px solid transparent; border-top-color: #111827;
 }
 .card-share-btn:hover .tip { opacity: 1; }
 
-/* ─────────────────────────────────────────────
-   STATUS BADGES on cards
-───────────────────────────────────────────── */
+/* status badges on card photo/banner */
 .badge-card-upcoming {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 11px;
-    border-radius: 999px;
-    font-size: 13px;
-    font-weight: 700;
-    background: rgba(37,99,235,0.88);
-    color: #fff;
-    backdrop-filter: blur(4px);
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(37,99,235,0.88); color: #fff; backdrop-filter: blur(4px);
 }
 .badge-card-completed {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 11px;
-    border-radius: 999px;
-    font-size: 13px;
-    font-weight: 700;
-    background: rgba(21,128,61,0.88);
-    color: #fff;
-    backdrop-filter: blur(4px);
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(21,128,61,0.88); color: #fff; backdrop-filter: blur(4px);
 }
 
-/* ─────────────────────────────────────────────
-   DETAIL PAGE — purple top bar action buttons
-   Tooltips BELOW the button
-───────────────────────────────────────────── */
 .detail-top-btn {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    cursor: pointer;
-    transition: background .15s, transform .1s;
-    flex-shrink: 0;
-    border: none;
-    outline: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    cursor: pointer; transition: background .15s, transform .1s;
+    flex-shrink: 0; border: none; outline: none;
 }
 .detail-top-btn:active { transform: scale(.93); }
-
-/* Tooltip BELOW */
 .detail-top-btn .tip {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    background: #111827;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    padding: 4px 10px;
-    border-radius: 6px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s;
-    z-index: 9999;
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
     font-family: ui-sans-serif, system-ui, sans-serif;
 }
-/* Arrow pointing UP (tooltip is below button) */
 .detail-top-btn .tip::before {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    right: 10px;
-    border: 4px solid transparent;
-    border-bottom-color: #111827;
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
 }
 .detail-top-btn:hover .tip { opacity: 1; }
 
-/* Share variant */
-.detail-top-btn.share-btn {
-    background: rgba(255,255,255,.14);
-    border: 1px solid rgba(255,255,255,.2);
-    color: #fff;
-}
+.detail-top-btn.share-btn { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); color: #fff; }
 .detail-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
-
-/* RSVP variant */
-.detail-top-btn.rsvp-btn {
-    background: rgba(255,255,255,.14);
-    border: 1px solid rgba(255,255,255,.2);
-    color: #fff;
-}
+.detail-top-btn.rsvp-btn { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); color: #fff; }
 .detail-top-btn.rsvp-btn:hover { background: rgba(255,255,255,.24); }
-
-/* Close variant */
-.detail-top-btn.close-btn {
-    background: rgba(255,255,255,.10);
-    border: 1px solid rgba(255,255,255,.15);
-}
+.detail-top-btn.close-btn { background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.15); }
 .detail-top-btn.close-btn:hover { background: rgba(255,255,255,.22); }
-.detail-top-btn.close-btn svg {
-    width: 13px;
-    height: 13px;
-    stroke: #fff;
-    stroke-width: 2.5;
-    stroke-linecap: round;
-}
+.detail-top-btn.close-btn svg { width: 13px; height: 13px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
 
 /* ─────────────────────────────────────────────
-   SHARE MODAL — purple close button
+   SHARE MODAL — clean / flat, no gradients.
 ───────────────────────────────────────────── */
-.btn-close-purple {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    background: rgba(255,255,255,0.15);
-    border: 1px solid rgba(255,255,255,0.25);
-    cursor: pointer;
-    transition: background .15s, transform .1s;
+.share-close-btn {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
     flex-shrink: 0;
 }
-.btn-close-purple:hover  { background: rgba(255,255,255,0.28); }
-.btn-close-purple:active { transform: scale(.93); }
-.btn-close-purple svg    { width: 13px; height: 13px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
+.share-close-btn:hover  { background: #e5e7eb; border-color: #d1d5db; }
+.share-close-btn:active { transform: scale(.93); }
+.share-close-btn svg    { width: 14px; height: 14px; stroke: #4b5563; stroke-width: 2.25; stroke-linecap: round; }
+.share-close-btn .tip {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.share-close-btn .tip::before {
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
+}
+.share-close-btn:hover .tip { opacity: 1; }
+
+.share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
+}
+.share-option-btn:hover  { filter: brightness(0.94); }
+.share-option-btn:active { transform: scale(.98); }
+.share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
 
 /* ─────────────────────────────────────────────
-   DETAIL PAGE — force sans-serif everywhere
+   PHILCST "OFFICIAL POST" DETAIL STYLING
 ───────────────────────────────────────────── */
+.philcst-post-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 14px; overflow: hidden; }
+.philcst-post-ribbon {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: #7a3f91; background: #f5eef9; border: 1px solid #e3cdf0;
+    padding: 4px 10px; border-radius: 999px;
+}
+
+/* ─────────────────────────────────────────────
+   DETAIL VIEW — fixed-height, no page scroll.
+   Two columns: left sidebar (meta/info), right
+   content. Only the two inner panels scroll on
+   their own if their content is long — the page
+   itself never grows past the viewport.
+───────────────────────────────────────────── */
+.detail-side-item { display: flex; align-items: flex-start; gap: 10px; }
+.detail-side-icon {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+.detail-side-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
+.detail-side-value { font-size: 13.5px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+
+/* ─────────────────────────────────────────────
+   RESPONSIVE — icon-only on small / touch screens:
+   tooltips and the mouse-follow label disappear.
+───────────────────────────────────────────── */
+@media (max-width: 767px) {
+    #ev-cursor-label { display: none !important; }
+    .card-share-btn .tip,
+    .detail-top-btn .tip,
+    .share-close-btn .tip { display: none !important; }
+}
+
 .detail-page * {
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-                 "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif !important;
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
     font-style: normal !important;
 }
-.detail-header-label {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.55);
-    line-height: 1;
-    margin-bottom: 2px;
-    display: block;
-}
 .detail-header-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: #fff;
-    line-height: 1.3;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 15px; font-weight: 600; color: #fff; line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .detail-label { font-style: italic; }
 </style>
 
-{{-- Mouse-following cursor label --}}
+{{-- Mouse-following cursor label — hidden on mobile via CSS + JS guard below --}}
 <div id="ev-cursor-label">
     <svg viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
     View Details
@@ -820,7 +839,7 @@ select.filter-input {
         </div>
 
         {{-- ── CARDS BODY ── --}}
-        <div class="events-cards-body bg-gray-100 p-4 relative">
+        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto">
 
             @if($this->pagedEvents->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -833,14 +852,14 @@ select.filter-input {
                     $postedAgo    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila')->diffForHumans();
                     $timeDisplay  = $eventDate->format('g:i A') . ($eventEndDate ? ' – ' . $eventEndDate->format('g:i A') : '');
                     $hasPhoto     = !empty($event->photo_url);
-                    $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 80) : null;
+                    $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 90) : null;
+                    $displaySrc   = $event->event_source === 'ADMIN' ? 'PHILCST' : null;
                 @endphp
 
                 <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
                             cursor-pointer relative select-none flex flex-col group"
                      data-ev-card
-                     data-ev-id="{{ $event->id }}"
-                     data-ev-type="{{ $event->event_source }}"
+                     wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')"
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
@@ -853,13 +872,9 @@ select.filter-input {
                              style="background:linear-gradient(to top,rgba(0,0,0,.45),transparent);"></div>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
-                                <span class="badge-card-completed">
-                                    <i class="fas fa-circle-check text-[11px]"></i> Completed
-                                </span>
+                                <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
                             @else
-                                <span class="badge-card-upcoming">
-                                    <i class="fas fa-calendar-check text-[11px]"></i> Upcoming
-                                </span>
+                                <span class="badge-card-upcoming"><i class="fas fa-calendar-check text-[11px]"></i> Upcoming</span>
                             @endif
                         </div>
                     </div>
@@ -869,70 +884,72 @@ select.filter-input {
                         <i class="fas fa-calendar-days text-white/20 text-3xl"></i>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
-                                <span class="badge-card-completed">
-                                    <i class="fas fa-circle-check text-[11px]"></i> Completed
-                                </span>
+                                <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
                             @else
-                                <span class="badge-card-upcoming">
-                                    <i class="fas fa-calendar-check text-[11px]"></i> Upcoming
-                                </span>
+                                <span class="badge-card-upcoming"><i class="fas fa-calendar-check text-[11px]"></i> Upcoming</span>
                             @endif
                         </div>
                     </div>
                     @endif
 
-                    <div class="flex flex-col flex-1 p-4 gap-2">
+                    <div class="flex flex-col flex-1 p-4 gap-2.5">
 
-                        <h3 class="font-normal text-base leading-snug line-clamp-2 text-gray-900">{{ $event->title }}</h3>
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex-1 min-w-0">
+                                <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{{ $event->title }}</h3>
+                            </div>
+                            @if($displaySrc)
+                            <span class="inline-flex shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 mt-0.5 whitespace-nowrap" style="color:#333333;">
+                                {{ $displaySrc }}
+                            </span>
+                            @endif
+                        </div>
 
                         <div class="flex flex-wrap gap-1.5">
-                            <span class="inline-flex items-center text-sm font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-900">
-                                <i class="fas fa-calendar mr-1 text-[10px] text-gray-500"></i>
+                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-purple-50 border border-purple-100 text-purple-700">
                                 {{ $eventDate->format('M d, Y') }}
                             </span>
                             @if($timeDisplay)
-                            <span class="inline-flex items-center text-sm font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-900">
+                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200" style="color:#333333;">
                                 {{ $timeDisplay }}
                             </span>
                             @endif
                         </div>
 
                         @if($event->venue)
-                        <p class="text-sm truncate text-gray-900">
-                            <i class="fas fa-location-dot text-gray-500 text-xs mr-1"></i>{{ $event->venue }}
+                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
+                            <i class="fas fa-location-dot text-[11px]" style="color:#999;"></i>{{ $event->venue }}
                         </p>
                         @endif
 
                         @if($event->target_participants)
-                        <p class="text-sm font-medium text-gray-900 truncate">
-                            <i class="fas fa-users text-[10px] mr-1 text-gray-500"></i>{{ Str::limit($event->target_participants, 40) }}
+                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
+                            <i class="fas fa-users text-[11px]" style="color:#999;"></i>{{ Str::limit($event->target_participants, 40) }}
                         </p>
                         @else
-                        <p class="text-sm text-gray-500 italic">No target specified</p>
+                        <p class="text-[13px] italic" style="color:#333333;">No target specified</p>
                         @endif
 
                         @if($descPreview)
-                        <p class="text-sm line-clamp-2 leading-relaxed text-gray-700">{{ $descPreview }}</p>
+                        <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
                         @endif
 
-                        {{-- Card footer --}}
-                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto gap-2">
+                        <div class="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-auto gap-2">
                             <div class="flex flex-col gap-0.5 min-w-0">
-                                <span class="text-xs text-gray-500">{{ $postedAgo }}</span>
-                                <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                                <span class="text-[12px]" style="color:#333333;">{{ $postedAgo }}</span>
+                                <span class="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-600">
                                     <i class="fas fa-circle-check text-[9px]"></i>
                                     {{ $event->confirmed_count }} Attending
                                 </span>
                             </div>
-                            <div class="flex items-center gap-1.5 flex-shrink-0 z-[2]">
-                                <button type="button"
-                                        data-ev-share
-                                        wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
-                                        class="card-share-btn">
-                                    <i class="fas fa-share-nodes text-[11px]"></i>
-                                    <span class="tip">Share</span>
-                                </button>
-                            </div>
+
+                            <button type="button"
+                                    data-ev-share
+                                    wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
+                                    class="card-share-btn">
+                                <i class="fas fa-share-nodes text-[11px]"></i>
+                                <span class="tip">Share</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1036,7 +1053,7 @@ select.filter-input {
 </div>
 
 
-{{-- ══ FULL-SCREEN EVENT DETAIL ══ --}}
+{{-- ══ FULL-SCREEN EVENT DETAIL — fixed height, no page scroll ══ --}}
 @if($showViewModal && $this->viewingEvent)
 @php
     $event        = $this->viewingEvent;
@@ -1059,43 +1076,41 @@ select.filter-input {
             default     => 'text-gray-900 font-semibold'
         };
     }
-    $hasDesc    = !empty($event->description);
-    $hasNotes   = !empty($event->notes);
-    $hasContact = $event->contact_person || $event->contact_email || $event->contact_phone;
+    $hasDesc     = !empty($event->description);
+    $hasNotes    = !empty($event->notes);
+    $hasContact  = $event->contact_person || $event->contact_email || $event->contact_phone;
+    $isPhilcst   = $event->event_source === 'ADMIN';
+    $displaySrc  = $isPhilcst ? 'PHILCST' : ($event->event_source === 'ORGANIZER' ? 'Organizer' : null);
 @endphp
 
-<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-hidden"
+<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto lg:overflow-hidden"
      @keydown.escape.window="$wire.closeViewModal()">
 
     {{-- Purple top bar --}}
     <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
 
-        <div class="flex flex-col justify-center flex-1 min-w-0">
-            <span class="detail-header-label">Event</span>
-            <span class="detail-header-title">{{ $event->title }}</span>
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-calendar-days text-white text-sm"></i>
+            </div>
+            <span class="detail-header-title">Event Details</span>
         </div>
 
         <div class="flex items-center gap-1.5 flex-shrink-0">
-            {{-- Share — tooltip BELOW --}}
             <button type="button" wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
-                    class="detail-top-btn share-btn"
-                    aria-label="Share">
+                    class="detail-top-btn share-btn" aria-label="Share">
                 <i class="fas fa-share-nodes text-[13px] text-white"></i>
                 <span class="tip">Share</span>
             </button>
-            {{-- RSVP — tooltip BELOW --}}
             @if(!$isCompleted)
             <button type="button" wire:click="openRsvpModal"
-                    class="detail-top-btn rsvp-btn"
-                    aria-label="{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}">
+                    class="detail-top-btn rsvp-btn" aria-label="{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}">
                 <i class="fas fa-calendar-plus text-[13px] text-white"></i>
                 <span class="tip">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
             </button>
             @endif
-            {{-- Close — tooltip BELOW --}}
             <button type="button" wire:click="closeViewModal"
-                    class="detail-top-btn close-btn"
-                    aria-label="Close">
+                    class="detail-top-btn close-btn" aria-label="Close">
                 <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
@@ -1104,126 +1119,190 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- White hero --}}
-    <div class="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0">
-        <h2 class="text-2xl font-semibold text-gray-900 leading-snug mb-3">{{ $event->title }}</h2>
-        <div class="flex flex-wrap gap-1.5">
-            @if($isCompleted)
-                <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-green-200 bg-green-50 text-green-700">
-                    <i class="fas fa-circle-check mr-1 text-[10px]"></i>Completed
-                </span>
-            @else
-                <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700">
-                    <i class="fas fa-calendar-check mr-1 text-[10px]"></i>Upcoming
-                </span>
-            @endif
-            @if($event->target_participants)
-                @foreach(explode(',', $event->target_participants) as $part)
-                    <span class="inline-flex items-center text-xs font-normal px-2.5 py-1 rounded border border-gray-200 bg-white text-gray-900">{{ trim($part) }}</span>
-                @endforeach
-            @endif
-        </div>
-    </div>
+    {{-- Body: fixed-height two-column layout. The overall page never
+         scrolls — only the sidebar / main content panels scroll on
+         their own if they genuinely have more content than fits. --}}
+    <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden">
 
-    {{-- Info strip --}}
-    <div class="bg-white border-b border-gray-200 flex flex-wrap flex-shrink-0">
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Date</span>
-            <span class="text-base font-semibold text-gray-900">{{ $eventDate->format('M d, Y') }}</span>
-            <span class="text-sm text-gray-900">{{ $timeDisplay }}</span>
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Venue</span>
-            <span class="text-base font-semibold text-gray-900">{{ $event->venue ?: '—' }}</span>
-            @if($event->venue_address)
-                <span class="text-sm text-gray-900">{{ $event->venue_address }}</span>
-            @endif
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Open For</span>
-            <span class="text-base font-semibold text-gray-900">{{ $event->target_participants ?: '—' }}</span>
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Responses</span>
-            <span class="text-base font-bold text-emerald-600">{{ $event->confirmed_count }} Attending</span>
-            <span class="text-sm text-gray-900">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</span>
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Your RSVP</span>
-            <span class="text-base {{ $rsvpColor }}">{{ $rsvpLabel }}</span>
-            @if(!$isCompleted)
-                <button wire:click="openRsvpModal"
-                        class="text-xs font-semibold text-violet-700 hover:underline cursor-pointer text-left">
-                    {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
-                </button>
-            @endif
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Posted</span>
-            <span class="text-base font-semibold text-gray-900">{{ $createdPH->format('M d, Y') }}</span>
-            <span class="text-sm text-gray-900">{{ $createdPH->diffForHumans() }}</span>
-        </div>
-    </div>
-
-    {{-- Scrollable content --}}
-    <div class="flex-1 overflow-y-auto bg-gray-100 scroll-thin min-h-0">
-        <div class="max-w-[1100px] mx-auto px-5 py-4 pb-8 flex flex-col gap-4">
+        {{-- LEFT: sidebar — title, badges, and all the "meta" info that
+             used to sit stacked across the top now lives here instead. --}}
+        <div class="w-full lg:w-[340px] lg:flex-none bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
 
             @if($hasPhoto)
-            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                     class="w-full object-cover" style="max-height:320px;display:block;">
-            </div>
+                     class="w-full h-48 sm:h-56 object-cover bg-[#f5eef9] flex-shrink-0"
+                     onerror="this.style.display='none'">
             @endif
 
-            @if($hasDesc)
-            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                    <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">About This Event</span>
-                </div>
-                <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $event->description }}</div>
-            </div>
-            @endif
-
-            @if($hasNotes || $hasContact)
-            <div class="{{ ($hasNotes && $hasContact) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
-                @if($hasNotes)
-                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Additional Notes</span>
-                    </div>
-                    <div class="px-5 py-4 text-base text-gray-900 leading-relaxed pre-wrap">{{ $event->notes }}</div>
-                </div>
+            <div class="p-4 flex flex-col gap-3">
+                @if($isPhilcst)
+                    <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[10px]"></i> Official PHILCST Event</span>
                 @endif
-                @if($hasContact)
-                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-gray-900">Contact Information</span>
+
+                <div>
+                    <p class="text-[9px] font-bold uppercase tracking-[.16em] mb-1" style="color:#666;">Event Title</p>
+                    <h2 class="text-lg font-semibold leading-snug mb-1" style="color:#333333;">{{ $event->title }}</h2>
+                    @if($displaySrc)
+                    <p class="text-xs font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $displaySrc }}</p>
+                    @endif
+                </div>
+
+                <div class="flex flex-wrap gap-1.5">
+                    @if($isCompleted)
+                        <span class="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded border border-green-200 bg-white text-green-700">
+                            <i class="fas fa-circle-check mr-1 text-[9px]"></i>Completed
+                        </span>
+                    @else
+                        <span class="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded border border-blue-200 bg-white text-blue-700">
+                            <i class="fas fa-calendar-check mr-1 text-[9px]"></i>Upcoming
+                        </span>
+                    @endif
+                    @if($event->target_participants)
+                        @foreach(explode(',', $event->target_participants) as $part)
+                            <span class="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($part) }}</span>
+                        @endforeach
+                    @endif
+                </div>
+
+                <div class="border-t border-gray-100"></div>
+
+                <div class="flex flex-col gap-3">
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Venue</p>
+                            <p class="detail-side-value">{{ $event->venue ?: '—' }}</p>
+                            @if($event->venue_address)
+                                <p class="text-[11px] mt-0.5" style="color:#666;">{{ $event->venue_address }}</p>
+                            @endif
+                        </div>
                     </div>
-                    <div class="px-5 py-4 flex flex-col gap-2">
-                        @if($event->contact_person)
-                            <p class="text-base font-semibold text-gray-900 flex items-center gap-2">
-                                <i class="fas fa-user text-gray-400 text-sm"></i>{{ $event->contact_person }}
-                            </p>
-                        @endif
-                        @if($event->contact_email)
-                            <p class="text-base text-gray-900 flex items-center gap-2">
-                                <i class="fas fa-envelope text-gray-400 text-sm"></i>{{ $event->contact_email }}
-                            </p>
-                        @endif
-                        @if($event->contact_phone)
-                            <p class="text-base text-gray-900 flex items-center gap-2">
-                                <i class="fas fa-phone text-gray-400 text-sm"></i>{{ $event->contact_phone }}
-                            </p>
-                        @endif
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Date &amp; Time</p>
+                            <p class="detail-side-value">{{ $eventDate->format('M d, Y') }}</p>
+                            <p class="text-[11px] mt-0.5" style="color:#666;">{{ $timeDisplay }}</p>
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-users"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Open For</p>
+                            <p class="detail-side-value">{{ $event->target_participants ?: '—' }}</p>
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-clipboard-check"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Responses</p>
+                            <p class="detail-side-value text-emerald-600">{{ $event->confirmed_count }} Attending</p>
+                            <p class="text-[11px] mt-0.5" style="color:#666;">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</p>
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-calendar-check"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Your RSVP</p>
+                            <p class="detail-side-value {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
+                            @if(!$isCompleted)
+                                <button wire:click="openRsvpModal"
+                                        class="text-[11px] font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
+                                    {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
+                                </button>
+                            @endif
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Posted</p>
+                            <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
+                            <p class="text-[11px] mt-0.5" style="color:#666;">{{ $createdPH->diffForHumans() }}</p>
+                        </div>
                     </div>
                 </div>
-                @endif
             </div>
-            @endif
-
-            <p class="text-center text-xs text-gray-500">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
         </div>
+
+        {{-- RIGHT: description / notes / contact info --}}
+        <div class="flex-1 min-w-0 lg:overflow-y-auto lg:scroll-thin bg-gray-100">
+            <div class="max-w-[1200px] mx-auto px-5 py-3 pb-4 flex flex-col gap-3">
+
+                <div class="{{ ($hasDesc && ($hasNotes || $hasContact)) ? 'grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-3 items-start' : '' }}">
+
+                    {{-- LEFT (of this sub-grid): Description --}}
+                    @if($hasDesc)
+                        @if($isPhilcst)
+                        {{-- ═══ PHILCST "OFFICIAL POST" LAYOUT ═══ --}}
+                        <div class="philcst-post-card">
+                            <div class="px-4 py-3 flex flex-col gap-3">
+                                <div>
+                                    <p class="text-base font-bold" style="color:#333333;">📢 {{ strtoupper($event->title) }}</p>
+                                    <p class="text-[12px] mt-1 leading-relaxed" style="color:#333333;">
+                                        The Philippine College of Science and Technology invites you to join this event! ✨
+                                    </p>
+                                </div>
+                                <div class="pre-wrap text-[14px] leading-relaxed" style="color:#333333;">{{ trim($event->description) }}</div>
+                                <p class="text-[13px] font-semibold" style="color:#333333;">
+                                    🗓️ {{ $eventDate->format('F d, Y') }} · {{ $timeDisplay }} &nbsp;•&nbsp; 📍 {{ $event->venue ?: 'TBA' }}
+                                </p>
+                            </div>
+                        </div>
+                        @else
+                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div class="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                                <span class="text-[13px] font-bold uppercase tracking-[.08em] detail-label" style="color:#333333;">About This Event</span>
+                            </div>
+                            <div class="px-4 py-3 text-[14px] leading-relaxed pre-wrap" style="color:#333333;">{{ $event->description }}</div>
+                        </div>
+                        @endif
+                    @endif
+
+                    {{-- RIGHT (of this sub-grid): Notes stacked above Contact, beside the description --}}
+                    @if($hasNotes || $hasContact)
+                    <div class="flex flex-col gap-3">
+                        @if($hasNotes)
+                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div class="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                                <span class="text-[13px] font-bold uppercase tracking-[.08em] detail-label" style="color:#333333;">Additional Notes</span>
+                            </div>
+                            <div class="px-4 py-3 text-[14px] leading-relaxed pre-wrap" style="color:#333333;">{{ $event->notes }}</div>
+                        </div>
+                        @endif
+                        @if($hasContact)
+                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div class="px-4 py-2.5 border-b border-gray-100 bg-emerald-50">
+                                <span class="text-[13px] font-bold uppercase tracking-[.08em] detail-label text-emerald-700">Contact Information</span>
+                            </div>
+                            <div class="px-4 py-3 flex flex-col gap-1.5">
+                                @if($event->contact_person)
+                                    <p class="text-[14px] font-semibold flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-user text-[12px]" style="color:#999;"></i>{{ $event->contact_person }}
+                                    </p>
+                                @endif
+                                @if($event->contact_email)
+                                    <p class="text-[14px] flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-envelope text-[12px]" style="color:#999;"></i>{{ $event->contact_email }}
+                                    </p>
+                                @endif
+                                @if($event->contact_phone)
+                                    <p class="text-[14px] flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-phone text-[12px]" style="color:#999;"></i>{{ $event->contact_phone }}
+                                    </p>
+                                @endif
+                            </div>
+                        </div>
+                        @endif
+                    </div>
+                    @endif
+
+                </div>
+
+                <p class="text-center text-[11px]" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+            </div>
+        </div>
+
     </div>
 
 </div>
@@ -1234,8 +1313,7 @@ select.filter-input {
 @if($showRsvpModal)
 <div class="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeRsvpModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden relative"
-         style="animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both;">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden relative share-sheet">
         <div class="px-6 py-5 border-b border-white/10" style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
             <div class="flex items-center justify-between">
                 <h2 class="text-lg font-semibold text-white flex items-center gap-2">
@@ -1306,11 +1384,9 @@ select.filter-input {
 @endif
 
 
-{{-- ══ SHARE MODAL ══ --}}
+{{-- ══ SHARE MODAL — native share sheet first, no copy/paste needed ══ --}}
 @if($showShareModal)
 @php
-    $shareBaseUrl     = $this->eventsBaseUrl();
-    $shareHost        = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
     $shTimeStr        = $shareTime . ($shareEndTime ? ' – ' . $shareEndTime : '');
     $isCompleted      = $shareIsCompleted;
 
@@ -1319,6 +1395,11 @@ select.filter-input {
         ? mb_substr($shareDescription, 0, $descLimit) . '…'
         : $shareDescription;
 
+    // NOTE: this text is meant to be posted directly (via the native share
+    // sheet / pasted into Facebook) as the post's own caption — it does
+    // NOT include the events page link, since the alumni portal isn't
+    // deployed publicly yet and a raw "alumniphilcst.com" link would just
+    // show up as a dead/unusable link box in the post composer.
     $fbLines = [];
     if ($isCompleted) {
         $fbLines[] = "🏆 Event Highlights: {$shareEventTitle}";
@@ -1327,7 +1408,7 @@ select.filter-input {
         if ($shareOrganizer)   $fbLines[] = "🏫 Organized by: {$shareOrganizer}";
         if ($shareTargetParts) $fbLines[] = "👥 {$shareTargetParts}";
         $fbLines[] = '';
-        $fbLines[] = "🎉 Thank you to everyone who attended! See the full recap on the PHILCST Alumni Portal 👇";
+        $fbLines[] = "🎉 Thank you to everyone who attended!";
     } else {
         $fbLines[] = "📅 Event: {$shareEventTitle}";
         if ($shareDate)        $fbLines[] = "🗓️  {$shareDate}" . ($shTimeStr ? " · {$shTimeStr}" : '');
@@ -1335,80 +1416,94 @@ select.filter-input {
         if ($shareOrganizer)   $fbLines[] = "🏫 Organized by: {$shareOrganizer}";
         if ($shareTargetParts) $fbLines[] = "👥 Open for: {$shareTargetParts}";
         $fbLines[] = '';
-        $fbLines[] = "See full details & RSVP on the PHILCST Alumni Portal 👇";
+        $fbLines[] = "See you there! 🎉";
     }
-    $fbLines[]  = $shareBaseUrl;
     $fbPostText = implode("\n", $fbLines);
-
-    $hasRealPhoto = $sharePhotoUrl
-        && !str_contains($sharePhotoUrl, 'default')
-        && str_contains($sharePhotoUrl, '/storage/');
 @endphp
 
-<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm"
+<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45"
      x-data="{
-         copied:false, fbCopied:false, messengerCopied:false,
-         fbText:  {{ json_encode($fbPostText) }},
-         baseUrl: {{ json_encode($shareBaseUrl) }},
-         photoUrl:{{ json_encode($sharePhotoUrl) }},
-         hasPhoto:{{ $hasRealPhoto ? 'true' : 'false' }},
-         async copyText(text) {
+         copied:false,
+         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         shareText: {{ json_encode($fbPostText) }},
+         eventTitle: {{ json_encode($shareEventTitle) }},
+         imageUrl:  {{ json_encode($sharePhotoUrl) }},
+         // Fetches the event photo and turns it into a File so the native
+         // share sheet can attach it, same as posting a photo + caption
+         // directly — no link required.
+         async buildImageFile() {
+             if (!this.imageUrl) return null;
              try {
-                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); }
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 return new File([blob], 'event-photo.' + ext, { type: blob.type });
+             } catch (e) { return null; }
+         },
+         async nativeShare() {
+             try {
+                 const shareData = { title: this.eventTitle, text: this.shareText };
+                 const file = await this.buildImageFile();
+                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                     shareData.files = [file];
+                 }
+                 await navigator.share(shareData);
+             } catch (e) { /* cancelled by user — nothing to do */ }
+         },
+         async shareOnFacebook() {
+             // No deployed site yet, so we deliberately do NOT pass a `u`
+             // link param to Facebook's sharer — that would just show up
+             // as a dead 'alumniphilcst.com' link box in the post composer.
+             // If this device supports the native share sheet (photo +
+             // caption, no link), use that instead — it behaves exactly
+             // like a normal FB post.
+             if (this.nativeShareSupported) { await this.nativeShare(); return; }
+             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
+             window.open(url,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+         },
+         async shareOnMessenger() {
+             if (this.nativeShareSupported) { await this.nativeShare(); return; }
+             window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
+         },
+         async copyLinkFn() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(this.shareText); }
                  else {
                      const ta = document.createElement('textarea');
-                     ta.value = text; ta.setAttribute('readonly','');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
                      ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
                      document.body.appendChild(ta); ta.focus(); ta.select();
                      document.execCommand('copy'); document.body.removeChild(ta);
                  }
+                 this.copied = true; setTimeout(() => this.copied = false, 2500);
              } catch(e) { console.warn('Copy failed', e); }
-         },
-         async shareOnFacebook() {
-             await this.copyText(this.fbText); this.fbCopied = true;
-             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             window.open('https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(this.baseUrl),'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             setTimeout(() => this.fbCopied = false, 7000);
-         },
-         async shareOnMessenger() {
-             await this.copyText(this.fbText); this.messengerCopied = true;
-             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-             if (isMobile) {
-                 window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
-                 setTimeout(() => window.open('https://www.messenger.com/new','_blank','noopener'), 1500);
-             } else {
-                 window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
-             }
-             setTimeout(() => this.messengerCopied = false, 7000);
-         },
-         async copyLinkFn() { await this.copyText(this.baseUrl); this.copied = true; setTimeout(() => this.copied = false, 2500); }
+         }
      }"
-     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="$wire.closeShareModal()">
 
-    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-2xl share-modal-wrapper">
+    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 share-modal-wrapper">
 
-        {{-- Share modal header --}}
-        <div class="flex items-center justify-between px-5 py-3 border-b border-white/10 flex-shrink-0"
-             style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-            <h2 class="text-sm font-semibold flex items-center gap-2 text-white">
-                <i class="fas fa-share-nodes text-sky-300 text-xs"></i> Share Event
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
+                <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <button wire:click="closeShareModal" type="button" class="btn-close-purple" aria-label="Close">
+            <button wire:click="closeShareModal" type="button" class="share-close-btn" aria-label="Close">
                 <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
+                <span class="tip">Close</span>
             </button>
         </div>
 
-        {{-- Body --}}
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
             {{-- LEFT: Preview --}}
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Post Preview</p>
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-thin">
+                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
                     @if($sharePhotoUrl)
@@ -1418,149 +1513,208 @@ select.filter-input {
                     </div>
                     @endif
                     <div class="border-b border-gray-100 px-4 py-3 {{ $isCompleted ? 'bg-amber-50/50' : 'bg-gray-50' }}">
-                        <p class="font-semibold text-gray-900 leading-tight" style="font-size:clamp(12px,1.2vw,14px);">{{ $shareEventTitle }}</p>
-                        <p class="font-medium text-gray-500 mt-0.5" style="font-size:clamp(10px,1vw,12px);">{{ $shareOrganizer }}</p>
+                        <p class="font-semibold leading-tight" style="font-size:clamp(12px,1.2vw,14px);color:#333333;">{{ $shareEventTitle }}</p>
+                        <p class="font-medium mt-0.5" style="font-size:clamp(10px,1vw,12px);color:#333333;">{{ $shareOrganizer }}</p>
                         <div class="flex flex-wrap gap-1 mt-1.5">
-                            @if($shareDate)        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareDate }}@if($shTimeStr) · {{ $shTimeStr }}@endif</span> @endif
-                            @if($shareVenue)       <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareVenue }}</span> @endif
-                            @if($shareTargetParts) <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ Str::limit($shareTargetParts, 30) }}</span> @endif
+                            @if($shareDate)        <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareDate }}@if($shTimeStr) · {{ $shTimeStr }}@endif</span> @endif
+                            @if($shareVenue)       <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareVenue }}</span> @endif
+                            @if($shareTargetParts) <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ Str::limit($shareTargetParts, 30) }}</span> @endif
                         </div>
                     </div>
                     @if($shareDescPreview)
-                    <div class="px-4 py-2 border-b border-gray-100">
-                        <p class="leading-relaxed text-gray-600" style="font-size:clamp(10px,0.9vw,12px);">{{ $shareDescPreview }}</p>
+                    <div class="px-4 py-2">
+                        <p class="leading-relaxed" style="font-size:clamp(10px,0.9vw,12px);color:#333333;">{{ $shareDescPreview }}</p>
                     </div>
                     @endif
-                    <div class="px-4 py-2 bg-gray-50">
-                        <span class="uppercase tracking-wider font-semibold text-gray-400" style="font-size:clamp(9px,0.8vw,11px);">{{ strtoupper($shareHost) }}</span>
-                    </div>
                 </div>
 
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-xs flex-shrink-0 mt-0.5"></i>
-                    <p class="text-xs text-blue-700 leading-relaxed">
-                        Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the caption and opens the platform.
-                        Press <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd> (or <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">⌘V</kbd>) to paste it.
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        Sharing sends the event's photo and caption straight into the post —
+                        no link needed. Use <strong>Share</strong> to open your device's
+                        share sheet and pick Messenger, Facebook, or any app.
                     </p>
                 </div>
             </div>
 
             {{-- RIGHT: Share buttons --}}
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Share via</p>
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-thin">
+                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                <div x-show="fbCopied" x-cloak x-transition
-                     class="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-start gap-2">
-                    <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-emerald-800">Caption copied! Paste it on Facebook.</p>
-                </div>
-                <div x-show="messengerCopied" x-cloak x-transition
-                     class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-start gap-2">
-                    <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-blue-800">Caption copied! Pick a contact in Messenger and paste.</p>
-                </div>
+                {{-- Native share sheet — sends title+text+photo directly to
+                     Messenger, Facebook, or any app the person picks, no
+                     copy/paste step at all. Primary option on phones and
+                     most modern browsers. --}}
+                <template x-if="nativeShareSupported">
+                    <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
+                        <span class="icon-wrap">
+                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
+                        </span>
+                        <div class="text-left flex-1">
+                            <p class="text-xs font-semibold">Share</p>
+                            <p class="text-[10px] text-white/70 mt-0.5">Send photo + caption via Messenger, Facebook, or any app</p>
+                        </div>
+                    </button>
+                </template>
 
-                <button type="button" @click="shareOnFacebook()"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm transition cursor-pointer">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
+                {{-- Facebook — no link, just the caption; uses native share
+                     (photo + text) automatically when supported --}}
+                <button type="button" @click="shareOnFacebook()" class="share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Caption auto-copied · paste to post</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Posts the photo + caption directly</p>
                     </div>
                 </button>
 
-                <button type="button" @click="shareOnMessenger()"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer"
-                        style="background:linear-gradient(135deg,#0099FF,#A033FF);">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
-                            <defs>
-                                <linearGradient id="mgr_ev2" x1="0%" y1="100%" x2="100%" y2="0%">
-                                    <stop offset="0%" style="stop-color:#0099FF"/>
-                                    <stop offset="100%" style="stop-color:#A033FF"/>
-                                </linearGradient>
-                            </defs>
-                            <path fill="url(#mgr_ev2)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                {{-- Messenger --}}
+                <button type="button" @click="shareOnMessenger()" class="share-option-btn" style="background:#0084FF;">
+                    <span class="icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Pick a contact · paste caption</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Opens Messenger to pick a contact</p>
                     </div>
                     <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
-                <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                    <i class="fas fa-lightbulb text-amber-500 text-[10px] flex-shrink-0 mt-0.5"></i>
-                    <p class="text-[10px] text-gray-500 leading-relaxed">
-                        Messenger will open. Search a contact, start a conversation, then press <span class="font-semibold text-gray-700">Ctrl+V</span> to paste the event details.
-                    </p>
-                </div>
-
-                <button type="button" wire:click="postToBatchChat"
-                        wire:loading.attr="disabled"
-                        wire:target="postToBatchChat"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-60 disabled:cursor-not-allowed">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/20">
-                        <span wire:loading.remove wire:target="postToBatchChat">
-                            <i class="fas fa-comments text-white text-sm"></i>
-                        </span>
-                        <span wire:loading wire:target="postToBatchChat">
-                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
-                        </span>
+                {{-- Batch Chat — opens the forward-style destination picker
+                     (like Messenger's forward), instead of sending straight away --}}
+                <button type="button" wire:click="openForwardModal"
+                        class="share-option-btn" style="background:#7a3f91;">
+                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
+                        <i class="fas fa-comments text-white text-sm"></i>
                     </span>
                     <div class="text-left flex-1">
-                        <p class="text-xs font-semibold">Post to Batch Chat</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Notify all your batchmates</p>
+                        <p class="text-xs font-semibold">Share to Batch Chat</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Choose which of your chats to send to</p>
                     </div>
+                    <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white text-gray-400">or copy link</span>
+                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
                     </div>
                 </div>
 
                 <button type="button" @click="copyLinkFn()"
                         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white text-gray-700">
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
                     <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-sm"></i>
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
                     </span>
                     <div class="flex-1 text-left min-w-0">
-                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : 'text-gray-700'" x-text="copied ? 'Link copied!' : 'Copy Link'"></p>
-                        <p class="text-[10px] font-mono text-gray-400 truncate">{{ $shareBaseUrl }}</p>
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
+                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
                     </div>
                 </button>
 
-                <button type="button" wire:click="closeShareModal"
-                        class="w-full px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer">
-                    Close
-                </button>
-                <p class="text-[10px] text-center text-gray-400">Sharing highlights is available even after the event.</p>
+                <p class="text-[10px] text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
             </div>
         </div>
     </div>
 </div>
 @endif
 
-</div>{{-- end root --}}
 
-{{-- ── Mouse-following cursor label + card click logic ── --}}
+{{-- ══ FORWARD-TO-CHAT MODAL — pick one or both of your chats, Messenger-forward style ══ --}}
+@if($showForwardModal)
+<div class="fixed inset-0 z-[10003] flex items-center justify-center p-4 bg-black/45"
+     @keydown.escape.window="$wire.closeForwardModal()">
+    <div class="share-sheet bg-white rounded-2xl w-full max-w-[420px] shadow-xl border border-gray-200 flex flex-col" style="max-height:85vh;">
+
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
+                <i class="fas fa-paper-plane text-[#7a3f91] text-xs"></i> Send to Chat
+            </h2>
+            <button wire:click="closeForwardModal" type="button" class="share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <span class="tip">Close</span>
+            </button>
+        </div>
+
+        <div class="px-5 py-3 flex-shrink-0">
+            <p class="text-xs" style="color:#333333;">Tap to select — pick one chat, or both to send to everyone at once.</p>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 pb-3 flex flex-col gap-2">
+            @forelse($alumniChatRooms as $room)
+            @php $isSelected = in_array($room['id'], $selectedRoomIds); @endphp
+            <button type="button"
+                    wire:click="toggleRoomSelection({{ $room['id'] }})"
+                    class="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border transition text-left cursor-pointer
+                           {{ $isSelected ? 'border-[#7a3f91] bg-[#f5eef9]' : 'border-gray-200 bg-white hover:bg-gray-50' }}">
+                <span class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0
+                             {{ $isSelected ? 'bg-[#7a3f91]' : 'bg-gray-100' }}">
+                    <i class="fas fa-users text-sm {{ $isSelected ? 'text-white' : 'text-gray-400' }}"></i>
+                </span>
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-semibold truncate" style="color:#333333;">{{ $room['label'] }}</span>
+                </span>
+                <span class="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0
+                             {{ $isSelected ? 'bg-[#7a3f91] border-[#7a3f91]' : 'border-gray-300' }}">
+                    @if($isSelected)<i class="fas fa-check text-white text-[10px]"></i>@endif
+                </span>
+            </button>
+            @empty
+            <p class="text-xs text-center py-6" style="color:#333333;">No chats found to send to.</p>
+            @endforelse
+        </div>
+
+        <div class="px-5 py-3.5 border-t border-gray-100 flex-shrink-0 flex items-center gap-2">
+            <button type="button" wire:click="closeForwardModal"
+                    class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">
+                Cancel
+            </button>
+            <button type="button" wire:click="confirmSendToChat"
+                    wire:loading.attr="disabled"
+                    wire:target="confirmSendToChat"
+                    @if(empty($selectedRoomIds)) disabled @endif
+                    class="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-white transition cursor-pointer
+                           bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                <span wire:loading.remove wire:target="confirmSendToChat">
+                    <i class="fas fa-paper-plane text-[11px]"></i>
+                    Send{{ count($selectedRoomIds) > 1 ? ' to Both' : '' }}
+                </span>
+                <span wire:loading wire:target="confirmSendToChat">
+                    <i class="fas fa-spinner fa-spin text-[11px]"></i> Sending…
+                </span>
+            </button>
+        </div>
+    </div>
+</div>
+@endif
+
+{{-- ── Mouse-following cursor label logic (desktop / mouse devices only) ── --}}
 <script>
 (function () {
+    function isTouchOrSmall() {
+        return window.matchMedia('(max-width: 767px)').matches ||
+               (window.matchMedia('(pointer: coarse)').matches);
+    }
+
     function init() {
         const label = document.getElementById('ev-cursor-label');
         if (!label) return;
+
+        if (isTouchOrSmall()) return;
 
         let activeCard = null;
         let mouseX = 0;
         let mouseY = 0;
 
         function show() {
+            if (isTouchOrSmall()) return;
             label.style.opacity    = '1';
             label.style.visibility = 'visible';
         }
@@ -1594,19 +1748,6 @@ select.filter-input {
         function onShareEnter() { hide(); }
         function onShareLeave() { if (activeCard) show(); }
 
-        // Click the card → call Livewire viewEvent
-        function onCardClick(e) {
-            const card = e.currentTarget;
-            const id   = parseInt(card.dataset.evId, 10);
-            const type = card.dataset.evType;
-            if (id && type) {
-                window.Livewire.find(
-                    card.closest('[wire\\:id]')?.getAttribute('wire:id') ||
-                    document.querySelector('[wire\\:id]')?.getAttribute('wire:id')
-                )?.call('viewEvent', id, type);
-            }
-        }
-
         function attachListeners() {
             document.querySelectorAll('[data-ev-card]').forEach(card => {
                 if (card._evBound) return;
@@ -1614,7 +1755,6 @@ select.filter-input {
 
                 card.addEventListener('mouseenter', onCardEnter);
                 card.addEventListener('mouseleave', onCardLeave);
-                card.addEventListener('click', onCardClick);
 
                 const shareBtn = card.querySelector('[data-ev-share]');
                 if (shareBtn) {
@@ -1626,13 +1766,18 @@ select.filter-input {
 
         attachListeners();
 
-        // Re-attach after Livewire DOM updates
         document.addEventListener('livewire:navigated', () => {
             document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
             attachListeners();
         });
 
         if (window.Livewire) {
+            window.Livewire.hook('morph.updated', ({ el }) => {
+                requestAnimationFrame(() => {
+                    document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
+                    attachListeners();
+                });
+            });
             try {
                 window.Livewire.hook('commit', ({ succeed }) => {
                     succeed(() => {
@@ -1645,7 +1790,6 @@ select.filter-input {
             } catch(e) {}
         }
 
-        // Hide label when any modal opens
         document.addEventListener('livewire:update', () => {
             hide();
             activeCard = null;
@@ -1659,3 +1803,20 @@ select.filter-input {
     }
 })();
 </script>
+
+{{-- ── Clean the address bar after a deep link auto-opens the modal ──
+     /upcoming/events?event=49&type=ORGANIZER lands here, opens the
+     matching event automatically (see mount() above), then this strips
+     the ?event=&type= query string from the visible URL so the bar
+     reads as a clean /upcoming/events — the modal stays open either way,
+     it's just no longer driven by the (now removed) query string. --}}
+<script>
+(function () {
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('event')) {
+        window.history.replaceState({}, '', window.location.pathname);
+    }
+})();
+</script>
+
+</div>{{-- end root --}}

@@ -10,6 +10,7 @@ use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
     use WithPagination;
@@ -30,8 +31,16 @@ new class extends Component {
     public int    $alumniId        = 0;
     public int    $alumniRoomId    = 0;
 
+    // The alumni's chat rooms (batch chat + course-wide chat), used by the
+    // "forward"-style destination picker in the Share modal.
+    public array  $alumniChatRooms = [];
+
     public bool   $showShareModal   = false;
     public ?int   $shareJobId       = null;
+
+    // Forward-to-chat destination picker (Messenger-forward style)
+    public bool   $showForwardModal = false;
+    public array  $selectedRoomIds  = [];
     public string $shareJobTitle    = '';
     public string $shareCompany     = '';
     public string $shareEmpType     = '';
@@ -41,6 +50,7 @@ new class extends Component {
     public string $shareDeadline    = '';
     public string $shareDescription = '';
     public string $shareCollege     = '';
+    public string $shareImageUrl    = '';
 
     public function mount(): void
     {
@@ -74,6 +84,65 @@ new class extends Component {
             ->where('batch', $alumni->batch)
             ->first();
         $this->alumniRoomId = $room ? (int) $room->id : 0;
+
+        // Build the list of chat rooms this alumni can forward a job post to.
+        // Room 1: their own batch chat (course_code + batch).
+        // Room 2: the COLLEGE-wide chat — stored the same way
+        // messenger.blade.php's ensureRoomsExist() creates it: `department`
+        // = college name, `course_code` = the CLG_ marker, `batch` = 0.
+        $chatRooms = collect();
+        if ($this->alumniRoomId) {
+            $chatRooms->push([
+                'id'    => $this->alumniRoomId,
+                'label' => 'Batch ' . ($alumni->batch ?? '') . ' Chat',
+            ]);
+        }
+        if ($this->alumniCollege) {
+            $marker = $this->collegeMarker($this->alumniCollege);
+            $generalRoom = DB::table('chat_rooms')
+                ->where('department', $this->alumniCollege)
+                ->where('course_code', $marker)
+                ->where('batch', 0)
+                ->first();
+            if ($generalRoom && (int) $generalRoom->id !== $this->alumniRoomId) {
+                $chatRooms->push([
+                    'id'    => (int) $generalRoom->id,
+                    'label' => $generalRoom->name ?? ($this->alumniCollege . ' Chat'),
+                ]);
+            }
+        }
+        $this->alumniChatRooms = $chatRooms->values()->toArray();
+
+        // Deep link support — lets a "View Post" link shared in chat
+        // (e.g. /job/opportunities?job=123) jump straight into that job's
+        // detail view, with all other filters cleared so it's guaranteed
+        // to be visible in the list underneath.
+        //
+        // NOTE (clean URL): the actual address-bar cleanup lives entirely
+        // client-side now — see the small <script> right below the root
+        // <div> that listens for the `livewire:navigated` event. It's
+        // intentionally NOT done here in PHP (no dispatch()/$this->js()),
+        // and it's intentionally NOT an Alpine x-init either — both of
+        // those ran *before* Livewire's own `wire:navigate` history
+        // handling finished, so Livewire ended up re-pushing the original
+        // "?job=35" URL right after we cleaned it. Listening for
+        // `livewire:navigated` guarantees our cleanup runs last.
+        $jobParam = request()->query('job');
+        if ($jobParam !== null && ctype_digit((string) $jobParam)) {
+            $exists = JobPosting::where('id', (int) $jobParam)
+                ->where('status', 'ACTIVE')
+                ->exists();
+            if ($exists) {
+                // Reset filters so the job is guaranteed to show under the list.
+                $this->search      = '';
+                $this->filterType  = '';
+                $this->filterLevel = '';
+                $this->filterSort  = 'deadline_asc';
+
+                $this->viewingJobId = (int) $jobParam;
+                $this->showDetail   = true;
+            }
+        }
     }
 
     public function updatingSearch()      { $this->resetPage(); }
@@ -97,7 +166,7 @@ new class extends Component {
         $q = JobPosting::select([
                 'id', 'organizer_id', 'job_title', 'company_name', 'company_type',
                 'location', 'employment_type', 'experience_level',
-                'target_college', 'salary', 'deadline', 'status',
+                'target_college', 'salary', 'deadline', 'status', 'job_image',
                 'description', 'qualifications', 'application_instructions', 'created_at',
             ])
             ->where('status', 'ACTIVE')
@@ -150,6 +219,22 @@ new class extends Component {
             ->first();
     }
 
+    public static function jobImageUrl(?string $path): string
+    {
+        if ($path && Storage::disk('public')->exists($path)) {
+            return Storage::url($path);
+        }
+        return asset('storage/job/default-photo-job.jpg');
+    }
+
+    // Same marker scheme used in messenger.blade.php's chat_rooms table:
+    // the college-wide room is stored with course_code = 'CLG_' + a short
+    // hash of the college name, and batch = 0.
+    private function collegeMarker(string $college): string
+    {
+        return 'CLG_' . substr(md5($college), 0, 12);
+    }
+
     public function openShareModal(int $id): void
     {
         $job = JobPosting::findOrFail($id);
@@ -173,6 +258,7 @@ new class extends Component {
         $this->shareDeadline    = $job->deadline ?? '';
         $this->shareDescription = $job->description ?? '';
         $this->shareCollege     = $job->target_college ?? '';
+        $this->shareImageUrl    = $this::jobImageUrl($job->job_image ?? null);
         $this->showShareModal   = true;
     }
 
@@ -189,23 +275,49 @@ new class extends Component {
         $this->shareDeadline    = '';
         $this->shareDescription = '';
         $this->shareCollege     = '';
+        $this->shareImageUrl    = '';
     }
 
     public function jobsBaseUrl(): string
     {
         $base = rtrim(config('app.url'), '/');
         try {
-            $path = route('jobs.index', [], false);
+            // FIXED: route name was 'jobs.index' (doesn't exist) so it was
+            // always falling through to '/jobs'. The actual named route
+            // for this page is 'job.opportunities' (see routes/web.php).
+            $path = route('job.opportunities', [], false);
         } catch (\Throwable) {
-            $path = '/jobs';
+            $path = '/job/opportunities';
         }
         return $base . $path;
     }
 
-    public function shareToChat(): void
+    // Direct link back to a specific job's detail view — used by the
+    // "View Post" link shared in Batch Chat and by the Facebook/Messenger
+    // share targets, so clicking it opens straight into that job.
+    public function jobDetailUrl(int $id): string
     {
-        if (! $this->shareJobId || ! $this->alumniRoomId) {
-            $this->dispatch('flash-message', type: 'error', message: 'Could not find your batch chat room.');
+        return $this->jobsBaseUrl() . '?job=' . $id;
+    }
+
+    /**
+     * ── Messenger-style share (UPDATED) ─────────────────────────────────
+     * The chat message body used to be a giant emoji-formatted paragraph
+     * with the job's title/company/salary/etc. duplicated as raw text,
+     * plus a raw URL at the bottom. That's why chat showed an ugly wall
+     * of text instead of a real Messenger-style link-preview card.
+     *
+     * Now the body is just a short marker: "[[JOB:{id}]]". messenger.
+     * blade.php looks the job up fresh from the DB using that marker and
+     * renders an actual image+text preview card — no duplicated data,
+     * no visible raw link, and it always reflects the job's *current*
+     * info (title/photo/etc.) even if it changes after the share.
+     */
+    // Opens the "forward to chat" destination picker (Messenger-forward style).
+    public function openForwardModal(): void
+    {
+        if (empty($this->alumniChatRooms)) {
+            $this->dispatch('flash-message', type: 'error', message: 'No chat rooms found to share to.');
             return;
         }
 
@@ -219,44 +331,97 @@ new class extends Component {
             return;
         }
 
-        $dl = $this->shareDeadline
-            ? \Carbon\Carbon::parse($this->shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
-            : null;
+        // Preselect their own batch chat by default.
+        $this->selectedRoomIds  = $this->alumniRoomId ? [$this->alumniRoomId] : [];
+        $this->showForwardModal = true;
+    }
 
-        $lines   = [];
-        $lines[] = "@everyone";
-        $lines[] = "📢 Job Opportunity Shared";
-        $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-        $lines[] = "🎯 {$this->shareJobTitle}";
-        $lines[] = "🏢 {$this->shareCompany}";
-        if ($this->shareLocation)  $lines[] = "📍 {$this->shareLocation}";
-        if ($this->shareEmpType)   $lines[] = "💼 {$this->shareEmpType}";
-        if ($this->shareExpLevel)  $lines[] = "📊 {$this->shareExpLevel}";
-        if ($this->shareSalary)    $lines[] = "💰 {$this->shareSalary}";
-        if ($dl)                   $lines[] = "📅 Deadline: {$dl}";
-        if ($this->shareCollege)   $lines[] = "🏫 For: {$this->shareCollege}";
-        $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-        $lines[] = "👀 Check it out on the Alumni Portal → " . $this->jobsBaseUrl();
+    public function closeForwardModal(): void
+    {
+        $this->showForwardModal = false;
+        $this->selectedRoomIds  = [];
+    }
 
-        $body = implode("\n", $lines);
+    public function toggleRoomSelection(int $roomId): void
+    {
+        if (in_array($roomId, $this->selectedRoomIds, true)) {
+            $this->selectedRoomIds = array_values(array_diff($this->selectedRoomIds, [$roomId]));
+        } else {
+            $this->selectedRoomIds[] = $roomId;
+        }
+    }
 
-        DB::table('chat_messages')->insert([
-            'room_id'     => $this->alumniRoomId,
-            'sender_type' => 'alumni',
-            'sender_id'   => $this->alumniId,
-            'body'        => $body,
-            'reply_to_id' => null,
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
+    // Sends the job post to every chat the alumni selected — one tap for
+    // one chat, or tap both to forward to both at once.
+    public function confirmSendToChat(): void
+    {
+        if (empty($this->selectedRoomIds)) {
+            $this->dispatch('flash-message', type: 'warning', message: 'Pumili muna ng chat kung saan mo ipapadala.');
+            return;
+        }
 
+        if (! $this->shareJobId) {
+            $this->dispatch('flash-message', type: 'error', message: 'Could not find the job to share.');
+            return;
+        }
+
+        $deadlinePassed = $this->shareDeadline
+            && \Carbon\Carbon::parse($this->shareDeadline)
+                ->setTimezone('Asia/Manila')->startOfDay()
+                ->lt(now('Asia/Manila')->startOfDay());
+
+        if ($deadlinePassed) {
+            $this->dispatch('flash-message', type: 'warning', message: 'This job posting can no longer be shared — the deadline has already passed.');
+            return;
+        }
+
+        $body = "@everyone [[JOB:{$this->shareJobId}]]";
+        $now  = now();
+
+        foreach ($this->selectedRoomIds as $roomId) {
+            DB::table('chat_messages')->insert([
+                'room_id'     => $roomId,
+                'sender_type' => 'alumni',
+                'sender_id'   => $this->alumniId,
+                'body'        => $body,
+                'reply_to_id' => null,
+                'created_at'  => $now,
+                'updated_at'  => $now,
+            ]);
+        }
+
+        $count = count($this->selectedRoomIds);
+
+        $this->closeForwardModal();
         $this->closeShareModal();
-        $this->dispatch('flash-message', type: 'success', message: 'Job shared to your Batch Chat! Your batchmates will see it shortly.');
+        $this->dispatch('flash-message', type: 'success', message: $count > 1
+            ? "Job shared to {$count} chats!"
+            : 'Job shared to the chat!');
     }
 
 }; ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+
+{{-- ── Clean-URL cleanup script ──────────────────────────────────────────
+     Strips the "?job=123" query param from the address bar once the job
+     detail view has been opened. Runs on `livewire:navigated` (fires both
+     on a normal full page load AND after a `wire:navigate` SPA-style
+     transition) plus a DOMContentLoaded fallback, so it always runs AFTER
+     Livewire finishes its own history/URL handling — that ordering is
+     what makes this actually stick instead of getting overwritten. --}}
+<script>
+(function () {
+    function jbStripJobQuery() {
+        if (new URLSearchParams(window.location.search).has('job')) {
+            window.history.replaceState(null, '', window.location.origin + window.location.pathname);
+        }
+    }
+    document.addEventListener('livewire:navigated', jbStripJobQuery);
+    document.addEventListener('DOMContentLoaded', jbStripJobQuery);
+    if (document.readyState !== 'loading') jbStripJobQuery();
+})();
+</script>
 
 <style>
 /* ─────────────────────────────────────────────
@@ -272,27 +437,15 @@ select.filter-input {
     appearance: none;
 }
 
-/* ─────────────────────────────────────────────
-   DETAIL PAGE ENTRANCE
-───────────────────────────────────────────── */
-@keyframes detailIn {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-}
+@keyframes detailIn { from { opacity: 0; } to { opacity: 1; } }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
 
-/* ─────────────────────────────────────────────
-   SHARE SHEET ENTRANCE
-───────────────────────────────────────────── */
 @keyframes panelIn {
     from { opacity: 0; transform: scale(.97) translateY(8px); }
     to   { opacity: 1; transform: none; }
 }
 .share-sheet { animation: panelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
-/* ─────────────────────────────────────────────
-   SCROLLBAR
-───────────────────────────────────────────── */
 .scroll-thin::-webkit-scrollbar       { width: 4px; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 
@@ -305,10 +458,7 @@ select.filter-input {
     overflow: hidden;
 }
 
-/* ─────────────────────────────────────────────
-   MOUSE-FOLLOWING "VIEW DETAILS" LABEL
-   Rendered as a fixed div positioned by JS
-───────────────────────────────────────────── */
+/* Mouse-following "View Details" label — desktop only, hidden on mobile below */
 #jb-cursor-label {
     position: fixed;
     z-index: 99999;
@@ -335,194 +485,170 @@ select.filter-input {
     top: -999px;
 }
 #jb-cursor-label svg {
-    width: 11px;
-    height: 11px;
-    flex-shrink: 0;
-    fill: none;
-    stroke: #fff;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+    width: 11px; height: 11px; flex-shrink: 0;
+    fill: none; stroke: #fff; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
 }
 
-/* ─────────────────────────────────────────────
-   CARD HOVER STATE
-───────────────────────────────────────────── */
-[data-jb-card] {
-    transition: border-color .15s ease, box-shadow .15s ease;
-}
+[data-jb-card] { transition: border-color .15s ease, box-shadow .15s ease; }
 [data-jb-card]:hover {
     border-color: #c4b5d4 !important;
     box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
 }
 
-/* Share icon button on card */
 .card-share-btn {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    color: #1d4ed8;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
     cursor: pointer;
     transition: background .15s, border-color .15s, transform .1s;
-    flex-shrink: 0;
-    z-index: 2;
+    flex-shrink: 0; z-index: 2;
 }
-.card-share-btn:hover {
-    background: #dbeafe;
-    border-color: #93c5fd;
-    transform: scale(1.08);
-}
-/* Tooltip ABOVE the share button */
+.card-share-btn:hover { background: #dbeafe; border-color: #93c5fd; transform: scale(1.08); }
 .card-share-btn .tip {
-    position: absolute;
-    bottom: calc(100% + 7px);
-    right: 0;
-    background: #111827;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    padding: 4px 10px;
-    border-radius: 6px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s;
-    z-index: 9999;
+    position: absolute; bottom: calc(100% + 7px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
     font-family: ui-sans-serif, system-ui, sans-serif;
 }
-/* Arrow pointing DOWN (tooltip is above) */
 .card-share-btn .tip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    right: 10px;
-    border: 4px solid transparent;
-    border-top-color: #111827;
+    content: ''; position: absolute; top: 100%; right: 10px;
+    border: 4px solid transparent; border-top-color: #111827;
 }
 .card-share-btn:hover .tip { opacity: 1; }
 
-/* ─────────────────────────────────────────────
-   DETAIL HEADER — GLASSY BUTTONS
-   Tooltips BELOW the button
-───────────────────────────────────────────── */
 .detail-top-btn {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    cursor: pointer;
-    transition: background .15s, transform .1s;
-    flex-shrink: 0;
-    border: none;
-    outline: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    cursor: pointer; transition: background .15s, transform .1s;
+    flex-shrink: 0; border: none; outline: none;
 }
 .detail-top-btn:active { transform: scale(.93); }
-
-/* Tooltip BELOW */
 .detail-top-btn .tip {
-    position: absolute;
-    top: calc(100% + 6px);   /* ← below the button */
-    right: 0;
-    background: #111827;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    padding: 4px 10px;
-    border-radius: 6px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s;
-    z-index: 9999;
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
     font-family: ui-sans-serif, system-ui, sans-serif;
 }
-/* Arrow pointing UP (tooltip is below button) */
 .detail-top-btn .tip::before {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    right: 10px;
-    border: 4px solid transparent;
-    border-bottom-color: #111827;
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
 }
 .detail-top-btn:hover .tip { opacity: 1; }
 
-/* Share variant */
-.detail-top-btn.share-btn {
-    background: rgba(255,255,255,.14);
-    border: 1px solid rgba(255,255,255,.2);
-    color: #fff;
-}
+.detail-top-btn.share-btn { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); color: #fff; }
 .detail-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
-
-/* Close variant */
-.detail-top-btn.close-btn {
-    background: rgba(255,255,255,.10);
-    border: 1px solid rgba(255,255,255,.15);
-}
+.detail-top-btn.close-btn { background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.15); }
 .detail-top-btn.close-btn:hover { background: rgba(255,255,255,.22); }
-.detail-top-btn.close-btn svg {
-    width: 13px;
-    height: 13px;
-    stroke: #fff;
-    stroke-width: 2.5;
-    stroke-linecap: round;
-}
+.detail-top-btn.close-btn svg { width: 13px; height: 13px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
 
 /* ─────────────────────────────────────────────
-   SHARE MODAL — Purple close button
+   SHARE MODAL — clean / flat, no gradients.
 ───────────────────────────────────────────── */
-.btn-close-purple {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.5rem;
-    background: #7a3f91;
-    border: none;
-    cursor: pointer;
-    transition: background .15s, transform .1s;
+.share-close-btn {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
     flex-shrink: 0;
 }
-.btn-close-purple:hover  { background: #5e2f72; }
-.btn-close-purple:active { transform: scale(.93); }
-.btn-close-purple svg    { width: 14px; height: 14px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
+.share-close-btn:hover  { background: #e5e7eb; border-color: #d1d5db; }
+.share-close-btn:active { transform: scale(.93); }
+.share-close-btn svg    { width: 14px; height: 14px; stroke: #4b5563; stroke-width: 2.25; stroke-linecap: round; }
+.share-close-btn .tip {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.share-close-btn .tip::before {
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
+}
+.share-close-btn:hover .tip { opacity: 1; }
+
+.share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
+}
+.share-option-btn:hover  { filter: brightness(0.94); }
+.share-option-btn:active { transform: scale(.98); }
+.share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
 
 /* ─────────────────────────────────────────────
-   DETAIL PAGE — force sans-serif everywhere
+   PHILCST "OFFICIAL POST" DETAIL STYLING
 ───────────────────────────────────────────── */
+.philcst-post-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 14px; overflow: hidden; }
+.philcst-post-banner { width: 100%; height: 180px; object-fit: cover; display: block; background: #f3f4f6; }
+.philcst-post-ribbon {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: #7a3f91; background: #f5eef9; border: 1px solid #e3cdf0;
+    padding: 4px 10px; border-radius: 999px;
+}
+.philcst-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.philcst-checklist li { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.55; color: #333333; }
+.philcst-checklist li .chk {
+    flex-shrink: 0; width: 18px; height: 18px; border-radius: 5px;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center; font-size: 10px; margin-top: 1px;
+}
+
+/* ─────────────────────────────────────────────
+   DETAIL VIEW — fixed-height, no page scroll.
+   Two columns: left sidebar (meta/info), right
+   content. Only the two inner panels scroll on
+   their own if their content is long — the page
+   itself never grows past the viewport.
+───────────────────────────────────────────── */
+.detail-side-item { display: flex; align-items: flex-start; gap: 10px; }
+.detail-side-icon {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+.detail-side-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
+.detail-side-value { font-size: 13.5px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+
+/* ─────────────────────────────────────────────
+   RESPONSIVE — icon-only on small / touch screens:
+   tooltips and the mouse-follow label disappear.
+───────────────────────────────────────────── */
+@media (max-width: 767px) {
+    #jb-cursor-label { display: none !important; }
+    .card-share-btn .tip,
+    .detail-top-btn .tip,
+    .share-close-btn .tip { display: none !important; }
+}
+
 .detail-page * {
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
                  "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
     font-style: normal !important;
 }
 .detail-header-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: #fff;
-    line-height: 1.3;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 15px; font-weight: 600; color: #fff; line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .detail-label { font-style: italic; }
 </style>
 
-{{-- Mouse-following cursor label (rendered once, moved by JS) --}}
+{{-- Mouse-following cursor label — hidden on mobile via CSS + JS guard below --}}
 <div id="jb-cursor-label">
     <svg viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
     View Details
@@ -583,7 +709,6 @@ select.filter-input {
 
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
-            {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -595,7 +720,6 @@ select.filter-input {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            {{-- Employment Type --}}
             <select wire:model.live="filterType"
                     class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                            hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
@@ -607,11 +731,6 @@ select.filter-input {
                 <option value="Freelance">Freelance</option>
             </select>
 
-            {{--
-                Experience Level — values now match exactly what the organizer
-                stores via the JobOption table (same order as $expLevelOrder in
-                the organizer component).
-            --}}
             <select wire:model.live="filterLevel"
                     class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                            hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
@@ -644,8 +763,19 @@ select.filter-input {
 
         </div>
 
+        {{-- Filtering progress bar — mirrors the Alumni Records loading effect --}}
+        <div class="jb-filter-progress-track" wire:loading wire:target="search,filterType,filterLevel,filterSort">
+            <div class="jb-filter-progress-bar"></div>
+        </div>
+        <style>
+            .jb-filter-progress-track { height:2px; width:100%; overflow:hidden; background:transparent; position:relative; }
+            .jb-filter-progress-bar { position:absolute; top:0; left:0; height:100%; width:40%; border-radius:99px; background:linear-gradient(135deg,#7a3f91,#9b59b6); animation:jbFilterProgress 1s ease-in-out infinite; }
+            @keyframes jbFilterProgress { 0%{left:-40%} 100%{left:100%} }
+        </style>
+
         {{-- ── CARDS BODY ── --}}
-        <div class="bg-gray-100 p-4 relative flex-1 min-h-0">
+        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
+             wire:loading.class="opacity-40" wire:target="search,filterType,filterLevel,filterSort">
 
             @if($this->jobPostings->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -676,7 +806,6 @@ select.filter-input {
 
                     <div class="flex flex-col flex-1 p-4 gap-2.5">
 
-                        {{-- Company + Type badge --}}
                         <div class="flex items-start justify-between gap-2">
                             <div class="flex-1 min-w-0">
                                 <p class="text-[11px] font-semibold uppercase tracking-widest mb-1" style="color:#333333;">{{ $job->company_name }}</p>
@@ -689,7 +818,6 @@ select.filter-input {
                             @endif
                         </div>
 
-                        {{-- Tags --}}
                         <div class="flex flex-wrap gap-1.5">
                             <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-purple-50 border border-purple-100 text-purple-700">
                                 {{ $job->employment_type }}
@@ -717,7 +845,6 @@ select.filter-input {
                         <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
                         @endif
 
-                        {{-- Footer: deadline + share --}}
                         <div class="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-auto">
                             <span class="text-[13px] {{ $dlClass }} flex items-center gap-1.5">
                                 <i class="fas {{ $dlIcon }} text-[11px]"></i>
@@ -836,7 +963,7 @@ select.filter-input {
 </div>
 
 
-{{-- ══ FULL-SCREEN JOB DETAIL ══ --}}
+{{-- ══ FULL-SCREEN JOB DETAIL — fixed height, no page scroll ══ --}}
 @if($showDetail && $this->viewingJob)
 @php
     $job      = $this->viewingJob;
@@ -856,9 +983,18 @@ select.filter-input {
     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
     $hasQual     = !empty($job->qualifications);
     $hasInstr    = !empty($job->application_instructions);
+    $isPhilcst   = $displayType === 'PHILCST';
+    $philcstImg  = $isPhilcst ? $this::jobImageUrl($job->job_image ?? null) : null;
+
+    $qualLines = $hasQual
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $job->qualifications)), fn($l) => $l !== ''))
+        : [];
+    $instrLines = $hasInstr
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $job->application_instructions)), fn($l) => $l !== ''))
+        : [];
 @endphp
 
-<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-hidden"
+<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto lg:overflow-hidden"
      @keydown.escape.window="$wire.closeDetail()">
 
     {{-- Purple top bar --}}
@@ -871,7 +1007,6 @@ select.filter-input {
             <span class="detail-header-title">Job Details</span>
         </div>
 
-        {{-- Action buttons — tooltips BELOW --}}
         <div class="flex items-center gap-1.5 flex-shrink-0">
             <button type="button"
                     wire:click="openShareModal({{ $job->id }})"
@@ -892,120 +1027,197 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- White hero --}}
-    <div class="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0">
-        <p class="text-[9px] font-bold uppercase tracking-[.16em] mb-1" style="color:#333333;">Job Title</p>
-        <h2 class="text-2xl font-semibold leading-snug mb-2" style="color:#333333;">{{ $job->job_title }}</h2>
-        <p class="text-sm font-semibold uppercase tracking-[.08em] mb-3" style="color:#333333;">{{ $job->company_name }}</p>
-        <div class="flex flex-wrap gap-1.5">
-            @if($displayType)
-                <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $displayType }}</span>
-            @endif
-            <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->employment_type }}</span>
-            <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->experience_level }}</span>
-            @if($job->target_college)
-                @foreach(explode(',', $job->target_college) as $col)
-                    <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($col) }}</span>
-                @endforeach
-            @endif
-            @if($isUrgent)
-                <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-red-200 bg-white text-red-700">
-                    <i class="fas fa-fire mr-1 text-[10px]"></i>{{ $dlLabel }}
-                </span>
-            @endif
-        </div>
-    </div>
+    {{-- Body: fixed-height two-column layout. The overall page never
+         scrolls — only the sidebar / main content panels scroll on
+         their own if they genuinely have more content than fits. --}}
+    <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden">
 
-    {{-- Info strip --}}
-    <div class="bg-white border-b border-gray-200 flex flex-wrap flex-shrink-0">
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Company</span>
-            <span class="text-base font-semibold" style="color:#333333;">{{ $job->company_name }}</span>
-            @if($displayType && $displayType !== $job->company_name)
-                <span class="text-sm" style="color:#333333;">{{ $displayType }}</span>
-            @endif
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Location</span>
-            <span class="text-base font-semibold" style="color:#333333;">{{ $job->location ?: '—' }}</span>
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Salary</span>
-            @if($job->salary)
-                <span class="text-base font-semibold text-emerald-600">{{ $job->salary }}</span>
-            @else
-                <span class="text-base italic font-normal" style="color:#333333;">Not disclosed</span>
-            @endif
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 border-r border-gray-100 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Deadline</span>
-            <span class="text-base {{ $dlValueClass }}">{{ $dl->format('M d, Y') }}</span>
-            <span class="text-sm {{ $dlValueClass }}">
-                @if($dlIsUrgent)<i class="fas fa-fire mr-0.5 text-xs"></i>@endif
-                {{ $dlLabel }}
-            </span>
-        </div>
-        <div class="flex-1 min-w-[110px] px-5 py-3 flex flex-col gap-0.5">
-            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Posted</span>
-            <span class="text-base font-semibold" style="color:#333333;">{{ $createdPH->format('M d, Y') }}</span>
-            <span class="text-sm" style="color:#333333;">{{ $createdPH->diffForHumans() }}</span>
-        </div>
-    </div>
+        {{-- LEFT: sidebar — title, badges, and all the "meta" info that
+             used to sit stacked at the top now lives here instead. --}}
+        <div class="w-full lg:w-[340px] lg:flex-none bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
 
-    {{-- Scrollable content --}}
-    <div class="flex-1 overflow-y-auto bg-gray-100 scroll-thin min-h-0">
-        <div class="max-w-[1100px] mx-auto px-5 py-4 pb-8 flex flex-col gap-4">
+            @if($isPhilcst)
+                <img src="{{ $philcstImg }}" alt="{{ $job->job_title }}"
+                     class="w-full h-48 sm:h-56 object-contain bg-[#f5eef9] flex-shrink-0"
+                     onerror="this.style.display='none'">
+            @endif
 
-            @if($isUrgent)
-            <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-4 py-3 text-sm text-gray-900 leading-relaxed">
-                @if($daysLeft === 0) Deadline is <strong class="text-red-600">today</strong>. Apply before it's too late.
-                @elseif($daysLeft === 1) Only <strong class="text-red-600">1 day</strong> left — apply now.
-                @else Only <strong class="text-red-600">{{ $daysLeft }} days</strong> left. Closes {{ $dl->format('F d, Y') }}.
+            <div class="p-5 flex flex-col gap-4">
+                @if($isPhilcst)
+                    <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[10px]"></i> Official PHILCST Posting</span>
                 @endif
-            </div>
-            @endif
 
-            <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                    <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>
+                <div>
+                    <p class="text-[9px] font-bold uppercase tracking-[.16em] mb-1" style="color:#666;">Job Title</p>
+                    <h2 class="text-xl font-semibold leading-snug mb-1.5" style="color:#333333;">{{ $job->job_title }}</h2>
+                    <p class="text-sm font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $job->company_name }}</p>
                 </div>
-                <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->description }}</div>
-            </div>
 
-            @if($hasQual || $hasInstr)
-            <div class="{{ ($hasQual && $hasInstr) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
-                @if($hasQual)
-                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Qualifications</span>
+                <div class="flex flex-wrap gap-1.5">
+                    @if($displayType)
+                        <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $displayType }}</span>
+                    @endif
+                    <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->employment_type }}</span>
+                    <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->experience_level }}</span>
+                    @if($job->target_college)
+                        @foreach(explode(',', $job->target_college) as $col)
+                            <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($col) }}</span>
+                        @endforeach
+                    @endif
+                    @if($isUrgent)
+                        <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-red-200 bg-white text-red-700">
+                            <i class="fas fa-fire mr-1 text-[10px]"></i>{{ $dlLabel }}
+                        </span>
+                    @endif
+                </div>
+
+                <div class="border-t border-gray-100"></div>
+
+                <div class="flex flex-col gap-4">
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-building"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Company</p>
+                            <p class="detail-side-value">{{ $job->company_name }}</p>
+                        </div>
                     </div>
-                    <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->qualifications }}</div>
-                </div>
-                @endif
-                @if($hasInstr)
-                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-emerald-50">
-                        <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-emerald-700">How to Apply</span>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Location</p>
+                            <p class="detail-side-value">{{ $job->location ?: '—' }}</p>
+                        </div>
                     </div>
-                    <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->application_instructions }}</div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-money-bill-wave"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Salary</p>
+                            @if($job->salary)
+                                <p class="detail-side-value text-emerald-600">{{ $job->salary }}</p>
+                            @else
+                                <p class="detail-side-value italic font-normal" style="color:#666;">Not disclosed</p>
+                            @endif
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Deadline</p>
+                            <p class="detail-side-value {{ $dlValueClass }}">{{ $dl->format('M d, Y') }}</p>
+                            <p class="text-xs {{ $dlValueClass }} mt-0.5">
+                                @if($dlIsUrgent)<i class="fas fa-fire mr-0.5"></i>@endif{{ $dlLabel }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Posted</p>
+                            <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
+                            <p class="text-xs mt-0.5" style="color:#666;">{{ $createdPH->diffForHumans() }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- RIGHT: description / qualifications / how-to-apply --}}
+        <div class="flex-1 min-w-0 lg:overflow-y-auto lg:scroll-thin bg-gray-100">
+            <div class="max-w-[900px] mx-auto px-5 py-4 pb-8 flex flex-col gap-4">
+
+                @if($isUrgent)
+                <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-4 py-3 text-sm text-gray-900 leading-relaxed">
+                    @if($daysLeft === 0) Deadline is <strong class="text-red-600">today</strong>. Apply before it's too late.
+                    @elseif($daysLeft === 1) Only <strong class="text-red-600">1 day</strong> left — apply now.
+                    @else Only <strong class="text-red-600">{{ $daysLeft }} days</strong> left. Closes {{ $dl->format('F d, Y') }}.
+                    @endif
                 </div>
                 @endif
-            </div>
-            @endif
 
-            <p class="text-center text-xs" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+                @if($isPhilcst)
+                    {{-- ═══ PHILCST "OFFICIAL POST" LAYOUT ═══ --}}
+                    <div class="philcst-post-card">
+                        <div class="px-5 py-4 flex flex-col gap-4">
+                            <div>
+                                <p class="text-lg font-bold" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
+                                <p class="text-sm mt-1 leading-relaxed" style="color:#333333;">
+                                    The Philippine College of Science and Technology is looking for passionate, dedicated individuals to join our growing academic community! ✨
+                                </p>
+                            </div>
+
+                            <div class="pre-wrap text-[15px] leading-relaxed" style="color:#333333;">{{ trim($job->description) }}</div>
+
+                            @if($hasQual)
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#333333;">📌 Requirements &amp; Qualifications:</p>
+                                <ul class="philcst-checklist">
+                                    @foreach($qualLines as $line)
+                                        <li><span class="chk"><i class="fas fa-check"></i></span><span>{{ $line }}</span></li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                            @endif
+
+                            @if($hasInstr)
+                            <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-4 py-3">
+                                <p class="text-sm font-bold text-emerald-800 mb-2">📝 How to Apply:</p>
+                                <ul class="philcst-checklist">
+                                    @foreach($instrLines as $line)
+                                        <li><span class="chk" style="background:#d1fae5;color:#047857;"><i class="fas fa-arrow-right"></i></span><span>{{ $line }}</span></li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                            @endif
+
+                            <p class="text-sm font-semibold" style="color:#333333;">
+                                📅 Deadline: {{ $dl->format('F d, Y') }} &nbsp;•&nbsp; 🏫 For: {{ $job->target_college ?: 'All Colleges' }}
+                            </p>
+                        </div>
+                    </div>
+                @else
+                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>
+                        </div>
+                        <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->description }}</div>
+                    </div>
+
+                    @if($hasQual || $hasInstr)
+                    <div class="{{ ($hasQual && $hasInstr) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
+                        @if($hasQual)
+                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                                <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Qualifications</span>
+                            </div>
+                            <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->qualifications }}</div>
+                        </div>
+                        @endif
+                        @if($hasInstr)
+                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                            <div class="px-5 py-3 border-b border-gray-100 bg-emerald-50">
+                                <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-emerald-700">How to Apply</span>
+                            </div>
+                            <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->application_instructions }}</div>
+                        </div>
+                        @endif
+                    </div>
+                    @endif
+                @endif
+
+                <p class="text-center text-xs" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+            </div>
         </div>
+
     </div>
 
 </div>
 @endif
 
 
-{{-- ══ SHARE MODAL ══ --}}
+{{-- ══ SHARE MODAL — native share sheet first, no copy/paste needed ══ --}}
 @if($showShareModal)
 @php
-    $shareBaseUrl     = $this->jobsBaseUrl();
-    $shareHost        = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
+    $shareBaseUrl     = $this->jobDetailUrl($shareJobId);
     $shareDlFormatted = $shareDeadline
         ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
         : '';
@@ -1016,6 +1228,11 @@ select.filter-input {
         ? mb_substr($shareDescription, 0, $descLimit) . '…'
         : $shareDescription;
 
+    // NOTE: this text is meant to be posted directly (via the native share
+    // sheet / pasted into Facebook) as the post's own caption — it does
+    // NOT include the job link, since the alumni portal isn't deployed
+    // publicly yet and a raw "alumniphilcst.com" link would just show up
+    // as a dead/unusable link box in the post composer.
     $fbLines   = [];
     $fbLines[] = "🎯 Job Opening: {$shareJobTitle}";
     $fbLines[] = "🏢 {$shareCompany}";
@@ -1027,224 +1244,303 @@ select.filter-input {
     if ($shareCollege)     $fbLines[] = "🏫 For: {$shareCollege}";
     $fbLines[] = '';
     $fbLines[] = "Apply now through the PHILCST Alumni Portal 👇";
-    $fbLines[] = $shareBaseUrl;
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
-<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm"
+<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45"
      x-data="{
-         copied:false, fbCopied:false, messengerCopied:false,
-         fbText:  {{ json_encode($fbPostText) }},
-         baseUrl: {{ json_encode($shareBaseUrl) }},
-         async copyText(text) {
+         copied:false,
+         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         shareText: {{ json_encode($fbPostText) }},
+         jobTitle:  {{ json_encode($shareJobTitle) }},
+         baseUrl:   {{ json_encode($shareBaseUrl) }},
+         imageUrl:  {{ json_encode($shareImageUrl) }},
+         // Fetches the job photo and turns it into a File so the native
+         // share sheet can attach it, same as posting a photo + caption
+         // directly — no link required.
+         async buildImageFile() {
+             if (!this.imageUrl) return null;
              try {
-                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); }
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 return new File([blob], 'job-photo.' + ext, { type: blob.type });
+             } catch (e) { return null; }
+         },
+         async nativeShare() {
+             try {
+                 const shareData = { title: this.jobTitle, text: this.shareText };
+                 const file = await this.buildImageFile();
+                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                     shareData.files = [file];
+                 }
+                 await navigator.share(shareData);
+             } catch (e) { /* cancelled by user — nothing to do */ }
+         },
+         async shareOnFacebook() {
+             // No deployed site yet, so we deliberately do NOT pass a `u`
+             // link param to Facebook's sharer — that's what was causing
+             // the dead 'alumniphilcst.com' link box to show up in the
+             // post composer. If this device supports the native share
+             // sheet (photo + caption, no link), use that instead since
+             // it behaves exactly like a normal FB post.
+             if (this.nativeShareSupported) { await this.nativeShare(); return; }
+             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
+             window.open(url,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+         },
+         async shareOnMessenger() {
+             if (this.nativeShareSupported) { await this.nativeShare(); return; }
+             window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
+         },
+         async copyLinkFn() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(this.shareText); }
                  else {
                      const ta = document.createElement('textarea');
-                     ta.value = text; ta.setAttribute('readonly','');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
                      ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
                      document.body.appendChild(ta); ta.focus(); ta.select();
                      document.execCommand('copy'); document.body.removeChild(ta);
                  }
+                 this.copied = true; setTimeout(() => this.copied = false, 2500);
              } catch(e) { console.warn('Copy failed', e); }
-         },
-         async shareOnFacebook() {
-             await this.copyText(this.fbText); this.fbCopied = true;
-             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             window.open('https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(this.baseUrl),'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             setTimeout(() => this.fbCopied = false, 7000);
-         },
-         async shareOnMessenger() {
-             await this.copyText(this.fbText); this.messengerCopied = true;
-             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-             if (isMobile) {
-                 window.location.href = 'fb-messenger://share/?link=' + encodeURIComponent(this.baseUrl);
-                 setTimeout(() => window.open('https://www.messenger.com/new','_blank','noopener'), 1500);
-             } else {
-                 window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
-             }
-             setTimeout(() => this.messengerCopied = false, 7000);
-         },
-         async copyLinkFn() { await this.copyText(this.baseUrl); this.copied = true; setTimeout(() => this.copied = false, 2500); }
+         }
      }"
-     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="$wire.closeShareModal()">
 
-    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-2xl share-modal-wrapper">
+    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 share-modal-wrapper">
 
-        {{-- Header --}}
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
-            <h2 class="text-sm font-semibold flex items-center gap-2 text-gray-800">
-                <i class="fas fa-share-nodes text-sky-600 text-xs"></i> Share Job Posting
+            <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
+                <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Job Posting
             </h2>
-            <button wire:click="closeShareModal" type="button" class="btn-close-purple" aria-label="Close">
+            <button wire:click="closeShareModal" type="button" class="share-close-btn" aria-label="Close">
                 <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
+                <span class="tip">Close</span>
             </button>
         </div>
 
-        {{-- Body --}}
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
             {{-- LEFT: Preview --}}
             <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-thin">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex-shrink-0">Post Preview</p>
+                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
                     <div class="border-b border-gray-100 px-4 py-3 bg-gray-50">
-                        <p class="font-semibold text-gray-900 leading-tight" style="font-size:clamp(12px,1.2vw,14px);">{{ $shareJobTitle }}</p>
-                        <p class="font-medium text-gray-500 mt-0.5" style="font-size:clamp(10px,1vw,12px);">{{ $shareCompany }}</p>
+                        <p class="font-semibold leading-tight" style="font-size:clamp(12px,1.2vw,14px);color:#333333;">{{ $shareJobTitle }}</p>
+                        <p class="font-medium mt-0.5" style="font-size:clamp(10px,1vw,12px);color:#333333;">{{ $shareCompany }}</p>
                         <div class="flex flex-wrap gap-1 mt-1.5">
-                            @if($shareEmpType)     <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareEmpType }}</span> @endif
-                            @if($shareLocation)    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareLocation }}</span> @endif
-                            @if($shareExpLevel)    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-gray-700 bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareExpLevel }}</span> @endif
+                            @if($shareEmpType)     <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareEmpType }}</span> @endif
+                            @if($shareLocation)    <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareLocation }}</span> @endif
+                            @if($shareExpLevel)    <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareExpLevel }}</span> @endif
                             @if($shareSalary)      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-emerald-700 bg-emerald-50" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareSalary }}</span> @endif
                             @if($shareDlFormatted) <span class="inline-flex items-center px-1.5 py-0.5 rounded text-red-600 bg-red-50" style="font-size:clamp(9px,0.85vw,11px);">Deadline: {{ $shareDlFormatted }}</span> @endif
                         </div>
                     </div>
                     @if($shareDescPreview)
-                    <div class="px-4 py-2 border-b border-gray-100">
-                        <p class="leading-relaxed text-gray-600" style="font-size:clamp(10px,0.9vw,12px);">{{ $shareDescPreview }}</p>
+                    <div class="px-4 py-2">
+                        <p class="leading-relaxed" style="font-size:clamp(10px,0.9vw,12px);color:#333333;">{{ $shareDescPreview }}</p>
                     </div>
                     @endif
-                    <div class="px-4 py-2 bg-gray-50">
-                        <span class="uppercase tracking-wider font-semibold text-gray-400" style="font-size:clamp(9px,0.8vw,11px);">{{ strtoupper($shareHost) }}</span>
-                    </div>
                 </div>
 
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-xs flex-shrink-0 mt-0.5"></i>
-                    <p class="text-xs text-blue-700 leading-relaxed">
-                        Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the caption and opens the platform.
-                        Press <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">Ctrl+V</kbd> (or <kbd class="bg-blue-100 px-1 rounded font-mono text-[10px]">⌘V</kbd>) to paste it.
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        Sharing sends the job's photo and caption straight into the post —
+                        no link needed. Use <strong>Share</strong> to open your device's
+                        share sheet and pick Messenger, Facebook, or any app.
                     </p>
                 </div>
             </div>
 
             {{-- RIGHT: Share buttons --}}
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-thin">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Share via</p>
+                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                <div x-show="fbCopied" x-cloak x-transition
-                     class="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-start gap-2">
-                    <i class="fas fa-check text-emerald-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-emerald-800">Caption copied! Paste it on Facebook.</p>
-                </div>
-                <div x-show="messengerCopied" x-cloak x-transition
-                     class="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-start gap-2">
-                    <i class="fas fa-check text-blue-600 text-xs mt-0.5 flex-shrink-0"></i>
-                    <p class="text-xs font-semibold text-blue-800">Caption copied! Pick a contact in Messenger and paste.</p>
-                </div>
+                {{-- Native share sheet — sends title+text+photo directly to
+                     Messenger, Facebook, or any app the person picks, no
+                     copy/paste step at all. This is the primary option on
+                     phones and most modern browsers. --}}
+                <template x-if="nativeShareSupported">
+                    <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
+                        <span class="icon-wrap">
+                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
+                        </span>
+                        <div class="text-left flex-1">
+                            <p class="text-xs font-semibold">Share</p>
+                            <p class="text-[10px] text-white/70 mt-0.5">Send photo + caption via Messenger, Facebook, or any app</p>
+                        </div>
+                    </button>
+                </template>
 
-                {{-- Facebook --}}
-                <button type="button" @click="shareOnFacebook()"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm transition cursor-pointer">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
+                {{-- Facebook — no link, just the caption; uses native share
+                     (photo + text) automatically when supported --}}
+                <button type="button" @click="shareOnFacebook()" class="share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Caption auto-copied · paste to post</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Posts the photo + caption directly</p>
                     </div>
                 </button>
 
                 {{-- Messenger --}}
-                <button type="button" @click="shareOnMessenger()"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer"
-                        style="background:linear-gradient(135deg,#0099FF,#A033FF);">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4">
-                            <defs>
-                                <linearGradient id="mgr_alumni" x1="0%" y1="100%" x2="100%" y2="0%">
-                                    <stop offset="0%" style="stop-color:#0099FF"/>
-                                    <stop offset="100%" style="stop-color:#A033FF"/>
-                                </linearGradient>
-                            </defs>
-                            <path fill="url(#mgr_alumni)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                <button type="button" @click="shareOnMessenger()" class="share-option-btn" style="background:#0084FF;">
+                    <span class="icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
                     <div class="text-left flex-1">
                         <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Pick a contact · paste caption</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Opens Messenger to pick a contact</p>
                     </div>
                     <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
-                <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 flex items-start gap-2">
-                    <i class="fas fa-lightbulb text-amber-500 text-[10px] flex-shrink-0 mt-0.5"></i>
-                    <p class="text-[10px] text-gray-500 leading-relaxed">
-                        Messenger will open. Search a contact, start a conversation, then press <span class="font-semibold text-gray-700">Ctrl+V</span> to paste the job details.
-                    </p>
-                </div>
-
-                {{-- Batch Chat --}}
-                <button type="button" wire:click="shareToChat"
-                        wire:loading.attr="disabled"
-                        wire:target="shareToChat"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white font-semibold text-sm transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-60 disabled:cursor-not-allowed">
-                    <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/20">
-                        <span wire:loading.remove wire:target="shareToChat">
-                            <i class="fas fa-comments text-white text-sm"></i>
-                        </span>
-                        <span wire:loading wire:target="shareToChat">
-                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
-                        </span>
+                {{-- Batch Chat — opens the forward-style destination picker
+                     (like Messenger's forward), instead of sending straight away --}}
+                <button type="button" wire:click="openForwardModal"
+                        class="share-option-btn" style="background:#7a3f91;">
+                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
+                        <i class="fas fa-comments text-white text-sm"></i>
                     </span>
                     <div class="text-left flex-1">
-                        <p class="text-xs font-semibold">Post to Batch Chat</p>
-                        <p class="text-[10px] text-white/60 mt-0.5">Notify all your batchmates</p>
+                        <p class="text-xs font-semibold">Share to Batch Chat</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Choose which of your chats to send to</p>
                     </div>
+                    <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white text-gray-400">or copy link</span>
+                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
                     </div>
                 </div>
 
-                {{-- Copy link --}}
                 <button type="button" @click="copyLinkFn()"
                         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white text-gray-700">
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
                     <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-gray-500'" class="text-sm"></i>
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
                     </span>
                     <div class="flex-1 text-left min-w-0">
-                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : 'text-gray-700'" x-text="copied ? 'Link copied!' : 'Copy Link'"></p>
-                        <p class="text-[10px] font-mono text-gray-400 truncate">{{ $shareBaseUrl }}</p>
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
+                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
                     </div>
                 </button>
 
-                <button type="button" wire:click="closeShareModal"
-                        class="w-full px-4 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer">
-                    Close
-                </button>
-                <p class="text-[10px] text-center text-gray-400">Sharing is disabled for expired postings.</p>
+                <p class="text-[10px] text-center" style="color:#333333;">Sharing is disabled for expired postings.</p>
             </div>
         </div>
     </div>
 </div>
 @endif
 
-</div>{{-- end root --}}
 
-{{-- ── Mouse-following cursor label logic ── --}}
+{{-- ══ FORWARD-TO-CHAT MODAL — pick one or both of your chats, Messenger-forward style ══ --}}
+@if($showForwardModal)
+<div class="fixed inset-0 z-[10003] flex items-center justify-center p-4 bg-black/45"
+     @keydown.escape.window="$wire.closeForwardModal()">
+    <div class="share-sheet bg-white rounded-2xl w-full max-w-[420px] shadow-xl border border-gray-200 flex flex-col" style="max-height:85vh;">
+
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
+                <i class="fas fa-paper-plane text-[#7a3f91] text-xs"></i> Send to Chat
+            </h2>
+            <button wire:click="closeForwardModal" type="button" class="share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <span class="tip">Close</span>
+            </button>
+        </div>
+
+        <div class="px-5 py-3 flex-shrink-0">
+            <p class="text-xs" style="color:#333333;">Tap to select — pick one chat, or both to send to everyone at once.</p>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 pb-3 flex flex-col gap-2">
+            @forelse($alumniChatRooms as $room)
+            @php $isSelected = in_array($room['id'], $selectedRoomIds); @endphp
+            <button type="button"
+                    wire:click="toggleRoomSelection({{ $room['id'] }})"
+                    class="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border transition text-left cursor-pointer
+                           {{ $isSelected ? 'border-[#7a3f91] bg-[#f5eef9]' : 'border-gray-200 bg-white hover:bg-gray-50' }}">
+                <span class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0
+                             {{ $isSelected ? 'bg-[#7a3f91]' : 'bg-gray-100' }}">
+                    <i class="fas fa-users text-sm {{ $isSelected ? 'text-white' : 'text-gray-400' }}"></i>
+                </span>
+                <span class="flex-1 min-w-0">
+                    <span class="block text-sm font-semibold truncate" style="color:#333333;">{{ $room['label'] }}</span>
+                </span>
+                <span class="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0
+                             {{ $isSelected ? 'bg-[#7a3f91] border-[#7a3f91]' : 'border-gray-300' }}">
+                    @if($isSelected)<i class="fas fa-check text-white text-[10px]"></i>@endif
+                </span>
+            </button>
+            @empty
+            <p class="text-xs text-center py-6" style="color:#333333;">No chats found to send to.</p>
+            @endforelse
+        </div>
+
+        <div class="px-5 py-3.5 border-t border-gray-100 flex-shrink-0 flex items-center gap-2">
+            <button type="button" wire:click="closeForwardModal"
+                    class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">
+                Cancel
+            </button>
+            <button type="button" wire:click="confirmSendToChat"
+                    wire:loading.attr="disabled"
+                    wire:target="confirmSendToChat"
+                    @if(empty($selectedRoomIds)) disabled @endif
+                    class="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-white transition cursor-pointer
+                           bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
+                <span wire:loading.remove wire:target="confirmSendToChat">
+                    <i class="fas fa-paper-plane text-[11px]"></i>
+                    Send{{ count($selectedRoomIds) > 1 ? ' to Both' : '' }}
+                </span>
+                <span wire:loading wire:target="confirmSendToChat">
+                    <i class="fas fa-spinner fa-spin text-[11px]"></i> Sending…
+                </span>
+            </button>
+        </div>
+    </div>
+</div>
+@endif
+
+{{-- ── Mouse-following cursor label logic (desktop / mouse devices only) ──
+     MOVED inside the root <div> — this used to sit AFTER the root closed,
+     which made it a second top-level sibling and triggered Livewire's
+     MultipleRootElementsDetectedException. --}}
 <script>
 (function () {
-    // Wait for DOM to be fully ready
+    function isTouchOrSmall() {
+        return window.matchMedia('(max-width: 767px)').matches ||
+               (window.matchMedia('(pointer: coarse)').matches);
+    }
+
     function init() {
         const label = document.getElementById('jb-cursor-label');
         if (!label) return;
+
+        if (isTouchOrSmall()) return;
 
         let activeCard = null;
         let mouseX = 0;
         let mouseY = 0;
 
         function show() {
+            if (isTouchOrSmall()) return;
             label.style.opacity    = '1';
             label.style.visibility = 'visible';
         }
@@ -1257,13 +1553,11 @@ select.filter-input {
         function onMouseMove(e) {
             mouseX = e.clientX;
             mouseY = e.clientY;
-            // Offset so label appears slightly below-right of cursor
             label.style.left = (mouseX + 16) + 'px';
             label.style.top  = (mouseY + 14) + 'px';
         }
 
         function onCardEnter(e) {
-            // Don't show if coming from a child element (bubbling)
             if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
             activeCard = e.currentTarget;
             document.addEventListener('mousemove', onMouseMove);
@@ -1271,20 +1565,14 @@ select.filter-input {
         }
 
         function onCardLeave(e) {
-            // Only hide if truly leaving the card boundary
             if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
             activeCard = null;
             hide();
             document.removeEventListener('mousemove', onMouseMove);
         }
 
-        function onShareEnter() {
-            hide();
-        }
-
-        function onShareLeave() {
-            if (activeCard) show();
-        }
+        function onShareEnter() { hide(); }
+        function onShareLeave() { if (activeCard) show(); }
 
         function attachListeners() {
             document.querySelectorAll('[data-jb-card]').forEach(card => {
@@ -1304,9 +1592,7 @@ select.filter-input {
 
         attachListeners();
 
-        // Livewire v3 — re-attach after any DOM update
         document.addEventListener('livewire:navigated', () => {
-            // Reset all bound flags so we re-attach fresh
             document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
             attachListeners();
         });
@@ -1318,7 +1604,6 @@ select.filter-input {
                     attachListeners();
                 });
             });
-            // Livewire v3 commit hook
             try {
                 window.Livewire.hook('commit', ({ succeed }) => {
                     succeed(() => {
@@ -1331,7 +1616,6 @@ select.filter-input {
             } catch(e) {}
         }
 
-        // Hide label if modal opens (share or detail)
         document.addEventListener('livewire:update', () => {
             hide();
             activeCard = null;
@@ -1345,3 +1629,5 @@ select.filter-input {
     }
 })();
 </script>
+
+</div>{{-- end root --}}

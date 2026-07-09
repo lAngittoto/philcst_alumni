@@ -16,11 +16,8 @@
             'rsvps as tentative_count' => fn($r) => $r->where('response', 'TENTATIVE'),
         ])
         ->orderBy('event_date')
+        ->take(3)
         ->get();
-
-    $firstThree = $events->take(3);
-    $remaining  = $events->skip(3);
-    $hasMore    = $remaining->count() > 0;
 
     $eventsJson = [];
     foreach ($events as $e) {
@@ -113,6 +110,12 @@
     /* Card hover lift */
     .ev-card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(122,63,145,.10); }
     .ev-card { transition: transform .25s ease, box-shadow .25s ease; }
+
+    /* ── MOBILE / TOUCH: icon-only, no tooltip text ── */
+    @media (hover: none), (max-width: 768px) {
+        #ev-global-tooltip { display: none !important; }
+        .ev-close-btn-wrap .ev-close-tip { display: none !important; }
+    }
 </style>
 
 <main class="w-full overflow-x-hidden bg-gray-100">
@@ -129,7 +132,8 @@
                 data-aos="fade-up" data-aos-delay="100" data-aos-duration="700">
                 Upcoming <span class="text-primary">Gatherings</span><br class="hidden sm:block">& Reunions
             </h1>
-            <p class="mx-auto mb-6 max-w-md font-sans text-base sm:text-lg leading-relaxed text-gray-500"
+            <p class="mx-auto mb-6 max-w-md font-sans text-base sm:text-lg leading-relaxed"
+               style="color: var(--text-dark);"
                data-aos="fade-up" data-aos-delay="200" data-aos-duration="700">
                 Stay connected with your alma mater. Join events made just for you.
             </p>
@@ -149,7 +153,7 @@
                     <i class="fa-solid fa-calendar-xmark text-3xl text-primary"></i>
                 </div>
                 <h2 class="mb-3 font-sans text-2xl font-semibold uppercase" style="color: var(--text-dark);">No Upcoming Events</h2>
-                <p class="font-sans text-base text-gray-500 leading-relaxed">
+                <p class="font-sans text-base leading-relaxed" style="color: var(--text-dark);">
                     There are no upcoming events at the moment.<br>Check back soon for exciting alumni gatherings!
                 </p>
             </div>
@@ -163,9 +167,9 @@
                 <div class="h-px flex-1 bg-gray-300"></div>
             </div>
 
-            {{-- ── FIRST 3 CARDS ── --}}
+            {{-- ── 3 CARDS MAX ── --}}
             <div class="mb-10 grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3" id="ev-grid-main">
-                @foreach($firstThree as $i => $event)
+                @foreach($events as $i => $event)
                 @php $d = $i * 80; @endphp
                 <div class="ev-card group relative flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
                      data-aos="fade-up" data-aos-delay="{{ $d }}" data-aos-duration="600"
@@ -184,95 +188,26 @@
                         <div class="inline-flex w-fit items-center gap-1.5 rounded-lg bg-purple-100 px-3 py-2 text-sm font-semibold text-primary">
                             {{ $event->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}
                         </div>
-                        <h3 class="font-sans text-lg font-semibold uppercase tracking-tight leading-snug" style="color: var(--text-dark);">
+                        <h3 class="font-sans text-lg font-bold uppercase tracking-tight leading-snug" style="color: var(--text-dark);">
                             {{ $event->title }}
                         </h3>
                         @if($event->target_participants)
-                        <p class="text-sm text-gray-500 font-medium">{{ $event->target_participants }}</p>
+                        <p class="text-sm font-semibold" style="color: var(--text-dark);">{{ $event->target_participants }}</p>
                         @endif
                         @if($event->description)
-                        <p class="line-clamp-2 text-sm text-gray-400 leading-relaxed">{{ $event->description }}</p>
+                        <p class="line-clamp-2 text-sm leading-relaxed" style="color: var(--text-dark);">{{ $event->description }}</p>
                         @endif
-
-                        {{-- View Details Button --}}
-                        <div class="mt-auto pt-2">
-                            <span class="inline-flex items-center gap-2 rounded-xl border-2 border-[#7a3f91] px-4 py-2.5 text-sm font-semibold uppercase tracking-widest text-[#7a3f91] transition-all duration-200 group-hover:bg-[#7a3f91] group-hover:text-white">
-                                View Details
-                                <i class="fa-solid fa-arrow-right text-xs transition-transform duration-200 group-hover:translate-x-1"></i>
-                            </span>
-                        </div>
                     </div>
                 </div>
                 @endforeach
             </div>
-
-            {{-- ── REMAINING CARDS ── --}}
-            @if($hasMore)
-            <div id="ev-grid-more" style="display:none;">
-                <div class="mb-10 mt-12 flex items-center gap-4">
-                    <div class="h-px flex-1 bg-gray-300"></div>
-                    <span class="whitespace-nowrap font-sans text-xs font-semibold tracking-widest text-primary uppercase">
-                        More Events
-                    </span>
-                    <div class="h-px flex-1 bg-gray-300"></div>
-                </div>
-                <div class="grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3">
-                    @foreach($remaining as $i => $event)
-                    @php $d = ($i % 3) * 80; @endphp
-                    <div class="ev-card group relative flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
-                         data-aos="fade-up" data-aos-delay="{{ $d }}" data-aos-duration="600"
-                         onclick="evOpenModal({{ $event->id }})">
-
-                        @if(!empty($event->photo_url))
-                            <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                                 class="h-60 w-full object-cover">
-                        @else
-                            <div class="flex h-60 w-full items-center justify-center bg-gradient-to-br from-purple-50 to-purple-100">
-                                <i class="fa-solid fa-calendar-star text-5xl text-purple-300"></i>
-                            </div>
-                        @endif
-                        <div class="flex flex-1 flex-col gap-4 p-6">
-                            <div class="inline-flex w-fit items-center gap-1.5 rounded-lg bg-purple-100 px-3 py-2 text-sm font-semibold text-primary">
-                                {{ $event->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}
-                            </div>
-                            <h3 class="font-sans text-lg font-semibold uppercase tracking-tight leading-snug" style="color: var(--text-dark);">
-                                {{ $event->title }}
-                            </h3>
-                            @if($event->target_participants)
-                            <p class="text-sm text-gray-500 font-medium">{{ $event->target_participants }}</p>
-                            @endif
-                            @if($event->description)
-                            <p class="line-clamp-2 text-sm text-gray-400 leading-relaxed">{{ $event->description }}</p>
-                            @endif
-
-                            {{-- View Details Button --}}
-                            <div class="mt-auto pt-2">
-                                <span class="inline-flex items-center gap-2 rounded-xl border-2 border-[#7a3f91] px-4 py-2.5 text-sm font-semibold uppercase tracking-widest text-[#7a3f91] transition-all duration-200 group-hover:bg-[#7a3f91] group-hover:text-white">
-                                    View Details
-                                    <i class="fa-solid fa-arrow-right text-xs transition-transform duration-200 group-hover:translate-x-1"></i>
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    @endforeach
-                </div>
-            </div>
-
-            <div class="mt-10 text-center" data-aos="fade-up" data-aos-delay="150">
-                <button class="inline-flex items-center gap-2 rounded-2xl border-2 border-primary px-6 py-3 text-sm font-semibold uppercase tracking-widest text-primary transition-all duration-200 hover:bg-primary hover:text-white"
-                        id="ev-more-btn" onclick="evToggleMore()">
-                    <i class="fa-solid fa-chevron-down text-inherit transition-transform duration-300" id="ev-more-icon"></i>
-                    <span id="ev-more-text">See All {{ $events->count() }} Events</span>
-                </button>
-            </div>
-            @endif
 
         @endif
     </div>
 
 </main>
 
-{{-- Global cursor-follow tooltip --}}
+{{-- Global cursor-follow tooltip (desktop only) --}}
 <div id="ev-global-tooltip">View Details</div>
 
 
@@ -307,13 +242,24 @@
     <div class="flex-1 overflow-hidden bg-gray-50">
         <div class="h-full grid grid-cols-1 lg:grid-cols-5">
 
-            {{-- ── LEFT: Image ── --}}
-            <div class="lg:col-span-2 flex items-center justify-center overflow-hidden p-6 lg:p-10"
-                 style="background:#F0EBF7;">
+            {{-- ── LEFT: Image + Title/Date/Info ── --}}
+            <div class="lg:col-span-2 flex flex-col overflow-y-auto p-6 lg:p-8 gap-6"
+                 style="background:#F0EBF7; scrollbar-width:thin; scrollbar-color:#d4aaeb #f0ebf7;">
+
                 <div id="ev-modal-photo-wrap"
-                     class="w-full h-full flex items-center justify-center rounded-2xl overflow-hidden"
-                     style="max-height: calc(100vh - 200px);">
+                     class="w-full flex items-center justify-center rounded-2xl overflow-hidden shrink-0"
+                     style="max-height: 320px;">
                 </div>
+
+                <div class="shrink-0">
+                    <div class="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 px-4 py-2 text-sm font-semibold text-primary mb-4"
+                         id="ev-modal-datechip"></div>
+                    <h3 class="text-xl sm:text-2xl font-bold leading-snug uppercase" style="color: var(--text-dark);"
+                        id="ev-modal-title"></h3>
+                </div>
+
+                {{-- Event Info rows --}}
+                <div id="ev-modal-info" class="flex flex-col shrink-0"></div>
             </div>
 
             {{-- ── RIGHT: Event details ── --}}
@@ -322,31 +268,18 @@
                 <div class="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6"
                      style="scrollbar-width:thin; scrollbar-color:#d4aaeb #f9fafb;">
 
-                    {{-- Date chip + Title --}}
-                    <div class="shrink-0">
-                        <div class="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 px-4 py-2 text-sm font-semibold text-primary mb-4"
-                             id="ev-modal-datechip"></div>
-                        <h3 class="text-2xl sm:text-3xl font-bold leading-snug uppercase" style="color: var(--text-dark);"
-                            id="ev-modal-title"></h3>
-                    </div>
-
-                    <div class="h-px bg-[#F3F0F8] shrink-0"></div>
-
-                    {{-- Event Info rows --}}
-                    <div id="ev-modal-info" class="flex flex-col shrink-0"></div>
-
                     {{-- Description --}}
                     <div id="ev-modal-desc-section" style="display:none;" class="shrink-0">
                         <div class="h-px bg-[#F3F0F8] mb-5"></div>
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#1a1a1a;">About This Event</p>
-                        <p class="text-base leading-relaxed" style="color:#333333; font-weight:400;" id="ev-modal-desc"></p>
+                        <p class="text-base font-bold uppercase tracking-widest mb-3" style="color:#333333;">About This Event</p>
+                        <p class="text-sm leading-relaxed" style="color:#333333; font-weight:400;" id="ev-modal-desc"></p>
                     </div>
 
                     {{-- Notes --}}
                     <div id="ev-modal-notes-section" style="display:none;" class="shrink-0">
                         <div class="h-px bg-[#F3F0F8] mb-5"></div>
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#1a1a1a;">Additional Notes</p>
-                        <p class="text-base leading-relaxed" style="color:#333333; font-weight:400;" id="ev-modal-notes"></p>
+                        <p class="text-base font-bold uppercase tracking-widest mb-3" style="color:#333333;">Additional Notes</p>
+                        <p class="text-sm leading-relaxed" style="color:#333333; font-weight:400;" id="ev-modal-notes"></p>
                     </div>
 
                     {{-- ── LOGIN PROMPT ── --}}
@@ -357,8 +290,8 @@
                                 <p class="text-base font-bold uppercase tracking-wide mb-1" style="color: var(--text-dark);">
                                     Want more information?
                                 </p>
-                                <p class="text-sm text-gray-500 leading-relaxed">
-                                    Login to your alumni account to RSVP, view full event details, and stay connected.
+                                <p class="text-sm leading-relaxed" style="color:#333333;">
+                                    Login to your alumni account to view full event details and stay connected.
                                 </p>
                             </div>
                             <a href="{{ route('login') }}"
@@ -374,7 +307,7 @@
                 {{-- Posted meta — pinned bottom --}}
                 <div class="shrink-0 border-t border-[#F3F0F8] px-8 py-4 flex items-center gap-2"
                      style="background:linear-gradient(135deg,#F9F7FC,#FFFFFF);">
-                    <p class="text-sm" style="color:#888888; font-weight:400;" id="ev-modal-footer-meta"></p>
+                    <p class="text-sm" style="color:#333333; font-weight:400;" id="ev-modal-footer-meta"></p>
                 </div>
 
             </div>
@@ -390,30 +323,7 @@ const EV_DATA = {!! json_encode($eventsJson, JSON_HEX_TAG | JSON_HEX_APOS | JSON
 </script>
 
 <script>
-// ── SHOW MORE / LESS ──────────────────────────────────────────────
-var evMoreOpen   = false;
-var evTotalCount = {{ $events->count() }};
-
-function evToggleMore() {
-    var more = document.getElementById('ev-grid-more');
-    var icon = document.getElementById('ev-more-icon');
-    var txt  = document.getElementById('ev-more-text');
-    evMoreOpen = !evMoreOpen;
-    if (evMoreOpen) {
-        more.style.display = 'block';
-        icon.style.transform = 'rotate(180deg)';
-        txt.textContent = 'Show Less';
-        if (typeof AOS !== 'undefined') AOS.refresh();
-        setTimeout(function () { more.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 80);
-    } else {
-        more.style.display = 'none';
-        icon.style.transform = 'rotate(0deg)';
-        txt.textContent = 'See All ' + evTotalCount + ' Events';
-        document.getElementById('ev-grid-main').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-}
-
-// ── CURSOR-FOLLOW TOOLTIP ─────────────────────────────────────────
+// ── CURSOR-FOLLOW TOOLTIP (desktop only — no-ops harmlessly on touch) ────
 var evTooltip = document.getElementById('ev-global-tooltip');
 
 document.querySelectorAll('.ev-card').forEach(function (card) {
@@ -448,7 +358,7 @@ function evOpenModal(id) {
     document.getElementById('ev-modal-photo-wrap').innerHTML = ev.photo_url
         ? '<img src="' + ev.photo_url + '" alt="" style="max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block;border-radius:14px;">'
         : '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:280px;">' +
-          '<span style="font-size:1.1rem;color:#aaa;font-weight:500;letter-spacing:.05em;">No Photo Available</span></div>';
+          '<span style="font-size:1.1rem;color:#333333;font-weight:600;letter-spacing:.05em;">No Photo Available</span></div>';
 
     // Info rows — Date + Participants only
     var infoRows = [
@@ -461,8 +371,8 @@ function evOpenModal(id) {
     infoRows.forEach(function (r) {
         infoHtml +=
             '<div class="ev-info-row">' +
-                '<p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#888888;line-height:1.2;">' + r.label + '</p>' +
-                '<p style="font-size:17px;font-weight:600;color:#1a1a1a;line-height:1.5;word-break:break-word;">' + r.val + '</p>' +
+                '<p style="font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#333333;line-height:1.3;">' + r.label + '</p>' +
+                '<p style="font-size:14px;font-weight:500;color:#333333;line-height:1.5;word-break:break-word;">' + r.val + '</p>' +
             '</div>';
     });
     document.getElementById('ev-modal-info').innerHTML = infoHtml;

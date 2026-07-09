@@ -514,7 +514,7 @@ new class extends Component {
 
 <div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '')">
 
-{{-- ══ CURSOR-FOLLOW TOOLTIP ══ --}}
+{{-- ══ CURSOR-FOLLOW TOOLTIP (desktop only — hidden on mobile/touch, see CSS + JS below) ══ --}}
 <div id="emp-cursor-tip"
      style="position:fixed;pointer-events:none;z-index:99999;display:none;
             background:#1a1a1a;color:#fff;font-size:10px;font-weight:700;
@@ -561,8 +561,14 @@ new class extends Component {
     /* Batch nav disabled */
     .batch-option-disabled { opacity:.38; cursor:not-allowed; pointer-events:none; }
 
-    /* Cursor-follow tooltip trigger elements */
+    /* Cursor-follow tooltip trigger elements (cursor only, tooltip itself is disabled on mobile below) */
     [data-tip] { cursor: pointer; }
+
+    /* ── Disable ALL tooltips on mobile / touch devices ─────────────────────
+       Matches the same breakpoint/approach used in Alumni Records. */
+    @media (max-width: 768px), (hover: none) {
+        #emp-cursor-tip { display: none !important; }
+    }
 
     /* ── Search highlight (matches Alumni Records / Dashboard) ─────────────── */
     mark.ar-hl {
@@ -580,7 +586,7 @@ new class extends Component {
 
     /* ── Close button (matches Alumni Records) ──────────────────────────────
        Static, attached tooltip that stays BELOW the X button — no longer
-       uses the cursor-follow tooltip system. */
+       uses the cursor-follow tooltip system. Hidden on mobile/touch too. */
     .emp-close-btn {
         position: relative;
         display: flex; align-items: center; justify-content: center;
@@ -611,6 +617,18 @@ new class extends Component {
         border-bottom-color: rgba(27,6,46,.88);
     }
     .emp-close-btn:hover .emp-close-tip { opacity: 1; }
+    @media (max-width: 768px), (hover: none) {
+        .emp-close-tip { display: none !important; }
+    }
+
+    /* ── Fixed page header (mirrors Alumni Records — stays put, only the
+       content below it scrolls) ────────────────────────────────────────── */
+    .emp-page-header-wrap {
+        padding: 0.75rem 0.75rem 0.5rem;
+    }
+    @media (min-width: 640px) {
+        .emp-page-header-wrap { padding: 1rem 1.5rem 0.5rem; }
+    }
 
     @media (max-width: 640px) {
         .stat-cards-grid { display:grid!important; grid-template-columns:1fr 1fr!important; gap:8px!important; }
@@ -620,7 +638,7 @@ new class extends Component {
         .charts-row-1 > div { height:260px!important; }
         .chart-batch-wrap { height:240px!important; }
         .chart-trend-wrap { height:240px!important; }
-        .emp-page-header h1 { font-size:1rem!important; }
+        .emp-page-header h1 { font-size:1.5rem!important; }
         .course-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
         .modal-toolbar { flex-wrap:wrap; gap:6px; }
         .modal-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
@@ -628,6 +646,48 @@ new class extends Component {
     }
     @media (max-width:400px) {
         .emp-pg-btn { min-width:26px; height:26px; padding:0 6px; font-size:.68rem; }
+    }
+
+    /* ── "More content below" glow indicator ─────────────────────────────── */
+    .emp-scroll-indicator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+    }
+    .emp-scroll-indicator-glow {
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(122,63,145,.55) 0%, rgba(122,63,145,0) 70%);
+        animation: empIndicatorGlow 1.8s ease-in-out infinite;
+        pointer-events: none;
+    }
+    .emp-scroll-indicator-btn {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: linear-gradient(135deg,#7A3F91,#9b59b6);
+        color: #fff;
+        box-shadow: 0 2px 10px rgba(122,63,145,.45), 0 0 0 3px rgba(255,255,255,.9);
+        animation: empIndicatorBounce 1.8s ease-in-out infinite;
+        font-size: .8rem;
+    }
+    @keyframes empIndicatorGlow {
+        0%, 100% { opacity:.45; transform:scale(.9); }
+        50%      { opacity:1;   transform:scale(1.15); }
+    }
+    @keyframes empIndicatorBounce {
+        0%, 100% { transform: translateY(0); }
+        50%      { transform: translateY(-4px); }
     }
 </style>
 
@@ -641,23 +701,31 @@ new class extends Component {
 </div>
 
 {{-- ═══════════════════════════════════════════════════════════
-     MAIN PAGE
+     MAIN PAGE — height capped like Alumni Records (up to the
+     logout footer only). Header stays fixed in place; only the
+     content below it scrolls.
 ═══════════════════════════════════════════════════════════ --}}
-<div class="h-[90vh] max-h-[90vh] overflow-hidden bg-gray-100 flex flex-col">
-<div class="flex-1 overflow-y-auto" style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-<div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border">
+<div class="bg-gray-100 flex flex-col relative" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;"
+     x-data="{ showMoreIndicator:true }">
 
-    {{-- PAGE HEADER --}}
-    <div class="flex items-center gap-3 emp-page-header">
-        <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <i class="fas fa-chart-column text-white text-base"></i>
-        </div>
-        <div>
-            <h1 class="text-lg sm:text-xl font-bold leading-tight text-[#111111]">Employment Tracking</h1>
-            <p class="text-xs text-[#333333] mt-0.5">System-wide alumni employment analytics &amp; records</p>
+    {{-- PAGE HEADER — fixed, does not move/scroll away --}}
+    <div class="emp-page-header-wrap shrink-0">
+        <div class="flex items-center gap-3 emp-page-header">
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-chart-column text-white text-base"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
+                <p class="text-[#666666] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
+            </div>
         </div>
     </div>
+
+<div class="flex-1 overflow-y-auto"
+     style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
+     @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
+<div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border">
 
     {{-- ── 4 STAT CARDS ── --}}
     @php
@@ -964,6 +1032,25 @@ new class extends Component {
 
 </div>
 </div>
+
+    {{-- ── "More content below" glow indicator ── --}}
+    <button type="button"
+            x-show="showMoreIndicator"
+            x-transition:enter="transition ease-out duration-200"
+            x-transition:enter-start="opacity-0 translate-y-1"
+            x-transition:enter-end="opacity-100 translate-y-0"
+            x-transition:leave="transition ease-in duration-150"
+            x-transition:leave-start="opacity-100"
+            x-transition:leave-end="opacity-0"
+            @click="$el.closest('.bg-gray-100.flex.flex-col.relative').querySelector('.overflow-y-auto').scrollBy({top:280,behavior:'smooth'})"
+            class="emp-scroll-indicator absolute left-1/2 -translate-x-1/2 z-30"
+            style="bottom:10px;display:none;">
+        <span class="emp-scroll-indicator-glow"></span>
+        <span class="emp-scroll-indicator-btn">
+            <i class="fas fa-chevron-up"></i>
+        </span>
+    </button>
+
 </div>
 
 
@@ -1324,14 +1411,20 @@ new class extends Component {
 (function () {
     'use strict';
 
-    // ── Cursor-follow tooltip ─────────────────────────────────────────────────
+    // ── Cursor-follow tooltip (desktop only — never shows on mobile/touch) ─────
     (function initCursorTip() {
         var tip = document.getElementById('emp-cursor-tip');
         if (!tip) return;
 
         var currentTarget = null;
 
+        function isHoverCapable() {
+            return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+                && window.innerWidth > 768;
+        }
+
         function showTip(el, e) {
+            if (!isHoverCapable()) return;
             // data-tip-noicon => plain text tooltip, no eye icon (no longer used by Close button)
             var noIconText = el.getAttribute('data-tip-noicon');
             var text = noIconText || el.getAttribute('data-tip');
@@ -1344,6 +1437,7 @@ new class extends Component {
         }
 
         function moveTip(e) {
+            if (!isHoverCapable()) return;
             var x = e.clientX;
             var y = e.clientY;
             var tw = tip.offsetWidth;
@@ -1360,6 +1454,7 @@ new class extends Component {
         }
 
         document.addEventListener('mouseover', function(e) {
+            if (!isHoverCapable()) { hideTip(); return; }
             var el = e.target.closest('[data-tip], [data-tip-noicon]');
             if (el && el !== currentTarget) {
                 currentTarget = el;
@@ -1380,6 +1475,7 @@ new class extends Component {
         }, true);
 
         document.addEventListener('scroll', hideTip, true);
+        document.addEventListener('touchstart', hideTip, true);
     })();
 
     // ── Chart helpers ─────────────────────────────────────────────────────────
