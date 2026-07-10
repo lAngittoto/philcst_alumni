@@ -82,11 +82,27 @@ new #[Layout('app')] class extends Component {
     private function cacheResendAttemptsKey(int $id): string  { return "alumni_resend_attempts:{$id}"; }
     private function cacheResendLockKey(int $id): string      { return "alumni_resend_locked:{$id}"; }
 
+    /**
+     * NEW: persistent, session-INDEPENDENT "OTP already verified" flag —
+     * keyed off the alumni's own ID rather than the session. See the
+     * big comment in mount() for why this exists: previously, "verified"
+     * only lived in the session key 'alumni_password_reset_step', so
+     * logging out (or the session simply expiring) and logging back in
+     * with the temp password wiped that flag and forced the alumni to
+     * redo the whole OTP flow — even though their identity was already
+     * proven. Same pattern as forgot-password.blade.php's
+     * cacheOtpVerifiedKey(), with the same generous 24-hour safety-net
+     * TTL (not a user-facing countdown — just a cap so the flag can't
+     * linger forever if the wizard is abandoned entirely).
+     */
+    private function cacheOtpVerifiedKey(int $id): string     { return "alumni_otp_verified:{$id}"; }
+
     private function clearWizardCache(int $id): void
     {
         cache()->forget($this->cacheEmailKey($id));
         cache()->forget($this->cachePasswordKey($id));
         cache()->forget($this->cacheFlowKey($id));
+        cache()->forget($this->cacheOtpVerifiedKey($id));
     }
 
     private function getAlumni(): ?\App\Models\Alumni
@@ -174,6 +190,39 @@ new #[Layout('app')] class extends Component {
         // returning here after logging back in mid-lock).
         $this->checkAndSyncSendLock($alumni);
 
+        $stillOnTemp = $alumni->hasTemporaryPassword();
+        $wizardInc   = $alumni->needsAccountSetup();
+
+        // ── PERSISTENT OTP-VERIFIED CHECK (survives logout + fresh login) ──
+        // FIX: previously, "OTP already verified" was tracked ONLY via the
+        // session key 'alumni_password_reset_step' = 'otp_verified'. That
+        // works fine for browser back/forward WITHIN the same session —
+        // but if the alumni logs out (or the session simply expires/gets
+        // cleared) and then logs back in with their temp password, that's
+        // a BRAND NEW session, so the flag is gone. mount() used to fall
+        // through to the "no session flags at all" branch below and force
+        // a full logout + redirect back to Step 1 — making the alumni
+        // redo the entire OTP flow even though their identity was already
+        // proven and their OTP already spent/verified.
+        //
+        // This check now runs FIRST, before any session-flag logic, and is
+        // driven entirely by cacheOtpVerifiedKey() — a flag keyed off the
+        // alumni's own database ID, not the session. As long as this
+        // alumni still genuinely needs account setup (still on temp
+        // password / hasn't finished the wizard) AND this persistent flag
+        // is present, we re-establish the session flags ourselves and send
+        // them straight to Step 3 (Set Password) — no re-sending or
+        // re-verifying an OTP required, no matter how many times they log
+        // out and back in first.
+        if (($wizardInc || $stillOnTemp) && cache()->has($this->cacheOtpVerifiedKey($alumni->id))) {
+            session()->put('alumni_requires_password_change', true);
+            session()->put('alumni_password_reset_step', 'otp_verified');
+
+            $this->step           = 3;
+            $this->otpExpiresAtMs = 0;
+            return;
+        }
+
         $hasLoginFlag  = session()->has('alumni_requires_password_change');
         $wizardStarted = session()->has('alumni_password_reset_step');
 
@@ -183,9 +232,6 @@ new #[Layout('app')] class extends Component {
             session()->regenerateToken();
             $this->redirect(route('login')); return;
         }
-
-        $stillOnTemp = $alumni->hasTemporaryPassword();
-        $wizardInc   = $alumni->needsAccountSetup();
 
         if (!$wizardInc && !$stillOnTemp) {
             session()->forget(['alumni_requires_password_change', 'alumni_pending_email',
@@ -237,6 +283,16 @@ new #[Layout('app')] class extends Component {
         // showing an OTP form with a code that was no longer valid. Now it
         // only restores Step 2 if the OTP is genuinely still active
         // (isOtpStillActive), same principle used in forgot-password.
+        //
+        // NOTE: 'otp_verified' ALWAYS wins here regardless of connectivity,
+        // browser back/forward, or accidental navigation — once the OTP has
+        // been successfully verified, the alumni is committed to Step 3
+        // (Set Password) and can never be routed back to Step 1/2 or Login
+        // from this mount() logic. There is intentionally no "Back to
+        // Login" escape hatch once this flag is set — see the view below.
+        // (The persistent cache-based check further above already handles
+        // the "logged out and back in" case; this session check just
+        // covers the plain same-session browser back/forward case.)
         $resetStep    = session('alumni_password_reset_step');
         $pendingEmail = session('alumni_pending_email');
 
@@ -268,6 +324,18 @@ new #[Layout('app')] class extends Component {
     // there is no separate "Home" destination in this wizard. Renamed
     // to backToLogin() to match what it actually does; the button label
     // in the markup below now also reads "Back to Login".
+    //
+    // NOTE: this method is intentionally still kept for Step 1 and Step 2
+    // (before OTP is verified). Once OTP is verified (Step 3), the view
+    // below no longer renders any "Back to Login" button at all, so this
+    // method simply becomes unreachable from Step 3 — the alumni is meant
+    // to complete password setup immediately instead of being able to bail
+    // out and re-login, even after an accidental back navigation, browser
+    // close, or dropped connection. And since it's unreachable post-verify,
+    // it can never accidentally wipe the persistent cacheOtpVerifiedKey
+    // flag (that only ever happens via clearWizardCache() here, which only
+    // fires while isOtpStillActive() is false — i.e. before an OTP has even
+    // been verified in the first place).
     // ─────────────────────────────────────────────────────────────
 
     public function backToLogin(): void
@@ -372,6 +440,11 @@ new #[Layout('app')] class extends Component {
             // already being several seconds short.
             $alumni->update(['otp_expires_at' => now()->addMinutes(10)]);
 
+            // A fresh code being sent means any previously-verified flag
+            // no longer applies — clear it so a stale cache entry can't
+            // route a not-yet-verified alumni straight to Step 3.
+            cache()->forget($this->cacheOtpVerifiedKey($alumni->id));
+
             session()->put('alumni_pending_email',       $targetEmail);
             session()->put('alumni_password_reset_step', 'otp_sent');
             cache()->put($this->cacheEmailKey($alumni->id), $targetEmail, now()->addMinutes(15));
@@ -445,7 +518,21 @@ new #[Layout('app')] class extends Component {
         cache()->forget($lockKey);
         $alumni->clearOtp();
 
+        // OTP is now successfully verified — from this point on the alumni
+        // is committed to Step 3. mount() will always route back here
+        // ('otp_verified') no matter what happens next (accidental back
+        // navigation, browser closed, connection dropped, etc.), and the
+        // view no longer offers any "Back to Login" button once this step
+        // is reached — see the markup below.
         session()->put('alumni_password_reset_step', 'otp_verified');
+
+        // NEW: also persist this "verified" state OUTSIDE the session, keyed
+        // off the alumni's own ID, with a generous 24-hour safety-net TTL.
+        // This is what lets mount() send the alumni straight to Step 3 even
+        // after a full logout + fresh login wipes the session — see the
+        // big comment in mount() for the full reasoning.
+        cache()->put($this->cacheOtpVerifiedKey($alumni->id), true, now()->addHours(24));
+
         $this->step           = 3;
         $this->otpExpiresAtMs = 0;
         $this->successMessage = 'Email verified! Please set your new password below.';
@@ -578,6 +665,11 @@ new #[Layout('app')] class extends Component {
 
             session()->forget(['alumni_pending_email', 'alumni_pending_password',
                 'alumni_password_reset_step', 'alumni_requires_password_change', 'alumni_wizard_flow']);
+            // clearWizardCache() also forgets cacheOtpVerifiedKey() — once
+            // the password is actually saved, the persistent "verified"
+            // flag is no longer needed and must not linger (the account is
+            // no longer mid-setup, so there's nothing left to route back to
+            // on a future login).
             $this->clearWizardCache($alumni->id);
 
             Log::info("Alumni account setup completed: alumni_id #{$alumni->id}");
@@ -609,24 +701,35 @@ new #[Layout('app')] class extends Component {
     {{-- Dark overlay --}}
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm z-0"></div>
 
-    {{-- Back to Login --}}
-    <div class="relative z-10 w-full max-w-2xl mb-4">
-        <button
-            wire:click="backToLogin"
-            wire:loading.attr="disabled"
-            wire:target="backToLogin"
-            class="inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors font-semibold text-sm group">
-            <div class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/30 bg-white/10 group-hover:border-white/60 group-hover:bg-white/20 transition-all shadow-sm">
-                <span wire:loading.remove wire:target="backToLogin"><i class="fa-solid fa-arrow-left text-sm"></i></span>
-                <span wire:loading wire:target="backToLogin" x-cloak class="flex gap-0.5">
-                    <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
-                    <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
-                    <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
-                </span>
-            </div>
-            <span>Back to Login</span>
-        </button>
-    </div>
+    {{-- Back to Login ──────────────────────────────────────────────
+         FIX: only rendered for Step 1 now. Once the alumni has requested
+         an OTP (Step 2) all the way through verifying it (Step 3), this
+         button is gone entirely — there is no way to log out / bail back
+         to Login from either step anymore. This means accidental browser
+         back, closing the tab, or a dropped connection while on Step 2 or
+         Step 3 will always land the alumni straight back on whichever of
+         those steps they were on (mount()'s 'otp_sent' / 'otp_verified'
+         checks — including a full logout + fresh re-login once verified),
+         never back to Login. --}}
+    @if ($step == 1)
+        <div class="relative z-10 w-full max-w-2xl mb-4">
+            <button
+                wire:click="backToLogin"
+                wire:loading.attr="disabled"
+                wire:target="backToLogin"
+                class="inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors font-semibold text-sm group">
+                <div class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/30 bg-white/10 group-hover:border-white/60 group-hover:bg-white/20 transition-all shadow-sm">
+                    <span wire:loading.remove wire:target="backToLogin"><i class="fa-solid fa-arrow-left text-sm"></i></span>
+                    <span wire:loading wire:target="backToLogin" x-cloak class="flex gap-0.5">
+                        <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
+                        <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
+                        <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
+                    </span>
+                </div>
+                <span>Back to Login</span>
+            </button>
+        </div>
+    @endif
 
     {{-- ══ Success Modal ══ --}}
     @if ($showSuccessModal)
@@ -661,7 +764,7 @@ new #[Layout('app')] class extends Component {
                     <div class="space-y-1.5">
                         <h2 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Account Activated!</h2>
                         <p class="text-sm sm:text-base font-medium" style="color: #333333;">Your alumni account has been verified.</p>
-                        <p class="text-sm" style="color: #555555; line-height: 1.6;">Welcome to the PCST Alumni Portal! Please complete your profile to access all features.</p>
+                        <p class="text-sm" style="color: #555555; line-height: 1.6;">Welcome to the PCST Alumni Connect! Please complete your profile to access all features.</p>
                     </div>
 
                     <div class="rounded-lg border px-4 py-3 flex items-center gap-3 text-left" style="background: #F8F4FC; border-color: #E8E0F0;">
@@ -979,7 +1082,15 @@ new #[Layout('app')] class extends Component {
                 </div>
             @endif
 
-            {{-- ══ STEP 3: Set Password ══ --}}
+            {{-- ══ STEP 3: Set Password ══
+                 FIX: No "Back to Login" button anywhere in this step
+                 anymore (top button is also hidden — see @if ($step != 3)
+                 above). Once the OTP is verified, the alumni is locked
+                 into completing password setup — accidental back
+                 navigation, closing the browser, losing wifi, OR a full
+                 logout + fresh re-login will always resume exactly here
+                 (mount() checks the persistent cache flag first, then the
+                 'otp_verified' session flag, before anything else). --}}
             @if ($step == 3)
                 <div class="space-y-4">
                     <div>
@@ -1081,24 +1192,9 @@ new #[Layout('app')] class extends Component {
                                 </span>
                             </button>
 
-                            <button wire:click="backToLogin"
-                                    wire:loading.attr="disabled"
-                                    wire:target="backToLogin"
-                                    type="button"
-                                    class="w-full py-2 rounded-lg text-xs font-medium transition-colors hover:bg-[#F5F5F5] flex items-center justify-center gap-1.5"
-                                    style="color: #555555;">
-                                <span wire:loading.remove wire:target="backToLogin" class="flex items-center gap-1.5">
-                                    <i class="fa-solid fa-arrow-left text-xs"></i> Back to Login
-                                </span>
-                                <span wire:loading wire:target="backToLogin" x-cloak class="flex items-center gap-1.5">
-                                    <span class="flex gap-0.5">
-                                        <span class="dot1 inline-block w-1 h-1 rounded-full" style="background:#555555;"></span>
-                                        <span class="dot2 inline-block w-1 h-1 rounded-full" style="background:#555555;"></span>
-                                        <span class="dot3 inline-block w-1 h-1 rounded-full" style="background:#555555;"></span>
-                                    </span>
-                                    <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Logging out</span>
-                                </span>
-                            </button>
+                            {{-- "Back to Login" button intentionally removed here.
+                                 Once OTP is verified, the alumni must complete
+                                 password setup — no bail-out option. --}}
                         </div>
                     </div>
                 </div>
