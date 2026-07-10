@@ -366,6 +366,60 @@ new class extends Component {
         .ar-close-tip { display: none !important; }
     }
 
+    /* ── Generate Reports button (header, left side) ─────────────── */
+    .ar-report-btn {
+        position: relative;
+        display: flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px;
+        border-radius: 10px;
+        background: #fff;
+        border: 1.5px solid #E8E0F0;
+        color: #7A3F91;
+        cursor: pointer;
+        transition: all .15s;
+        font-size: 15px;
+    }
+    .ar-report-btn:hover,
+    .ar-report-btn-active { background: #F9F7FC; border-color: #7A3F91; }
+    .ar-report-tip {
+        position: absolute;
+        top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+        background: #1a1a1a; color: #fff;
+        font-size: 10px; font-weight: 600; letter-spacing: .05em;
+        padding: 5px 11px; border-radius: 7px; white-space: nowrap;
+        pointer-events: none; opacity: 0; transition: opacity .15s ease;
+        z-index: 9999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    }
+    .ar-report-tip::before {
+        content: '';
+        position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+        border: 5px solid transparent; border-bottom-color: #1a1a1a;
+    }
+    .ar-report-btn:hover .ar-report-tip { opacity: 1; }
+    @media (max-width: 768px), (hover: none) {
+        .ar-report-tip { display: none !important; }
+    }
+    .ar-report-menu {
+        position: absolute; top: calc(100% + 8px); left: 0;
+        min-width: 230px; background: #fff;
+        border: 1.5px solid #E8E0F0; border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(122,63,145,.18);
+        z-index: 500; padding: 6px;
+    }
+    .ar-report-menu-label {
+        font-size: .65rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .06em; color: #999999; padding: 6px 10px 8px;
+        border-bottom: 1px solid #F0ECF5; margin-bottom: 4px;
+    }
+    .ar-report-menu-item {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        padding: 9px 10px; border-radius: 8px;
+        font-size: .82rem; font-weight: 600; color: #333333;
+        background: transparent; border: none; cursor: pointer; text-align: left;
+        transition: background .12s;
+    }
+    .ar-report-menu-item:hover { background: #F5F0FA; }
+
     /* ── Filter bar ──────────────────────────────────────────────── */
     .ar-filter-label { pointer-events: none; }
     .ar-dropdown { position: relative; }
@@ -619,8 +673,25 @@ new class extends Component {
     }
     @media (max-width: 640px) {
         .ar-pg-footer {
-            margin-bottom: 8px;
-            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+            margin-bottom: 0;
+            border-radius: 0;
+            padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+        }
+    }
+
+    /* ── Mobile: table card + page wrap go true full-screen edge to edge ── */
+    @media (max-width: 640px) {
+        .ar-page-wrap {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            padding-bottom: 0 !important;
+        }
+        .ar-table-card {
+            border-radius: 0 !important;
+            border-left: none !important;
+            border-right: none !important;
+            border-bottom: none !important;
+            box-shadow: none !important;
         }
     }
 </style>
@@ -657,11 +728,55 @@ new class extends Component {
 </div>
 
 {{-- ══ PAGE ══════════════════════════════════════════════════════════ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-3 max-w-screen-2xl mx-auto" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+<div class="ar-page-wrap flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-3 max-w-screen-2xl mx-auto" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
     {{-- Header --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 shrink-0">
         <div class="flex items-center gap-3">
+
+            {{-- Generate Reports icon — on the left, separated by a divider --}}
+            <div class="relative shrink-0"
+                 x-data="{
+                    open:false,
+                    doExport(type){
+                        const params = new URLSearchParams({
+                            type: type,
+                            search: $wire.alumniSearch || '',
+                            batch: $wire.alumniBatch || '',
+                            course: $wire.alumniCourse || '',
+                            profile_filter: $wire.alumniProfileFilter || 'all',
+                        });
+                        window.open('/registrar/alumni-records/export?' + params.toString(), '_blank');
+                        this.open = false;
+                    }
+                 }"
+                 @click.outside="open=false" wire:key="ar-report-dropdown">
+                <button type="button" @click="open=!open" class="ar-report-btn" :class="{ 'ar-report-btn-active': open }">
+                    <i class="fas fa-chart-column"></i>
+                    <span class="ar-report-tip">Generate Reports</span>
+                </button>
+
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-report-menu" style="display:none;">
+                    <p class="ar-report-menu-label">
+                        {{ number_format($this->alumniRecords->total()) }} record(s) match current filters
+                    </p>
+                    <button type="button" @click="doExport('pdf')" class="ar-report-menu-item">
+                        <i class="fas fa-file-pdf" style="color:#DC2626;width:14px;"></i> Export as PDF
+                    </button>
+                    <button type="button" @click="doExport('excel')" class="ar-report-menu-item">
+                        <i class="fas fa-file-excel" style="color:#059669;width:14px;"></i> Export as Excel
+                    </button>
+                    <button type="button" @click="open=false; window.print();" class="ar-report-menu-item">
+                        <i class="fas fa-print" style="color:#555555;width:14px;"></i> Print Current View
+                    </button>
+                </div>
+            </div>
+
+            <div class="h-9 w-px bg-[#E8E0F0] shrink-0"></div>
+
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white text-base"></i>
@@ -674,7 +789,7 @@ new class extends Component {
     </div>
 
     {{-- Table Card --}}
-    <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
+    <div class="ar-table-card bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
 
         {{-- ── Filter bar ── --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200"

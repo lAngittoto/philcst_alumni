@@ -193,8 +193,9 @@ new class extends Component {
                     ->orWhere('college', 'like', $term)
                 );
             }
-            return $q->orderBy('college')->orderBy('code')
-                     ->paginate($this->alumniModalPageSize, ['*'], 'aPage', $this->alumniModalPage);
+            // No pagination needed here — course list is short, so the
+            // modal simply shows everything in a scrollable table.
+            return $q->orderBy('college')->orderBy('code')->get();
         }
 
         $q = Alumni::select([
@@ -670,6 +671,7 @@ new class extends Component {
 
         $isAllNoFilter   = ($alumniModalFilter === 'all' && $alumniModalBatch === null);
         $hasBatchContext = ($alumniModalBatch !== null);
+        $isCoursesView   = ($alumniModalFilter === 'courses');
 
         if ($isAllNoFilter) {
             $visibleAlumniTabs   = [['all', 'All Alumni', 'fa-users']];
@@ -682,14 +684,19 @@ new class extends Component {
             $alumniTabsClickable = false;
         }
 
-        $aTotal    = $this->alumniModalRecords->total();
-        $aPp       = $this->alumniModalRecords->perPage();
-        $aCp       = $this->alumniModalRecords->currentPage();
-        $aLastPage = $this->alumniModalRecords->lastPage();
-        $aFrom     = $aTotal > 0 ? ($aCp - 1) * $aPp + 1 : 0;
-        $aTo       = min($aCp * $aPp, $aTotal);
-        $aPgStart  = max(1, $aCp - 2);
-        $aPgEnd    = min($aLastPage, $aCp + 2);
+        if ($isCoursesView) {
+            // Courses view: no pagination, just a plain count of all results.
+            $aTotal = $this->alumniModalRecords->count();
+        } else {
+            $aTotal    = $this->alumniModalRecords->total();
+            $aPp       = $this->alumniModalRecords->perPage();
+            $aCp       = $this->alumniModalRecords->currentPage();
+            $aLastPage = $this->alumniModalRecords->lastPage();
+            $aFrom     = $aTotal > 0 ? ($aCp - 1) * $aPp + 1 : 0;
+            $aTo       = min($aCp * $aPp, $aTotal);
+            $aPgStart  = max(1, $aCp - 2);
+            $aPgEnd    = min($aLastPage, $aCp + 2);
+        }
     @endphp
     <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 animate-[dashPageIn_.22s_cubic-bezier(.4,0,.2,1)_both]"
          @keydown.escape.window="$wire.closeModal()">
@@ -704,7 +711,7 @@ new class extends Component {
                 <div>
                     <h2 class="text-white font-semibold text-base leading-tight">{{ $this->alumniModalTitle }}</h2>
                     <p class="text-white/60 text-xs font-normal">
-                        {{ number_format($this->alumniModalRecords->total()) }} record(s) found
+                        {{ number_format($aTotal) }} record(s) found
                     </p>
                 </div>
             </div>
@@ -853,52 +860,69 @@ new class extends Component {
             <div class="ar-filter-progress-bar"></div>
         </div>
 
-        {{-- Table --}}
-        <div class="flex-1 overflow-y-auto min-h-0 transition-opacity duration-200"
+        {{-- Content --}}
+        @if($alumniModalFilter === 'courses')
+        {{-- ── Active Courses: boxed table, vertical scroll only (no horizontal scroll on mobile/tablet) ── --}}
+        <div class="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 flex flex-col">
+            <div class="relative flex-1 min-h-0 flex flex-col bg-white border-[1.5px] border-[#E8E0F0] rounded-2xl shadow-sm overflow-hidden">
+
+                <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0 relative transition-opacity duration-200"
+                     style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
+                     wire:loading.class="opacity-40" wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
+
+                    <table class="w-full border-collapse table-fixed">
+                        <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
+                            <tr class="border-b-2 border-[#E8E0F0]">
+                                <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[22%] sm:w-[18%]">Code</th>
+                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[46%] sm:w-[52%]">Course Name</th>
+                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[32%] sm:w-[30%]">College</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            @forelse($this->alumniModalRecords as $course)
+                            <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
+                                <td class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2.5 sm:py-3 align-top">
+                                    <span class="text-[11px] sm:text-sm font-mono font-bold text-[#111111] break-words">{!! $this->highlight($course->code ?? '', $this->alumniModalSearch) !!}</span>
+                                </td>
+                                <td class="px-2 sm:px-5 py-2.5 sm:py-3 align-top">
+                                    <p class="text-[11px] sm:text-sm font-semibold text-[#111111] break-words leading-snug">{!! $this->highlight($course->name ?? '', $this->alumniModalSearch) !!}</p>
+                                </td>
+                                <td class="px-2 sm:px-5 py-2.5 sm:py-3 align-top">
+                                    <span class="text-[11px] sm:text-sm text-[#333333] break-words leading-snug">{!! $course->college ? $this->highlight($course->college, $this->alumniModalSearch) : '—' !!}</span>
+                                </td>
+                            </tr>
+                            @empty
+                            <tr><td colspan="3" class="py-20 text-center">
+                                <div class="flex flex-col items-center gap-3">
+                                    <div class="w-12 h-12 bg-[#f0e6f8] rounded-2xl flex items-center justify-center">
+                                        <i class="fas fa-book text-xl" style="color:#c89de0;"></i>
+                                    </div>
+                                    <p class="text-sm font-semibold text-[#333333]">No courses found</p>
+                                </div>
+                            </td></tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+
+                {{-- Purple solid footer — visual indicator that this is a bounded table --}}
+                <div class="px-4 sm:px-5 py-2.5 shrink-0 flex items-center justify-between gap-2"
+                     style="background:#7A3F91;">
+                    <p class="text-white/75 text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 uppercase tracking-wide">
+                        <i class="fas fa-table"></i> Course Table
+                    </p>
+                    <p class="text-white text-xs sm:text-sm font-semibold">
+                        {{ number_format($aTotal) }} course{{ $aTotal === 1 ? '' : 's' }} found
+                    </p>
+                </div>
+            </div>
+        </div>
+        @else
+        {{-- ── Alumni records table (unchanged) ── --}}
+        <div class="flex-1 overflow-y-auto min-h-0 relative transition-opacity duration-200"
              style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
              wire:loading.class="opacity-40" wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
 
-            @if($alumniModalFilter === 'courses')
-            <table class="w-full border-collapse" style="min-width:500px;">
-                <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
-                    <tr class="border-b-2 border-[#E8E0F0]">
-                        <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
-                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
-                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course Name</th>
-                        <th class="px-5 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">College</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                    @forelse($this->alumniModalRecords as $idx => $course)
-                    @php $rowNum = ($this->alumniModalRecords->currentPage() - 1) * $this->alumniModalRecords->perPage() + $idx + 1; @endphp
-                    <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
-                        <td class="pl-6 lg:pl-10 pr-3 py-3">
-                            <span class="text-xs font-semibold text-[#333333]">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
-                        </td>
-                        <td class="px-5 py-3">
-                            <span class="text-sm font-mono font-bold text-[#111111]">{!! $this->highlight($course->code ?? '', $this->alumniModalSearch) !!}</span>
-                        </td>
-                        <td class="px-5 py-3">
-                            <p class="text-sm font-semibold text-[#111111]">{!! $this->highlight($course->name ?? '', $this->alumniModalSearch) !!}</p>
-                        </td>
-                        <td class="px-5 py-3">
-                            <span class="text-sm text-[#333333]">{!! $course->college ? $this->highlight($course->college, $this->alumniModalSearch) : '—' !!}</span>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr><td colspan="4" class="py-20 text-center">
-                        <div class="flex flex-col items-center gap-3">
-                            <div class="w-12 h-12 bg-[#f0e6f8] rounded-2xl flex items-center justify-center">
-                                <i class="fas fa-book text-xl" style="color:#c89de0;"></i>
-                            </div>
-                            <p class="text-sm font-semibold text-[#333333]">No courses found</p>
-                        </div>
-                    </td></tr>
-                    @endforelse
-                </tbody>
-            </table>
-
-            @else
             <table class="w-full border-collapse" style="min-width:760px;">
                 <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                     <tr class="border-b-2 border-[#E8E0F0]">
@@ -964,11 +988,11 @@ new class extends Component {
                     @endforelse
                 </tbody>
             </table>
-            @endif
-
         </div>
+        @endif
 
-        {{-- Footer Pagination --}}
+        {{-- Footer Pagination (hidden for the Active Courses view — it has its own boxed footer) --}}
+        @if($alumniModalFilter !== 'courses')
         <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
              style="background:#7A3F91;">
             <p class="text-white/70 text-sm">
@@ -1020,6 +1044,7 @@ new class extends Component {
                 <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $aCp }}/{{ $aLastPage }}</span>
             </div>
         </div>
+        @endif
 
     </div>
     @endif
