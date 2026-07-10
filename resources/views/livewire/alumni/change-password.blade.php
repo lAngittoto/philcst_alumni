@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
+use Illuminate\Support\Str;
 
 new #[Layout('app')] class extends Component {
 
@@ -36,12 +38,14 @@ new #[Layout('app')] class extends Component {
     // After MAX_RESEND_ATTEMPTS (3) sends within the current window — the
     // very first "Send Verification Code" from Step 1 AND every "Resend
     // Code" from Step 2 all count toward the same limit — the account is
-    // locked for RESEND_LOCK_MINUTES (30 mins). Unlike forgot-password.blade.php
-    // (which has to track this via a session key because the alumni isn't
-    // known until Step 1 is submitted), here the alumni is always resolvable
-    // straight from auth()->id(), so the lock state can just be synced
-    // directly off the DB/cache any time — including on mount(), so Step 1's
-    // send button reflects a real, still-active lock immediately.
+    // locked for RESEND_LOCK_MINUTES (now 24 hours, mirroring
+    // forgot-password.blade.php's lockout severity). Unlike
+    // forgot-password.blade.php (which has to track this via a session key
+    // because the alumni isn't known until Step 1 is submitted), here the
+    // alumni is always resolvable straight from auth()->id(), so the lock
+    // state can just be synced directly off the DB/cache any time —
+    // including on mount(), so Step 1's send button reflects a real,
+    // still-active lock immediately.
     public bool $sendLocked            = false;
     public int  $sendLockedUntilMs     = 0;
     public bool $showResendLockedModal = false;
@@ -59,7 +63,15 @@ new #[Layout('app')] class extends Component {
     public bool   $showSuccessModal = false;
 
     private const MAX_RESEND_ATTEMPTS = 3;
-    private const RESEND_LOCK_MINUTES = 30;
+
+    // FIX: previously 30 minutes. To mirror the seriousness of 3 failed
+    // "send verification code" attempts — same shape as
+    // forgot-password.blade.php's own fix — the 4th attempt now locks the
+    // account for a full 24 hours instead of just 30 minutes. Same single
+    // choke point (_sendOtp) enforces this uniformly whether the send came
+    // from Step 1's initial "Send Verification Code" or Step 2's "Resend
+    // Code" — there is no separate path that could bypass the 24-hour lock.
+    private const RESEND_LOCK_MINUTES = 1440; // 24 hours
 
     // ─────────────────────────────────────────────────────────────
     // Private Helpers
@@ -135,8 +147,10 @@ new #[Layout('app')] class extends Component {
      * Sync the "Request New Code" lockout state from cache. The cache
      * value under cacheResendLockKey() stores the ISO8601 expiry timestamp
      * itself (not just `true`), so the exact remaining time can be shown
-     * instead of a static "30 minutes" message. Safe to call any time —
-     * including on every mount() — since the alumni is always known here.
+     * instead of a static message. Safe to call any time — including on
+     * every mount() — since the alumni is always known here. With the lock
+     * now lasting 24 hours, the front-end timer formats this as
+     * "Hh MMm SSs" instead of raw MM:SS (see sendLockTimer below).
      */
     private function checkAndSyncSendLock(\App\Models\Alumni $alumni): void
     {
@@ -153,8 +167,9 @@ new #[Layout('app')] class extends Component {
 
     /**
      * Marks the given alumni as locked out of sending any new code (fresh
-     * OR resend) for RESEND_LOCK_MINUTES, and immediately syncs the
-     * front-end lock state so Step 1's button reflects it right away.
+     * OR resend) for RESEND_LOCK_MINUTES (now 24 hours), and immediately
+     * syncs the front-end lock state so Step 1's button reflects it right
+     * away.
      */
     private function lockSending(\App\Models\Alumni $alumni): void
     {
@@ -336,19 +351,86 @@ new #[Layout('app')] class extends Component {
     // flag (that only ever happens via clearWizardCache() here, which only
     // fires while isOtpStillActive() is false — i.e. before an OTP has even
     // been verified in the first place).
+    //
+    // NEW: this is now also the target of the Step 2 JS "force re-login"
+    // guard (see the @script block below). That guard fires whenever the
+    // alumni lands back on the OTP page through a browser bfcache restore
+    // (back/forward button) or after regaining internet connectivity
+    // while the page was open on Step 2 — instead of silently resuming a
+    // possibly-stale OTP view, it calls this same method to force a real
+    // logout back to /login. Because isOtpStillActive() is still true at
+    // that point, clearWizardCache() is correctly skipped, so nothing
+    // about the pending OTP is lost — the very next successful, DELIBERATE
+    // login will land the alumni straight back on Step 2 via mount()'s
+    // DB-FIRST restore above, without needing to resend a new code.
+    //
+    // NEW: also rotates the remember_token and forgets the recaller
+    // cookie (see body below) so that merely REFRESHING /login afterward
+    // can't silently re-authenticate the alumni via a lingering
+    // "remember me" cookie and bounce them straight back into Step 2 —
+    // only an actual, deliberate login (typing credentials again) should
+    // resume the wizard from here on out.
     // ─────────────────────────────────────────────────────────────
 
+    /**
+     * FIX: previously only checked isOtpStillActive() before deciding
+     * whether to wipe wizard cache. That's correct for Step 1/Step 2 (no
+     * active OTP → nothing to preserve), but WRONG for Step 3 — once
+     * verifyOtp() succeeds it calls $alumni->clearOtp(), so
+     * isOtpStillActive() is ALWAYS false by the time Step 3 is reached,
+     * meaning a naive check here would silently wipe the persistent
+     * cacheOtpVerifiedKey() flag too. Since this method is now also
+     * triggered by browser-back (via the Step 2 JS guard → forced logout,
+     * see below), it must also check cacheOtpVerifiedKey() before deciding
+     * to wipe — otherwise pressing Back while on Step 3 would force the
+     * alumni to redo the entire OTP flow after logging back in, instead of
+     * landing them straight back on Step 3 like mount()'s persistent-check
+     * already promises.
+     */
     public function backToLogin(): void
     {
         $alumni = $this->getAlumni();
         if ($alumni) {
-            if (!$alumni->isOtpStillActive()) {
+            $hasActiveOtp   = $alumni->isOtpStillActive();
+            $hasVerifiedOtp = cache()->has($this->cacheOtpVerifiedKey($alumni->id));
+            if (!$hasActiveOtp && !$hasVerifiedOtp) {
                 $this->clearWizardCache($alumni->id);
             }
         }
+
         session()->forget(['alumni_pending_email', 'alumni_pending_password',
             'alumni_password_reset_step', 'alumni_requires_password_change', 'alumni_wizard_flow']);
+
+        // FIX: reported bug — pressing browser Back correctly bounced the
+        // alumni to /login (see the Step 2 JS guard below), but simply
+        // REFRESHING that /login page afterward sent them straight back
+        // into the OTP wizard instead of staying on Login. Root cause:
+        // Auth::logout() alone does NOT guarantee the "remember me"
+        // recaller cookie is gone before this response is sent. If that
+        // cookie is still present, the very next request to /login
+        // silently re-authenticates the alumni via Laravel's own
+        // remember-me handling — and since the OTP is still genuinely
+        // active in the DB (intentionally left alone so a real re-login
+        // resumes at Step 2), whatever redirects an authenticated,
+        // setup-incomplete alumni away from /login lands them right back
+        // on Step 2. This is invisible to the alumni: they never typed
+        // their password again, Laravel just quietly logged them back in.
+        //
+        // Fix: rotate the user's remember_token in the DB (invalidating
+        // the recaller cookie's value) AND explicitly forget the recaller
+        // cookie itself, in addition to Auth::logout(). This is on top of
+        // (not a replacement for) Auth::logout() + session invalidation,
+        // so a genuinely fresh /login visit after this can never silently
+        // resume as this alumni.
+        $user = auth()->user();
+        if ($user) {
+            $user->setRememberToken(Str::random(60));
+            $user->save();
+        }
+
         Auth::logout();
+        Cookie::queue(Cookie::forget(Auth::guard()->getRecallerName()));
+
         session()->invalidate();
         session()->regenerateToken();
         $this->redirect(route('login'));
@@ -386,7 +468,7 @@ new #[Layout('app')] class extends Component {
      * SINGLE choke point for every actual OTP send — both the initial send
      * from Step 1 (sendOtp) and every resend from Step 2 ("Resend Code" /
      * "Request New Code") pass through here. That means the 3-sends-then-
-     * lock-30-minutes rule applies uniformly no matter which button
+     * lock-24-hours rule applies uniformly no matter which button
      * triggered the send — the very first send from Step 1 counts toward
      * the same limit as resends, so the lock can't be bypassed by starting
      * the wizard fresh.
@@ -404,7 +486,7 @@ new #[Layout('app')] class extends Component {
         }
 
         // Enforce max 3 OTP sends per rolling window — the 4th attempt
-        // locks the account for 30 minutes instead of sending anything.
+        // locks the account for 24 hours instead of sending anything.
         $sendAttempts = cache()->get($resendAttemptsKey, 0);
         if ($sendAttempts >= self::MAX_RESEND_ATTEMPTS) {
             $this->lockSending($alumni);
@@ -431,7 +513,10 @@ new #[Layout('app')] class extends Component {
 
             // Only count this attempt once we've actually tried to send —
             // counted here (not gated on mail success) to match this file's
-            // original behavior of not hard-failing on mail errors.
+            // original behavior of not hard-failing on mail errors. The
+            // attempts counter itself expires after RESEND_LOCK_MINUTES
+            // (24 hours) so a clean, non-locked user isn't stuck being
+            // counted forever.
             cache()->put($resendAttemptsKey, $sendAttempts + 1, now()->addMinutes(self::RESEND_LOCK_MINUTES));
 
             // NOW that the send has actually been attempted, restart the
@@ -555,7 +640,7 @@ new #[Layout('app')] class extends Component {
             $this->errorMessage = 'Session expired. Please start over.'; $this->step = 1; return;
         }
 
-        // Same 3x + 30-min-lock rule as Step 1's send — enforced uniformly
+        // Same 3x + 24-hour-lock rule as Step 1's send — enforced uniformly
         // inside _sendOtp(), which this now also passes through.
         $this->checkAndSyncSendLock($alumni);
         if ($this->sendLocked) {
@@ -829,7 +914,7 @@ new #[Layout('app')] class extends Component {
                         <h2 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Too Many Code Requests</h2>
                         <p class="text-sm sm:text-base font-medium" style="color: #333333;">You've reached the maximum number of code requests (3).</p>
                         <p class="text-sm" style="color: #555555; line-height: 1.6;">
-                            For your account's security, sending a new code has been disabled.
+                            For your account's security, sending a new code has been disabled for 24 hours.
                             <span x-show="locked">You can try again in <strong class="font-mono" x-text="formattedTime"></strong>.</span>
                         </p>
                     </div>
@@ -1251,6 +1336,67 @@ new #[Layout('app')] class extends Component {
 
     @script
     <script>
+        // ─────────────────────────────────────────────────────────────
+        // NEW: Force re-login guard for Step 2 (OTP)
+        //
+        // PROBLEM: pressing the browser's Back/Forward button (or losing
+        // and then regaining internet while sitting on Step 2) very often
+        // does NOT make a real request back to the server — the browser
+        // just repaints the page from its bfcache (back-forward cache),
+        // so mount()'s PHP logic never gets a chance to re-run. The result
+        // was a stale/frozen OTP screen that no longer reflected the true
+        // session/DB state.
+        //
+        // FIX: we no longer rely on the browser to "just do the right
+        // thing". Instead we explicitly listen for:
+        //   1. `pageshow` with `event.persisted === true` → the page was
+        //      restored from bfcache, which is exactly what happens on
+        //      browser back/forward.
+        //   2. Regaining connectivity (`online`) after having been
+        //      `offline` while this page was open.
+        //
+        // In BOTH cases, if the alumni is currently sitting on Step 2, we
+        // call the same `backToLogin()` server method Step 1 already uses
+        // — this logs them out for real and redirects to `/login`. Because
+        // the OTP is still active in the DB at that point, backToLogin()
+        // does NOT wipe the wizard cache, so nothing is lost. The very
+        // next successful login re-runs mount(), whose DB-FIRST check
+        // (`isOtpStillActive()`) automatically sends the alumni straight
+        // back to Step 2 — no new code needs to be sent.
+        //
+        // We deliberately check `$wire.step` at the moment the event
+        // fires (not once at page-load) so this stays correct even though
+        // the alumni may have started on Step 1 and moved to Step 2 via a
+        // normal Livewire update (no full page reload) before ever
+        // triggering back/forward or losing connectivity.
+        // ─────────────────────────────────────────────────────────────
+        (function () {
+            let wasOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+
+            function forceReLoginIfOnOtpStep() {
+                if ($wire.step === 2) {
+                    $wire.call('backToLogin');
+                }
+            }
+
+            window.addEventListener('pageshow', function (event) {
+                if (event.persisted) {
+                    forceReLoginIfOnOtpStep();
+                }
+            });
+
+            window.addEventListener('offline', function () {
+                wasOffline = true;
+            });
+
+            window.addEventListener('online', function () {
+                if (wasOffline) {
+                    wasOffline = false;
+                    forceReLoginIfOnOtpStep();
+                }
+            });
+        })();
+
         // ── OTP countdown ─────────────────────────────────────────────────
         // FIX: previously this timer lived entirely in localStorage
         // ('alumni_otp_timer_expiry'), completely disconnected from the
@@ -1316,12 +1462,14 @@ new #[Layout('app')] class extends Component {
         }));
 
         // ── "Request New Code" lockout countdown (Step 1 button + modal) ───
-        // Derived ENTIRELY from `sendLockedUntilMs`, entangled with the
-        // server-side property of the same name. That property only ever
-        // reflects a REAL lock stored in cache (see checkAndSyncSendLock()
-        // in the PHP class) — so this timer can never show a fake lock, and
-        // it survives page refresh for as long as the underlying 30-minute
-        // lock is genuinely still active. Same pattern as forgot-password.
+        // FIX: the lock now lasts 24 hours instead of 30 minutes, so a
+        // plain "MM:SS" readout would show something ugly like "1439:58".
+        // formattedTime now renders as "Hh MMm SSs" once past an hour, and
+        // falls back to plain "MM:SS" once under an hour remains — same
+        // reactive pattern as before, still driven entirely by
+        // `sendLockedUntilMs` (entangled with the real server-side cache
+        // value, never guessed on the front-end). Exact same logic as
+        // forgot-password.blade.php's sendLockTimer.
         Alpine.data('sendLockTimer', (expiresAtMs) => ({
             expiresAtMs,
             seconds: 0,
@@ -1329,9 +1477,15 @@ new #[Layout('app')] class extends Component {
             _interval: null,
 
             get formattedTime() {
-                const m = String(Math.floor(this.seconds / 60)).padStart(2, '0');
-                const s = String(this.seconds % 60).padStart(2, '0');
-                return `${m}:${s}`;
+                const totalSeconds = this.seconds;
+                const h = Math.floor(totalSeconds / 3600);
+                const m = Math.floor((totalSeconds % 3600) / 60);
+                const s = totalSeconds % 60;
+
+                if (h > 0) {
+                    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+                }
+                return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             },
 
             init() {

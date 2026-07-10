@@ -305,12 +305,35 @@ new #[Layout('app')] class extends Component {
         return true;
     }
 
+    /**
+     * FIX: previously this ALSO called cache()->forget($this->cacheOtpVerifiedKey())
+     * whenever an alumni ID happened to still be in the session — meaning
+     * the moment the wizard landed back on Step 1 (via browser Back/
+     * popstate → goToWizardStep(1) → here, since tryRestoreStep3()/
+     * tryRestoreStep2() had already returned false in goToWizardStep()),
+     * the persistent "OTP already verified" flag was wiped out immediately
+     * — even before the alumni got a chance to resubmit their Student ID +
+     * email. That meant tryRestoreStep3() inside verifyAndSend() always
+     * came back false on re-submission, silently forcing a full OTP redo
+     * even though the alumni's identity was already proven moments ago.
+     *
+     * resetToStep1() now ONLY clears session state (which step we're on).
+     * It never touches the persistent cache verified flag anymore — that
+     * flag is the actual source of truth for "has this alumni already
+     * verified an OTP", same pattern as change-password.blade.php's
+     * cacheOtpVerifiedKey(), and should only ever be cleared when:
+     *   (a) the password is actually saved (savePassword()),
+     *   (b) a fresh OTP is sent (_sendOtp() — a new code invalidates the
+     *       old verified state), or
+     *   (c) the flow is explicitly and intentionally ended (goToLogin(),
+     *       or restartWizard() due to a genuinely expired/invalid state).
+     * Simply landing back on Step 1 via navigation is none of those —
+     * re-entering the same Student ID + email on Step 1 should transparently
+     * skip straight back to Step 3 via tryRestoreStep3() in verifyAndSend(),
+     * with no new OTP sent, exactly like change-password.blade.php.
+     */
     private function resetToStep1(): void
     {
-        $alumniId = session('alumni_forgot_id');
-        if ($alumniId) {
-            cache()->forget($this->cacheOtpVerifiedKey($alumniId));
-        }
         session()->forget(['alumni_forgot_id', 'alumni_forgot_step']);
 
         $this->reset([
@@ -424,7 +447,12 @@ new #[Layout('app')] class extends Component {
         }
 
         // Target was Step 1, or nothing above could be legitimately
-        // restored — always a clean restart, never an OTP resend.
+        // restored — always a clean restart, never an OTP resend. Note
+        // this no longer wipes the persistent OTP-verified cache flag (see
+        // resetToStep1() above) — if the alumni resubmits their Student ID
+        // + email on Step 1, verifyAndSend()'s own tryRestoreStep3() check
+        // will transparently skip them straight back to Step 3 instead of
+        // forcing a fresh OTP.
         $this->resetToStep1();
     }
 
@@ -527,7 +555,10 @@ new #[Layout('app')] class extends Component {
         //    forced a fresh OTP even though identity was already proven.
         //    Now it's simply: has this alumni verified an OTP that hasn't
         //    been consumed yet? If yes, no need to request or verify an OTP
-        //    again — go straight to Step 3.
+        //    again — go straight to Step 3. This is also now what makes
+        //    the "verify → browser Back → resubmit Student ID + email"
+        //    flow land straight on Step 3 too, since resetToStep1() no
+        //    longer wipes this flag on a plain Back navigation.
         if ($this->tryRestoreStep3($alumni->id)) {
             RateLimiter::clear($this->rateLimitKey());
             session(['alumni_forgot_id' => $alumni->id, 'alumni_forgot_step' => 3]);
