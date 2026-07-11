@@ -114,7 +114,7 @@ class RegistrarAlumniExportController extends Controller
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Alumni Records');
 
-        $headers = ['Name', 'Student ID', 'Course', 'Batch', 'Email', 'Status'];
+        $headers = ['Name', 'Student ID', 'Program Code', 'Batch', 'Email', 'Status'];
         $sheet->fromArray($headers, null, 'A1');
 
         $headerRange = 'A1:F1';

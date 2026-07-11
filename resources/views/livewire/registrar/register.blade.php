@@ -128,10 +128,10 @@ new class extends Component {
         }
 
         if (!trim($this->regCourseCode)) {
-            $errors[]      = 'Please select a course.';
+            $errors[]      = 'Please select a program code.';
             $fieldErrors[] = 'course';
         } elseif (!Course::where('code', $this->regCourseCode)->exists()) {
-            $errors[]      = 'The selected course does not exist.';
+            $errors[]      = 'The selected program code does not exist.';
             $fieldErrors[] = 'course';
         }
 
@@ -381,15 +381,15 @@ new class extends Component {
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            $hasCourse     = in_array('course', $header, true);
-            $hasCourseCode = in_array('course_code', $header, true);
+            $hasProgram     = in_array('program', $header, true);
+            $hasProgramCode = in_array('program_code', $header, true);
 
-            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
+            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'program', 'batch', 'email'];
             $missing  = [];
 
             foreach ($required as $col) {
-                if ($col === 'course') {
-                    if (!$hasCourse && !$hasCourseCode) $missing[] = 'course';
+                if ($col === 'program') {
+                    if (!$hasProgram && !$hasProgramCode) $missing[] = 'program';
                     continue;
                 }
                 if (!in_array($col, $header, true)) $missing[] = $col;
@@ -452,12 +452,15 @@ new class extends Component {
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            $hasCourse     = in_array('course', $header, true);
-            $hasCourseCode = in_array('course_code', $header, true);
-            if (!$hasCourse && !$hasCourseCode)
-                throw new \Exception('Missing required column: "course".');
-            if (!$hasCourse && $hasCourseCode)
-                $header[array_search('course_code', $header)] = 'course';
+            $hasProgram     = in_array('program', $header, true);
+            $hasProgramCode = in_array('program_code', $header, true);
+            if (!$hasProgram && !$hasProgramCode)
+                throw new \Exception('Missing required column: "program".');
+            if ($hasProgram) {
+                $header[array_search('program', $header)] = 'course';
+            } else {
+                $header[array_search('program_code', $header)] = 'course';
+            }
 
             $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
             foreach ($required as $col)
@@ -531,7 +534,7 @@ new class extends Component {
 
                 $courseInput = preg_replace('/\s+/', ' ', trim($row['course'] ?? ''));
                 $courseMatch = $courseByCode[strtoupper($courseInput)] ?? $courseByName[strtolower($courseInput)] ?? null;
-                if (!$courseMatch) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Course \"{$courseInput}\" not found."); continue; }
+                if (!$courseMatch) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Program \"{$courseInput}\" not found."); continue; }
 
                 $batchYear = (int)($row['batch'] ?? 0);
                 if ($batchYear < 1000 || $batchYear > 9999) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Batch \"{$batchYear}\" must be 4-digit year."); continue; }
@@ -1415,11 +1418,11 @@ new class extends Component {
                             </div>
                         </div>
 
-                        {{-- Course + Batch --}}
+                        {{-- Program Code + Batch --}}
                         <div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                                 <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
-                                    Course <span class="text-red-500">*</span>
+                                    Program Code <span class="text-red-500">*</span>
                                 </p>
                                 <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
                                     Batch <span class="text-red-500">*</span>
@@ -1428,7 +1431,7 @@ new class extends Component {
 
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" style="overflow:visible;position:relative;z-index:10;">
 
-                                {{-- Course picker --}}
+                                {{-- Program Code picker --}}
                                 @php $courseCodesJson = $this->courses->pluck('code')->toJson(); @endphp
                                 <div class="reg-dropdown"
                                      x-data="{
@@ -1439,10 +1442,10 @@ new class extends Component {
                                          get totalPages() { return Math.max(1, Math.ceil(this.allCodes.length / this.pageSize)); },
                                          get pageCodes() { let s = this.pageIndex * this.pageSize; return this.allCodes.slice(s, s + this.pageSize); },
                                          get rangeLabel() {
-                                             if (!this.allCodes.length) return 'No courses';
+                                             if (!this.allCodes.length) return 'No program codes';
                                              let s = this.pageIndex * this.pageSize;
                                              let e = Math.min(s + this.pageSize - 1, this.allCodes.length - 1);
-                                             return this.totalPages === 1 ? 'All Courses' : this.allCodes[s] + ' - ' + this.allCodes[e];
+                                             return this.totalPages === 1 ? 'All Program Codes' : this.allCodes[s] + ' - ' + this.allCodes[e];
                                          },
                                          prevPage() { if (this.pageIndex > 0) this.pageIndex--; },
                                          nextPage() { if (this.pageIndex < this.totalPages - 1) this.pageIndex++; },
@@ -1460,7 +1463,7 @@ new class extends Component {
                                             :class="{ 'has-value': $wire.regCourseCode !== '', 'open': open }"
                                             class="reg-dropdown-trigger {{ in_array('course', $fieldErrors) ? 'field-error' : '' }}">
                                         <i class="fas fa-book-open reg-trigger-icon"></i>
-                                        <span class="reg-trigger-label">Course</span>
+                                        <span class="reg-trigger-label">Program Code</span>
                                         <span class="reg-trigger-value" x-show="$wire.regCourseCode !== ''" x-text="$wire.regCourseCode" style="display:none;"></span>
                                         <i class="fas fa-chevron-down reg-trigger-chevron"></i>
                                     </button>
@@ -1738,7 +1741,7 @@ new class extends Component {
                 @php
                 $reqCols = [
                     'first_name', 'last_name', 'middle_name', 'suffix',
-                    'student_id', 'course',    'batch',       'email',
+                    'student_id', 'program',    'batch',       'email',
                 ];
                 @endphp
                 <div class="req-col-chips">

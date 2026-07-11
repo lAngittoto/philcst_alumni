@@ -109,7 +109,7 @@
             <tr>
                 <th style="width:26%;">Name</th>
                 <th style="width:16%;">Student ID</th>
-                <th style="width:14%;">Course</th>
+                <th style="width:14%;">Program Code</th>
                 <th style="width:10%;">Batch</th>
                 <th style="width:24%;">Email</th>
                 <th style="width:10%;">Status</th>

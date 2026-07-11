@@ -154,7 +154,7 @@ new class extends Component {
         elseif ($this->alumniProfileFilter === 'incomplete') $parts[] = 'Pending profiles only';
 
         if ($this->alumniBatch !== '') $parts[] = 'Batch ' . $this->alumniBatch;
-        if ($this->alumniCourse !== '') $parts[] = 'Course ' . $this->alumniCourse;
+        if ($this->alumniCourse !== '') $parts[] = 'Program Code ' . $this->alumniCourse;
         if ($this->alumniSearch !== '') $parts[] = 'Search: "' . $this->alumniSearch . '"';
 
         return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
@@ -929,19 +929,19 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Course --}}
+            {{-- Program Code --}}
             <div class="ar-dropdown"
                  x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniCourse',val); this.close(); } }"
                  @click.outside="close()" wire:key="course-dropdown">
                 <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniCourse!=='','open':open }" class="ar-dropdown-trigger">
-                    <span>@if($alumniCourse){{ $alumniCourse }}@else All Courses @endif</span>
+                    <span>@if($alumniCourse){{ $alumniCourse }}@else All Program Codes @endif</span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;">
-                    <button type="button" @click="select('')" :class="{'active':$wire.alumniCourse===''}" class="ar-dropdown-item">All Courses</button>
+                    <button type="button" @click="select('')" :class="{'active':$wire.alumniCourse===''}" class="ar-dropdown-item">All Program Codes</button>
                     @foreach($this->courses as $c)
                     <button type="button" @click="select('{{ $c->code }}')" :class="{'active':$wire.alumniCourse==='{{ $c->code }}'}" class="ar-dropdown-item">{{ $c->code }}</button>
                     @endforeach
@@ -996,7 +996,7 @@ new class extends Component {
                         <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Name</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Student ID</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Course</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Program Code</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Batch</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
                         </tr>
@@ -1474,7 +1474,7 @@ new class extends Component {
                             <p class="ar-field-value">{{ $dob }}</p>
                         </div>
                         <div class="ar-cell">
-                            <p class="ar-field-label">Course</p>
+                            <p class="ar-field-label">Program Name</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['course_name'] ?? $viewingProfile['course_code'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>

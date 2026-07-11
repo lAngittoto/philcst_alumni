@@ -19,7 +19,7 @@ new class extends Component {
     public string  $empCourseFilter  = '';
     public string  $empSearch        = '';
 
-    // ── Alumni / Courses modal ────────────────────────────────
+    // ── Alumni / Programs modal ────────────────────────────────
     public string  $alumniModalFilter       = 'all';
     public int     $alumniModalPage         = 1;
     public int     $alumniModalPageSize     = 200;
@@ -178,7 +178,7 @@ new class extends Component {
         };
     }
 
-    // ─── Alumni / Courses modal records ──────────────────────
+    // ─── Alumni / Programs modal records ──────────────────────
 
     #[Computed]
     public function alumniModalRecords()
@@ -193,7 +193,7 @@ new class extends Component {
                     ->orWhere('college', 'like', $term)
                 );
             }
-            // No pagination needed here — course list is short, so the
+            // No pagination needed here — program list is short, so the
             // modal simply shows everything in a scrollable table.
             return $q->orderBy('college')->orderBy('code')->get();
         }
@@ -243,7 +243,7 @@ new class extends Component {
         return match ($this->alumniModalFilter) {
             'complete'   => 'Complete Profiles',
             'incomplete' => 'Pending Profiles',
-            'courses'    => 'Active Courses',
+            'courses'    => 'Active Programs',
             default      => 'All Alumni Records',
         };
     }
@@ -524,7 +524,7 @@ new class extends Component {
                 @endif
             </a>
 
-            {{-- Total Courses --}}
+            {{-- Total Programs --}}
             <div wire:click="openAlumniModal('courses')"
                  class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                         hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985]">
@@ -535,18 +535,18 @@ new class extends Component {
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
                              [.relative:hover_&]:opacity-100">
-                    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Active Courses
+                    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Active Programs
                 </span>
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                         <i class="fas fa-book-open text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Courses</span>
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Programs</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
-                <p class="text-sm text-[#333333] mt-1 font-normal">Active Courses</p>
+                <p class="text-sm text-[#333333] mt-1 font-normal">Active Programs</p>
                 <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
-                    More on Courses <i class="fas fa-chevron-right text-[10px]"></i>
+                    More on Programs <i class="fas fa-chevron-right text-[10px]"></i>
                 </p>
             </div>
 
@@ -659,7 +659,7 @@ new class extends Component {
 
 
     {{-- ═══════════════════════════════════════════════════════════
-         ALUMNI / COURSES FULL-SCREEN MODAL
+         ALUMNI / PROGRAMS FULL-SCREEN MODAL
     ═══════════════════════════════════════════════════════════ --}}
     @if($activeModal === 'alumni')
     @php
@@ -685,7 +685,7 @@ new class extends Component {
         }
 
         if ($isCoursesView) {
-            // Courses view: no pagination, just a plain count of all results.
+            // Programs view: no pagination, just a plain count of all results.
             $aTotal = $this->alumniModalRecords->count();
         } else {
             $aTotal    = $this->alumniModalRecords->total();
@@ -762,7 +762,7 @@ new class extends Component {
                     </span>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('alumniModalSearch', q)"
-                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search course, name, college…' : 'Search name, ID, course…' }}"
+                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search program, name, college…' : 'Search name, ID, program…' }}"
                            class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-gray-900
                                   focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-56"
                            autocomplete="off">
@@ -817,7 +817,7 @@ new class extends Component {
                             class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
                                    text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
-                        <span>@if($alumniModalCourseFilter) {{ $alumniModalCourseFilter }} @else All Courses @endif</span>
+                        <span>@if($alumniModalCourseFilter) {{ $alumniModalCourseFilter }} @else All Programs @endif</span>
                         <i class="fas fa-chevron-down text-[9px] opacity-50"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
@@ -828,7 +828,7 @@ new class extends Component {
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.alumniModalCourseFilter === ''}"
                                 class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
-                            All Courses
+                            All Programs
                         </button>
                         @foreach($this->availableModalCourses as $code)
                         <button type="button" @click="select('{{ $code }}')"
@@ -862,7 +862,7 @@ new class extends Component {
 
         {{-- Content --}}
         @if($alumniModalFilter === 'courses')
-        {{-- ── Active Courses: boxed table, vertical scroll only (no horizontal scroll on mobile/tablet) ── --}}
+        {{-- ── Active Programs: boxed table, vertical scroll only (no horizontal scroll on mobile/tablet) ── --}}
         <div class="flex-1 min-h-0 p-3 sm:p-4 lg:p-6 flex flex-col">
             <div class="relative flex-1 min-h-0 flex flex-col bg-white border-[1.5px] border-[#E8E0F0] rounded-2xl shadow-sm overflow-hidden">
 
@@ -873,8 +873,8 @@ new class extends Component {
                     <table class="w-full border-collapse table-fixed">
                         <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                             <tr class="border-b-2 border-[#E8E0F0]">
-                                <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[22%] sm:w-[18%]">Code</th>
-                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[46%] sm:w-[52%]">Course Name</th>
+                                <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[22%] sm:w-[18%]">Program Code</th>
+                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[46%] sm:w-[52%]">Program Name</th>
                                 <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[32%] sm:w-[30%]">College</th>
                             </tr>
                         </thead>
@@ -897,7 +897,7 @@ new class extends Component {
                                     <div class="w-12 h-12 bg-[#f0e6f8] rounded-2xl flex items-center justify-center">
                                         <i class="fas fa-book text-xl" style="color:#c89de0;"></i>
                                     </div>
-                                    <p class="text-sm font-semibold text-[#333333]">No courses found</p>
+                                    <p class="text-sm font-semibold text-[#333333]">No programs found</p>
                                 </div>
                             </td></tr>
                             @endforelse
@@ -909,10 +909,10 @@ new class extends Component {
                 <div class="px-4 sm:px-5 py-2.5 shrink-0 flex items-center justify-between gap-2"
                      style="background:#7A3F91;">
                     <p class="text-white/75 text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 uppercase tracking-wide">
-                        <i class="fas fa-table"></i> Course Table
+                        <i class="fas fa-table"></i> Program Table
                     </p>
                     <p class="text-white text-xs sm:text-sm font-semibold">
-                        {{ number_format($aTotal) }} course{{ $aTotal === 1 ? '' : 's' }} found
+                        {{ number_format($aTotal) }} program{{ $aTotal === 1 ? '' : 's' }} found
                     </p>
                 </div>
             </div>
@@ -929,7 +929,7 @@ new class extends Component {
                         <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Program</th>
                         <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
                         <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Status</th>
                     </tr>
@@ -991,7 +991,7 @@ new class extends Component {
         </div>
         @endif
 
-        {{-- Footer Pagination (hidden for the Active Courses view — it has its own boxed footer) --}}
+        {{-- Footer Pagination (hidden for the Active Programs view — it has its own boxed footer) --}}
         @if($alumniModalFilter !== 'courses')
         <div class="px-4 py-2.5 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
              style="background:#7A3F91;">
@@ -1202,7 +1202,7 @@ new class extends Component {
                             class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
                                    text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
                                    hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
-                        <span>@if($empCourseFilter) {{ $empCourseFilter }} @else All Courses @endif</span>
+                        <span>@if($empCourseFilter) {{ $empCourseFilter }} @else All Programs @endif</span>
                         <i class="fas fa-chevron-down text-[9px] opacity-50"></i>
                     </button>
                     <div x-show="open" x-transition class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-[220px] overflow-y-auto
@@ -1212,7 +1212,7 @@ new class extends Component {
                                 :class="{'bg-[#F0E6F8] text-[#7A3F91]': $wire.empCourseFilter === ''}"
                                 class="block w-full px-[10px] py-[7px] rounded-[7px] text-[.78rem] font-semibold text-left text-[#111111]
                                        hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors duration-100">
-                            All Courses
+                            All Programs
                         </button>
                         @foreach($this->availableModalCourses as $code)
                         <button type="button" @click="select('{{ $code }}')"
@@ -1252,7 +1252,7 @@ new class extends Component {
                         <th class="pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-14">#</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
-                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
+                        <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Program</th>
                         <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider hidden md:table-cell">{{ $dynColLabel }}</th>
                         <th class="pl-4 pr-6 lg:pr-10 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider hidden sm:table-cell">Email</th>
                     </tr>
@@ -1625,25 +1625,18 @@ new class extends Component {
     /**
      * Compute arc sizes that guarantee MIN_SLICE_DEG for every non-zero segment,
      * while keeping the total at exactly 360 degrees.
-     *
-     * Strategy:
-     *  1. Give every non-zero slice its minimum floor (MIN_SLICE_DEG).
-     *  2. Compute how many degrees are left for proportional distribution.
-     *  3. Distribute the remainder proportionally among non-zero slices.
-     *  4. Zero slices stay at 0.
      */
     function computeAdjustedSlices(rawData) {
         var total        = rawData.reduce(function (a, b) { return a + b; }, 0);
         var nonZeroCount = rawData.filter(function (v) { return v > 0; }).length;
 
-        // If nothing to show or only one non-zero slice filling everything
         if (total === 0 || nonZeroCount === 0) {
             return rawData.map(function () { return 0; });
         }
 
-        var floorDeg     = MIN_SLICE_DEG * nonZeroCount;   // degrees reserved for minimums
-        var remainDeg    = 360 - floorDeg;                 // leftover for proportional dist
-        if (remainDeg < 0) remainDeg = 0;                  // safety clamp
+        var floorDeg     = MIN_SLICE_DEG * nonZeroCount;
+        var remainDeg    = 360 - floorDeg;
+        if (remainDeg < 0) remainDeg = 0;
 
         var nonZeroSum = rawData.reduce(function (acc, v) { return acc + (v > 0 ? v : 0); }, 0);
 
@@ -1673,25 +1666,16 @@ new class extends Component {
         ];
 
         var total = rawData.reduce(function (a, b) { return a + b; }, 0);
-        if (total === 0) return; // nothing to draw
+        if (total === 0) return;
 
-        // Compute visually adjusted arc sizes
         var adjustedDeg = computeAdjustedSlices(rawData);
-
-        // Convert degrees to Chart.js circumference/offset values
-        // Chart.js uses radians internally but accepts them via circumference (degrees * PI/180)
-        // We'll pass adjusted values as the dataset data — Chart.js doughnut uses them as weights
-        // so we pass the DEGREE values directly as data (they sum to 360, Chart.js normalises).
-        // To show correct real values in tooltips, we store rawData separately.
 
         new Chart(canvas, {
             type: 'doughnut',
             data: {
                 labels: PIE_LABELS,
                 datasets: [{
-                    // Use adjusted arc degrees so tiny slices stay visible
                     data:            adjustedDeg,
-                    // Store real counts for tooltip use
                     realData:        rawData,
                     backgroundColor: PIE_COLORS,
                     borderColor:     PIE_BORDERS,
@@ -1710,7 +1694,6 @@ new class extends Component {
                     tooltip: {
                         enabled: true,
                         callbacks: {
-                            // Show real counts, not the adjusted arc degrees
                             label: function (ctx) {
                                 var real  = ctx.dataset.realData[ctx.dataIndex];
                                 var pct   = total > 0 ? ((real / total) * 100).toFixed(1) : '0.0';
@@ -1726,7 +1709,6 @@ new class extends Component {
                 onClick: function (event, elements) {
                     if (!elements || !elements.length) return;
                     var idx    = elements[0].index;
-                    // Only trigger if the real count is > 0
                     if (rawData[idx] === 0) return;
                     var filter = PIE_FILTERS[idx];
                     window.dispatchEvent(new CustomEvent('dash-open-emp', {
