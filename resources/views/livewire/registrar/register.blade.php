@@ -963,7 +963,7 @@ new class extends Component {
     .import-btn-wrap { position: relative; display: inline-flex; }
     .import-btn-tooltip {
         position: absolute;
-        bottom: calc(100% + 8px);
+        top: calc(100% + 8px);
         right: 0;
         background: #1a1a1a;
         color: #fff;
@@ -982,9 +982,9 @@ new class extends Component {
     .import-btn-tooltip::after {
         content: '';
         position: absolute;
-        top: 100%; right: 12px;
+        bottom: 100%; right: 12px;
         border: 6px solid transparent;
-        border-top-color: #1a1a1a;
+        border-bottom-color: #1a1a1a;
     }
     .import-btn-wrap:hover .import-btn-tooltip { opacity: 1; }
     /* Tooltip never shows on touch / small screens */
@@ -1140,12 +1140,12 @@ new class extends Component {
         text-align: center;
     }
 
-    /* ── Import modal: fixed size, no resize ── */
+    /* ── Import modal: fixed size on desktop, full screen on mobile ── */
     .import-modal-box {
         width: 640px;
         height: 750px;
         max-width: calc(100vw - 32px);
-        max-height: calc(100vh - 40px);
+        max-height: calc(100dvh - 40px);
         display: flex;
         flex-direction: column;
         background: #fff;
@@ -1158,6 +1158,15 @@ new class extends Component {
     @keyframes panelIn {
         from { opacity:0; transform:translateY(14px) scale(.98); }
         to   { opacity:1; transform:none; }
+    }
+    @media (max-width: 640px) {
+        .import-modal-box {
+            width: 100vw;
+            height: 100dvh;
+            max-width: 100vw;
+            max-height: 100dvh;
+            border-radius: 0;
+        }
     }
 
     /* Scrollable result lists in done step */
@@ -1188,13 +1197,36 @@ new class extends Component {
         to   { opacity:1; transform:none; }
     }
     .reg-panel { animation: regPanelIn .18s cubic-bezier(.4,0,.2,1) both; }
+
+    /* ── Page height: full screen, dvh-based so mobile browser chrome doesn't clip it ── */
+    .reg-page-height {
+        height: calc(100dvh - 180px);
+        max-height: calc(100dvh - 180px);
+        overflow: hidden;
+    }
+    @media (max-width: 640px) {
+        .reg-page-height {
+            height: calc(100dvh - 110px);
+            max-height: calc(100dvh - 110px);
+        }
+    }
+
+    /* ── MOBILE: Register Alumni page goes edge-to-edge, no container/box look ── */
+    @media (max-width: 640px) {
+        .reg-card {
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+            box-shadow: none;
+        }
+    }
 </style>
 
 {{-- ══ PAGE ══ --}}
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-3 max-w-screen-2xl mx-auto" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+<div class="flex flex-col px-0 sm:px-5 lg:px-6 pt-0 sm:pt-4 pb-3 max-w-screen-2xl mx-auto reg-page-height">
 
     {{-- Header --}}
-    <div class="flex items-center justify-between gap-3 mb-3 shrink-0">
+    <div class="flex items-center justify-between gap-3 mb-3 px-3 sm:px-0 pt-3 sm:pt-0 shrink-0">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1209,8 +1241,8 @@ new class extends Component {
         <div class="import-btn-wrap">
             <span class="import-btn-tooltip">Import from Excel</span>
             <button wire:click="openImportModal"
-                    class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-white shadow-lg transition hover:shadow-xl hover:-translate-y-0.5 active:scale-95 shrink-0"
-                    style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-white shadow-lg transition hover:shadow-xl shrink-0"
+                    style="background:linear-gradient(135deg,#2563EB,#3B82F6);">
                 <i class="fas fa-file-import text-sm"></i>
             </button>
         </div>
@@ -1234,7 +1266,7 @@ new class extends Component {
                 setTimeout(() => { $wire.clearSuccess(); }, 300);
             }
         }"
-        class="success-toast relative mb-3 shrink-0 inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm self-start"
+        class="success-toast relative mb-3 mx-3 sm:mx-0 shrink-0 inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm self-start"
         style="min-width:0; max-width:560px;">
         <i class="fas fa-circle-check text-emerald-500 text-base shrink-0"></i>
         <p class="text-sm font-semibold text-emerald-800 leading-snug pr-1">{{ $successMsg }}</p>
@@ -1247,13 +1279,13 @@ new class extends Component {
 
     {{-- ══ Scrollable body (fills remaining height, no page-level scroll/buffer) ══ --}}
     <div id="reg-scroll" class="flex-1 min-h-0 overflow-y-auto">
-    <div class="flex items-start justify-center pt-1 pb-4">
-        <div class="w-full flex gap-5 items-start justify-center
+    <div class="flex items-start justify-center pt-1 pb-4 px-3 sm:px-0">
+        <div class="w-full flex flex-col sm:flex-row gap-5 items-start justify-center
                     {{ count($formErrors) > 0 ? 'max-w-5xl' : 'max-w-2xl' }}
                     transition-all duration-300">
 
             {{-- ── Form Column ── --}}
-            <div class="{{ count($formErrors) > 0 ? 'flex-1 min-w-0' : 'w-full' }}">
+            <div class="{{ count($formErrors) > 0 ? 'flex-1 min-w-0 w-full' : 'w-full' }}">
                 <div class="reg-card reg-panel">
                     <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-5 pb-7">
 
@@ -1594,7 +1626,7 @@ new class extends Component {
 
             {{-- ── Side Error Panel ── --}}
             @if(count($formErrors) > 0)
-            <div class="w-80 shrink-0">
+            <div class="w-full sm:w-80 shrink-0">
                 <div class="bg-red-50 border border-red-200 rounded-2xl overflow-hidden shadow-sm">
                     <div class="px-4 py-3 flex items-center justify-between" style="background:#DC2626;">
                         <div class="flex items-center gap-2">
@@ -1636,15 +1668,15 @@ new class extends Component {
 
 {{-- ══ IMPORT MODAL ══ --}}
 @if($showImportModal)
-<div class="fixed inset-0 z-50 flex items-center justify-center px-4"
+<div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:px-4"
      style="background:rgba(27,6,46,0.60);backdrop-filter:blur(4px);"
      @keydown.escape.window="@if($importStep !== 'processing') $wire.closeImportModal() @endif">
 
-    {{-- Fixed-size modal box — never resizes --}}
+    {{-- Fixed-size modal box on desktop, full screen on mobile --}}
     <div class="import-modal-box">
 
-        {{-- Modal Header --}}
-        <div class="flex items-center justify-between px-5 py-4 shrink-0" style="background:linear-gradient(135deg,#8A4DA3,#6E3680);">
+        {{-- Modal Header — solid purple --}}
+        <div class="flex items-center justify-between px-5 py-4 shrink-0" style="background:#7A3F91;">
             <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
                 <i class="fas fa-file-import"></i> Import Alumni Records
             </h2>
@@ -1729,10 +1761,10 @@ new class extends Component {
             {{-- Dropzone normal --}}
             <div wire:loading.remove wire:target="importFile">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2">Choose File</p>
-                <div class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-8 text-center cursor-pointer hover:border-[#21A366] hover:bg-[#f0fdf4] hover:shadow-sm transition-all duration-200"
+                <div class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-8 text-center cursor-pointer hover:border-[#2563EB] hover:bg-[#eff6ff] hover:shadow-sm transition-all duration-200"
                      @click="document.getElementById('importFileInput').click()">
-                    <div class="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-sm" style="background:rgba(33,163,102,.12);">
-                        <i class="fas fa-file-excel text-3xl" style="color:#21A366;"></i>
+                    <div class="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-sm" style="background:rgba(37,99,235,.12);">
+                        <i class="fas fa-file-excel text-3xl" style="color:#2563EB;"></i>
                     </div>
                     <p class="text-[#333333] font-semibold text-base">Click to choose file</p>
                     <p class="text-[#888888] text-sm mt-1">Excel files only (.xlsx / .xls)</p>
@@ -1743,13 +1775,13 @@ new class extends Component {
             {{-- Shimmer loading state --}}
             <div wire:loading wire:target="importFile" class="w-full">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2 text-center">Choose File</p>
-                <div class="w-full border-2 border-dashed border-[#21A366] rounded-xl p-8 flex flex-col items-center justify-center text-center"
-                     style="background:linear-gradient(90deg,#f0fdf4 25%,#dcfce7 50%,#f0fdf4 75%);background-size:200% 100%;animation:regShimmer 1.2s infinite linear;">
-                    <div class="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center" style="background:rgba(34,197,94,.15);">
-                        <i class="fas fa-spinner animate-spin text-2xl" style="color:#16a34a;"></i>
+                <div class="w-full border-2 border-dashed border-[#2563EB] rounded-xl p-8 flex flex-col items-center justify-center text-center"
+                     style="background:linear-gradient(90deg,#eff6ff 25%,#dbeafe 50%,#eff6ff 75%);background-size:200% 100%;animation:regShimmer 1.2s infinite linear;">
+                    <div class="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center" style="background:rgba(37,99,235,.15);">
+                        <i class="fas fa-spinner animate-spin text-2xl" style="color:#1D4ED8;"></i>
                     </div>
-                    <p class="font-semibold text-base" style="color:#15803d;">Reading file...</p>
-                    <p class="text-sm mt-1" style="color:#16a34a;">Please wait while we process your file</p>
+                    <p class="font-semibold text-base" style="color:#1D4ED8;">Reading file...</p>
+                    <p class="text-sm mt-1" style="color:#2563EB;">Please wait while we process your file</p>
                 </div>
             </div>
 
@@ -1766,7 +1798,7 @@ new class extends Component {
                         <div class="relative w-20 h-20 mb-5 mx-auto">
                             <span class="reg-scan-ring"></span>
                             <span class="reg-scan-ring reg-scan-ring--delay"></span>
-                            <div class="absolute inset-0 rounded-2xl flex items-center justify-center shadow-lg" style="background:#21A366;">
+                            <div class="absolute inset-0 rounded-2xl flex items-center justify-center shadow-lg" style="background:#2563EB;">
                                 <i class="fas fa-file-excel text-white text-3xl"></i>
                             </div>
                         </div>
@@ -1798,13 +1830,13 @@ new class extends Component {
                     </div>
 
                 @else
-                    <div class="flex flex-col items-center text-center gap-3 p-5 rounded-xl bg-[#f0fdf4] border border-[#bbf7d0]">
-                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm" style="background:#21A366;">
+                    <div class="flex flex-col items-center text-center gap-3 p-5 rounded-xl bg-[#eff6ff] border border-[#bfdbfe]">
+                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm" style="background:#2563EB;">
                             <i class="fas fa-file-excel text-white text-2xl"></i>
                         </div>
                         <div class="min-w-0">
                             <p class="font-bold text-[#333333] text-base break-all">{{ $importFileName }}</p>
-                            <p class="text-sm text-[#16a34a] mt-0.5 font-medium">
+                            <p class="text-sm text-[#1D4ED8] mt-0.5 font-medium">
                                 <i class="fas fa-circle-check mr-1"></i>Columns look good — confirm below to start importing.
                             </p>
                         </div>
@@ -1945,7 +1977,7 @@ new class extends Component {
             <div class="grid grid-cols-4 gap-2">
                 @foreach([
                     ['#f9fafb','#e5e7eb','#4b5563', $importTotal,         'Total'],
-                    ['#f0fdf4','#bbf7d0','#15803d', $importSuccessCount,   'Imported'],
+                    ['#eff6ff','#bfdbfe','#1D4ED8', $importSuccessCount,   'Imported'],
                     ['#fffbeb','#fde68a','#92400e', $importDuplicateCount, 'Duplicate'],
                     ['#fef2f2','#fecaca','#991b1b', $importFailCount,      'Errors'],
                 ] as [$bg, $border, $clr, $cnt, $lbl])

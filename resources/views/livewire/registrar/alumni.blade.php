@@ -141,6 +141,25 @@ new class extends Component {
         return true;
     }
 
+    /**
+     * Build a human-readable summary of the currently applied filters,
+     * used inside the Generate Reports dropdown message.
+     */
+    #[Computed]
+    public function activeFilterSummary(): string
+    {
+        $parts = [];
+
+        if ($this->alumniProfileFilter === 'complete') $parts[] = 'Complete profiles only';
+        elseif ($this->alumniProfileFilter === 'incomplete') $parts[] = 'Pending profiles only';
+
+        if ($this->alumniBatch !== '') $parts[] = 'Batch ' . $this->alumniBatch;
+        if ($this->alumniCourse !== '') $parts[] = 'Course ' . $this->alumniCourse;
+        if ($this->alumniSearch !== '') $parts[] = 'Search: "' . $this->alumniSearch . '"';
+
+        return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
+    }
+
     public function resetAlumniFilters(): void
     {
         $this->alumniSearch        = '';
@@ -366,24 +385,27 @@ new class extends Component {
         .ar-close-tip { display: none !important; }
     }
 
-    /* ── Generate Reports button (header, left side) ─────────────── */
+    /* ── Generate Reports button — neutral color, always top-right ──── */
     .ar-report-btn {
         position: relative;
         display: flex; align-items: center; justify-content: center;
         width: 40px; height: 40px;
         border-radius: 10px;
-        background: #fff;
-        border: 1.5px solid #E8E0F0;
-        color: #7A3F91;
+        background: linear-gradient(135deg,#475569,#64748b);
+        border: 1.5px solid transparent;
+        color: #fff;
         cursor: pointer;
         transition: all .15s;
         font-size: 15px;
+        flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(71,85,105,.35);
     }
     .ar-report-btn:hover,
-    .ar-report-btn-active { background: #F9F7FC; border-color: #7A3F91; }
+    .ar-report-btn-active { background: linear-gradient(135deg,#334155,#475569); box-shadow: 0 3px 10px rgba(71,85,105,.5); }
+    .ar-report-btn:disabled { opacity: .7; cursor: wait; }
     .ar-report-tip {
         position: absolute;
-        top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+        top: calc(100% + 8px); right: 0;
         background: #1a1a1a; color: #fff;
         font-size: 10px; font-weight: 600; letter-spacing: .05em;
         padding: 5px 11px; border-radius: 7px; white-space: nowrap;
@@ -392,7 +414,7 @@ new class extends Component {
     }
     .ar-report-tip::before {
         content: '';
-        position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+        position: absolute; bottom: 100%; right: 12px;
         border: 5px solid transparent; border-bottom-color: #1a1a1a;
     }
     .ar-report-btn:hover .ar-report-tip { opacity: 1; }
@@ -400,25 +422,73 @@ new class extends Component {
         .ar-report-tip { display: none !important; }
     }
     .ar-report-menu {
-        position: absolute; top: calc(100% + 8px); left: 0;
-        min-width: 230px; background: #fff;
+        position: absolute; top: calc(100% + 8px); right: 0;
+        width: min(260px, calc(100vw - 24px));
+        background: #fff;
         border: 1.5px solid #E8E0F0; border-radius: 12px;
         box-shadow: 0 10px 30px rgba(122,63,145,.18);
         z-index: 500; padding: 6px;
     }
-    .ar-report-menu-label {
-        font-size: .65rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: .06em; color: #999999; padding: 6px 10px 8px;
-        border-bottom: 1px solid #F0ECF5; margin-bottom: 4px;
+    .ar-report-menu-message {
+        padding: 10px 10px 11px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid #F0ECF5;
     }
+    .ar-report-menu-message .lbl {
+        font-size: .6rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .07em; color: #7A3F91; display: block; margin-bottom: 3px;
+    }
+    .ar-report-menu-message .txt {
+        font-size: .75rem; font-weight: 600; color: #111111; line-height: 1.35;
+    }
+    .ar-report-menu-message .cnt {
+        font-size: .68rem; font-weight: 500; color: #333333; margin-top: 3px; display: block;
+    }
+
+    /* ── Report menu items — proper colored backgrounds per type ──── */
     .ar-report-menu-item {
-        display: flex; align-items: center; gap: 8px; width: 100%;
+        display: flex; align-items: center; gap: 9px; width: 100%;
         padding: 9px 10px; border-radius: 8px;
+        margin-bottom: 4px;
         font-size: .82rem; font-weight: 600; color: #333333;
-        background: transparent; border: none; cursor: pointer; text-align: left;
-        transition: background .12s;
+        border: 1.5px solid transparent; cursor: pointer; text-align: left;
+        transition: background .12s, border-color .12s, opacity .12s;
     }
-    .ar-report-menu-item:hover { background: #F5F0FA; }
+    .ar-report-menu-item:last-child { margin-bottom: 0; }
+    .ar-report-menu-item .ar-item-icon {
+        width: 22px; height: 22px; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; font-size: 11px;
+    }
+    .ar-report-menu-item .ar-item-label { flex: 1; }
+
+    .ar-report-menu-item.item-pdf   { background: #FEF2F2; border-color: #FEE2E2; }
+    .ar-report-menu-item.item-pdf:hover   { background: #FEE2E2; border-color: #FECACA; }
+    .ar-report-menu-item.item-pdf .ar-item-icon { background: #DC2626; color: #fff; }
+
+    .ar-report-menu-item.item-excel { background: #ECFDF5; border-color: #D1FAE5; }
+    .ar-report-menu-item.item-excel:hover { background: #D1FAE5; border-color: #A7F3D0; }
+    .ar-report-menu-item.item-excel .ar-item-icon { background: #059669; color: #fff; }
+
+    .ar-report-menu-item.item-print { background: #F5F5F5; border-color: #EDEDED; }
+    .ar-report-menu-item.item-print:hover { background: #ECECEC; border-color: #E0E0E0; }
+    .ar-report-menu-item.item-print .ar-item-icon { background: #555555; color: #fff; }
+
+    .ar-report-menu-item:disabled { opacity: .55; cursor: wait; }
+
+    /* ── Header row: always single row, button pinned top-right ──── */
+    .ar-header-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+    }
+    .ar-header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+    }
 
     /* ── Filter bar ──────────────────────────────────────────────── */
     .ar-filter-label { pointer-events: none; }
@@ -468,17 +538,17 @@ new class extends Component {
 
     /* ── Profile field labels ─────────── */
     .ar-field-label {
-        font-size: .625rem;
-        font-weight: 600;
+        font-size: .7rem;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: .06em;
-        color: #555555;
-        margin-bottom: 2px;
+        letter-spacing: .05em;
+        color: #333333;
+        margin-bottom: 4px;
     }
     .ar-field-value {
-        font-size: .8rem;
+        font-size: .95rem;
         font-weight: 600;
-        color: #111111;
+        color: #333333;
         word-break: break-word;
     }
 
@@ -491,7 +561,7 @@ new class extends Component {
         box-shadow: 0 1px 3px rgba(0,0,0,.06);
     }
     .ar-card-header {
-        padding: 7px 12px;
+        padding: 8px 12px;
         border-bottom: 1.5px solid #EEEEEE;
         background: #F7F7F7;
         display: flex;
@@ -500,17 +570,17 @@ new class extends Component {
         gap: 7px;
     }
     .ar-card-header p {
-        font-size: .68rem;
+        font-size: .72rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: .07em;
-        color: #222222;
+        letter-spacing: .06em;
+        color: #333333;
         margin: 0;
     }
 
     /* ── Cells — WHITE background ─────────────────────────────── */
     .ar-cell {
-        padding: 7px 11px;
+        padding: 8px 11px;
         border: 1.5px solid #EEEEEE;
         background: #ffffff;
         border-radius: 8px;
@@ -523,7 +593,7 @@ new class extends Component {
         gap: 5px;
         padding: 4px 10px;
         border-radius: 999px;
-        font-size: .68rem;
+        font-size: .72rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .03em;
@@ -644,7 +714,7 @@ new class extends Component {
         flex-direction: column;
         justify-content: center;
         padding: 12px 16px;
-        gap: 5px;
+        gap: 6px;
         background: #ffffff;
     }
 
@@ -679,11 +749,15 @@ new class extends Component {
         }
     }
 
-    /* ── Mobile: table card + page wrap go true full-screen edge to edge ── */
+    /* ── Mobile: true full-screen — reduce reserved offset so the
+       pagination bar sits flush at the bottom, no leftover gray gap ── */
     @media (max-width: 640px) {
         .ar-page-wrap {
+            height: calc(100dvh - 118px) !important;
+            max-height: calc(100dvh - 118px) !important;
             padding-left: 0 !important;
             padding-right: 0 !important;
+            padding-top: 10px !important;
             padding-bottom: 0 !important;
         }
         .ar-table-card {
@@ -731,59 +805,75 @@ new class extends Component {
 <div class="ar-page-wrap flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-3 max-w-screen-2xl mx-auto" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
     {{-- Header --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 shrink-0">
-        <div class="flex items-center gap-3">
-
-            {{-- Generate Reports icon — on the left, separated by a divider --}}
-            <div class="relative shrink-0"
-                 x-data="{
-                    open:false,
-                    doExport(type){
-                        const params = new URLSearchParams({
-                            type: type,
-                            search: $wire.alumniSearch || '',
-                            batch: $wire.alumniBatch || '',
-                            course: $wire.alumniCourse || '',
-                            profile_filter: $wire.alumniProfileFilter || 'all',
-                        });
-                        window.open('/registrar/alumni-records/export?' + params.toString(), '_blank');
-                        this.open = false;
-                    }
-                 }"
-                 @click.outside="open=false" wire:key="ar-report-dropdown">
-                <button type="button" @click="open=!open" class="ar-report-btn" :class="{ 'ar-report-btn-active': open }">
-                    <i class="fas fa-chart-column"></i>
-                    <span class="ar-report-tip">Generate Reports</span>
-                </button>
-
-                <div x-show="open"
-                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-report-menu" style="display:none;">
-                    <p class="ar-report-menu-label">
-                        {{ number_format($this->alumniRecords->total()) }} record(s) match current filters
-                    </p>
-                    <button type="button" @click="doExport('pdf')" class="ar-report-menu-item">
-                        <i class="fas fa-file-pdf" style="color:#DC2626;width:14px;"></i> Export as PDF
-                    </button>
-                    <button type="button" @click="doExport('excel')" class="ar-report-menu-item">
-                        <i class="fas fa-file-excel" style="color:#059669;width:14px;"></i> Export as Excel
-                    </button>
-                    <button type="button" @click="open=false; window.print();" class="ar-report-menu-item">
-                        <i class="fas fa-print" style="color:#555555;width:14px;"></i> Print Current View
-                    </button>
-                </div>
-            </div>
-
-            <div class="h-9 w-px bg-[#E8E0F0] shrink-0"></div>
-
+    <div class="ar-header-row mb-3 shrink-0">
+        <div class="ar-header-left">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white text-base"></i>
             </div>
-            <div>
+            <div class="min-w-0">
                 <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Alumni Records</h1>
                 <p class="text-[#666666] text-xs sm:text-sm font-normal">View and manage alumni information and records.</p>
+            </div>
+        </div>
+
+        {{-- Generate Reports icon — always top-right, single row on all screens
+             NOTE: uses fetch() + blob download / hidden iframe instead of window.open()
+             so everything stays in the SAME TAB and the URL never gets query params.
+
+             STATE LIVES IN Alpine.store('report', ...) — registered via multiple
+             lifecycle hooks below (alpine:init / livewire:init / livewire:navigated
+             / immediate call if Alpine is already present) so the store is always
+             ready before the very first click, even after Livewire's SPA-style
+             navigation re-executes this component without re-running its <script>
+             tag in some setups.
+
+             FIX (double-open/close bug): the toggle() method below is guarded with
+             a small timestamp debounce. The previous version toggled `open` directly
+             on click ($store.report.open = !$store.report.open). If this node ever
+             ended up with the click listener bound more than once — e.g. Alpine
+             re-scanning the tree on `livewire:navigated` before the store guard
+             above had a chance to run — a single physical click fired the toggle
+             twice in the same tick, which visually looks like "click once, it
+             opens then instantly closes" or "close it, and it pops back open by
+             itself". Debouncing toggle() so a second call within 150ms is ignored
+             makes a single click always resolve to a single, correct state change,
+             regardless of how many listeners ended up bound. --}}
+        <div class="relative shrink-0" wire:ignore
+             x-data
+             x-init="window.__arEnsureReportStore && window.__arEnsureReportStore()"
+             @click.outside="$store.report.open=false" wire:key="ar-report-dropdown">
+            <button type="button" @click.stop="$store.report.toggle()" class="ar-report-btn"
+                    :class="{ 'ar-report-btn-active': $store.report.open }">
+                <i class="fas fa-chart-column"></i>
+                <span class="ar-report-tip">Generate Reports</span>
+            </button>
+
+            <div x-show="$store.report.open"
+                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                 class="ar-report-menu" style="display:none;">
+
+                <div class="ar-report-menu-message">
+                    <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
+                    <span class="txt">{{ $this->activeFilterSummary }}</span>
+                    <span class="cnt">{{ number_format($this->alumniRecords->total()) }} matching record(s)</span>
+                </div>
+
+                <button type="button" @click="$store.report.doExport('pdf', $wire)" class="ar-report-menu-item item-pdf">
+                    <span class="ar-item-icon"><i class="fas fa-file-pdf"></i></span>
+                    <span class="ar-item-label">Export as PDF</span>
+                </button>
+
+                <button type="button" @click="$store.report.doExport('excel', $wire)" class="ar-report-menu-item item-excel">
+                    <span class="ar-item-icon"><i class="fas fa-file-excel"></i></span>
+                    <span class="ar-item-label">Export as Excel</span>
+                </button>
+
+                <button type="button" @click="$store.report.doExport('print', $wire)" class="ar-report-menu-item item-print">
+                    <span class="ar-item-icon"><i class="fas fa-print"></i></span>
+                    <span class="ar-item-label">Print Current View</span>
+                </button>
             </div>
         </div>
     </div>
@@ -1303,27 +1393,27 @@ new class extends Component {
                         </div>
 
                         <p x-show="!hasFile && !saving" class="text-center font-semibold leading-tight select-none"
-                           style="font-size:.68rem;color:#666666;max-width:108px;display:block;">
+                           style="font-size:.72rem;color:#666666;max-width:108px;display:block;">
                             Hover photo to change
                         </p>
                     </div>
 
                     <div class="ar-info-col">
-                        <p class="font-bold uppercase leading-tight" style="font-size:1.05rem;color:#111111;">
+                        <p class="font-bold uppercase leading-tight" style="font-size:1.15rem;color:#111111;">
                             {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
                         </p>
-                        <p class="font-mono" style="font-size:.73rem;color:#444444;letter-spacing:.03em;">
+                        <p class="font-mono" style="font-size:.82rem;color:#444444;letter-spacing:.03em;">
                             {{ $viewingProfile['student_id'] ?? '—' }}
                         </p>
                         <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;">
+                            <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">
                                 {{ $viewingProfile['course_code'] ?? '—' }}
                             </span>
-                            <span style="color:#CCCCCC;font-size:.7rem;">•</span>
-                            <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;">
+                            <span style="color:#CCCCCC;font-size:.8rem;">•</span>
+                            <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">
                                 Batch {{ $viewingProfile['batch'] ?? '—' }}
                             </span>
-                            <span style="color:#CCCCCC;font-size:.7rem;">•</span>
+                            <span style="color:#CCCCCC;font-size:.8rem;">•</span>
                             {{-- Complete chip: uses derived logic (DB flag OR all required fields present) --}}
                             @if($profileIsComplete)
                                 <span class="ar-info-chip" style="background:#ECFDF5;color:#059669;border:1px solid #6ee7b7;">Complete</span>
@@ -1332,7 +1422,7 @@ new class extends Component {
                             @endif
                         </div>
                         {{-- Email: preserve original casing from DB --}}
-                        <p style="font-size:.72rem;color:#444444;font-weight:500;">
+                        <p style="font-size:.9rem;color:#444444;font-weight:500;">
                             {{ $viewingProfile['email'] ?? '—' }}
                         </p>
                     </div>
@@ -1344,7 +1434,7 @@ new class extends Component {
                     <div class="p-2">
                         <div class="ar-cell">
                             <p class="ar-field-label">Student ID</p>
-                            <p class="ar-field-value font-mono text-xs">{{ $up($viewingProfile['student_id'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value font-mono">{{ $up($viewingProfile['student_id'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
@@ -1354,19 +1444,19 @@ new class extends Component {
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['last_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['last_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Given Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['first_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['first_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Middle Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['middle_initial'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['middle_initial'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Ext.</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['suffix'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['suffix'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
@@ -1377,51 +1467,51 @@ new class extends Component {
                     <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Sex</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['gender'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['gender'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Birthdate</p>
-                            <p class="ar-field-value text-xs">{{ $dob }}</p>
+                            <p class="ar-field-value">{{ $dob }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Course</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['course_name'] ?? $viewingProfile['course_code'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['course_name'] ?? $viewingProfile['course_code'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
                 <div class="ar-card">
                     <div class="ar-card-header"><p>Father's Name</p></div>
-                    <div class="p-2 grid grid-cols-1 gap-1.5">
+                    <div class="p-2 grid grid-cols-3 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['father_last_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['father_last_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Given Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['father_given_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['father_given_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Middle Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['father_middle_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['father_middle_name'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
                 <div class="ar-card">
                     <div class="ar-card-header"><p>Mother's Maiden Name</p></div>
-                    <div class="p-2 grid grid-cols-1 gap-1.5">
+                    <div class="p-2 grid grid-cols-3 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['mother_last_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['mother_last_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Given Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['mother_given_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['mother_given_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Middle Name</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['mother_middle_name'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['mother_middle_name'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
@@ -1432,19 +1522,19 @@ new class extends Component {
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Street</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_street'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['address_street'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Barangay</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_barangay'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['address_barangay'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Municipality / City</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_municipality'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['address_municipality'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Province</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['address_province'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['address_province'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
@@ -1455,20 +1545,20 @@ new class extends Component {
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">DSWD Household No.</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['dswd_household_no'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['dswd_household_no'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Disability</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['disability'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['disability'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Contact Number</p>
-                            <p class="ar-field-value text-xs">{{ $up($viewingProfile['contact_number'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['contact_number'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Email Address</p>
                             {{-- Email: preserve original casing from DB, no strtoupper/strtolower --}}
-                            <p class="ar-field-value text-xs" style="font-size:.7rem;">{{ trim($viewingProfile['email'] ?? '') ?: '—' }}</p>
+                            <p class="ar-field-value">{{ trim($viewingProfile['email'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
@@ -1479,7 +1569,7 @@ new class extends Component {
                     <div class="ar-card-header">
                         <p>Employment</p>
                         @if($emp && $updatedAt)
-                            <span style="font-size:.62rem;font-weight:600;color:#555555;text-transform:none;letter-spacing:0;font-family:inherit;">
+                            <span style="font-size:.7rem;font-weight:600;color:#555555;text-transform:none;letter-spacing:0;font-family:inherit;">
                                 Last updated {{ $updatedAt }}
                             </span>
                         @endif
@@ -1489,7 +1579,7 @@ new class extends Component {
                         <div class="p-3">
                             <div class="ar-cell">
                                 <p class="ar-field-label">Employment Record</p>
-                                <p class="ar-field-value text-xs">No employment information submitted yet.</p>
+                                <p class="ar-field-value">No employment information submitted yet.</p>
                             </div>
                         </div>
                     @else
@@ -1500,41 +1590,41 @@ new class extends Component {
 
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Status</p>
-                                    <p class="ar-field-value text-xs">{{ $empStatusMap[$empStatus] ?? '—' }}</p>
+                                    <p class="ar-field-value">{{ $empStatusMap[$empStatus] ?? '—' }}</p>
                                 </div>
 
                                 @if($isWorking && $empTypeLbl)
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Employment Type</p>
-                                    <p class="ar-field-value text-xs">{{ $empTypeLbl }}</p>
+                                    <p class="ar-field-value">{{ $empTypeLbl }}</p>
                                 </div>
                                 @endif
 
                                 @if($isWorking && !empty($emp['work_location']))
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Work Location</p>
-                                    <p class="ar-field-value text-xs">{{ $workLocMap[$emp['work_location']] ?? ucfirst($emp['work_location']) }}</p>
+                                    <p class="ar-field-value">{{ $workLocMap[$emp['work_location']] ?? ucfirst($emp['work_location']) }}</p>
                                 </div>
                                 @endif
 
                                 @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']))
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Unemployment Reason</p>
-                                    <p class="ar-field-value text-xs">{{ $unempMap[$emp['unemployment_status']] ?? '—' }}</p>
+                                    <p class="ar-field-value">{{ $unempMap[$emp['unemployment_status']] ?? '—' }}</p>
                                 </div>
                                 @endif
 
                                 @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none' && isset($eduMap[$emp['education_status']]))
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Further Studies</p>
-                                    <p class="ar-field-value text-xs">{{ $eduMap[$emp['education_status']] }}</p>
+                                    <p class="ar-field-value">{{ $eduMap[$emp['education_status']] }}</p>
                                 </div>
                                 @endif
 
                                 @if($submittedAt)
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Date Submitted</p>
-                                    <p class="ar-field-value text-xs">{{ $submittedAt }}</p>
+                                    <p class="ar-field-value">{{ $submittedAt }}</p>
                                 </div>
                                 @endif
 
@@ -1547,35 +1637,35 @@ new class extends Component {
                                     @if(!empty($emp['job_title']))
                                     <div class="ar-cell">
                                         <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Position / Role' : 'Job Title' }}</p>
-                                        <p class="ar-field-value text-xs" style="text-transform:uppercase;">{{ strtoupper($emp['job_title']) }}</p>
+                                        <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['job_title']) }}</p>
                                     </div>
                                     @endif
 
                                     @if(!empty($emp['company_name']))
                                     <div class="ar-cell">
                                         <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company' }}</p>
-                                        <p class="ar-field-value text-xs" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
+                                        <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
                                     </div>
                                     @endif
 
                                     @if($dateHired)
                                     <div class="ar-cell">
                                         <p class="ar-field-label">Date Hired</p>
-                                        <p class="ar-field-value text-xs">{{ $dateHired }}</p>
+                                        <p class="ar-field-value">{{ $dateHired }}</p>
                                     </div>
                                     @endif
 
                                     @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
                                     <div class="ar-cell">
                                         <p class="ar-field-label">Course Relevance</p>
-                                        <p class="ar-field-value text-xs">{{ $relevanceMap[$emp['course_relevance']] }}</p>
+                                        <p class="ar-field-value">{{ $relevanceMap[$emp['course_relevance']] }}</p>
                                     </div>
                                     @endif
 
                                     @if(count($careerPath))
                                     <div class="ar-cell">
                                         <p class="ar-field-label">Career Path</p>
-                                        <p class="ar-field-value text-xs">
+                                        <p class="ar-field-value">
                                             {{ implode(', ', array_map(fn($k) => $cpLabels[$k] ?? $k, $careerPath)) }}
                                         </p>
                                     </div>
@@ -1598,6 +1688,146 @@ new class extends Component {
 
 <script>
 (function () {
+    // Register the report-export Alpine store — guarded so it only runs once
+    // even if this Blade file's <script> block executes again after a
+    // Livewire re-render, and callable on demand from x-init as a safety net.
+    function registerReportStore() {
+        if (!window.Alpine) return;
+        if (window.Alpine.store('report')) return;
+
+        window.Alpine.store('report', {
+            open: false,
+            _lastToggle: 0,
+
+            /**
+             * FIX (double open/close bug): debounce toggle calls. If this
+             * button's click listener ever ends up bound more than once on
+             * the same DOM node (e.g. Alpine re-scanning the tree around a
+             * Livewire SPA navigation before the store guard above has run),
+             * a single physical click could fire this twice in the same
+             * tick — which looks like "click once → it opens then instantly
+             * closes" or "close it → it pops back open by itself". Ignoring
+             * a second call within 150ms of the first makes one click always
+             * resolve to exactly one state change.
+             */
+            toggle() {
+                const now = Date.now();
+                if (now - this._lastToggle < 150) return;
+                this._lastToggle = now;
+                this.open = !this.open;
+            },
+
+            /**
+             * FIX: reads the actual backend error message (set by
+             * RegistrarAlumniExportController's catch block, e.g.
+             * "Report generation failed: ...") instead of always showing
+             * a generic "Export failed" string. Falls back to the generic
+             * message only if the response body isn't readable/JSON.
+             */
+            async readErrorMessage(res, fallback) {
+                try {
+                    const data = await res.clone().json();
+                    if (data && data.message) return data.message;
+                } catch (e) {
+                    // response wasn't JSON — fall through to generic message
+                }
+                return fallback;
+            },
+
+            async doExport(type, wire) {
+                // No loading/spinner state — export runs directly and
+                // the dropdown closes immediately on click.
+                this.open = false;
+
+                const params = new URLSearchParams({
+                    type: type,
+                    search: (wire && wire.alumniSearch) || '',
+                    batch: (wire && wire.alumniBatch) || '',
+                    course: (wire && wire.alumniCourse) || '',
+                    profile_filter: (wire && wire.alumniProfileFilter) || 'all',
+                });
+                const url = '/registrar/alumni-records/export?' + params.toString();
+
+                try {
+                    if (type === 'print') {
+                        const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!res.ok) {
+                            const msg = await this.readErrorMessage(res, 'Print generation failed. Please try again.');
+                            throw new Error(msg);
+                        }
+                        const html = await res.text();
+
+                        let frame = document.getElementById('ar-print-frame');
+                        if (!frame) {
+                            frame = document.createElement('iframe');
+                            frame.id = 'ar-print-frame';
+                            frame.style.position = 'fixed';
+                            frame.style.right = '0';
+                            frame.style.bottom = '0';
+                            frame.style.width = '0';
+                            frame.style.height = '0';
+                            frame.style.border = '0';
+                            document.body.appendChild(frame);
+                        }
+
+                        const doc = frame.contentWindow.document;
+                        doc.open();
+                        doc.write(html);
+                        doc.close();
+
+                        frame.onload = () => {
+                            setTimeout(() => {
+                                frame.contentWindow.focus();
+                                frame.contentWindow.print();
+                            }, 150);
+                        };
+                    } else {
+                        const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!res.ok) {
+                            const msg = await this.readErrorMessage(
+                                res,
+                                type === 'excel' ? 'Excel export failed. Please try again.' : 'PDF export failed. Please try again.'
+                            );
+                            throw new Error(msg);
+                        }
+
+                        const blob = await res.blob();
+                        const disposition = res.headers.get('Content-Disposition') || '';
+                        let filename = type === 'excel' ? 'alumni-records.xlsx' : 'alumni-records.pdf';
+                        const match = disposition.match(/filename="?([^"]+)"?/);
+                        if (match) filename = match[1];
+
+                        const blobUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        window.URL.revokeObjectURL(blobUrl);
+                    }
+                } catch (e) {
+                    window.dispatchEvent(new CustomEvent('flash-message', {
+                        detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
+                    }));
+                }
+            }
+        });
+    }
+
+    // Exposed globally so the dropdown's x-init can call it directly the
+    // instant that specific DOM node initializes — this is what guarantees
+    // the very first click always works, instead of needing a stray retry
+    // while waiting for alpine:init / livewire:navigated to fire.
+    window.__arEnsureReportStore = registerReportStore;
+
+    if (window.Alpine) {
+        registerReportStore();
+    }
+    document.addEventListener('alpine:init', registerReportStore);
+    document.addEventListener('livewire:init', registerReportStore);
+    document.addEventListener('livewire:navigated', registerReportStore);
+
     var tip = document.getElementById('ar-hover-tip');
 
     // Tooltip only makes sense on devices with real hover + a mouse (desktop).

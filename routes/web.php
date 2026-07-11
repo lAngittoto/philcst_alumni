@@ -11,6 +11,7 @@ use App\Http\Controllers\CourseController;
 use App\Http\Controllers\DirectorNotificationController;
 use App\Http\Controllers\MessengerController;
 use App\Http\Controllers\OrganizerController;
+use App\Http\Controllers\RegistrarAlumniExportController;
 use App\Http\Controllers\RegistrarNotificationController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -106,13 +107,14 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
 // ===================================
 Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.')->group(function () {
 
-    Route::view('/dashboard',              'registrar.dashboard-wrapper')              ->name('dashboard');
-    Route::view('/alumni',                 'registrar.alumni-wrapper')                 ->name('alumni');
-    Route::view('/alumni/register',        'registrar.register-wrapper')               ->name('alumni.register');
-    Route::view('/alumni/import',          'registrar.import-wrapper')                 ->name('alumni.import');
-    Route::view('/information-management', 'registrar.information-management-wrapper') ->name('information-management');
-    Route::view('/courses',                'registrar.courses-wrapper')                ->name('courses');
-    Route::view('/employment/tracking',    'registrar.employment-tracking-wrapper')    ->name('employment.tracking');
+    Route::view('/dashboard',           'registrar.dashboard-wrapper')           ->name('dashboard');
+    Route::view('/alumni',              'registrar.alumni-wrapper')             ->name('alumni');
+    Route::view('/alumni/register',     'registrar.register-wrapper')           ->name('alumni.register');
+    Route::view('/employment/tracking', 'registrar.employment-tracking-wrapper')->name('employment.tracking');
+
+    // ── Alumni Records: Generate Reports (PDF / Excel export) ──────────────
+    Route::get('/alumni-records/export', [RegistrarAlumniExportController::class, 'export'])
+        ->name('alumni-records.export');
 
     Route::get('/notifications',                      [RegistrarNotificationController::class, 'index'])      ->name('notifications.index');
     Route::post('/notifications',                     [RegistrarNotificationController::class, 'store'])      ->name('notifications.store');
