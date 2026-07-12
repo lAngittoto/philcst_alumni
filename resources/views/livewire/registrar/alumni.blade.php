@@ -65,14 +65,17 @@ new class extends Component {
             'password_changed_at', 'created_at',
         ]);
 
+        // NOTE: text search is intentionally limited to Name, Student ID,
+        // and Email. Batch and Program Code already have their own
+        // dedicated dropdown filters above the table, so they are excluded
+        // here on purpose — typing "2006" or "BSIT" in the search box
+        // should NOT match by batch/course; use the dropdowns for that.
         if ($this->alumniSearch) {
             $term = '%' . $this->alumniSearch . '%';
             $q->where(fn($s) => $s
                 ->where('first_name',   'like', $term)
                 ->orWhere('last_name',  'like', $term)
                 ->orWhere('student_id', 'like', $term)
-                ->orWhere('course_code','like', $term)
-                ->orWhere('course_name','like', $term)
                 ->orWhere('email',      'like', $term));
         }
 
@@ -903,7 +906,7 @@ new class extends Component {
                  x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.300ms="$wire.set('alumniSearch',q)"
-                       placeholder="Search name, ID, course…"
+                       placeholder="Search name, ID, email…"
                        class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
                               placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
                        autocomplete="off" spellcheck="false">
@@ -1026,7 +1029,7 @@ new class extends Component {
                             <td class="px-4 py-3 overflow-hidden">
                                 <span class="inline-block px-2.5 py-1 rounded-full text-xs font-semibold uppercase truncate max-w-full"
                                       style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
-                                    {!! $this->highlight($item->course_code ?? '—', $this->alumniSearch) !!}
+                                    {{ $item->course_code ?? '—' }}
                                 </span>
                             </td>
                             <td class="px-4 py-3 text-center overflow-hidden">
@@ -1078,7 +1081,7 @@ new class extends Component {
                                 <span class="text-[#CCCCCC] text-xs">&bull;</span>
                                 <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase"
                                       style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
-                                    {!! $this->highlight($item->course_code ?? '—', $this->alumniSearch) !!}
+                                    {{ $item->course_code ?? '—' }}
                                 </span>
                                 <span class="text-[#CCCCCC] text-xs">&bull;</span>
                                 <span class="font-mono text-[#333333] text-xs font-semibold">Batch {{ $item->batch }}</span>

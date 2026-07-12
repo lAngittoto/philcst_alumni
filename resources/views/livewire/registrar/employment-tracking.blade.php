@@ -24,12 +24,16 @@ new class extends Component {
     public string $sortBy          = 'a.last_name';
     public string $sortDir         = 'asc';
 
-    // ── Modal (read-only detail view — no in-modal re-filtering) ───────────────
+    // ── Modal (read-only detail view — has its own in-modal SEARCH only;
+    //    modalFilter/modalBatch/modalCourse are still set exclusively from
+    //    openModal(), there is no way to change the underlying scope from
+    //    inside the modal — modalSearch just narrows within it) ──────────
     public bool   $showModal    = false;
     public string $activeModal  = '';
     public string $modalFilter  = '';
     public string $modalCourse  = '';
     public ?int   $modalBatch   = null;
+    public string $modalSearch  = '';
     public int    $modalPage    = 1;
     public int    $modalPageSize = 200;
 
@@ -106,6 +110,18 @@ new class extends Component {
         $this->refreshDashboard();
     }
 
+    /**
+     * In-modal search — narrows the currently drilled-down record set
+     * (name / student ID / email / program code) without touching
+     * modalFilter/modalBatch/modalCourse. Fires on every debounced keystroke
+     * from the search box inside the detail modal.
+     */
+    public function updatedModalSearch(): void
+    {
+        $this->modalPage = 1;
+        unset($this->modalRecords);
+    }
+
     public function clearFilters(): void
     {
         $this->closeAnyModal();
@@ -146,6 +162,7 @@ new class extends Component {
             $this->modalFilter = '';
             $this->modalBatch  = null;
             $this->modalCourse = '';
+            $this->modalSearch = '';
             $this->modalPage   = 1;
             unset($this->modalRecords);
         }
@@ -397,8 +414,9 @@ new class extends Component {
     /**
      * Records shown inside the detail modal. modalFilter / modalBatch / modalCourse
      * are set ONLY from openModal() — i.e. by clicking a stat card, chart segment,
-     * or Program Breakdown row. There is no in-modal UI to change them anymore;
-     * the modal is a read-only drill-down of whatever was clicked.
+     * or Program Breakdown row. modalSearch is the ONLY thing the user can change
+     * while the modal is open — it narrows within whatever scope was clicked,
+     * it never changes modalFilter/modalBatch/modalCourse themselves.
      */
     #[Computed]
     public function modalRecords()
@@ -422,6 +440,18 @@ new class extends Component {
 
             if ($this->modalBatch !== null) $q->where('a.batch', $this->modalBatch);
             if ($this->modalCourse !== '')  $q->where('a.course_code', $this->modalCourse);
+
+            if ($this->modalSearch !== '') {
+                $term = '%' . $this->modalSearch . '%';
+                $q->where(function ($s) use ($term) {
+                    $s->where('a.first_name', 'like', $term)
+                      ->orWhere('a.last_name', 'like', $term)
+                      ->orWhere('a.middle_initial', 'like', $term)
+                      ->orWhere('a.student_id', 'like', $term)
+                      ->orWhere('a.email', 'like', $term)
+                      ->orWhere('a.course_code', 'like', $term);
+                });
+            }
 
             return $q->orderBy('a.last_name')
                      ->paginate($this->modalPageSize, ['*'], 'mPage', $this->modalPage);
@@ -453,6 +483,18 @@ new class extends Component {
 
         if ($this->modalBatch !== null) $q->where('a.batch', $this->modalBatch);
         if ($this->modalCourse !== '')  $q->where('a.course_code', $this->modalCourse);
+
+        if ($this->modalSearch !== '') {
+            $term = '%' . $this->modalSearch . '%';
+            $q->where(function ($s) use ($term) {
+                $s->where('a.first_name', 'like', $term)
+                  ->orWhere('a.last_name', 'like', $term)
+                  ->orWhere('a.middle_initial', 'like', $term)
+                  ->orWhere('a.student_id', 'like', $term)
+                  ->orWhere('a.email', 'like', $term)
+                  ->orWhere('a.course_code', 'like', $term);
+            });
+        }
 
         return $q->orderByDesc('et.created_at')
                  ->paginate($this->modalPageSize, ['*'], 'mPage', $this->modalPage);
@@ -530,6 +572,7 @@ new class extends Component {
         $this->modalFilter = $filter;
         $this->modalBatch  = $batch !== null ? (int)$batch : null;
         $this->modalCourse = strip_tags($course);
+        $this->modalSearch = '';
         $this->modalPage   = 1;
         $this->activeModal = 'detail';
         unset($this->modalRecords);
@@ -541,6 +584,7 @@ new class extends Component {
         $this->modalFilter = '';
         $this->modalBatch  = null;
         $this->modalCourse = '';
+        $this->modalSearch = '';
         $this->modalPage   = 1;
         unset($this->modalRecords);
         $this->refreshDashboard();
@@ -566,11 +610,31 @@ new class extends Component {
         return implode(' ', array_filter($parts));
     }
 
+    /**
+     * Wraps every case-insensitive occurrence of $search inside $text with
+     * <mark class="ar-hl"> (blue highlight) — same approach used by Alumni
+     * Records' search highlight. Used inside the detail modal table when
+     * modalSearch is active.
+     */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="ar-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     public function with(): array { return []; }
 };
 ?>
 
-<div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '')">
+<div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '')" class="emp-dashboard-root">
 
 {{-- ══ CURSOR-FOLLOW TOOLTIP (desktop only — hidden on mobile/touch, see CSS + JS below) ══ --}}
 <div id="emp-cursor-tip"
@@ -752,6 +816,53 @@ new class extends Component {
         animation: empFilterProgress 1s ease-in-out infinite;
     }
     @keyframes empFilterProgress { 0%{left:-40%} 100%{left:100%} }
+
+    /* ── Modal search — dedicated focus styling. Doesn't rely on Tailwind's
+       arbitrary ring/border utilities (focus:ring-[#7A3F91]/10 etc.) since
+       those can silently fail to generate and fall back to the browser's
+       native default outline (which renders black in some browsers) —
+       this guarantees the purple focus ring every time. ── */
+    .emp-modal-search-input { outline: none; }
+    .emp-modal-search-input:focus,
+    .emp-modal-search-input:focus-visible {
+        outline: none !important;
+        border-color: #7A3F91 !important;
+        box-shadow: 0 0 0 3px rgba(122,63,145,.14) !important;
+    }
+
+    /* ── Search highlight — matches Alumni Records' blue highlight ── */
+    mark.ar-hl {
+        background: #BFDBFE;
+        color: inherit;
+        border-radius: 2px;
+        padding: 0 1px;
+        font-weight: 700;
+    }
+
+    /* ── Force every table/row/cell in this page to use the design's gray
+       border color instead of ever falling back to the browser/Tailwind
+       default (which resolves to black — Tailwind's preflight reset sets
+       default border-color to `currentColor`, so any element that ends up
+       with a non-zero border-width but no explicit color class renders a
+       black line). This was showing up as black lines around each row in
+       the detail modal's results table specifically while typing in the
+       search box (wire:loading/morph re-render re-adds row separators
+       without always carrying the intended color utility with them).
+       Scoped to `.emp-dashboard-root` only so it can't leak outside this
+       component. `!important` because Tailwind's own border utilities are
+       also loaded with `!important`-strength specificity via arbitrary
+       values in places, and we need this to always win. ── */
+    .emp-dashboard-root table,
+    .emp-dashboard-root thead,
+    .emp-dashboard-root tbody,
+    .emp-dashboard-root tr,
+    .emp-dashboard-root th,
+    .emp-dashboard-root td {
+        border-color: #E8E0F0 !important;
+    }
+    .emp-dashboard-root .modal-table-wrap tbody tr {
+        border-bottom: 1px solid #F3F4F6 !important;
+    }
 
     /* ── Generate Reports button (copied styling from Alumni Records) ──── */
     .ar-report-btn {
@@ -1431,10 +1542,12 @@ new class extends Component {
 
 
 {{-- ═══════════════════════════════════════════════════════════
-     DETAIL FULL-SCREEN MODAL — read-only drill-down. There's no
-     in-modal filtering UI anymore; whatever segment you clicked
-     (stat card / donut slice / batch bar / trend point / program
-     row) is exactly what's shown here. Changing the Program/Batch
+     DETAIL FULL-SCREEN MODAL — read-only drill-down for the
+     underlying scope (modalFilter/modalBatch/modalCourse — those
+     never change from inside the modal, only from the segment you
+     clicked). The one thing you CAN change in here is the search
+     box below the header, which narrows within that scope so long
+     lists are actually searchable. Changing the Program/Batch
      filter bar while this is open automatically closes it (see
      updatedFilterCourse / updatedFilterBatch in the PHP class).
 ═══════════════════════════════════════════════════════════ --}}
@@ -1495,13 +1608,46 @@ new class extends Component {
         </button>
     </div>
 
+    {{-- ── In-modal search — narrows the current record set (name /
+         student ID / email / program code) without touching the
+         underlying modalFilter/modalBatch/modalCourse scope. Matches
+         wire:loading dim + progress-bar treatment used elsewhere, and
+         highlights matches in blue (mark.ar-hl) like Alumni Records. ── --}}
+    <div class="px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center gap-2 shrink-0"
+         wire:loading.class="opacity-60" wire:target="modalSearch">
+        <span class="text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">
+            <i class="fas fa-magnifying-glass sm:mr-1"></i><span class="hidden sm:inline">SEARCH</span>
+        </span>
+        <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
+        <div class="relative flex-1 max-w-xs" wire:ignore
+             x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
+            <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
+                   placeholder="Search name, student ID, email…"
+                   class="emp-modal-search-input w-full pl-8 pr-8 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
+                          placeholder-[#999999] transition font-normal"
+                   autocomplete="off" spellcheck="false">
+            <button type="button" x-show="q" @click="q=''; $wire.set('modalSearch','')"
+                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#7A3F91] transition"
+                    style="display:none;">
+                <i class="fas fa-xmark text-xs"></i>
+            </button>
+        </div>
+        <span class="text-[11px] font-semibold text-[#7A3F91] shrink-0 whitespace-nowrap">
+            {{ number_format($records->total()) }} result(s)
+        </span>
+    </div>
+    <div class="emp-filter-progress-track" wire:loading wire:target="modalSearch">
+        <div class="emp-filter-progress-bar"></div>
+    </div>
+
     {{-- ── Table ── --}}
-    <div class="modal-table-wrap flex-1 overflow-y-auto overflow-x-auto min-h-0">
+    <div class="modal-table-wrap flex-1 overflow-y-auto overflow-x-auto min-h-0"
+         wire:loading.class="opacity-50" wire:target="modalSearch" style="transition:opacity .2s ease;">
         <table class="w-full border-collapse" style="min-width:700px;">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-4 sm:pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-12">#</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
+                    <th class="pl-4 sm:pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Program</th>
                     <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
@@ -1515,7 +1661,6 @@ new class extends Component {
             <tbody class="divide-y divide-gray-100">
                 @forelse($records as $idx => $row)
                 @php
-                    $rowNum = ($records->currentPage() - 1) * $records->perPage() + $idx + 1;
                     $badge  = $isNoRecord ? null : ($statusBadge[$row->employment_status ?? ''] ?? null);
                     $relBadge = isset($row->course_relevance) ? ($relevanceBadge[$row->course_relevance] ?? null) : null;
                     $photo  = $this->getPhotoUrl($row->profile_photo ?? null);
@@ -1523,21 +1668,18 @@ new class extends Component {
                 @endphp
                 <tr class="bg-white hover:bg-[#F5F0FA] transition-colors duration-100">
                     <td class="pl-4 sm:pl-6 lg:pl-10 pr-3 py-3">
-                        <span class="text-xs font-semibold text-[#7A3F91]/40">{{ str_pad($rowNum,2,'0',STR_PAD_LEFT) }}</span>
-                    </td>
-                    <td class="px-4 py-3">
                         <div class="flex items-center gap-2.5">
                             <img src="{{ $photo }}" alt="{{ e($row->first_name ?? '') }}"
                                  class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{{ $dName }}</p>
+                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{!! $this->highlight($dName, $modalSearch) !!}</p>
                         </div>
                     </td>
                     <td class="px-4 py-3">
-                        <span class="text-sm font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</span>
+                        <span class="text-sm font-mono font-semibold text-[#111111]">{!! $this->highlight($row->student_id ?? '—', $modalSearch) !!}</span>
                     </td>
                     <td class="px-4 py-3">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold bg-[#F9F7FC] text-[#7a3f91]">
-                            {{ $row->course_code ?? '—' }}
+                            {!! $this->highlight($row->course_code ?? '—', $modalSearch) !!}
                         </span>
                     </td>
                     <td class="px-4 py-3 text-center">
@@ -1562,7 +1704,7 @@ new class extends Component {
                     </td>
                     <td class="px-4 py-3">
                         @if($row->email ?? null)
-                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">{{ strtolower($row->email) }}</span>
+                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">{!! $this->highlight(strtolower($row->email), $modalSearch) !!}</span>
                         @else
                             <span class="text-xs text-[#333333]">—</span>
                         @endif
@@ -1577,13 +1719,19 @@ new class extends Component {
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="8" class="py-20 text-center">
+                    <td colspan="7" class="py-20 text-center">
                         <div class="flex flex-col items-center gap-3">
                             <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
                                 <i class="fas fa-briefcase text-xl" style="color:#c89de0;"></i>
                             </div>
                             <p class="text-sm font-semibold text-[#333333]">No records found</p>
-                            <p class="text-xs text-[#333333]">No employment data available for this segment</p>
+                            <p class="text-xs text-[#333333]">
+                                @if($modalSearch !== '')
+                                    No results match "{{ $modalSearch }}" in this scope.
+                                @else
+                                    No employment data available for this segment
+                                @endif
+                            </p>
                         </div>
                     </td>
                 </tr>
@@ -2298,7 +2446,7 @@ new class extends Component {
                     },
                 },
                 scales: {
-                    x:{grid:{color:'#f3f4f6'},ticks:{font:{size:10,weight:'500'},color:'#333333',precision:0},beginAtZero:true},
+                    x:{grid:{color:'#f3f4f6'},ticks:{display:false},beginAtZero:true},
                     y:{grid:{display:false},ticks:{font:{size:10,weight:'600'},color:'#111111'}},
                 },
                 onClick:function(event,elements){

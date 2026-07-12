@@ -10,10 +10,18 @@ use Illuminate\Support\Facades\Log;
 class EmploymentTrackingExportController extends Controller
 {
     /**
-     * GET /registrar/employment-tracking/export?type=pdf|excel|print&filter=&batch=&course=
+     * GET /registrar/employment-tracking/export?type=pdf|excel|print&program=&batch=
      *
-     * Note: walang na "search" param dito — tinanggal na yung in-modal
-     * search/filter toolbar sa frontend, so hindi na siya kailangan.
+     * IMPORTANT: this mirrors the dashboard SCOPE, not the drill-down
+     * modal. The Generate Reports button only ever sends `type`,
+     * `program`, and `batch` (see the empReport Alpine store's
+     * doExport()) — whatever Program/Batch Year filter is active up
+     * top in the dashboard. There is no `filter`/`course` param coming
+     * in from that button, so getFilteredRecords() must not depend on
+     * those — it needs to return the SAME population as the
+     * dashboard's own computeStats() (every alumnus in scope, LEFT
+     * JOINed to their latest employment record so "No Record" alumni
+     * are included, not silently dropped).
      */
     public function export(Request $request)
     {
@@ -121,34 +129,22 @@ class EmploymentTrackingExportController extends Controller
     }
 
     /**
-     * Human-readable summary of the record scope. No more "filters" language —
-     * this just describes what segment of employment records is included.
+     * Human-readable scope text — reflects EXACTLY the Program / Batch
+     * Year filter active on the dashboard when Generate Reports was
+     * clicked (mirrors activeReportFilterSummary() in the Volt
+     * component). No more "filter"/"course" params — those belonged to
+     * the old per-segment modal export, which this button doesn't use.
      */
     private function filterSummary(Request $request): string
     {
-        $parts  = [];
-        $filter = $request->query('filter', '');
-        $batch  = $request->query('batch', '');
-        $course = $request->query('course', '');
+        $program = trim((string) $request->query('program', ''));
+        $batch   = trim((string) $request->query('batch', ''));
 
-        $labels = [
-            'employed'            => 'Employed',
-            'self_employed'       => 'Self-Employed',
-            'employed_all'        => 'Working Alumni',
-            'unemployed'          => 'Unemployed',
-            'no_record'           => 'No Employment Record',
-            'abroad'              => 'OFW / Working Abroad',
-            'local'               => 'Working Locally',
-            'relevance_yes'       => 'Course-Relevant Employment',
-            'relevance_partially' => 'Partially Relevant Employment',
-            'relevance_no'        => 'Not Relevant to Course',
-        ];
+        $parts = [];
+        if ($program !== '') $parts[] = $program;
+        if ($batch !== '')   $parts[] = 'Batch ' . $batch;
 
-        if ($filter !== '' && isset($labels[$filter])) $parts[] = $labels[$filter];
-        if ($batch !== '')  $parts[] = 'Batch ' . $batch;
-        if ($course !== '') $parts[] = 'Course ' . $course;
-
-        return count($parts) ? implode(' · ', $parts) : 'All Employment Records';
+        return count($parts) ? implode(' · ', $parts) : 'All Programs · All Batch Years';
     }
 
     private function latestEmpSubquery()
@@ -159,56 +155,40 @@ class EmploymentTrackingExportController extends Controller
             ->groupBy('et_inner.alumni_id');
     }
 
+    private function baseAlumniQuery(string $program, string $batch)
+    {
+        $q = DB::table('alumni as a')->whereNull('a.deleted_at');
+
+        if ($program !== '') $q->where('a.course_code', $program);
+        if ($batch !== '')   $q->where('a.batch', $batch);
+
+        return $q;
+    }
+
+    /**
+     * Same population as the dashboard's $totalAlumni stat: every
+     * alumnus in scope (Program + Batch Year applied), LEFT JOINed to
+     * their latest employment_trackings row. Alumni with no row at all
+     * still come back as a record — employment_status / course_relevance
+     * / work_location simply null — instead of being dropped by an
+     * inner join. That's what makes "No Record" in the report match
+     * "No Record" on the dashboard, no matter the scope.
+     */
     private function getFilteredRecords(Request $request)
     {
-        $filter = $request->query('filter', '');
-        $batch  = $request->query('batch', '');
-        $course = $request->query('course', '');
+        $program = trim((string) $request->query('program', ''));
+        $batch   = trim((string) $request->query('batch', ''));
 
-        if ($filter === 'no_record') {
-            $q = DB::table('alumni as a')
-                ->whereNull('a.deleted_at')
-                ->whereNotExists(fn($sq) => $sq
-                    ->from('employment_trackings as et')
-                    ->whereColumn('et.alumni_id', 'a.id')
-                    ->whereNull('et.deleted_at')
-                )
-                ->select([
-                    'a.first_name', 'a.middle_initial', 'a.last_name', 'a.suffix',
-                    'a.student_id', 'a.course_code', 'a.batch', 'a.email', 'a.contact_number',
-                    DB::raw('NULL as employment_status'),
-                    DB::raw('NULL as course_relevance'),
-                    DB::raw('NULL as work_location'),
-                    DB::raw('NULL as created_at'),
-                ]);
-        } else {
-            $q = DB::table('alumni as a')
-                ->whereNull('a.deleted_at')
-                ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
-                ->join('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
-                ->select([
-                    'a.first_name', 'a.middle_initial', 'a.last_name', 'a.suffix',
-                    'a.student_id', 'a.course_code', 'a.batch', 'a.email', 'a.contact_number',
-                    'et.employment_status', 'et.course_relevance', 'et.work_location', 'et.created_at',
-                ]);
-
-            match ($filter) {
-                'employed'            => $q->where('et.employment_status', 'employed'),
-                'self_employed'       => $q->where('et.employment_status', 'self_employed'),
-                'unemployed'          => $q->where('et.employment_status', 'unemployed'),
-                'employed_all'        => $q->whereIn('et.employment_status', ['employed', 'self_employed']),
-                'abroad'              => $q->where('et.work_location', 'abroad')->whereIn('et.employment_status', ['employed', 'self_employed']),
-                'local'               => $q->where('et.work_location', 'local')->whereIn('et.employment_status', ['employed', 'self_employed']),
-                'relevance_yes'       => $q->whereIn('et.employment_status', ['employed', 'self_employed'])->whereIn('et.course_relevance', ['yes', 'relevant']),
-                'relevance_partially' => $q->whereIn('et.employment_status', ['employed', 'self_employed'])->whereIn('et.course_relevance', ['partially', 'partially_relevant']),
-                'relevance_no'        => $q->whereIn('et.employment_status', ['employed', 'self_employed'])->whereIn('et.course_relevance', ['no', 'not_relevant']),
-                default               => null,
-            };
-        }
-
-        if ($batch !== '')  $q->where('a.batch', $batch);
-        if ($course !== '') $q->where('a.course_code', $course);
-
-        return $q->orderBy('a.last_name')->get();
+        return $this->baseAlumniQuery($program, $batch)
+            ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
+            ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
+            ->select([
+                'a.first_name', 'a.middle_initial', 'a.last_name', 'a.suffix',
+                'a.student_id', 'a.course_code', 'a.batch', 'a.email', 'a.contact_number',
+                'et.employment_status', 'et.course_relevance', 'et.work_location', 'et.created_at',
+            ])
+            ->orderBy('a.last_name')
+            ->orderBy('a.first_name')
+            ->get();
     }
 }

@@ -191,11 +191,9 @@
             margin-top: 1px;
             font-size: 15px;
         }
-        .notif-icon-emp     { background: #EBF4FE; color: #1A6FC4; }
         .notif-icon-alumni  { background: #F0E9F8; color: #7A3F91; }
         .notif-icon-import  { background: #EAFAF3; color: #0E8058; }
         .notif-icon-chat    { background: #FEF0E6; color: #C06A20; }
-        .notif-icon-profile { background: #FDECEF; color: #B4326B; }
         .notif-icon-default { background: #F3F3F3; color: #888888; }
 
         .notif-body         { flex: 1; min-width: 0; }
@@ -221,11 +219,9 @@
             text-transform: uppercase;
             flex-shrink: 0;
         }
-        .notif-tag-emp     { background: #DBEAFE; color: #1347A0; }
         .notif-tag-alumni  { background: #EDE1F9; color: #5A2270; }
         .notif-tag-import  { background: #D1FAE5; color: #065F46; }
         .notif-tag-chat    { background: #FEE8D1; color: #953F0E; }
-        .notif-tag-profile { background: #FBD9E3; color: #8A2049; }
 
         .notif-count-badge {
             display: inline-flex;
@@ -333,6 +329,27 @@
             _groupByDay(rows) {
                 var map = new Map();
                 Array.from(rows)
+                    // Employment updates and alumni profile updates are excluded
+                    // entirely — they never show up in the bell, no matter which
+                    // source (Livewire event or backend) produced them.
+                    .filter(function (n) {
+                        var rawDedup = n.dedup_key || '';
+                        var isEmpEvent = (
+                            rawDedup.startsWith('employment_update') ||
+                            rawDedup.startsWith('employment::')      ||
+                            rawDedup.startsWith('recorded::')        ||
+                            rawDedup.startsWith('updated::')         ||
+                            n.title === 'Employment Status Updated'  ||
+                            n.title === 'New Employment Record'      ||
+                            n.icon  === 'arrow-rotate-right'
+                        );
+                        var isProfileEvent = (
+                            rawDedup.startsWith('profile_update::') ||
+                            n.title === 'Alumni Profile Updated'    ||
+                            n.icon  === 'user-pen'
+                        );
+                        return !isEmpEvent && !isProfileEvent;
+                    })
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
@@ -345,15 +362,6 @@
                             ? new Date(nTimestamp).toISOString().slice(0, 10)
                             : 'unknown';
 
-                        var isEmpEvent = (
-                            rawDedup.startsWith('employment_update') ||
-                            rawDedup.startsWith('employment::')      ||
-                            rawDedup.startsWith('recorded::')        ||
-                            rawDedup.startsWith('updated::')         ||
-                            n.title === 'Employment Status Updated'  ||
-                            n.title === 'New Employment Record'      ||
-                            n.icon  === 'arrow-rotate-right'
-                        );
                         var isChatMsg = (
                             rawDedup.startsWith('chat_msg::') ||
                             n.icon === 'comment-dots'
@@ -366,18 +374,9 @@
                             rawDedup === 'imported' ||
                             n.title  === 'Bulk Import Complete'
                         );
-                        var isProfileEvent = (
-                            rawDedup.startsWith('profile_update::') ||
-                            n.title === 'Alumni Profile Updated'    ||
-                            n.icon  === 'user-pen'
-                        );
 
                         var groupKey;
-                        if (isEmpEvent) {
-                            groupKey = 'employment_day::' + day;
-                        } else if (isProfileEvent) {
-                            groupKey = 'profile_day::' + day;
-                        } else if (isChatMsg) {
+                        if (isChatMsg) {
                             var roomSlug = rawDedup.replace('chat_msg::', '') || 'chat';
                             groupKey = 'chat_msg::' + roomSlug + '::' + day;
                         } else if (isAlumniEvent) {
@@ -396,13 +395,7 @@
                             if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
                                 g.created_at = nTimestamp;
                             }
-                            if (isEmpEvent) {
-                                g.message = g.count + ' employment status update(s) today.';
-                                g.title   = 'Employment Status Updated';
-                            } else if (isProfileEvent) {
-                                g.message = g.count + ' alumni profile update(s) today.';
-                                g.title   = 'Alumni Profile Updated';
-                            } else if (isChatMsg) {
+                            if (isChatMsg) {
                                 var rName = g._roomName || 'group chat';
                                 g.message = g.count + ' new message(s) in ' + rName + '.';
                             } else if (isAlumniEvent) {
@@ -418,15 +411,11 @@
                                 _ids:       [n.id],
                                 _roomName:  n._roomName || '',
                                 created_at: nTimestamp || n.created_at,
-                                title: isEmpEvent     ? 'Employment Status Updated'
-                                     : isProfileEvent ? 'Alumni Profile Updated'
-                                     : isChatMsg      ? (n.title || 'New Chat Message')
+                                title: isChatMsg      ? (n.title || 'New Chat Message')
                                      : isAlumniEvent  ? 'New Alumni Registered'
                                      : isImportEvent  ? 'Bulk Import Complete'
                                      : n.title,
-                                icon: isEmpEvent     ? 'arrow-rotate-right'
-                                    : isProfileEvent ? 'user-pen'
-                                    : isChatMsg      ? 'comment-dots'
+                                icon: isChatMsg      ? 'comment-dots'
                                     : (n.icon || 'bell'),
                             }));
                         }
@@ -608,14 +597,11 @@
     window.__sidebarNotifsMarkRead = function (routeName) {
         var s = window.__safeNotifsStore();
         if (!s) return;
-        var routesToMark = [routeName];
-        if (routeName === 'registrar.alumni') {
-            routesToMark.push('registrar.alumni.register');
-        }
-        if (routeName === 'registrar.alumni.register') {
-            routesToMark.push('registrar.alumni');
-        }
-        routesToMark.forEach(function (r) { s.markReadByRoute(r); });
+        // No cross-mapping: only the exact sidebar link clicked clears its own
+        // notifs. "New Alumni Registered" and "Bulk Import Complete" both link
+        // to registrar.alumni, so their badge only clears when the user opens
+        // Alumni Records — clicking Register Alumni must NOT clear them.
+        s.markReadByRoute(routeName);
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -675,46 +661,9 @@
             });
         });
 
-        window.addEventListener('employment-recorded', function (e) {
-            var today = new Date().toISOString().slice(0, 10);
-            _saveNotif({
-                icon:       'arrow-rotate-right',
-                title:      'Employment Status Updated',
-                message:    'An alumni submitted a new employment record.',
-                link_route: 'registrar.employment.tracking',
-                link_label: 'View Tracking',
-                dedup_key:  'employment_update::' + today,
-            });
-        });
-
-        window.addEventListener('employment-updated', function (e) {
-            var today = new Date().toISOString().slice(0, 10);
-            _saveNotif({
-                icon:       'arrow-rotate-right',
-                title:      'Employment Status Updated',
-                message:    'An alumni updated their employment status.',
-                link_route: 'registrar.employment.tracking',
-                link_label: 'View Tracking',
-                dedup_key:  'employment_update::' + today,
-            });
-        });
-
-        // Alumni profile updates (personal info form) — grouped per day,
-        // same pattern as employment-updated above, with the alumnus'
-        // actual name in the message instead of a generic placeholder.
-        window.addEventListener('profile-updated', function (e) {
-            var d = _detail(e);
-            var today = new Date().toISOString().slice(0, 10);
-            var who = d.name || 'An alumnus';
-            _saveNotif({
-                icon:       'user-pen',
-                title:      'Alumni Profile Updated',
-                message:    who + ' updated their profile information.',
-                link_route: 'registrar.alumni',
-                link_label: 'View Alumni',
-                dedup_key:  'profile_update::' + today,
-            });
-        });
+        // NOTE: 'employment-recorded', 'employment-updated', and 'profile-updated'
+        // no longer create bell notifications on purpose — registrar only wants
+        // New Alumni Registered, Bulk Import Complete, and chat messages here.
 
         window.addEventListener('message-received', function (e) {
             var d = _detail(e);
@@ -977,7 +926,7 @@
                 </div>
                 <p style="font-size:14px; font-weight:600; color:#888888; margin-bottom:6px;">No notifications yet</p>
                 <p style="font-size:12px; color:#BBBBBB; line-height:1.6;">
-                    Alumni registrations, bulk imports, employment updates,<br>profile updates, and chat messages will appear here.
+                    Alumni registrations, bulk imports, and<br>chat messages will appear here.
                 </p>
             </div>
         </template>
@@ -1000,12 +949,10 @@
                     {{-- Icon --}}
                     <div class="notif-icon-wrap"
                          :class="{
-                             'notif-icon-emp':     notif.icon === 'arrow-rotate-right',
                              'notif-icon-alumni':  notif.icon === 'user-graduate',
                              'notif-icon-import':  notif.icon === 'file-import',
                              'notif-icon-chat':    notif.icon === 'comment-dots',
-                             'notif-icon-profile': notif.icon === 'user-pen',
-                             'notif-icon-default': !['arrow-rotate-right','user-graduate','file-import','comment-dots','user-pen'].includes(notif.icon)
+                             'notif-icon-default': !['user-graduate','file-import','comment-dots'].includes(notif.icon)
                          }">
                         <i class="fas" :class="'fa-' + (notif.icon || 'bell')"></i>
                     </div>
@@ -1022,16 +969,12 @@
                                 </span>
 
                                 {{-- Type tags --}}
-                                <span x-show="notif.icon === 'arrow-rotate-right'" x-cloak
-                                      class="notif-tag notif-tag-emp">Employment</span>
                                 <span x-show="notif.icon === 'user-graduate'" x-cloak
                                       class="notif-tag notif-tag-alumni">New Alumni</span>
                                 <span x-show="notif.icon === 'file-import'" x-cloak
                                       class="notif-tag notif-tag-import">Import</span>
                                 <span x-show="notif.icon === 'comment-dots'" x-cloak
                                       class="notif-tag notif-tag-chat">Message</span>
-                                <span x-show="notif.icon === 'user-pen'" x-cloak
-                                      class="notif-tag notif-tag-profile">Profile</span>
 
                                 {{-- Count badge --}}
                                 <span x-show="Number(notif.count) > 1" x-cloak
