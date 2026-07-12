@@ -11,7 +11,9 @@ new class extends Component {
 
     use WithPagination;
 
-    // ── Filters ───────────────────────────────────────────────────────────────
+    // ── Filters — PAGE-LEVEL now. filterCourse (Program) + filterBatch
+    //    (Batch Year) scope EVERYTHING: stat cards, all charts, the
+    //    Program Breakdown table, AND the exported summary report. ───────
     public string $search          = '';
     public string $filterStatus    = '';
     public string $filterLocation  = '';
@@ -22,17 +24,14 @@ new class extends Component {
     public string $sortBy          = 'a.last_name';
     public string $sortDir         = 'asc';
 
-    // ── Modal ─────────────────────────────────────────────────────────────────
-    public bool   $showModal            = false;
-    public string $activeModal          = '';
-    public string $modalFilter          = '';
-    public string $modalCourse          = '';
-    public bool   $modalCourseLocked    = false;
-    public ?int   $modalBatch           = null;
-    public bool   $modalBatchLocked     = false;
-    public int    $modalPage            = 1;
-    public int    $modalPageSize        = 200;
-    public string $modalSearch          = '';
+    // ── Modal (read-only detail view — no in-modal re-filtering) ───────────────
+    public bool   $showModal    = false;
+    public string $activeModal  = '';
+    public string $modalFilter  = '';
+    public string $modalCourse  = '';
+    public ?int   $modalBatch   = null;
+    public int    $modalPage    = 1;
+    public int    $modalPageSize = 200;
 
     // ── Stats ─────────────────────────────────────────────────────────────────
     public int    $totalAlumni     = 0;
@@ -51,6 +50,13 @@ new class extends Component {
     public string $chartCourseData    = '{}';
     public string $chartTrendData     = '{}';
 
+    // ── Top Programs ranking (populated only when a single Program is
+    //    selected via $filterCourse — used to render the "#6 of 12
+    //    programs" rank card instead of the horizontal bar chart) ──────────
+    public ?int $courseRank      = null;
+    public ?int $courseRankTotal = null;
+    public int  $courseRankCount = 0;
+
     // ── Allowed sort columns ──────────────────────────────────────────────────
     #[Locked]
     protected array $allowedSortColumns = [
@@ -58,17 +64,13 @@ new class extends Component {
         'a.course_code', 'a.batch', 'et.employment_status',
     ];
 
-    protected $queryString = [
-        'search'          => ['except' => ''],
-        'filterStatus'    => ['except' => ''],
-        'filterLocation'  => ['except' => ''],
-        'filterRelevance' => ['except' => ''],
-        'filterBatch'     => ['except' => ''],
-        'filterCourse'    => ['except' => ''],
-        'filterDept'      => ['except' => ''],
-        'sortBy'          => ['except' => 'a.last_name'],
-        'sortDir'         => ['except' => 'asc'],
-    ];
+    /**
+     * Clean URL — same approach as Alumni Records: never sync filters to
+     * the query string. Filtering must never change the address bar, and
+     * switching Program/Batch must never resurrect a modal from a stale
+     * URL/history state.
+     */
+    protected function queryString(): array { return []; }
 
     public function mount(): void
     {
@@ -77,24 +79,84 @@ new class extends Component {
             $this->redirect(route('login'));
             return;
         }
-        $this->computeStats();
-        $this->buildCharts();
+        $this->refreshDashboard();
     }
 
     public function refreshData(): void
     {
+        $this->refreshDashboard();
+    }
+
+    /**
+     * Program / Batch Year filter bar handlers — every time either changes,
+     * close any open drill-down modal (it was scoped to the previous data
+     * and is no longer valid), then recompute stats + rebuild every chart
+     * + the Program Breakdown table so the whole dashboard (and whatever
+     * gets exported next) stays in sync with the selected scope.
+     */
+    public function updatedFilterCourse(): void
+    {
+        $this->closeAnyModal();
+        $this->refreshDashboard();
+    }
+
+    public function updatedFilterBatch(): void
+    {
+        $this->closeAnyModal();
+        $this->refreshDashboard();
+    }
+
+    public function clearFilters(): void
+    {
+        $this->closeAnyModal();
+        $this->filterCourse = '';
+        $this->filterBatch  = '';
+        $this->refreshDashboard();
+    }
+
+    /**
+     * Single choke point for "recompute everything + rebuild every chart"
+     * — used by mount(), refreshData(), the filter-bar updated hooks,
+     * clearFilters(), and closeModal(). Centralizing this here (instead of
+     * repeating computeStats()+buildCharts()+unset() at every call site)
+     * also lets us reliably tell the front-end *exactly* when fresh chart
+     * data is ready via a dispatched browser event, rather than relying on
+     * a generic Livewire lifecycle hook that can silently miss updates and
+     * leave the charts (donut %, Top Programs, batch/trend bars) showing
+     * stale data after a filter change.
+     */
+    private function refreshDashboard(): void
+    {
         $this->computeStats();
         $this->buildCharts();
         unset($this->courseAnalytics);
-        unset($this->availableBatches);
-        unset($this->availableCourses);
-        unset($this->courseMap);
-        unset($this->availableModalBatchesForFilter);
+        $this->dispatch('emp-charts-refresh');
+    }
+
+    /**
+     * Closes the read-only detail modal, if one happens to be open, without
+     * touching the Program/Batch filters themselves. Called whenever those
+     * filters change so the user is never left staring at a modal full of
+     * records that no longer match the current scope.
+     */
+    private function closeAnyModal(): void
+    {
+        if ($this->activeModal !== '') {
+            $this->activeModal = '';
+            $this->modalFilter = '';
+            $this->modalBatch  = null;
+            $this->modalCourse = '';
+            $this->modalPage   = 1;
+            unset($this->modalRecords);
+        }
     }
 
     private function baseQuery(): \Illuminate\Database\Query\Builder
     {
-        return DB::table('alumni as a')->whereNull('a.deleted_at');
+        $q = DB::table('alumni as a')->whereNull('a.deleted_at');
+        if ($this->filterCourse !== '') $q->where('a.course_code', $this->filterCourse);
+        if ($this->filterBatch  !== '') $q->where('a.batch', $this->filterBatch);
+        return $q;
     }
 
     private function latestEmpSubquery(): \Illuminate\Database\Query\Builder
@@ -126,7 +188,10 @@ new class extends Component {
 
     public function buildCharts(): void
     {
-        // Status donut
+        $courseFilter = $this->filterCourse;
+        $batchFilter  = $this->filterBatch;
+
+        // Status donut — already scoped since it reads from computeStats()
         $this->chartStatusData = json_encode([
             'labels'  => ['Employed', 'Self-Employed', 'Unemployed', 'Not Filled'],
             'data'    => [$this->totalEmployed, $this->totalSelf, $this->totalUnemployed, $this->totalNotFilled],
@@ -134,11 +199,15 @@ new class extends Component {
             'filters' => ['employed', 'self_employed', 'unemployed', 'no_record'],
         ]);
 
-        // Relevance donut
+        // Relevance donut — joined to alumni so the Program/Batch filter applies
         $relevanceRows = DB::table('employment_trackings as et')
             ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id'))
+            ->join('alumni as a', 'a.id', '=', 'latest_et.alumni_id')
+            ->whereNull('a.deleted_at')
             ->whereNull('et.deleted_at')
             ->whereNotNull('et.course_relevance')
+            ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
+            ->when($batchFilter  !== '', fn($q) => $q->where('a.batch', $batchFilter))
             ->select('et.course_relevance', DB::raw('COUNT(*) as cnt'))
             ->groupBy('et.course_relevance')
             ->get()->keyBy('course_relevance');
@@ -154,9 +223,12 @@ new class extends Component {
             'filters' => ['relevance_yes', 'relevance_partially', 'relevance_no'],
         ]);
 
-        // Batch stacked bar
+        // Batch stacked bar — scoped by Program filter (Batch filter would
+        // just collapse it to a single bar, which is expected/fine)
         $batchRows = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
+            ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
+            ->when($batchFilter  !== '', fn($q) => $q->where('a.batch', $batchFilter))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -176,23 +248,83 @@ new class extends Component {
             'total'      => $batchRows->pluck('total')->values(),
         ]);
 
-        // Top courses horizontal bar
-        $courseRows = DB::table('alumni as a')
+        // Top Programs — full ranking (by employed + self-employed count),
+        // scoped only by Batch (never by Program — ranking one program
+        // against itself is meaningless). Always computed in full so we
+        // can tell a selected Program exactly where it stands.
+        $courseRowsAll = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
+            ->when($batchFilter !== '', fn($q) => $q->where('a.batch', $batchFilter))
             ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->join('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->whereIn('et.employment_status', ['employed','self_employed'])
             ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('a.course_code')->orderByDesc('cnt')->limit(10)->get();
+            ->groupBy('a.course_code')->orderByDesc('cnt')->get()
+            ->values();
 
-        $this->chartCourseData = json_encode([
-            'labels' => $courseRows->pluck('course_code'),
-            'data'   => $courseRows->pluck('cnt'),
-        ]);
+        if ($courseFilter === '') {
+            // No Program selected — rank ALL programs by employed/working
+            // count (courseRowsAll above already covers every program),
+            // but only surface the top 3 here as the horizontal bar.
+            $courseRows = $courseRowsAll->take(3);
 
-        // Employment rate trend per batch (line chart)
+            $this->chartCourseData = json_encode([
+                'labels' => $courseRows->pluck('course_code'),
+                'data'   => $courseRows->pluck('cnt'),
+            ]);
+
+            $this->courseRank      = null;
+            $this->courseRankTotal = null;
+            $this->courseRankCount = 0;
+        } else {
+            // A single Program is selected — the horizontal bar is replaced
+            // by a rank card in the Blade view (e.g. "#6 of 12 programs"),
+            // so no chart data is needed here.
+            $this->chartCourseData = json_encode(['labels' => [], 'data' => []]);
+
+            // Case-insensitive, trimmed match. The Program dropdown's values
+            // come from the `courses` table, but `alumni.course_code` is
+            // free-entered data — a stray space or different casing (e.g.
+            // "Bsit" vs "BSIT") still matches fine in the SQL filter above
+            // (MySQL string comparison is case-insensitive by default), but
+            // a strict PHP === comparison here would silently fail and make
+            // a Program that clearly has data show up as "no data" in the
+            // rank card. Normalize both sides before comparing so the two
+            // stay in sync.
+            $needle    = mb_strtolower(trim($courseFilter));
+            $rankIndex = $courseRowsAll->search(fn($r) => mb_strtolower(trim((string) $r->course_code)) === $needle);
+
+            // Ground-truth working count for THIS Program, taken from the
+            // already course-scoped computeStats() run above (same filter,
+            // same tables) — this can never disagree with the "Working"
+            // stat card, unlike re-deriving it from $courseRowsAll where a
+            // stray casing/whitespace mismatch in the free-typed
+            // `alumni.course_code` column could make the row fail to match
+            // and silently show "no data" even though alumni are working.
+            $groundTruthWorking = $this->totalEmployed + $this->totalSelf;
+
+            $this->courseRankTotal = $courseRowsAll->count();
+            $this->courseRankCount = $groundTruthWorking;
+
+            if ($rankIndex !== false) {
+                $this->courseRank = $rankIndex + 1;
+            } elseif ($groundTruthWorking > 0) {
+                // The stats clearly show working alumni for this Program,
+                // but the ranking list (matched by course_code) didn't pick
+                // it up — rather than showing a misleading "no data" card,
+                // still rank it. Worst case: it slots in last place.
+                $this->courseRankTotal = $courseRowsAll->count() + 1;
+                $this->courseRank      = $this->courseRankTotal;
+            } else {
+                $this->courseRank = null;
+            }
+        }
+
+        // Employment rate trend per batch (line chart) — scoped by Program filter
         $trendRows = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
+            ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
+            ->when($batchFilter  !== '', fn($q) => $q->where('a.batch', $batchFilter))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -220,11 +352,28 @@ new class extends Component {
             ->toArray();
     }
 
+    /**
+     * Distinct batch years available — populates the Batch Year filter
+     * dropdown.
+     */
+    #[Computed(persist: true)]
+    public function batchYears()
+    {
+        return DB::table('alumni')
+            ->whereNull('deleted_at')
+            ->whereNotNull('batch')
+            ->distinct()
+            ->orderByDesc('batch')
+            ->pluck('batch');
+    }
+
     #[Computed]
     public function courseAnalytics()
     {
         return DB::table('alumni as a')
             ->whereNull('a.deleted_at')
+            ->when($this->filterCourse !== '', fn($q) => $q->where('a.course_code', $this->filterCourse))
+            ->when($this->filterBatch  !== '', fn($q) => $q->where('a.batch', $this->filterBatch))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -245,56 +394,12 @@ new class extends Component {
             });
     }
 
-    #[Computed(persist: true)]
-    public function availableBatches()
-    {
-        return DB::table('alumni')->whereNull('deleted_at')
-            ->select('batch')->distinct()->orderByDesc('batch')->pluck('batch');
-    }
-
-    #[Computed(persist: true)]
-    public function availableCourses()
-    {
-        return DB::table('alumni')->whereNull('deleted_at')
-            ->select('course_code')->distinct()->orderBy('course_code')->pluck('course_code');
-    }
-
-    #[Computed]
-    public function availableModalBatchesForFilter()
-    {
-        if ($this->modalFilter === 'no_record') {
-            return DB::table('alumni as a')
-                ->whereNull('a.deleted_at')
-                ->whereNotExists(fn($sq) => $sq
-                    ->from('employment_trackings as et')
-                    ->whereColumn('et.alumni_id', 'a.id')
-                    ->whereNull('et.deleted_at')
-                )
-                ->select('a.batch')->distinct()->orderByDesc('a.batch')->pluck('a.batch');
-        }
-
-        $q = DB::table('alumni as a')
-            ->whereNull('a.deleted_at')
-            ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
-            ->join('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
-            ->select('a.batch')->distinct()->orderByDesc('a.batch');
-
-        match ($this->modalFilter) {
-            'employed'            => $q->where('et.employment_status', 'employed'),
-            'self_employed'       => $q->where('et.employment_status', 'self_employed'),
-            'unemployed'          => $q->where('et.employment_status', 'unemployed'),
-            'employed_all'        => $q->whereIn('et.employment_status', ['employed', 'self_employed']),
-            'abroad'              => $q->where('et.work_location', 'abroad')->whereIn('et.employment_status', ['employed','self_employed']),
-            'local'               => $q->where('et.work_location', 'local')->whereIn('et.employment_status', ['employed','self_employed']),
-            'relevance_yes'       => $q->whereIn('et.employment_status', ['employed','self_employed'])->where('et.course_relevance', 'yes'),
-            'relevance_partially' => $q->whereIn('et.employment_status', ['employed','self_employed'])->where('et.course_relevance', 'partially'),
-            'relevance_no'        => $q->whereIn('et.employment_status', ['employed','self_employed'])->where('et.course_relevance', 'no'),
-            default               => null,
-        };
-
-        return $q->pluck('a.batch');
-    }
-
+    /**
+     * Records shown inside the detail modal. modalFilter / modalBatch / modalCourse
+     * are set ONLY from openModal() — i.e. by clicking a stat card, chart segment,
+     * or Program Breakdown row. There is no in-modal UI to change them anymore;
+     * the modal is a read-only drill-down of whatever was clicked.
+     */
     #[Computed]
     public function modalRecords()
     {
@@ -317,17 +422,6 @@ new class extends Component {
 
             if ($this->modalBatch !== null) $q->where('a.batch', $this->modalBatch);
             if ($this->modalCourse !== '')  $q->where('a.course_code', $this->modalCourse);
-
-            if ($this->modalSearch) {
-                $term = '%' . str_replace(['%','_'], ['\%','\_'], $this->modalSearch) . '%';
-                $q->where(fn($s) => $s
-                    ->where('a.first_name',   'like', $term)
-                    ->orWhere('a.last_name',  'like', $term)
-                    ->orWhere('a.student_id', 'like', $term)
-                    ->orWhere('a.course_code','like', $term)
-                    ->orWhere('a.email',      'like', $term)
-                );
-            }
 
             return $q->orderBy('a.last_name')
                      ->paginate($this->modalPageSize, ['*'], 'mPage', $this->modalPage);
@@ -359,18 +453,6 @@ new class extends Component {
 
         if ($this->modalBatch !== null) $q->where('a.batch', $this->modalBatch);
         if ($this->modalCourse !== '')  $q->where('a.course_code', $this->modalCourse);
-
-        if ($this->modalSearch) {
-            $term = '%' . str_replace(['%','_'], ['\%','\_'], $this->modalSearch) . '%';
-            $q->where(fn($s) => $s
-                ->where('a.first_name',      'like', $term)
-                ->orWhere('a.last_name',     'like', $term)
-                ->orWhere('a.student_id',    'like', $term)
-                ->orWhere('a.course_code',   'like', $term)
-                ->orWhere('a.email',         'like', $term)
-                ->orWhere('a.contact_number','like', $term)
-            );
-        }
 
         return $q->orderByDesc('et.created_at')
                  ->paginate($this->modalPageSize, ['*'], 'mPage', $this->modalPage);
@@ -420,6 +502,22 @@ new class extends Component {
         };
     }
 
+    /**
+     * Human-readable summary of the CURRENT PAGE-LEVEL filter (Program +
+     * Batch Year) — used inside the Generate Reports dropdown message.
+     * This is exactly what gets exported now (a scoped summary report),
+     * independent of whatever drill-down modal happens to be open.
+     */
+    #[Computed]
+    public function activeReportFilterSummary(): string
+    {
+        $parts = [];
+        if ($this->filterCourse !== '') $parts[] = $this->filterCourse;
+        if ($this->filterBatch  !== '') $parts[] = 'Batch ' . $this->filterBatch;
+
+        return count($parts) ? implode(' · ', $parts) : 'All Programs';
+    }
+
     public function openModal(string $filter = '', ?int $batch = null, string $course = ''): void
     {
         $allowedFilters = [
@@ -429,49 +527,23 @@ new class extends Component {
         ];
         if (!in_array($filter, $allowedFilters, true)) $filter = '';
 
-        $this->modalFilter       = $filter;
-        $this->modalBatch        = $batch !== null ? (int)$batch : null;
-        $this->modalBatchLocked  = ($batch !== null);
-        $this->modalCourse       = strip_tags($course);
-        $this->modalCourseLocked = ($course !== '');
-        $this->modalPage         = 1;
-        $this->modalSearch       = '';
-        $this->activeModal       = 'detail';
+        $this->modalFilter = $filter;
+        $this->modalBatch  = $batch !== null ? (int)$batch : null;
+        $this->modalCourse = strip_tags($course);
+        $this->modalPage   = 1;
+        $this->activeModal = 'detail';
         unset($this->modalRecords);
-        unset($this->availableModalBatchesForFilter);
-    }
-
-    public function updatingModalSearch(): void { $this->modalPage = 1; }
-    public function updatingModalBatch(): void  { $this->modalPage = 1; }
-    public function updatingModalCourse(): void { $this->modalPage = 1; }
-
-    public function clearModalFilters(): void
-    {
-        $this->modalBatch        = null;
-        $this->modalBatchLocked  = false;
-        $this->modalCourse       = '';
-        $this->modalCourseLocked = false;
-        $this->modalSearch       = '';
-        $this->modalPage         = 1;
-        unset($this->modalRecords);
-        unset($this->availableModalBatchesForFilter);
     }
 
     public function closeModal(): void
     {
-        $this->activeModal       = '';
-        $this->modalFilter       = '';
-        $this->modalBatch        = null;
-        $this->modalBatchLocked  = false;
-        $this->modalCourse       = '';
-        $this->modalCourseLocked = false;
-        $this->modalPage         = 1;
-        $this->modalSearch       = '';
+        $this->activeModal = '';
+        $this->modalFilter = '';
+        $this->modalBatch  = null;
+        $this->modalCourse = '';
+        $this->modalPage   = 1;
         unset($this->modalRecords);
-        unset($this->availableModalBatchesForFilter);
-        $this->computeStats();
-        $this->buildCharts();
-        unset($this->courseAnalytics);
+        $this->refreshDashboard();
     }
 
     public function getPhotoUrl(?string $path): string
@@ -492,20 +564,6 @@ new class extends Component {
         $parts[] = trim($l ?? '');
         if (trim($s ?? '') !== '') $parts[] = trim($s);
         return implode(' ', array_filter($parts));
-    }
-
-    public function highlight(string $text, string $search): string
-    {
-        if (!$search || !$text) return e($text);
-        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
-        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
-        $out     = '';
-        foreach ($parts as $i => $part) {
-            $out .= ($i % 2 === 1)
-                ? '<mark class="ar-hl">' . e($part) . '</mark>'
-                : e($part);
-        }
-        return $out;
     }
 
     public function with(): array { return []; }
@@ -558,9 +616,6 @@ new class extends Component {
     /* Location bar fill animation */
     .loc-bar-fill { transition: width .7s cubic-bezier(.4,0,.2,1); }
 
-    /* Batch nav disabled */
-    .batch-option-disabled { opacity:.38; cursor:not-allowed; pointer-events:none; }
-
     /* Cursor-follow tooltip trigger elements (cursor only, tooltip itself is disabled on mobile below) */
     [data-tip] { cursor: pointer; }
 
@@ -569,20 +624,6 @@ new class extends Component {
     @media (max-width: 768px), (hover: none) {
         #emp-cursor-tip { display: none !important; }
     }
-
-    /* ── Search highlight (matches Alumni Records / Dashboard) ─────────────── */
-    mark.ar-hl {
-        background: #BFDBFE;
-        color: inherit;
-        border-radius: 2px;
-        padding: 0 1px;
-        font-weight: 700;
-    }
-
-    /* ── Filtering progress bar (matches Alumni Records / Dashboard) ───────── */
-    .ar-filter-progress-track { height:2px;width:100%;overflow:hidden;background:transparent;position:relative; }
-    .ar-filter-progress-bar { position:absolute;top:0;left:0;height:100%;width:40%;border-radius:99px;background:linear-gradient(135deg,#7A3F91,#9b59b6);animation:arFilterProgress 1s ease-in-out infinite; }
-    @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
 
     /* ── Close button (matches Alumni Records) ──────────────────────────────
        Static, attached tooltip that stays BELOW the X button — no longer
@@ -630,6 +671,173 @@ new class extends Component {
         .emp-page-header-wrap { padding: 1rem 1.5rem 0.5rem; }
     }
 
+    /* ── Header row: title left, Generate Reports button pinned top-right ── */
+    .emp-header-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+    }
+
+    /* ── Program / Batch Year filter bar ─────────────────────────────────── */
+    .emp-filter-select {
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding-right: 4px;
+    }
+    .emp-filter-pill {
+        transition: border-color .15s ease;
+    }
+    .emp-filter-pill:hover { border-color: #c4b5fd !important; }
+
+    /* ── Filter bar: single row that WRAPS on narrow screens instead of
+       horizontally scrolling. IMPORTANT: this bar must never set
+       overflow-x/overflow-y — any overflow value here clips the absolutely
+       positioned .ar-dropdown-menu popups (Batch Year / Program Code),
+       which is what was making the dropdowns silently fail to show up.
+       Mirrors the Alumni Records filter bar, which has no overflow on its
+       wrapper for the same reason. This wrapper is also given an explicit
+       stacking context (position + z-index) so its dropdown popups always
+       paint ABOVE the dashboard content below (stat cards / charts), and
+       so a click landing on a dropdown item can never be mistaken for a
+       click on whatever card happens to sit underneath it. ──────────────── */
+    .emp-filter-bar {
+        transition: opacity .2s ease;
+        position: relative;
+        z-index: 50;
+    }
+
+    .ar-filter-label { pointer-events: none; }
+    .ar-dropdown { position: relative; }
+    .ar-dropdown-menu {
+        position: absolute; top: calc(100% + 4px); left: 0;
+        min-width: 100%; max-height: 220px; overflow-y: auto;
+        background: #fff; border: 1.5px solid #E8E0F0;
+        border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
+        z-index: 500; padding: 4px;
+        scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+    }
+    .ar-dropdown-menu::-webkit-scrollbar { width: 5px; }
+    .ar-dropdown-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+    .ar-dropdown-item {
+        display: block; width: 100%; padding: 7px 10px; border-radius: 7px;
+        font-size: .8rem; font-weight: 600; text-align: left; color: #333;
+        transition: background .1s; cursor: pointer; white-space: nowrap;
+        border: none; background: transparent;
+    }
+    .ar-dropdown-item:hover { background: #F5F0FA; color: #7A3F91; }
+    .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
+    .ar-dropdown-trigger {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 8px;
+        font-size: .8rem; font-weight: 600; background: #fff; color: #333;
+        cursor: pointer; transition: border-color .15s, background .15s, color .15s;
+        white-space: nowrap; user-select: none;
+    }
+    .ar-dropdown-trigger:hover { border-color: #c49ed8; }
+    .ar-dropdown-trigger.has-value { border-color: #7A3F91; background: #F9F7FC; color: #7A3F91; }
+    .ar-dropdown-trigger .ar-chevron { transition: transform .18s; font-size: .65rem; opacity: .6; }
+    .ar-dropdown-trigger.open .ar-chevron { transform: rotate(180deg); }
+    .emp-filter-progress-track {
+        height: 2px; width: 100%; overflow: hidden;
+        background: transparent; position: relative; margin-top: 4px;
+    }
+    .emp-filter-progress-bar {
+        position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+        border-radius: 99px; background: linear-gradient(135deg,#7A3F91,#9b59b6);
+        animation: empFilterProgress 1s ease-in-out infinite;
+    }
+    @keyframes empFilterProgress { 0%{left:-40%} 100%{left:100%} }
+
+    /* ── Generate Reports button (copied styling from Alumni Records) ──── */
+    .ar-report-btn {
+        position: relative;
+        display: flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px;
+        border-radius: 10px;
+        background: linear-gradient(135deg,#475569,#64748b);
+        border: 1.5px solid transparent;
+        color: #fff;
+        cursor: pointer;
+        transition: all .15s;
+        font-size: 15px;
+        flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(71,85,105,.35);
+    }
+    .ar-report-btn:hover,
+    .ar-report-btn-active { background: linear-gradient(135deg,#334155,#475569); box-shadow: 0 3px 10px rgba(71,85,105,.5); }
+    .ar-report-btn:disabled { opacity: .7; cursor: wait; }
+    .ar-report-tip {
+        position: absolute;
+        top: calc(100% + 8px); right: 0;
+        background: #1a1a1a; color: #fff;
+        font-size: 10px; font-weight: 600; letter-spacing: .05em;
+        padding: 5px 11px; border-radius: 7px; white-space: nowrap;
+        pointer-events: none; opacity: 0; transition: opacity .15s ease;
+        z-index: 9999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    }
+    .ar-report-tip::before {
+        content: '';
+        position: absolute; bottom: 100%; right: 12px;
+        border: 5px solid transparent; border-bottom-color: #1a1a1a;
+    }
+    .ar-report-btn:hover .ar-report-tip { opacity: 1; }
+    @media (max-width: 768px), (hover: none) {
+        .ar-report-tip { display: none !important; }
+    }
+    .ar-report-menu {
+        position: absolute; top: calc(100% + 8px); right: 0;
+        width: min(260px, calc(100vw - 24px));
+        background: #fff;
+        border: 1.5px solid #E8E0F0; border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(122,63,145,.18);
+        z-index: 500; padding: 6px;
+    }
+    .ar-report-menu-message {
+        padding: 10px 10px 11px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid #F0ECF5;
+    }
+    .ar-report-menu-message .lbl {
+        font-size: .6rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .07em; color: #7A3F91; display: block; margin-bottom: 3px;
+    }
+    .ar-report-menu-message .txt {
+        font-size: .75rem; font-weight: 600; color: #111111; line-height: 1.35;
+    }
+    .ar-report-menu-message .cnt {
+        font-size: .68rem; font-weight: 600; color: #333333; margin-top: 3px; display: block;
+    }
+    .ar-report-menu-item {
+        display: flex; align-items: center; gap: 9px; width: 100%;
+        padding: 9px 10px; border-radius: 8px;
+        margin-bottom: 4px;
+        font-size: .82rem; font-weight: 600; color: #333333;
+        border: 1.5px solid transparent; cursor: pointer; text-align: left;
+        transition: background .12s, border-color .12s, opacity .12s;
+    }
+    .ar-report-menu-item:last-child { margin-bottom: 0; }
+    .ar-report-menu-item .ar-item-icon {
+        width: 22px; height: 22px; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; font-size: 11px;
+    }
+    .ar-report-menu-item .ar-item-label { flex: 1; }
+    .ar-report-menu-item.item-pdf   { background: #FEF2F2; border-color: #FEE2E2; }
+    .ar-report-menu-item.item-pdf:hover   { background: #FEE2E2; border-color: #FECACA; }
+    .ar-report-menu-item.item-pdf .ar-item-icon { background: #DC2626; color: #fff; }
+    .ar-report-menu-item.item-excel { background: #ECFDF5; border-color: #D1FAE5; }
+    .ar-report-menu-item.item-excel:hover { background: #D1FAE5; border-color: #A7F3D0; }
+    .ar-report-menu-item.item-excel .ar-item-icon { background: #059669; color: #fff; }
+    .ar-report-menu-item.item-print { background: #F5F5F5; border-color: #EDEDED; }
+    .ar-report-menu-item.item-print:hover { background: #ECECEC; border-color: #E0E0E0; }
+    .ar-report-menu-item.item-print .ar-item-icon { background: #555555; color: #fff; }
+    .ar-report-menu-item:disabled { opacity: .55; cursor: wait; }
+
     @media (max-width: 640px) {
         .stat-cards-grid { display:grid!important; grid-template-columns:1fr 1fr!important; gap:8px!important; }
         .stat-cards-grid > div { flex:none!important; min-width:0!important; }
@@ -640,7 +848,6 @@ new class extends Component {
         .chart-trend-wrap { height:240px!important; }
         .emp-page-header h1 { font-size:1.5rem!important; }
         .course-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
-        .modal-toolbar { flex-wrap:wrap; gap:6px; }
         .modal-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
         .modal-footer-inner { flex-direction:column; align-items:flex-start; gap:8px; }
     }
@@ -710,22 +917,139 @@ new class extends Component {
 
     {{-- PAGE HEADER — fixed, does not move/scroll away --}}
     <div class="emp-page-header-wrap shrink-0">
-        <div class="flex items-center gap-3 emp-page-header">
-            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-chart-column text-white text-base"></i>
+        <div class="emp-header-row">
+            <div class="flex items-center gap-3 emp-page-header">
+                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    <i class="fas fa-chart-column text-white text-base"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
+                    <p class="text-[#333333] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
+                </div>
             </div>
-            <div>
-                <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
-                <p class="text-[#666666] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
+
+            {{-- ══ GENERATE REPORTS BUTTON ══ --}}
+            <div class="relative shrink-0" wire:ignore
+                 x-data
+                 x-init="window.__empEnsureReportStore && window.__empEnsureReportStore()"
+                 @click.outside="$store.empReport.open=false" wire:key="emp-report-dropdown">
+                <button type="button" @click.stop="$store.empReport.toggle()" class="ar-report-btn"
+                        :class="{ 'ar-report-btn-active': $store.empReport.open }">
+                    <i class="fas fa-chart-column"></i>
+                    <span class="ar-report-tip">Generate Reports</span>
+                </button>
+
+                <div x-show="$store.empReport.open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-report-menu" style="display:none;">
+
+                    <div class="ar-report-menu-message">
+                        <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
+                        <span class="txt">{{ $this->activeReportFilterSummary }}</span>
+                        <span class="cnt">{{ number_format($totalAlumni) }} alumni in this scope</span>
+                    </div>
+
+                    <button type="button" @click="$store.empReport.doExport('pdf', $wire)" class="ar-report-menu-item item-pdf">
+                        <span class="ar-item-icon"><i class="fas fa-file-pdf"></i></span>
+                        <span class="ar-item-label">Export as PDF</span>
+                    </button>
+
+                    <button type="button" @click="$store.empReport.doExport('excel', $wire)" class="ar-report-menu-item item-excel">
+                        <span class="ar-item-icon"><i class="fas fa-file-excel"></i></span>
+                        <span class="ar-item-label">Export as Excel</span>
+                    </button>
+
+                    <button type="button" @click="$store.empReport.doExport('print', $wire)"
+                            :disabled="$store.empReport.printLock" class="ar-report-menu-item item-print">
+                        <span class="ar-item-icon"><i class="fas fa-print"></i></span>
+                        <span class="ar-item-label">Print Current View</span>
+                    </button>
+                </div>
             </div>
+        </div>
+
+        {{-- ══ PROGRAM / BATCH YEAR FILTER BAR — scopes cards, charts,
+             Program Breakdown table, AND whatever gets exported. Same
+             compact, icon-dropdown treatment as Alumni Records (FILTERS
+             label + custom Alpine dropdowns — no native <select>). Wraps
+             instead of scrolling so the dropdown popups are never clipped
+             (see .emp-filter-bar comment above). Wire:loading dim +
+             progress-bar match Alumni Records too. Every click inside this
+             bar is stopped from bubbling (@click.stop), so picking a
+             filter value can NEVER be mistaken for a click on the
+             dashboard cards/charts underneath. ══ --}}
+        <div class="emp-filter-bar flex items-center gap-2 mt-3 flex-wrap"
+             wire:loading.class="opacity-60" wire:target="filterCourse,filterBatch"
+             @click.stop>
+
+            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+
+            <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
+
+            {{-- Batch Year --}}
+            <div class="ar-dropdown shrink-0"
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('filterBatch',val); this.close(); } }"
+                 @click.outside="close()" wire:key="emp-batch-dropdown">
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterBatch!=='','open':open }" class="ar-dropdown-trigger">
+                    <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
+                    <span>@if($filterBatch){{ $filterBatch }}@else All Batch Years @endif</span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;" @click.stop>
+                    <button type="button" @click.stop="select('')" :class="{'active':$wire.filterBatch===''}" class="ar-dropdown-item">All Batch Years</button>
+                    @foreach($this->batchYears as $year)
+                    <button type="button" @click.stop="select('{{ $year }}')" :class="{'active':$wire.filterBatch==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Program Code --}}
+            <div class="ar-dropdown shrink-0"
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('filterCourse',val); this.close(); } }"
+                 @click.outside="close()" wire:key="emp-course-dropdown">
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterCourse!=='','open':open }" class="ar-dropdown-trigger">
+                    <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
+                    <span>@if($filterCourse){{ $filterCourse }}@else All Program Codes @endif</span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;" @click.stop>
+                    <button type="button" @click.stop="select('')" :class="{'active':$wire.filterCourse===''}" class="ar-dropdown-item">All Program Codes</button>
+                    @foreach($this->courseMap as $code => $name)
+                    <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.filterCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $code }}</button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Reset --}}
+            @if($filterCourse !== '' || $filterBatch !== '')
+                <button wire:click="clearFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearFilters"
+                        type="button"
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
+                    <i class="fas fa-rotate-left text-sm"></i>
+                    <span class="hidden sm:inline">Reset</span>
+                </button>
+            @endif
+        </div>
+
+        {{-- Filtering progress bar --}}
+        <div class="emp-filter-progress-track" wire:loading wire:target="filterCourse,filterBatch">
+            <div class="emp-filter-progress-bar"></div>
         </div>
     </div>
 
 <div class="flex-1 overflow-y-auto"
      style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
      @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
-<div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border">
+<div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
+     wire:loading.class="opacity-60" wire:target="filterCourse,filterBatch" style="transition:opacity .2s ease;">
 
     {{-- ── 4 STAT CARDS ── --}}
     @php
@@ -739,7 +1063,7 @@ new class extends Component {
             [''           , $totalSubmitted , 'fa-file-circle-check', 'bg-violet-100' , 'text-violet-700' , 'stat-card-submitted' , 'Submitted'  , $responseRate.'% response rate'],
             ['employed_all', $totalWorking  , 'fa-briefcase'        , 'bg-emerald-100', 'text-emerald-700', 'stat-card-working'   , 'Working'    , $empRate.'% of total alumni'],
             ['unemployed'  , $totalUnemployed,'fa-circle-pause'     , 'bg-amber-100'  , 'text-amber-700'  , 'stat-card-unemployed', 'Unemployed' , $unempRate.'% of submitted'],
-            ['no_record'   , $totalNotFilled, 'fa-circle-question'  , 'bg-gray-100'   , 'text-gray-600'   , 'stat-card-nofill'   , 'No Record'  , $nfRate.'% of total alumni'],
+            ['no_record'   , $totalNotFilled, 'fa-circle-question'  , 'bg-gray-100'   , 'text-[#333333]'  , 'stat-card-nofill'   , 'No Record'  , $nfRate.'% of total alumni'],
         ];
     @endphp
     <div class="stat-cards-grid flex gap-3 flex-wrap lg:flex-nowrap">
@@ -778,7 +1102,7 @@ new class extends Component {
                 <span class="w-2 h-2 rounded-full bg-[#10b981] shrink-0"></span>
                 <div class="flex flex-col min-w-0">
                     <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Employment Status</span>
-                    <span class="text-[.62rem] text-[#888888] font-medium leading-tight mt-0.5">Overall breakdown of alumni job status</span>
+                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">Overall breakdown of alumni job status</span>
                 </div>
             </div>
             <div class="flex-1 min-h-0 flex items-center justify-center p-2" wire:ignore>
@@ -798,7 +1122,7 @@ new class extends Component {
                 <span class="w-2 h-2 rounded-full bg-[#7a3f91] shrink-0"></span>
                 <div class="flex flex-col min-w-0 flex-1">
                     <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Work Location</span>
-                    <span class="text-[.62rem] text-[#888888] font-medium leading-tight mt-0.5">Where working alumni are based</span>
+                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">Where working alumni are based</span>
                 </div>
                 <span class="text-[.65rem] font-bold text-[#7a3f91] bg-[#f0e6f8] px-2 py-0.5 rounded-full shrink-0">{{ number_format($locTotal) }} working</span>
             </div>
@@ -806,13 +1130,13 @@ new class extends Component {
                 <div class="flex items-end justify-between">
                     <div>
                         <p class="text-2xl sm:text-3xl font-black leading-none" style="color:#7a3f91;">{{ number_format($totalLocal) }}</p>
-                        <p class="text-[11px] font-bold text-[#111111] mt-1">Local</p>
+                        <p class="text-[11px] font-bold text-[#111111] mt-1">Local / PH</p>
                         <p class="text-[11px] font-black mt-0.5" style="color:#7a3f91;">{{ $localPct }}%</p>
                     </div>
-                    <div class="text-[10px] font-semibold text-[#AAAAAA] self-center pb-4">-</div>
+                    <div class="text-[10px] font-semibold text-[#333333] self-center pb-4">-</div>
                     <div class="text-right">
                         <p class="text-2xl sm:text-3xl font-black leading-none" style="color:#c084fc;">{{ number_format($totalAbroad) }}</p>
-                        <p class="text-[11px] font-bold text-[#111111] mt-1">OFW / Abroad</p>
+                        <p class="text-[11px] font-bold text-[#111111] mt-1">Abroad / OFW</p>
                         <p class="text-[11px] font-black mt-0.5" style="color:#c084fc;">{{ $abroadPct }}%</p>
                     </div>
                 </div>
@@ -850,7 +1174,7 @@ new class extends Component {
                 <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                 <div class="flex flex-col min-w-0">
                     <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Job Relevance</span>
-                    <span class="text-[.62rem] text-[#888888] font-medium leading-tight mt-0.5">Alumni whose jobs match their course</span>
+                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">Alumni whose jobs match their program</span>
                 </div>
             </div>
             <div class="flex-1 min-h-0 flex items-center justify-center p-2" wire:ignore>
@@ -858,21 +1182,74 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Top Courses Horizontal Bar --}}
-        <div onclick="empOpenModal('employed_all','',null)"
-             data-tip="View All Working Alumni"
-             class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                    transition-all cursor-pointer flex flex-col overflow-hidden">
+        {{-- Top Programs — ranking board (top 3), or rank card when scoped to one Program.
+             IMPORTANT: each branch below carries its own wire:key. Without
+             distinct keys, Livewire's DOM diffing (morphdom) can mistake the
+             <canvas> block for the rank-card block (or vice versa) when the
+             Program filter toggles between "" and a real value, since both
+             occupy the same position in the DOM tree. That confusion is what
+             was leaving stale click handlers / stale content behind and
+             making this card intermittently show wrong data right after a
+             filter change. Keying them makes Livewire treat them as two
+             completely distinct elements and always swap them cleanly. ── --}}
+        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
+                    transition-all flex flex-col overflow-hidden">
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Top Courses</span>
-                    <span class="text-[.62rem] text-[#888888] font-medium leading-tight mt-0.5">Courses with most employed alumni</span>
+                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Top Programs</span>
+                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">
+                        {{ $filterCourse === '' ? 'Top 3 programs by employed alumni' : $filterCourse.' — ranking among all programs' }}
+                    </span>
                 </div>
             </div>
-            <div class="flex-1 min-h-0 p-2" wire:ignore>
-                <canvas id="chartCourse" style="max-height:100%;width:100%;"></canvas>
-            </div>
+
+            @if($filterCourse === '')
+                <div class="flex-1 min-h-0 p-2" wire:ignore wire:key="emp-top-programs-chart">
+                    <canvas id="chartCourse" style="max-height:100%;width:100%;"></canvas>
+                </div>
+            @else
+                @php
+                    // ── Smart rank badge — color-tiers the rank number so a
+                    //    Program's standing reads at a glance: green for the
+                    //    top third of programs, amber for the middle third,
+                    //    red for the bottom third. e.g. #1 of 12 -> green,
+                    //    #9 of 12 -> red. ──────────────────────────────────
+                    $rankTier = null;
+                    if ($courseRank && $courseRankTotal) {
+                        $tierSize = max(1, (int) ceil($courseRankTotal / 3));
+                        if ($courseRank <= $tierSize) {
+                            $rankTier = ['bg' => '#ECFDF5', 'text' => '#059669', 'ring' => '#6ee7b7', 'label' => 'Top Performer'];
+                        } elseif ($courseRank <= $tierSize * 2) {
+                            $rankTier = ['bg' => '#FFFBEB', 'text' => '#D97706', 'ring' => '#fcd34d', 'label' => 'Mid Performer'];
+                        } else {
+                            $rankTier = ['bg' => '#FEF2F2', 'text' => '#DC2626', 'ring' => '#fca5a5', 'label' => 'Needs Attention'];
+                        }
+                    }
+                @endphp
+                <div wire:click="openModal('employed_all','{{ $filterCourse }}',null)"
+                     wire:key="emp-top-programs-rank"
+                     data-tip="View {{ $filterCourse }} Working Alumni"
+                     class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3 cursor-pointer">
+                    @if($courseRank && $rankTier)
+                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl leading-none"
+                             style="background:{{ $rankTier['bg'] }}; color:{{ $rankTier['text'] }}; border:2px solid {{ $rankTier['ring'] }};">
+                            #{{ $courseRank }}
+                        </div>
+                        <p class="text-[11px] font-bold text-[#111111] mt-1">out of {{ $courseRankTotal }} program(s)</p>
+                        <span class="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                              style="background:{{ $rankTier['bg'] }}; color:{{ $rankTier['text'] }};">
+                            {{ $rankTier['label'] }}
+                        </span>
+                        <p class="text-[11px] font-semibold mt-0.5" style="color:#7a3f91;">{{ number_format($courseRankCount) }} working alumni</p>
+                    @else
+                        <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:#f0e6f8;">
+                            <i class="fas fa-chart-simple" style="color:#c89de0;font-size:.9rem;"></i>
+                        </div>
+                        <p class="text-xs font-semibold text-[#333333] text-center mt-1">No working alumni yet for {{ $filterCourse }} in this scope.</p>
+                    @endif
+                </div>
+            @endif
         </div>
 
     </div>
@@ -885,7 +1262,7 @@ new class extends Component {
                 <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
                 <div class="flex flex-col min-w-0">
                     <span class="text-[.72rem] sm:text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em] leading-tight">Employment Breakdown by Batch Year</span>
-                    <span class="text-[.62rem] text-[#888888] font-medium leading-tight mt-0.5 hidden sm:block">Number of employed, self-employed &amp; unemployed per batch</span>
+                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">Number of employed, self-employed &amp; unemployed per batch</span>
                 </div>
             </div>
             <div id="batchNavControls" class="hidden items-center gap-2 shrink-0 ml-2">
@@ -919,7 +1296,7 @@ new class extends Component {
                 <div class="w-2 h-2 rounded-full bg-[#7a3f91] shrink-0"></div>
                 <div class="flex flex-col min-w-0">
                     <span class="text-[.72rem] sm:text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em] leading-tight">Employment Rate Trend per Batch Year</span>
-                    <span class="text-[.62rem] text-[#888888] font-medium leading-tight mt-0.5 hidden sm:block">% of alumni (employed + self-employed) out of total per batch</span>
+                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">% of alumni (employed + self-employed) out of total per batch</span>
                 </div>
             </div>
             <div id="trendNavControls" class="hidden items-center gap-2 shrink-0 ml-2">
@@ -945,7 +1322,7 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ── COURSE BREAKDOWN TABLE ── --}}
+    {{-- ── PROGRAM BREAKDOWN TABLE ── --}}
     <div class="bg-white border border-[#E8E0F0] rounded-2xl overflow-hidden shadow-sm">
         <div class="flex items-center justify-between px-3 sm:px-5 py-2.5 border-b border-[#E8E0F0] bg-[#F9F7FC]">
             <div class="flex items-center gap-2.5">
@@ -953,24 +1330,24 @@ new class extends Component {
                     <i class="fas fa-table text-white" style="font-size:.65rem;"></i>
                 </div>
                 <div>
-                    <p class="text-xs sm:text-sm font-bold leading-tight text-[#111111]">Course Breakdown</p>
-                    <p class="text-[10px] text-[#333333] hidden sm:block">Employment rate per course — click any row to view records</p>
+                    <p class="text-xs sm:text-sm font-bold leading-tight text-[#111111]">Program Breakdown</p>
+                    <p class="text-[10px] text-[#333333] hidden sm:block">Employment rate per program — click any row to view records</p>
                 </div>
             </div>
             <span class="text-[11px] font-semibold px-2 py-1 rounded-lg bg-[#F9F7FC] text-[#7a3f91] border border-[#E8E0F0] shrink-0">
-                {{ count($this->courseAnalytics) }} courses
+                {{ count($this->courseAnalytics) }} programs
             </span>
         </div>
         <div class="course-table-wrap max-h-[450px] overflow-y-auto overflow-x-auto" style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
             <table class="w-full border-collapse" style="min-width:580px;">
                 <thead class="sticky top-0 z-10">
                     <tr class="bg-[#f5f0fa] border-b-2 border-[#E8E0F0]">
-                        <th class="pl-3 sm:pl-4 pr-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#111111]">Course</th>
+                        <th class="pl-3 sm:pl-4 pr-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#111111]">Program</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[#111111]">Total</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-emerald-700">Employed</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-blue-700">Self-Employed</th>
                         <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-amber-700">Unemployed</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[#AAAAAA]">No Record</th>
+                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[#333333]">No Record</th>
                         <th class="px-3 sm:px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#7a3f91]" style="min-width:160px;">Employment Rate</th>
                     </tr>
                 </thead>
@@ -985,7 +1362,6 @@ new class extends Component {
                                 <i class="fas fa-graduation-cap text-[9px]"></i>
                                 {{ $cr->course_code ?? '—' }}
                             </span>
-                            {{-- FIX 2: Full course name hidden on mobile, visible sm and up --}}
                             @if($courseFullName)
                                 <p class="text-[11px] mt-0.5 font-semibold text-[#111111] leading-tight hidden sm:block">{{ $courseFullName }}</p>
                             @endif
@@ -1003,7 +1379,7 @@ new class extends Component {
                             <span class="text-xs font-semibold text-amber-700">{{ number_format($cr->unemployed) }}</span>
                         </td>
                         <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-semibold text-[#AAAAAA]">{{ number_format($cr->not_filled) }}</span>
+                            <span class="text-xs font-semibold text-[#333333]">{{ number_format($cr->not_filled) }}</span>
                         </td>
                         <td class="px-3 sm:px-4 py-2.5" style="min-width:160px;">
                             <div class="flex items-center gap-2">
@@ -1015,13 +1391,13 @@ new class extends Component {
                                     {{ $cr->emp_rate }}%
                                 </span>
                             </div>
-                            <p class="text-[10px] mt-0.5 text-[#555555]">{{ $cr->response_rate }}% response</p>
+                            <p class="text-[10px] mt-0.5 text-[#333333]">{{ $cr->response_rate }}% response</p>
                         </td>
                     </tr>
                     @empty
                     <tr>
                         <td colspan="7" class="py-10 text-center">
-                            <p class="text-sm font-semibold text-[#333333]">No course data available</p>
+                            <p class="text-sm font-semibold text-[#333333]">No program data available</p>
                         </td>
                     </tr>
                     @endforelse
@@ -1055,7 +1431,12 @@ new class extends Component {
 
 
 {{-- ═══════════════════════════════════════════════════════════
-     DETAIL FULL-SCREEN MODAL
+     DETAIL FULL-SCREEN MODAL — read-only drill-down. There's no
+     in-modal filtering UI anymore; whatever segment you clicked
+     (stat card / donut slice / batch bar / trend point / program
+     row) is exactly what's shown here. Changing the Program/Batch
+     filter bar while this is open automatically closes it (see
+     updatedFilterCourse / updatedFilterBatch in the PHP class).
 ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'detail')
 @php
@@ -1079,13 +1460,6 @@ new class extends Component {
 
     $isRelevanceFilter = in_array($modalFilter, ['relevance_yes','relevance_partially','relevance_no']);
 
-    $hasSubFilters  = $modalBatch !== null || $modalCourse !== '' || $modalSearch !== '';
-    $hasChipsToShow = ($modalBatch !== null && !$modalBatchLocked)
-                   || ($modalCourse !== '' && !$modalCourseLocked)
-                   || $modalSearch !== '';
-
-    $smartBatches = $this->availableModalBatchesForFilter;
-
     $rTotal    = $records->total();
     $rPp       = $records->perPage();
     $rCp       = $records->currentPage();
@@ -1094,20 +1468,6 @@ new class extends Component {
     $rTo       = min($rCp * $rPp, $rTotal);
     $rPgStart  = max(1, $rCp - 2);
     $rPgEnd    = min($rLastPage, $rCp + 2);
-
-    $filterLabel = match($modalFilter) {
-        'employed'            => 'Employed',
-        'self_employed'       => 'Self-Employed',
-        'employed_all'        => 'Working Alumni',
-        'unemployed'          => 'Unemployed',
-        'no_record'           => 'No Record',
-        'abroad'              => 'OFW / Abroad',
-        'local'               => 'Local',
-        'relevance_yes'       => 'Relevant to Course',
-        'relevance_partially' => 'Partially Relevant',
-        'relevance_no'        => 'Not Relevant',
-        default               => 'All Records',
-    };
 @endphp
 <div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 emp-modal-enter"
      @keydown.escape.window="$wire.closeModal()">
@@ -1129,153 +1489,21 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- FIXED: static close-button tooltip that stays below the X, matching Alumni Records --}}
         <button wire:click="closeModal" class="emp-close-btn shrink-0 ml-3">
             <span class="emp-close-tip">Close</span>
             <i class="fas fa-xmark text-sm"></i>
         </button>
     </div>
 
-    {{-- ── Toolbar ── --}}
-    <div class="px-3 sm:px-6 lg:px-10 py-2.5 sm:py-3 bg-white border-b border-gray-200 shrink-0 transition-opacity duration-200"
-         wire:loading.class="opacity-60" wire:target="modalSearch,modalBatch,modalCourse">
-        <div class="modal-toolbar flex flex-wrap gap-2 items-center">
-
-            <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
-
-            {{-- Active filter pill (locked, non-clickable) --}}
-            <span class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold text-white border-transparent shadow-sm cursor-default"
-                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                {{ $filterLabel }}
-            </span>
-
-            {{-- Search --}}
-            <div class="relative" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{if(v!==this.q)this.q=v;}); } }">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none">
-                    <i class="fas fa-search" style="font-size:.7rem;"></i>
-                </span>
-                <input type="text" x-model="q"
-                       @input.debounce.300ms="$wire.set('modalSearch',q)"
-                       placeholder="Search name, ID, email…"
-                       class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-[#111111]
-                              focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-44 sm:w-56"
-                       autocomplete="off">
-            </div>
-
-            {{-- Batch Dropdown --}}
-            @if(!$modalBatchLocked)
-            <div class="relative" x-data="{ open:false }" @click.outside="open=false">
-                <button type="button" @click="open=!open"
-                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.modalBatch !== null }"
-                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
-                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
-                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
-                    @if($modalBatch) Batch {{ $modalBatch }} @else All Batches @endif
-                    <i class="fas fa-chevron-down text-[9px] opacity-50" :class="{'rotate-180':open}"></i>
-                </button>
-                <div x-show="open" x-transition
-                     class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                            bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
-                            shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1
-                            [scrollbar-width:thin] [scrollbar-color:#d4b8e8_transparent]"
-                     style="display:none;">
-                    <button type="button" @click="$wire.set('modalBatch',null); open=false"
-                            class="block w-full px-[10px] py-[7px] rounded-[7px] text-left text-[.78rem] font-semibold text-[#111111]
-                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors
-                                   {{ $modalBatch === null ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">
-                        All Batches
-                        @if($smartBatches->count() < $this->availableBatches->count())
-                            <span class="ml-1 text-[10px] opacity-70">({{ $smartBatches->count() }} with records)</span>
-                        @endif
-                    </button>
-                    @foreach($this->availableBatches as $bYear)
-                    @php $hasRecords = $smartBatches->contains($bYear); @endphp
-                    <button type="button"
-                            @if($hasRecords) @click="$wire.set('modalBatch',{{ $bYear }}); open=false" @endif
-                            class="block w-full px-[10px] py-[7px] rounded-[7px] text-left text-[.78rem] font-semibold transition
-                                   {{ $modalBatch == $bYear ? 'bg-[#F0E6F8] text-[#7A3F91]' : 'text-[#111111]' }}
-                                   {{ $hasRecords ? 'hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent' : 'batch-option-disabled' }}">
-                        Batch {{ $bYear }}
-                        @if(!$hasRecords)<span class="ml-1 text-[10px] font-normal text-[#AAAAAA]">— no records</span>@endif
-                    </button>
-                    @endforeach
-                </div>
-            </div>
-            @else
-            <span class="inline-flex items-center gap-2 px-3 py-[7px] rounded-full text-xs font-semibold border border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]">
-                Batch {{ $modalBatch }}
-            </span>
-            @endif
-
-            {{-- Course Dropdown --}}
-            @if(!$modalCourseLocked)
-            <div class="relative" x-data="{ open:false }" @click.outside="open=false">
-                <button type="button" @click="open=!open"
-                        :class="{ 'border-[#7A3F91] bg-[#F9F7FC] text-[#7A3F91]': $wire.modalCourse !== '' }"
-                        class="inline-flex items-center gap-2 px-3 py-[7px] border border-[#E0E0E0] rounded-full
-                               text-xs font-semibold bg-white text-[#111111] cursor-pointer whitespace-nowrap select-none
-                               hover:border-[#c49ed8] hover:text-[#7A3F91] transition-all duration-150">
-                    @if($modalCourse) {{ $modalCourse }} @else All Courses @endif
-                    <i class="fas fa-chevron-down text-[9px] opacity-50" :class="{'rotate-180':open}"></i>
-                </button>
-                <div x-show="open" x-transition
-                     class="absolute top-[calc(100%+4px)] left-0 min-w-full max-h-56 overflow-y-auto
-                            bg-white border-[1.5px] border-[#E8E0F0] rounded-[10px]
-                            shadow-[0_8px_24px_rgba(122,63,145,.13)] z-[600] p-1
-                            [scrollbar-width:thin] [scrollbar-color:#d4b8e8_transparent]"
-                     style="display:none;">
-                    <button type="button" @click="$wire.set('modalCourse',''); open=false"
-                            class="block w-full px-[10px] py-[7px] rounded-[7px] text-left text-[.78rem] font-semibold text-[#111111]
-                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors
-                                   {{ $modalCourse === '' ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">
-                        All Courses
-                    </button>
-                    @foreach($this->availableCourses as $cCode)
-                    <button type="button" @click="$wire.set('modalCourse','{{ $cCode }}'); open=false"
-                            class="block w-full px-[10px] py-[7px] rounded-[7px] text-left text-[.78rem] font-semibold text-[#111111]
-                                   hover:bg-[#F5F0FA] hover:text-[#7A3F91] cursor-pointer border-none bg-transparent transition-colors
-                                   {{ $modalCourse === $cCode ? 'bg-[#F0E6F8] text-[#7A3F91]' : '' }}">
-                        {{ $cCode }}
-                    </button>
-                    @endforeach
-                </div>
-            </div>
-            @else
-            <span class="inline-flex items-center gap-2 px-3 py-[7px] rounded-full text-xs font-semibold border border-blue-400 bg-blue-50 text-blue-700">
-                {{ $modalCourse }}
-            </span>
-            @endif
-
-            @if($hasSubFilters && $hasChipsToShow)
-            <button wire:click="clearModalFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-full text-xs font-semibold border
-                           border-[#E0E0E0] bg-white text-[#555555] hover:border-red-300 hover:text-red-500
-                           transition-all duration-150 cursor-pointer">
-                <i class="fas fa-rotate-left text-[10px]"></i>
-                Reset
-            </button>
-            @endif
-
-        </div>
-    </div>
-
-    {{-- Filtering progress bar --}}
-    <div class="ar-filter-progress-track" wire:loading wire:target="modalSearch,modalBatch,modalCourse">
-        <div class="ar-filter-progress-bar"></div>
-    </div>
-
     {{-- ── Table ── --}}
-    <div class="modal-table-wrap flex-1 overflow-y-auto overflow-x-auto min-h-0 transition-opacity duration-200"
-         style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;"
-         wire:loading.class="opacity-40" wire:target="modalSearch,modalBatch,modalCourse">
+    <div class="modal-table-wrap flex-1 overflow-y-auto overflow-x-auto min-h-0">
         <table class="w-full border-collapse" style="min-width:700px;">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
                     <th class="pl-4 sm:pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider w-12">#</th>
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Course</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Program</th>
                     <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
                     <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">
                         {{ $isRelevanceFilter ? 'Relevance' : 'Status' }}
@@ -1301,15 +1529,15 @@ new class extends Component {
                         <div class="flex items-center gap-2.5">
                             <img src="{{ $photo }}" alt="{{ e($row->first_name ?? '') }}"
                                  class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
-                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{!! $this->highlight($dName, $this->modalSearch) !!}</p>
+                            <p class="text-sm font-semibold truncate uppercase text-[#111111]">{{ $dName }}</p>
                         </div>
                     </td>
                     <td class="px-4 py-3">
-                        <span class="text-sm font-mono font-semibold text-[#111111]">{!! $row->student_id ? $this->highlight($row->student_id, $this->modalSearch) : '—' !!}</span>
+                        <span class="text-sm font-mono font-semibold text-[#111111]">{{ $row->student_id ?? '—' }}</span>
                     </td>
                     <td class="px-4 py-3">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold bg-[#F9F7FC] text-[#7a3f91]">
-                            {!! $row->course_code ? $this->highlight($row->course_code, $this->modalSearch) : '—' !!}
+                            {{ $row->course_code ?? '—' }}
                         </span>
                     </td>
                     <td class="px-4 py-3 text-center">
@@ -1329,21 +1557,21 @@ new class extends Component {
                                 {{ $badge[0] }}
                             </span>
                         @else
-                            <span class="text-xs text-[#AAAAAA]">—</span>
+                            <span class="text-xs text-[#333333]">—</span>
                         @endif
                     </td>
                     <td class="px-4 py-3">
                         @if($row->email ?? null)
-                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">{!! $this->highlight(strtolower($row->email), $this->modalSearch) !!}</span>
+                            <span class="text-sm text-[#333333] truncate block max-w-[200px]">{{ strtolower($row->email) }}</span>
                         @else
-                            <span class="text-xs text-[#AAAAAA]">—</span>
+                            <span class="text-xs text-[#333333]">—</span>
                         @endif
                     </td>
                     <td class="px-4 pr-6 lg:pr-10 py-3">
                         @if($row->contact_number ?? null)
-                            <span class="text-sm text-[#333333]">{!! $this->highlight($row->contact_number, $this->modalSearch) !!}</span>
+                            <span class="text-sm text-[#333333]">{{ $row->contact_number }}</span>
                         @else
-                            <span class="text-xs text-[#AAAAAA]">—</span>
+                            <span class="text-xs text-[#333333]">—</span>
                         @endif
                     </td>
                 </tr>
@@ -1355,7 +1583,7 @@ new class extends Component {
                                 <i class="fas fa-briefcase text-xl" style="color:#c89de0;"></i>
                             </div>
                             <p class="text-sm font-semibold text-[#333333]">No records found</p>
-                            <p class="text-xs text-[#555555]">Try adjusting your filters or search terms</p>
+                            <p class="text-xs text-[#333333]">No employment data available for this segment</p>
                         </div>
                     </td>
                 </tr>
@@ -1406,10 +1634,211 @@ new class extends Component {
 @endif
 
 
-{{-- ══ CHARTS + CURSOR TOOLTIP SCRIPT ══ --}}
+{{-- ══ CHARTS + CURSOR TOOLTIP + REPORT STORE SCRIPT ══ --}}
 <script>
 (function () {
     'use strict';
+
+    // ── Generate Reports Alpine store ───────────────────────────────────────
+    function registerEmpReportStore() {
+        if (!window.Alpine) return;
+        if (window.Alpine.store('empReport')) return;
+
+        window.Alpine.store('empReport', {
+            open: false,
+            _lastToggle: 0,
+            printLock: false,
+            _activePrintCleanup: null,
+
+            toggle() {
+                const now = Date.now();
+                if (now - this._lastToggle < 150) return;
+                this._lastToggle = now;
+                this.open = !this.open;
+            },
+
+            async readErrorMessage(res, fallback) {
+                try {
+                    const data = await res.clone().json();
+                    if (data && data.message) return data.message;
+                } catch (e) { /* not JSON */ }
+                return fallback;
+            },
+
+            /**
+             * The exported report is ALWAYS the current page-level scope —
+             * whatever Program + Batch Year filter is selected at the top
+             * of the dashboard (wire.filterCourse / wire.filterBatch).
+             * This is independent from the drill-down detail modal.
+             */
+            async doExport(type, wire) {
+                this.open = false;
+
+                // ── Print re-entry guard ──────────────────────────────────
+                // "Print Current View" must only ever open the OS print
+                // dialog because the button itself was clicked — never on
+                // its own afterward. If a print flow is already running
+                // (double-click, or a previous flow's cleanup hasn't fired
+                // yet), ignore this call instead of stacking a second
+                // frame/print() call — that stacking is what was causing
+                // the dialog to pop back up right after Cancel.
+                if (type === 'print') {
+                    if (this.printLock) return;
+                    this.printLock = true;
+                    // Force-cleanup any leftover listeners/frame from a
+                    // previous print flow that never finished cleanly, so
+                    // nothing from it can fire later and interfere.
+                    if (this._activePrintCleanup) {
+                        try { this._activePrintCleanup(); } catch (e) { /* noop */ }
+                        this._activePrintCleanup = null;
+                    }
+                }
+
+                var self = this;
+
+                var params = new URLSearchParams({
+                    type:    type,
+                    program: (wire && wire.filterCourse) || '',
+                    batch:   (wire && wire.filterBatch)  || '',
+                });
+                var url = '/registrar/employment-tracking/export?' + params.toString();
+
+                try {
+                    if (type === 'print') {
+                        var res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!res.ok) {
+                            var msg = await this.readErrorMessage(res, 'Print generation failed. Please try again.');
+                            throw new Error(msg);
+                        }
+                        var html = await res.text();
+
+                        // ── Always start from a clean iframe ────────────────
+                        // Reusing the same iframe/onload across exports was the
+                        // cause of "print -> Cancel -> print dialog pops right
+                        // back up": a stale 'load' handler from a previous
+                        // export (or a re-fired load event) could call
+                        // print() again after the user had already dismissed
+                        // it. Removing and recreating the iframe each time,
+                        // plus binding 'load'/'afterprint' with {once:true},
+                        // guarantees print() fires exactly once per click and
+                        // the iframe is torn down as soon as the dialog
+                        // closes — whether the user printed or hit Cancel.
+                        var oldFrame = document.getElementById('emp-print-frame');
+                        if (oldFrame) oldFrame.remove();
+
+                        var frame = document.createElement('iframe');
+                        frame.id = 'emp-print-frame';
+                        frame.style.position = 'fixed';
+                        frame.style.right = '0';
+                        frame.style.bottom = '0';
+                        frame.style.width = '0';
+                        frame.style.height = '0';
+                        frame.style.border = '0';
+                        document.body.appendChild(frame);
+
+                        var doc = frame.contentWindow.document;
+                        doc.open();
+                        doc.write(html);
+                        doc.close();
+
+                        var cleanedUp   = false;
+                        var printFired  = false;
+                        var onWinFocus; // declared below, referenced in cleanup
+
+                        var cleanup = function () {
+                            if (cleanedUp) return;
+                            cleanedUp = true;
+                            window.removeEventListener('focus', onWinFocus);
+                            if (frame && frame.parentNode) frame.remove();
+                            self.printLock = false;
+                            if (self._activePrintCleanup === cleanup) self._activePrintCleanup = null;
+                        };
+                        self._activePrintCleanup = cleanup;
+
+                        // A print dialog blurs the main window while it's
+                        // open and returns focus to it the moment it closes
+                        // — printed OR cancelled, doesn't matter. Some
+                        // browsers only fire 'afterprint' on the top window
+                        // (not the iframe that called print()), so this
+                        // focus-based fallback catches those cases and is
+                        // what actually fixes "Cancel brings the dialog
+                        // right back": without it, a stale, never-cleared
+                        // iframe/handler could still be sitting around to
+                        // react to the next paint/focus cycle. Only ever
+                        // *cleans up* — it never calls print() itself, so
+                        // regaining focus can no longer reopen the dialog.
+                        // Only arms itself AFTER print() has been called, so
+                        // the page's very first focus event never closes
+                        // the iframe prematurely.
+                        onWinFocus = function () {
+                            if (!printFired) return;
+                            cleanup();
+                        };
+
+                        frame.addEventListener('load', function onLoad() {
+                            frame.removeEventListener('load', onLoad);
+                            setTimeout(function () {
+                                // If this flow was already superseded/cleaned
+                                // up (e.g. a newer print click came in) before
+                                // this timeout ran, bail out — never call
+                                // print() on a torn-down frame.
+                                if (cleanedUp) return;
+                                try {
+                                    frame.contentWindow.addEventListener('afterprint', cleanup, { once: true });
+                                    window.addEventListener('afterprint', cleanup, { once: true });
+                                    window.addEventListener('focus', onWinFocus);
+                                    printFired = true;
+                                    frame.contentWindow.focus();
+                                    frame.contentWindow.print();
+                                } catch (e) {
+                                    cleanup();
+                                }
+                            }, 150);
+
+                            // Safety net in case none of the above ever fire
+                            // (some older/webview browsers support neither).
+                            setTimeout(cleanup, 60000);
+                        }, { once: true });
+                    } else {
+                        var res2 = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!res2.ok) {
+                            var msg2 = await this.readErrorMessage(
+                                res2,
+                                type === 'excel' ? 'Excel export failed. Please try again.' : 'PDF export failed. Please try again.'
+                            );
+                            throw new Error(msg2);
+                        }
+
+                        var blob = await res2.blob();
+                        var disposition = res2.headers.get('Content-Disposition') || '';
+                        var filename = type === 'excel' ? 'employment-tracking-report.xls' : 'employment-tracking-report.pdf';
+                        var match = disposition.match(/filename="?([^"]+)"?/);
+                        if (match) filename = match[1];
+
+                        var blobUrl = window.URL.createObjectURL(blob);
+                        var a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        window.URL.revokeObjectURL(blobUrl);
+                    }
+                } catch (e) {
+                    if (type === 'print') this.printLock = false;
+                    window.dispatchEvent(new CustomEvent('flash-message', {
+                        detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
+                    }));
+                }
+            }
+        });
+    }
+
+    window.__empEnsureReportStore = registerEmpReportStore;
+    if (window.Alpine) registerEmpReportStore();
+    document.addEventListener('alpine:init', registerEmpReportStore);
+    document.addEventListener('livewire:init', registerEmpReportStore);
+    document.addEventListener('livewire:navigated', registerEmpReportStore);
 
     // ── Cursor-follow tooltip (desktop only — never shows on mobile/touch) ─────
     (function initCursorTip() {
@@ -1425,7 +1854,6 @@ new class extends Component {
 
         function showTip(el, e) {
             if (!isHoverCapable()) return;
-            // data-tip-noicon => plain text tooltip, no eye icon (no longer used by Close button)
             var noIconText = el.getAttribute('data-tip-noicon');
             var text = noIconText || el.getAttribute('data-tip');
             if (!text) return;
@@ -1814,12 +2242,32 @@ new class extends Component {
         }
     }
 
-    // ── Top Courses Horizontal Bar ────────────────────────────────────────────
+    // ── Top Programs Horizontal Bar ───────────────────────────────────────────
     function buildCourseBar(data) {
-        if (!data || !data.labels) return;
         var canvas = document.getElementById('chartCourse');
         if (!canvas) return;
+        var wrap = canvas.parentElement;
         safeDestroy('chartCourse');
+
+        var hasData = !!(data && data.labels && data.labels.length);
+        var emptyMsg = document.getElementById('chartCourseEmpty');
+
+        if (!hasData) {
+            canvas.style.display = 'none';
+            if (!emptyMsg) {
+                emptyMsg = document.createElement('div');
+                emptyMsg.id = 'chartCourseEmpty';
+                emptyMsg.style.cssText = 'height:100%;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 16px;';
+                emptyMsg.innerHTML = '<p style="font-size:11px;color:#333333;line-height:1.5;">No employment data yet for this scope.</p>';
+                if (wrap) wrap.appendChild(emptyMsg);
+            } else {
+                emptyMsg.style.display = 'flex';
+            }
+            return;
+        }
+
+        if (emptyMsg) emptyMsg.style.display = 'none';
+        canvas.style.display = 'block';
 
         var bgColors     = data.labels.map(function(_,i){return BAR_COLORS[i%BAR_COLORS.length].bg;});
         var borderColors = data.labels.map(function(_,i){return BAR_COLORS[i%BAR_COLORS.length].border;});
@@ -1961,6 +2409,35 @@ new class extends Component {
             requestAnimationFrame(initAllCharts);
         });
 
+        // ── Reliable chart refresh ──────────────────────────────────────────
+        // Previously this relied ONLY on a generic Livewire.hook('commit', ...)
+        // listener to know when to rebuild the charts. That hook fires for
+        // every commit across the whole app and depends on internal Livewire
+        // plumbing (payload.succeed) that can silently no-op across version
+        // differences — when it did, the canvases (Employment Status donut,
+        // Job Relevance donut, Batch bar, Trend line, Top Programs bar) kept
+        // showing whatever data they were built with at page load, even
+        // though the Program/Batch filter (and the PHP-rendered stat cards)
+        // had already moved on. That's what caused the donut % and the Top
+        // Programs card to look "stuck" / wrong right after filtering.
+        //
+        // The PHP side now explicitly dispatches an 'emp-charts-refresh'
+        // browser event every single time computeStats()+buildCharts() run
+        // (see refreshDashboard() in the component). Listening for that
+        // exact event is a direct, guaranteed signal — no guessing based on
+        // generic Livewire internals.
+        function hookChartsRefreshEvent() {
+            if (!window.Livewire) return;
+            Livewire.on('emp-charts-refresh', function () {
+                requestAnimationFrame(initAllCharts);
+            });
+        }
+
+        if (window.Livewire) { hookChartsRefreshEvent(); }
+        else { document.addEventListener('livewire:initialized', hookChartsRefreshEvent); }
+
+        // Kept as a secondary safety net in case the dispatched-event path
+        // above ever misses a beat — harmless no-op re-render otherwise.
         function hookLivewire() {
             if (!window.Livewire) return;
             Livewire.hook('commit', function(payload) {

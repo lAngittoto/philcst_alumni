@@ -9,6 +9,7 @@ use App\Http\Controllers\AuditLogsController;
 use App\Http\Controllers\CoordinatorNotificationController;
 use App\Http\Controllers\CourseController;
 use App\Http\Controllers\DirectorNotificationController;
+use App\Http\Controllers\EmploymentTrackingExportController;
 use App\Http\Controllers\MessengerController;
 use App\Http\Controllers\OrganizerController;
 use App\Http\Controllers\RegistrarAlumniExportController;
@@ -115,6 +116,10 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
     // ── Alumni Records: Generate Reports (PDF / Excel export) ──────────────
     Route::get('/alumni-records/export', [RegistrarAlumniExportController::class, 'export'])
         ->name('alumni-records.export');
+
+    // ── Employment Tracking: Generate Reports (PDF / Excel / Print export) ─
+    Route::get('/employment-tracking/export', [EmploymentTrackingExportController::class, 'export'])
+        ->name('employment-tracking.export');
 
     Route::get('/notifications',                      [RegistrarNotificationController::class, 'index'])      ->name('notifications.index');
     Route::post('/notifications',                     [RegistrarNotificationController::class, 'store'])      ->name('notifications.store');

@@ -829,16 +829,12 @@ new class extends Component {
              tag in some setups.
 
              FIX (double-open/close bug): the toggle() method below is guarded with
-             a small timestamp debounce. The previous version toggled `open` directly
-             on click ($store.report.open = !$store.report.open). If this node ever
-             ended up with the click listener bound more than once — e.g. Alpine
-             re-scanning the tree on `livewire:navigated` before the store guard
-             above had a chance to run — a single physical click fired the toggle
-             twice in the same tick, which visually looks like "click once, it
-             opens then instantly closes" or "close it, and it pops back open by
-             itself". Debouncing toggle() so a second call within 150ms is ignored
-             makes a single click always resolve to a single, correct state change,
-             regardless of how many listeners ended up bound. --}}
+             a small timestamp debounce, and doExport() has its own "exporting" +
+             debounce guard (see script at bottom) so a single click can never
+             kick off two overlapping export jobs — which was the cause of the
+             print dialog appearing to "come back on its own" after being
+             cancelled (a second, delayed export finishing after the first one
+             and calling print() again by itself). --}}
         <div class="relative shrink-0" wire:ignore
              x-data
              x-init="window.__arEnsureReportStore && window.__arEnsureReportStore()"
@@ -860,17 +856,20 @@ new class extends Component {
                     <span class="cnt">{{ number_format($this->alumniRecords->total()) }} matching record(s)</span>
                 </div>
 
-                <button type="button" @click="$store.report.doExport('pdf', $wire)" class="ar-report-menu-item item-pdf">
+                <button type="button" @click="$store.report.doExport('pdf', $wire)"
+                        :disabled="$store.report.exporting" class="ar-report-menu-item item-pdf">
                     <span class="ar-item-icon"><i class="fas fa-file-pdf"></i></span>
                     <span class="ar-item-label">Export as PDF</span>
                 </button>
 
-                <button type="button" @click="$store.report.doExport('excel', $wire)" class="ar-report-menu-item item-excel">
+                <button type="button" @click="$store.report.doExport('excel', $wire)"
+                        :disabled="$store.report.exporting" class="ar-report-menu-item item-excel">
                     <span class="ar-item-icon"><i class="fas fa-file-excel"></i></span>
                     <span class="ar-item-label">Export as Excel</span>
                 </button>
 
-                <button type="button" @click="$store.report.doExport('print', $wire)" class="ar-report-menu-item item-print">
+                <button type="button" @click="$store.report.doExport('print', $wire)"
+                        :disabled="$store.report.exporting" class="ar-report-menu-item item-print">
                     <span class="ar-item-icon"><i class="fas fa-print"></i></span>
                     <span class="ar-item-label">Print Current View</span>
                 </button>
@@ -1697,7 +1696,9 @@ new class extends Component {
 
         window.Alpine.store('report', {
             open: false,
+            exporting: false,
             _lastToggle: 0,
+            _lastExport: 0,
 
             /**
              * FIX (double open/close bug): debounce toggle calls. If this
@@ -1734,9 +1735,32 @@ new class extends Component {
                 return fallback;
             },
 
+            /**
+             * FIX (print "reopens by itself" bug): the export item buttons
+             * use a plain @click (no debounce), so if this node ever ends
+             * up double-bound the same way the toggle button could, a
+             * single physical click fired doExport() TWICE. Both calls
+             * would fetch the same export HTML and build/print an iframe —
+             * the first print dialog is the one you see and cancel, but the
+             * second call's fetch finishes a moment later and calls
+             * frame.contentWindow.print() again on its own, which is what
+             * made it look like the dialog "came back" without a new click.
+             *
+             * Two independent guards close this off:
+             *   1. `exporting` + a 400ms debounce on entry — a second call
+             *      arriving while one is already running (or right after
+             *      one just started) is dropped immediately.
+             *   2. For print specifically, a brand-new <iframe> is created
+             *      per export and the previous one is removed, and its
+             *      `onload` handler nulls itself out right after firing —
+             *      so even in the worst case an old iframe/timer can never
+             *      call print() a second time behind your back.
+             */
             async doExport(type, wire) {
-                // No loading/spinner state — export runs directly and
-                // the dropdown closes immediately on click.
+                const now = Date.now();
+                if (this.exporting || now - this._lastExport < 400) return;
+                this._lastExport = now;
+                this.exporting = true;
                 this.open = false;
 
                 const params = new URLSearchParams({
@@ -1757,18 +1781,24 @@ new class extends Component {
                         }
                         const html = await res.text();
 
-                        let frame = document.getElementById('ar-print-frame');
-                        if (!frame) {
-                            frame = document.createElement('iframe');
-                            frame.id = 'ar-print-frame';
-                            frame.style.position = 'fixed';
-                            frame.style.right = '0';
-                            frame.style.bottom = '0';
-                            frame.style.width = '0';
-                            frame.style.height = '0';
-                            frame.style.border = '0';
-                            document.body.appendChild(frame);
-                        }
+                        // Always start from a fresh iframe. Reusing one
+                        // persistent iframe across print jobs meant a
+                        // leftover `onload` handler (or an in-flight
+                        // setTimeout from a previous, still-resolving call)
+                        // could still be alive and fire print() again later
+                        // — exactly the "reopens on its own" symptom.
+                        const oldFrame = document.getElementById('ar-print-frame');
+                        if (oldFrame) oldFrame.remove();
+
+                        const frame = document.createElement('iframe');
+                        frame.id = 'ar-print-frame';
+                        frame.style.position = 'fixed';
+                        frame.style.right = '0';
+                        frame.style.bottom = '0';
+                        frame.style.width = '0';
+                        frame.style.height = '0';
+                        frame.style.border = '0';
+                        document.body.appendChild(frame);
 
                         const doc = frame.contentWindow.document;
                         doc.open();
@@ -1776,6 +1806,9 @@ new class extends Component {
                         doc.close();
 
                         frame.onload = () => {
+                            // Fire exactly once, then detach — nothing can
+                            // trigger a second print() from this iframe again.
+                            frame.onload = null;
                             setTimeout(() => {
                                 frame.contentWindow.focus();
                                 frame.contentWindow.print();
@@ -1810,6 +1843,8 @@ new class extends Component {
                     window.dispatchEvent(new CustomEvent('flash-message', {
                         detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
                     }));
+                } finally {
+                    this.exporting = false;
                 }
             }
         });

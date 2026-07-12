@@ -1146,7 +1146,7 @@ new class extends Component {
     /* ── Import modal: fixed size on desktop, full screen on mobile ── */
     .import-modal-box {
         width: 640px;
-        height: 750px;
+        height: 640px;
         max-width: calc(100vw - 32px);
         max-height: calc(100dvh - 40px);
         display: flex;
@@ -1698,8 +1698,8 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Scrollable body --}}
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+        {{-- Scrollable body — flex column so button rows can be pinned to the bottom via mt-auto --}}
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 flex flex-col">
 
             {{-- Step Indicator --}}
             @php
@@ -1707,7 +1707,7 @@ new class extends Component {
                 $currentStep = $stepMap[$importStep] ?? 0;
                 $stepDefs    = [[0,'1','Upload'],[1,'2','Preview'],[2,'3','Importing'],[3,'4','Done']];
             @endphp
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 shrink-0">
                 @foreach($stepDefs as [$idx, $num, $lbl])
                     @php $isActive = $currentStep === $idx; $isDone = $currentStep > $idx; @endphp
                     <div class="flex items-center gap-1.5 {{ $isActive ? 'opacity-100' : ($isDone ? 'opacity-80' : 'opacity-30') }}">
@@ -1727,7 +1727,7 @@ new class extends Component {
             @if($importStep === 'upload')
 
             {{-- ══ Required Columns — horizontal chips, no icons ══ --}}
-            <div class="rounded-xl border border-blue-200 overflow-hidden" style="background:#F8FBFF;">
+            <div class="rounded-xl border border-blue-200 overflow-hidden shrink-0" style="background:#F8FBFF;">
                 {{-- header --}}
                 <div class="flex items-center gap-2 px-4 py-2.5 border-b border-blue-100" style="background:#EEF4FF;">
                     <div class="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style="background:#1D4ED8;">
@@ -1752,7 +1752,7 @@ new class extends Component {
             </div>
 
             @if($importStatus === 'invalid_type')
-            <div class="flex items-start gap-3 p-3.5 rounded-xl bg-red-50 border border-red-200">
+            <div class="flex items-start gap-3 p-3.5 rounded-xl bg-red-50 border border-red-200 shrink-0">
                 <i class="fas fa-circle-xmark text-red-500 mt-0.5 shrink-0"></i>
                 <div>
                     <p class="font-bold text-red-800 text-sm">Invalid file type</p>
@@ -1762,7 +1762,7 @@ new class extends Component {
             @endif
 
             {{-- Dropzone normal --}}
-            <div wire:loading.remove wire:target="importFile">
+            <div wire:loading.remove wire:target="importFile" class="shrink-0">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2">Choose File</p>
                 <div class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-8 text-center cursor-pointer hover:border-[#2563EB] hover:bg-[#eff6ff] hover:shadow-sm transition-all duration-200"
                      @click="document.getElementById('importFileInput').click()">
@@ -1776,7 +1776,7 @@ new class extends Component {
             </div>
 
             {{-- Shimmer loading state --}}
-            <div wire:loading wire:target="importFile" class="w-full">
+            <div wire:loading wire:target="importFile" class="w-full shrink-0">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2 text-center">Choose File</p>
                 <div class="w-full border-2 border-dashed border-[#2563EB] rounded-xl p-8 flex flex-col items-center justify-center text-center"
                      style="background:linear-gradient(90deg,#eff6ff 25%,#dbeafe 50%,#eff6ff 75%);background-size:200% 100%;animation:regShimmer 1.2s infinite linear;">
@@ -1789,7 +1789,7 @@ new class extends Component {
             </div>
 
             <button wire:click="closeImportModal"
-                    class="w-full px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99]">
+                    class="w-full px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99] mt-auto">
                 Cancel
             </button>
 
@@ -1797,7 +1797,7 @@ new class extends Component {
             @elseif($importStep === 'preview')
 
                 @if($headerChecking)
-                    <div wire:init="checkFileHeaders" class="w-full py-12 flex flex-col items-center justify-center text-center">
+                    <div wire:init="checkFileHeaders" class="w-full py-12 flex flex-col items-center justify-center text-center m-auto">
                         <div class="relative w-20 h-20 mb-5 mx-auto">
                             <span class="reg-scan-ring"></span>
                             <span class="reg-scan-ring reg-scan-ring--delay"></span>
@@ -1810,7 +1810,7 @@ new class extends Component {
                     </div>
 
                 @elseif(!$headerValid)
-                    <div class="flex flex-col items-center text-center gap-3 py-8 px-2">
+                    <div class="flex flex-col items-center text-center gap-3 py-8 px-2 shrink-0">
                         <div class="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center">
                             <i class="fas fa-triangle-exclamation text-red-500 text-2xl"></i>
                         </div>
@@ -1820,7 +1820,7 @@ new class extends Component {
                         </div>
                     </div>
 
-                    <div class="flex gap-3">
+                    <div class="flex gap-3 mt-auto">
                         <button wire:click="backToUpload"
                                 class="flex-1 px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-[.99] flex items-center justify-center gap-2">
                             <i class="fas fa-arrow-left text-sm"></i> Choose Another File
@@ -1833,7 +1833,7 @@ new class extends Component {
                     </div>
 
                 @else
-                    <div class="flex flex-col items-center text-center gap-3 p-5 rounded-xl bg-[#eff6ff] border border-[#bfdbfe]">
+                    <div class="flex flex-col items-center text-center gap-3 p-5 rounded-xl bg-[#eff6ff] border border-[#bfdbfe] shrink-0">
                         <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm" style="background:#2563EB;">
                             <i class="fas fa-file-excel text-white text-2xl"></i>
                         </div>
@@ -1851,7 +1851,7 @@ new class extends Component {
                         <input type="file" id="importFileInputPreview" wire:model="importFile" accept=".xlsx,.xls" class="hidden">
                     </div>
 
-                    <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+                    <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3 shrink-0">
                         <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
                         <p class="text-sm text-amber-800 leading-relaxed">
                             Clicking <strong>Confirm Import</strong> will begin importing immediately.
@@ -1859,7 +1859,7 @@ new class extends Component {
                         </p>
                     </div>
 
-                    <div class="flex gap-3">
+                    <div class="flex gap-3 mt-auto">
                         <button wire:click="backToUpload"
                                 class="flex-1 px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-[.99] flex items-center justify-center gap-2">
                             <i class="fas fa-arrow-left text-sm"></i> Change File
@@ -1881,7 +1881,7 @@ new class extends Component {
             {{-- STEP 3: IMPORTING --}}
             @elseif($importStep === 'processing')
 
-            <div wire:init="processImport" class="py-8 text-center">
+            <div wire:init="processImport" class="py-8 text-center m-auto">
                 <div class="relative w-24 h-24 mx-auto mb-6 flex items-center justify-center">
                     <span class="import-scan-ring"></span>
                     <span class="import-scan-ring import-scan-ring--delay1"></span>
@@ -1933,7 +1933,7 @@ new class extends Component {
             {{-- BLOCKED --}}
             @elseif($importStep === 'blocked')
 
-            <div class="flex items-start gap-4 p-4 rounded-xl bg-red-50 border border-red-200">
+            <div class="flex items-start gap-4 p-4 rounded-xl bg-red-50 border border-red-200 shrink-0">
                 <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
                     <i class="fas fa-xmark text-red-600 text-lg"></i>
                 </div>
@@ -1943,7 +1943,7 @@ new class extends Component {
                 </div>
             </div>
             <button wire:click="resetImport"
-                    class="w-full bg-white border border-[#E8E0F0] text-[#333333] px-5 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99]">
+                    class="w-full bg-white border border-[#E8E0F0] text-[#333333] px-5 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99] mt-auto">
                 <i class="fas fa-rotate-left mr-2"></i>Try Again
             </button>
 
@@ -1956,7 +1956,7 @@ new class extends Component {
                 $hasDups   = $importDuplicateCount  > 0;
             @endphp
 
-            <div class="flex items-start gap-3 p-4 rounded-xl border
+            <div class="flex items-start gap-3 p-4 rounded-xl border shrink-0
                         {{ $hasNew ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200' }}">
                 <div class="reg-pop w-10 h-10 rounded-xl flex items-center justify-center shrink-0
                             {{ $hasNew ? 'bg-emerald-100' : 'bg-amber-100' }}">
@@ -1977,7 +1977,7 @@ new class extends Component {
                 </div>
             </div>
 
-            <div class="grid grid-cols-4 gap-2">
+            <div class="grid grid-cols-4 gap-2 shrink-0">
                 @foreach([
                     ['#f9fafb','#e5e7eb','#4b5563', $importTotal,         'Total'],
                     ['#eff6ff','#bfdbfe','#1D4ED8', $importSuccessCount,   'Imported'],
@@ -1992,7 +1992,7 @@ new class extends Component {
             </div>
 
             @if($hasErrors)
-            <div class="border border-red-200 rounded-xl overflow-hidden">
+            <div class="border border-red-200 rounded-xl overflow-hidden shrink-0">
                 <div class="px-4 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2">
                     <i class="fas fa-circle-xmark text-red-400"></i>
                     <p class="font-bold text-red-900 text-base">Validation Errors</p>
@@ -2010,7 +2010,7 @@ new class extends Component {
             @endif
 
             @if($hasDups && count($importDuplicates) > 0)
-            <div class="border border-amber-200 rounded-xl overflow-hidden">
+            <div class="border border-amber-200 rounded-xl overflow-hidden shrink-0">
                 <div class="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
                     <i class="fas fa-copy text-amber-400"></i>
                     <p class="font-bold text-amber-900 text-base">Duplicates Skipped</p>
@@ -2027,7 +2027,7 @@ new class extends Component {
             </div>
             @endif
 
-            <div class="flex gap-3">
+            <div class="flex gap-3 mt-auto">
                 <button wire:click="resetImport"
                         class="flex-1 bg-white border border-[#E8E0F0] text-[#333333] px-4 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99]">
                     <i class="fas fa-rotate-left mr-2"></i>Import Another
