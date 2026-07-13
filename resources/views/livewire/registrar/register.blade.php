@@ -40,10 +40,6 @@ new class extends Component {
     public array  $importErrors         = [];
     public array  $importDuplicates     = [];
 
-    public bool   $headerChecking = false;
-    public bool   $headerValid    = false;
-    public string $headerCheckMsg = '';
-
     public function mount(): void
     {
         $this->regYear = (string) date('Y');
@@ -259,11 +255,12 @@ new class extends Component {
         $this->importDuplicateCount = 0;
         $this->importErrors         = [];
         $this->importDuplicates     = [];
-        $this->headerChecking       = false;
-        $this->headerValid          = false;
-        $this->headerCheckMsg       = '';
     }
 
+    /**
+     * No more wizard steps — the moment a valid file is chosen,
+     * we go straight into processing (which validates + imports).
+     */
     public function updatedImportFile(): void
     {
         if (!$this->importFile) return;
@@ -280,31 +277,8 @@ new class extends Component {
 
         $this->importStatus   = '';
         $this->importFileName = $this->importFile->getClientOriginalName();
-        $this->importStep     = 'preview';
-
-        $this->headerChecking = true;
-        $this->headerValid    = false;
-        $this->headerCheckMsg = '';
-    }
-
-    public function backToUpload(): void
-    {
-        $this->importFile     = null;
-        $this->importFileName = '';
-        $this->importStatus   = '';
-        $this->importStep     = 'upload';
-        $this->headerChecking = false;
-        $this->headerValid    = false;
-        $this->headerCheckMsg = '';
-    }
-
-    public function confirmImport(): void
-    {
-        if (!$this->headerValid) return;
-
-        $this->importStep    = 'processing';
-        $this->importStatus  = 'Starting...';
-        $this->importingFile = true;
+        $this->importStep     = 'processing';
+        $this->importingFile  = true;
     }
 
     private function parseExcel(string $path): array
@@ -328,88 +302,6 @@ new class extends Component {
             return $rows;
         } catch (\Exception $e) {
             throw new \Exception('Excel parse failed: ' . $e->getMessage());
-        }
-    }
-
-    private function peekHeaderRow(string $path): array
-    {
-        try {
-            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
-            $reader->setReadDataOnly(true);
-            $reader->setReadEmptyCells(false);
-            $reader->setReadFilter(new class implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter {
-                public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
-                {
-                    return $row === 1;
-                }
-            });
-            $sheet      = $reader->load($path)->getActiveSheet();
-            $highestCol = $sheet->getHighestDataColumn();
-            $rows       = [];
-
-            foreach ($sheet->getRowIterator(1, 1) as $row) {
-                $rd = [];
-                $ci = $row->getCellIterator('A', $highestCol);
-                $ci->setIterateOnlyExistingCells(false);
-                foreach ($ci as $cell) $rd[] = $cell->getValue();
-                $rows[] = $rd;
-            }
-            return $rows;
-        } catch (\Exception $e) {
-            throw new \Exception('Could not read the file: ' . $e->getMessage());
-        }
-    }
-
-    public function checkFileHeaders(): void
-    {
-        $this->headerChecking = true;
-
-        try {
-            if (!$this->importFile) {
-                $this->headerValid    = false;
-                $this->headerCheckMsg = 'No file selected.';
-                return;
-            }
-
-            $rows = $this->peekHeaderRow($this->importFile->getRealPath());
-
-            if (empty($rows) || empty(array_filter($rows[0], fn($v) => trim((string) $v) !== ''))) {
-                $this->headerValid    = false;
-                $this->headerCheckMsg = 'The file appears to be empty.';
-                return;
-            }
-
-            $header = array_map('trim', array_map('strtolower', $rows[0]));
-
-            $hasProgram     = in_array('program', $header, true);
-            $hasProgramCode = in_array('program_code', $header, true);
-
-            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'program', 'batch', 'email'];
-            $missing  = [];
-
-            foreach ($required as $col) {
-                if ($col === 'program') {
-                    if (!$hasProgram && !$hasProgramCode) $missing[] = 'program';
-                    continue;
-                }
-                if (!in_array($col, $header, true)) $missing[] = $col;
-            }
-
-            if (!empty($missing)) {
-                $this->headerValid    = false;
-                $this->headerCheckMsg = 'Missing required column' . (count($missing) > 1 ? 's' : '') . ': '
-                    . implode(', ', array_map(fn($c) => "\"{$c}\"", $missing)) . '.';
-                return;
-            }
-
-            $this->headerValid    = true;
-            $this->headerCheckMsg = '';
-
-        } catch (\Exception $e) {
-            $this->headerValid    = false;
-            $this->headerCheckMsg = $e->getMessage();
-        } finally {
-            $this->headerChecking = false;
         }
     }
 
@@ -990,7 +882,6 @@ new class extends Component {
         border-bottom-color: #1a1a1a;
     }
     .import-btn-wrap:hover .import-btn-tooltip { opacity: 1; }
-    /* Tooltip never shows on touch / small screens */
     @media (max-width: 768px), (hover: none) {
         .import-btn-tooltip { display: none !important; }
     }
@@ -1022,21 +913,6 @@ new class extends Component {
         background-size: 200% 100%;
         animation: regShimmer 1.2s infinite linear;
     }
-
-    /* ── Preview scanning pulse ── */
-    @keyframes regScanPulse {
-        0%   { transform: scale(1);    opacity: .55; }
-        70%  { transform: scale(1.55); opacity: 0; }
-        100% { transform: scale(1.55); opacity: 0; }
-    }
-    .reg-scan-ring {
-        position: absolute;
-        inset: 0;
-        border-radius: 16px;
-        border: 2px solid #21A366;
-        animation: regScanPulse 1.4s cubic-bezier(.4,0,.6,1) infinite;
-    }
-    .reg-scan-ring--delay { animation-delay: .55s; }
 
     /* ── GREEN importing scan rings ── */
     @keyframes importScanPulse {
@@ -1669,16 +1545,15 @@ new class extends Component {
     </div>{{-- end reg-scroll --}}
 </div>
 
-{{-- ══ IMPORT MODAL ══ --}}
+{{-- ══ IMPORT MODAL (NO WIZARD — upload, then auto validate + import) ══ --}}
 @if($showImportModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:px-4"
      style="background:rgba(27,6,46,0.60);backdrop-filter:blur(4px);"
      @keydown.escape.window="@if($importStep !== 'processing') $wire.closeImportModal() @endif">
 
-    {{-- Fixed-size modal box on desktop, full screen on mobile --}}
     <div class="import-modal-box">
 
-        {{-- Modal Header — solid purple --}}
+        {{-- Modal Header --}}
         <div class="flex items-center justify-between px-5 py-4 shrink-0" style="background:#7A3F91;">
             <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
                 <i class="fas fa-file-import"></i> Import Alumni Records
@@ -1698,14 +1573,14 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Scrollable body — flex column so button rows can be pinned to the bottom via mt-auto --}}
+        {{-- Scrollable body --}}
         <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 flex flex-col">
 
-            {{-- Step Indicator --}}
+            {{-- Step Indicator (3 steps only: Upload → Importing → Done) --}}
             @php
-                $stepMap     = ['upload' => 0, 'preview' => 1, 'processing' => 2, 'blocked' => 2, 'done' => 3];
+                $stepMap     = ['upload' => 0, 'processing' => 1, 'blocked' => 1, 'done' => 2];
                 $currentStep = $stepMap[$importStep] ?? 0;
-                $stepDefs    = [[0,'1','Upload'],[1,'2','Preview'],[2,'3','Importing'],[3,'4','Done']];
+                $stepDefs    = [[0,'1','Upload'],[1,'2','Importing'],[2,'3','Done']];
             @endphp
             <div class="flex items-center gap-2 shrink-0">
                 @foreach($stepDefs as [$idx, $num, $lbl])
@@ -1719,25 +1594,21 @@ new class extends Component {
                         </div>
                         <span class="text-sm font-semibold text-[#333333]">{{ $lbl }}</span>
                     </div>
-                    @if($idx < 3)<div class="flex-1 h-px bg-[#E8E0F0]"></div>@endif
+                    @if($idx < 2)<div class="flex-1 h-px bg-[#E8E0F0]"></div>@endif
                 @endforeach
             </div>
 
-            {{-- STEP 1: UPLOAD --}}
+            {{-- STEP 1: UPLOAD (just a dropzone/radio-style file picker — no confirm step) --}}
             @if($importStep === 'upload')
 
-            {{-- ══ Required Columns — horizontal chips, no icons ══ --}}
             <div class="rounded-xl border border-blue-200 overflow-hidden shrink-0" style="background:#F8FBFF;">
-                {{-- header --}}
                 <div class="flex items-center gap-2 px-4 py-2.5 border-b border-blue-100" style="background:#EEF4FF;">
                     <div class="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style="background:#1D4ED8;">
                         <i class="fas fa-table-columns text-white" style="font-size:.6rem;"></i>
                     </div>
                     <p class="font-bold text-blue-900 text-sm">Required Excel Columns</p>
-
                 </div>
 
-                {{-- Horizontal chips — text only, no icons ── --}}
                 @php
                 $reqCols = [
                     'first_name', 'last_name', 'middle_name', 'suffix',
@@ -1770,12 +1641,12 @@ new class extends Component {
                         <i class="fas fa-file-excel text-3xl" style="color:#2563EB;"></i>
                     </div>
                     <p class="text-[#333333] font-semibold text-base">Click to choose file</p>
-                    <p class="text-[#888888] text-sm mt-1">Excel files only (.xlsx / .xls)</p>
+                    <p class="text-[#888888] text-sm mt-1">Excel files only (.xlsx / .xls) — upload starts importing automatically</p>
                     <input type="file" id="importFileInput" wire:model="importFile" accept=".xlsx,.xls" class="hidden">
                 </div>
             </div>
 
-            {{-- Shimmer loading state --}}
+            {{-- Shimmer loading state (while file is uploading to server) --}}
             <div wire:loading wire:target="importFile" class="w-full shrink-0">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2 text-center">Choose File</p>
                 <div class="w-full border-2 border-dashed border-[#2563EB] rounded-xl p-8 flex flex-col items-center justify-center text-center"
@@ -1783,8 +1654,8 @@ new class extends Component {
                     <div class="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center" style="background:rgba(37,99,235,.15);">
                         <i class="fas fa-spinner animate-spin text-2xl" style="color:#1D4ED8;"></i>
                     </div>
-                    <p class="font-semibold text-base" style="color:#1D4ED8;">Reading file...</p>
-                    <p class="text-sm mt-1" style="color:#2563EB;">Please wait while we process your file</p>
+                    <p class="font-semibold text-base" style="color:#1D4ED8;">Uploading file...</p>
+                    <p class="text-sm mt-1" style="color:#2563EB;">Please wait while we upload your file</p>
                 </div>
             </div>
 
@@ -1793,92 +1664,7 @@ new class extends Component {
                 Cancel
             </button>
 
-            {{-- STEP 2: PREVIEW --}}
-            @elseif($importStep === 'preview')
-
-                @if($headerChecking)
-                    <div wire:init="checkFileHeaders" class="w-full py-12 flex flex-col items-center justify-center text-center m-auto">
-                        <div class="relative w-20 h-20 mb-5 mx-auto">
-                            <span class="reg-scan-ring"></span>
-                            <span class="reg-scan-ring reg-scan-ring--delay"></span>
-                            <div class="absolute inset-0 rounded-2xl flex items-center justify-center shadow-lg" style="background:#2563EB;">
-                                <i class="fas fa-file-excel text-white text-3xl"></i>
-                            </div>
-                        </div>
-                        <p class="font-bold text-[#333333] text-lg">Scanning your file...</p>
-                        <p class="text-sm text-[#888888] mt-1">Checking the columns in "{{ $importFileName }}"</p>
-                    </div>
-
-                @elseif(!$headerValid)
-                    <div class="flex flex-col items-center text-center gap-3 py-8 px-2 shrink-0">
-                        <div class="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center">
-                            <i class="fas fa-triangle-exclamation text-red-500 text-2xl"></i>
-                        </div>
-                        <div>
-                            <p class="font-bold text-red-800 text-base">This file can't be imported</p>
-                            <p class="text-sm text-red-700 mt-1.5 max-w-sm mx-auto leading-relaxed">{{ $headerCheckMsg }}</p>
-                        </div>
-                    </div>
-
-                    <div class="flex gap-3 mt-auto">
-                        <button wire:click="backToUpload"
-                                class="flex-1 px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-[.99] flex items-center justify-center gap-2">
-                            <i class="fas fa-arrow-left text-sm"></i> Choose Another File
-                        </button>
-                        <button wire:click="closeImportModal"
-                                class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 active:scale-[.99]"
-                                style="background:#7A3F91;">
-                            Cancel
-                        </button>
-                    </div>
-
-                @else
-                    <div class="flex flex-col items-center text-center gap-3 p-5 rounded-xl bg-[#eff6ff] border border-[#bfdbfe] shrink-0">
-                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm" style="background:#2563EB;">
-                            <i class="fas fa-file-excel text-white text-2xl"></i>
-                        </div>
-                        <div class="min-w-0">
-                            <p class="font-bold text-[#333333] text-base break-all">{{ $importFileName }}</p>
-                            <p class="text-sm text-[#1D4ED8] mt-0.5 font-medium">
-                                <i class="fas fa-circle-check mr-1"></i>Columns look good — confirm below to start importing.
-                            </p>
-                        </div>
-                        <button type="button"
-                                onclick="document.getElementById('importFileInputPreview').click()"
-                                class="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border border-[#E8E0F0] text-[#555555] hover:bg-[#F5F5F5] transition">
-                            <i class="fas fa-arrows-rotate text-xs"></i> Replace
-                        </button>
-                        <input type="file" id="importFileInputPreview" wire:model="importFile" accept=".xlsx,.xls" class="hidden">
-                    </div>
-
-                    <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3 shrink-0">
-                        <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
-                        <p class="text-sm text-amber-800 leading-relaxed">
-                            Clicking <strong>Confirm Import</strong> will begin importing immediately.
-                            Duplicates are skipped automatically; invalid rows are reported after completion.
-                        </p>
-                    </div>
-
-                    <div class="flex gap-3 mt-auto">
-                        <button wire:click="backToUpload"
-                                class="flex-1 px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-[.99] flex items-center justify-center gap-2">
-                            <i class="fas fa-arrow-left text-sm"></i> Change File
-                        </button>
-                        <button wire:click="confirmImport"
-                                wire:loading.attr="disabled" wire:target="confirmImport"
-                                class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2"
-                                style="background:#7A3F91;">
-                            <span wire:loading wire:target="confirmImport">
-                                <i class="fas fa-spinner animate-spin"></i> Starting...
-                            </span>
-                            <span wire:loading.remove wire:target="confirmImport">
-                                <i class="fas fa-play"></i> Confirm Import
-                            </span>
-                        </button>
-                    </div>
-                @endif
-
-            {{-- STEP 3: IMPORTING --}}
+            {{-- STEP 2: IMPORTING (auto validates + imports, no confirm button) --}}
             @elseif($importStep === 'processing')
 
             <div wire:init="processImport" class="py-8 text-center m-auto">
@@ -1899,9 +1685,10 @@ new class extends Component {
                     @if($importTotal > 0)
                         Importing {{ number_format($importProgress) }} / {{ number_format($importTotal) }}
                     @else
-                        Preparing...
+                        Checking file &amp; preparing...
                     @endif
                 </p>
+                <p class="text-base font-medium mb-1 text-[#888888] break-all px-4">{{ $importFileName }}</p>
                 <p class="text-base font-medium mb-6" style="color:#16a34a;">{{ $importStatus ?: 'Please wait...' }}</p>
 
                 @if($importTotal > 0)
@@ -1920,7 +1707,7 @@ new class extends Component {
                     <div class="reg-progress-track">
                         <div class="reg-progress-fill" style="width:100%;"></div>
                     </div>
-                    <p class="text-xs font-bold mt-2" style="color:#15803d;">Reading records...</p>
+                    <p class="text-xs font-bold mt-2" style="color:#15803d;">Checking columns &amp; reading records...</p>
                 </div>
                 @endif
 
@@ -1930,7 +1717,7 @@ new class extends Component {
                 </p>
             </div>
 
-            {{-- BLOCKED --}}
+            {{-- BLOCKED (file failed validation — bad columns, empty file, etc.) --}}
             @elseif($importStep === 'blocked')
 
             <div class="flex items-start gap-4 p-4 rounded-xl bg-red-50 border border-red-200 shrink-0">
@@ -1947,7 +1734,7 @@ new class extends Component {
                 <i class="fas fa-rotate-left mr-2"></i>Try Again
             </button>
 
-            {{-- STEP 4: DONE --}}
+            {{-- STEP 3: DONE --}}
             @elseif($importStep === 'done')
 
             @php
@@ -2045,12 +1832,7 @@ new class extends Component {
         {{-- Modal Footer --}}
         <div class="shrink-0 px-5 py-3 border-t border-[#E8E0F0] bg-[#FAFAFA]">
             <p class="text-sm text-[#888888]">
-                @if($importStep === 'upload')    Choose an Excel file (.xlsx / .xls) to get started.
-                @elseif($importStep === 'preview')
-                    @if($headerChecking) Checking the file's columns...
-                    @elseif(!$headerValid) Fix the file and try again, or choose a different one.
-                    @else Review the file, then click Confirm Import.
-                    @endif
+                @if($importStep === 'upload')      Choose an Excel file (.xlsx / .xls) — it will be checked and imported automatically.
                 @elseif($importStep === 'processing') Do not close this window while importing.
                 @elseif($importStep === 'done')       Import complete — you may close this window.
                 @elseif($importStep === 'blocked')    Fix the error above and try again.

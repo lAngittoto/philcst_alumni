@@ -51,7 +51,23 @@ class RegistrarAlumniExportController extends Controller
             $q->where('profile_completed', 0);
         }
 
-        return $q->orderByDesc('created_at')->get();
+        $hasActiveFilter = $search !== '' || $batch !== '' || $course !== '' || $filter !== 'all';
+
+        // Same deterministic ordering (with `id` tie-breaker) as the
+        // alumni-records Volt component's alumniRecords() computed
+        // property, so the first row on screen always matches the first
+        // row in every export.
+        if ($hasActiveFilter) {
+            $q->orderBy('course_code')
+              ->orderBy('last_name')
+              ->orderBy('first_name')
+              ->orderBy('id');
+        } else {
+            $q->orderByDesc('created_at')
+              ->orderByDesc('id');
+        }
+
+        return $q->get();
     }
 
     private function formatName($item): string
@@ -72,15 +88,25 @@ class RegistrarAlumniExportController extends Controller
     }
 
     /**
-     * type=pdf    -> downloads a real PDF file
-     * type=excel  -> downloads a real .xlsx file (PhpSpreadsheet)
-     * type=print  -> returns clean printable HTML (used inside a hidden iframe)
+     * FIX (all-rows-showed-Complete bug): this used to OR the DB flag
+     * with a "derived from basic fields" check (first_name, last_name,
+     * middle_initial, student_id, course_code, batch, email). Those
+     * fields are always populated at registration/bulk-import time
+     * regardless of whether the alumnus has actually finished their full
+     * profile (address, parents' info, disability, etc. via the alumni
+     * portal) — so that derived check was true for nearly every record,
+     * which made every single row show "Complete" in the exports no
+     * matter what profile_completed actually said in the database.
      *
-     * Every branch is wrapped so a failure returns a clean JSON error
-     * response (with a real HTTP status code) instead of a raw fatal-error
-     * page — the frontend's fetch() relies on getting SOME response back
-     * quickly so it can stop its loading spinner.
+     * profile_completed is the authoritative flag (set by the alumni
+     * portal's own, more thorough completion check), so Status now comes
+     * straight from that column — no derived fallback, no guessing.
      */
+    private function isProfileComplete($item): bool
+    {
+        return (bool) ($item->profile_completed ?? false);
+    }
+
     public function export(Request $request)
     {
         $type = $request->query('type', 'pdf');
@@ -102,6 +128,12 @@ class RegistrarAlumniExportController extends Controller
         }
     }
 
+    /**
+     * Columns: Name, Student ID, Program Code, Batch, Email, Status.
+     * Status now reflects the real profile_completed value per row —
+     * Complete and Pending will both actually appear, matching the
+     * true mix of alumni records.
+     */
     private function toXlsx($records): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         if (! class_exists(Spreadsheet::class)) {
@@ -124,17 +156,23 @@ class RegistrarAlumniExportController extends Controller
             ->getStartColor()->setRGB('F5F0FA');
         $sheet->getStyle($headerRange)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
 
-        $row = 2;
+        $rows = [];
+        $statusFlags = [];
         foreach ($records as $item) {
-            $sheet->fromArray([
+            $isComplete = $this->isProfileComplete($item);
+            $statusFlags[] = $isComplete;
+
+            $rows[] = [
                 $this->formatName($item),
                 $item->student_id,
                 $item->course_code,
                 $item->batch,
                 $item->email,
-                $item->profile_completed ? 'Complete' : 'Pending',
-            ], null, 'A' . $row);
-            $row++;
+                $isComplete ? 'Complete' : 'Pending',
+            ];
+        }
+        if (count($rows)) {
+            $sheet->fromArray($rows, null, 'A2');
         }
 
         foreach (['A', 'B', 'C', 'D', 'E', 'F'] as $col) {
@@ -142,7 +180,20 @@ class RegistrarAlumniExportController extends Controller
         }
         $sheet->freezePane('A2');
 
+        $rowNum = 2;
+        foreach ($statusFlags as $isComplete) {
+            $cell = 'F' . $rowNum;
+            $sheet->getStyle($cell)->getFont()->setBold(true)
+                ->getColor()->setRGB($isComplete ? '059669' : 'D97706');
+            $sheet->getStyle($cell)->getFill()
+                ->setFillType(Fill::FILL_SOLID)
+                ->getStartColor()->setRGB($isComplete ? 'ECFDF5' : 'FFFBEB');
+            $rowNum++;
+        }
+
         $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
+
         $filePath = tempnam(sys_get_temp_dir(), 'alumni_xlsx_');
         $writer->save($filePath);
 
@@ -163,6 +214,7 @@ class RegistrarAlumniExportController extends Controller
         $html = view('registrar.alumni-records-print', [
             'records'     => $records,
             'formatName'  => fn ($item) => $this->formatName($item),
+            'isComplete'  => fn ($item) => $this->isProfileComplete($item),
             'generatedAt' => now(),
         ])->render();
 
@@ -170,6 +222,7 @@ class RegistrarAlumniExportController extends Controller
 
         return Pdf::loadHTML($html)
             ->setPaper('a4', 'portrait')
+            ->setOptions(['isHtml5ParserEnabled' => true, 'isPhpEnabled' => true])
             ->download($filename);
     }
 
@@ -178,6 +231,7 @@ class RegistrarAlumniExportController extends Controller
         return view('registrar.alumni-records-print', [
             'records'     => $records,
             'formatName'  => fn ($item) => $this->formatName($item),
+            'isComplete'  => fn ($item) => $this->isProfileComplete($item),
             'generatedAt' => now(),
         ]);
     }

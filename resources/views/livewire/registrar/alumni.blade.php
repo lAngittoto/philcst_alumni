@@ -87,9 +87,34 @@ new class extends Component {
         elseif ($this->alumniProfileFilter === 'incomplete')
             $q->where('profile_completed', 0);
 
-        $q->orderByDesc('created_at');
+        $hasActiveFilter = $this->alumniSearch !== ''
+            || $this->alumniBatch !== ''
+            || $this->alumniCourse !== ''
+            || $this->alumniProfileFilter !== 'all';
 
-        return $q->paginate(200, ['*'], 'alumniPage');
+        // FIX (Paolo-on-screen-but-Jose-in-export bug): without a final
+        // deterministic tie-breaker, rows sharing the same course_code /
+        // last_name / first_name — or, in the "no filter" branch, the
+        // exact same created_at (very common with bulk-imported alumni)
+        // — have NO guaranteed order. MySQL can return ties in a
+        // different order on every separate query, so the on-screen
+        // table and the export could show completely different first
+        // rows even with identical filters applied. Adding `id` as the
+        // last sort key makes the order 100% deterministic — and the
+        // export controller (RegistrarAlumniExportController) uses this
+        // EXACT same ordering so what's on screen is always what gets
+        // exported, in the same order, every time.
+        if ($hasActiveFilter) {
+            $q->orderBy('course_code')
+              ->orderBy('last_name')
+              ->orderBy('first_name')
+              ->orderBy('id');
+        } else {
+            $q->orderByDesc('created_at')
+              ->orderByDesc('id');
+        }
+
+        return $q->paginate(100, ['*'], 'alumniPage');
     }
 
     #[Computed] public function courses() { return Course::orderBy('code')->get(); }
@@ -100,9 +125,7 @@ new class extends Component {
         if (!$path || str_contains($path, 'default.png'))
             return asset('storage/alumni-photos/default.png');
         if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/'))
-            return Storage::disk('public')->exists($path)
-                ? asset('storage/' . $path)
-                : asset('storage/alumni-photos/default.png');
+            return asset('storage/' . $path);
         return asset('storage/alumni-photos/default.png');
     }
 
@@ -144,10 +167,6 @@ new class extends Component {
         return true;
     }
 
-    /**
-     * Build a human-readable summary of the currently applied filters,
-     * used inside the Generate Reports dropdown message.
-     */
     #[Computed]
     public function activeFilterSummary(): string
     {
@@ -305,7 +324,6 @@ new class extends Component {
         border: 5px solid transparent;
         border-top-color: #1a1a1a;
     }
-    /* Tooltip never shows on touch / small screens */
     @media (max-width: 768px), (hover: none) {
         .ar-hover-tip { display: none !important; }
     }
@@ -448,7 +466,6 @@ new class extends Component {
         font-size: .68rem; font-weight: 500; color: #333333; margin-top: 3px; display: block;
     }
 
-    /* ── Report menu items — proper colored backgrounds per type ──── */
     .ar-report-menu-item {
         display: flex; align-items: center; gap: 9px; width: 100%;
         padding: 9px 10px; border-radius: 8px;
@@ -820,29 +837,12 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Generate Reports icon — always top-right, single row on all screens
-             NOTE: uses fetch() + blob download / hidden iframe instead of window.open()
-             so everything stays in the SAME TAB and the URL never gets query params.
-
-             STATE LIVES IN Alpine.store('report', ...) — registered via multiple
-             lifecycle hooks below (alpine:init / livewire:init / livewire:navigated
-             / immediate call if Alpine is already present) so the store is always
-             ready before the very first click, even after Livewire's SPA-style
-             navigation re-executes this component without re-running its <script>
-             tag in some setups.
-
-             FIX (double-open/close bug): the toggle() method below is guarded with
-             a small timestamp debounce, and doExport() has its own "exporting" +
-             debounce guard (see script at bottom) so a single click can never
-             kick off two overlapping export jobs — which was the cause of the
-             print dialog appearing to "come back on its own" after being
-             cancelled (a second, delayed export finishing after the first one
-             and calling print() again by itself). --}}
         <div class="relative shrink-0" wire:ignore
              x-data
              x-init="window.__arEnsureReportStore && window.__arEnsureReportStore()"
              @click.outside="$store.report.open=false" wire:key="ar-report-dropdown">
             <button type="button" @click.stop="$store.report.toggle()" class="ar-report-btn"
+                    :disabled="$store.report.exporting"
                     :class="{ 'ar-report-btn-active': $store.report.open }">
                 <i class="fas fa-chart-column"></i>
                 <span class="ar-report-tip">Generate Reports</span>
@@ -857,6 +857,7 @@ new class extends Component {
                     <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
                     <span class="txt">{{ $this->activeFilterSummary }}</span>
                     <span class="cnt">{{ number_format($this->alumniRecords->total()) }} matching record(s)</span>
+                    
                 </div>
 
                 <button type="button" @click="$store.report.doExport('pdf', $wire)"
@@ -889,7 +890,6 @@ new class extends Component {
 
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
-            {{-- Profile Status Pill Tabs --}}
             <div class="flex items-center gap-1.5 shrink-0">
                 <button type="button" wire:click="$set('alumniProfileFilter','all')"
                         class="ar-status-pill {{ $alumniProfileFilter === 'all' ? 'active-all' : '' }}">All</button>
@@ -901,7 +901,6 @@ new class extends Component {
 
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
 
-            {{-- Search --}}
             <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
                  x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
@@ -912,7 +911,6 @@ new class extends Component {
                        autocomplete="off" spellcheck="false">
             </div>
 
-            {{-- Batch Year --}}
             <div class="ar-dropdown"
                  x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniBatch',val); this.close(); } }"
                  @click.outside="close()" wire:key="batch-dropdown">
@@ -931,7 +929,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Program Code --}}
             <div class="ar-dropdown"
                  x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniCourse',val); this.close(); } }"
                  @click.outside="close()" wire:key="course-dropdown">
@@ -950,14 +947,12 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Reset --}}
             <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none">
                 <i class="fas fa-rotate-left text-sm"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
-            {{-- Active filter badges --}}
             @if($alumniProfileFilter !== 'all')
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border
                          {{ $alumniProfileFilter === 'complete' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200' }}">
@@ -973,7 +968,6 @@ new class extends Component {
             @endif
         </div>
 
-        {{-- Filtering progress bar --}}
         <div class="ar-filter-progress-track" wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
             <div class="ar-filter-progress-bar"></div>
         </div>
@@ -983,13 +977,12 @@ new class extends Component {
             @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
         </style>
 
-        {{-- Records wrapper --}}
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
 
-                {{-- ── DESKTOP / TABLET: table view (hidden on mobile, no horizontal scroll needed since it fits) ── --}}
+                {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
                     <colgroup>
                         <col style="width:28%;"><col style="width:18%;"><col style="width:14%;"><col style="width:12%;"><col style="width:28%;">
@@ -1011,11 +1004,12 @@ new class extends Component {
                                 $item->last_name ?? '', $item->suffix ?? ''
                             );
                         @endphp
-                        <tr class="ar-row bg-white" wire:click="viewProfile({{ $item->id }})">
+                        <tr class="ar-row bg-white" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
-                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false">
+                                         class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false"
+                                         onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
                                     <span class="font-semibold text-[#333333] text-sm uppercase truncate block">
                                         {!! $this->highlight($displayName, $this->alumniSearch) !!}
                                     </span>
@@ -1036,7 +1030,6 @@ new class extends Component {
                                 <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
                             <td class="px-4 py-3 overflow-hidden">
-                                {{-- Email: preserve original casing from DB --}}
                                 <span class="text-[#333333] text-sm font-normal truncate block">
                                     {!! $this->highlight($item->email ?? '', $this->alumniSearch) !!}
                                 </span>
@@ -1058,7 +1051,7 @@ new class extends Component {
                     </tbody>
                 </table>
 
-                {{-- ── MOBILE: stacked card list (no horizontal scroll, no email column, no tooltip) ── --}}
+                {{-- ── MOBILE: stacked card list ── --}}
                 <div class="block md:hidden">
                     @forelse($this->alumniRecords as $item)
                     @php
@@ -1067,9 +1060,10 @@ new class extends Component {
                             $item->last_name ?? '', $item->suffix ?? ''
                         );
                     @endphp
-                    <div class="ar-mrow" wire:click="viewProfile({{ $item->id }})">
+                    <div class="ar-mrow" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
                         <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
-                             class="w-10 h-10 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false">
+                             class="w-10 h-10 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false"
+                             onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
                         <div class="flex-1 min-w-0">
                             <p class="font-semibold text-[#333333] text-sm uppercase truncate">
                                 {!! $this->highlight($displayName, $this->alumniSearch) !!}
@@ -1111,7 +1105,6 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- Pagination footer --}}
         @php
             $total    = $this->alumniRecords->total();
             $pp       = $this->alumniRecords->perPage();
@@ -1234,7 +1227,6 @@ new class extends Component {
     $hasCustomPhoto = !empty($viewingProfile['profile_photo'])
         && !str_contains($viewingProfile['profile_photo'], 'default.png');
 
-    // Derive completeness: DB flag OR all required fields filled
     $profileIsComplete = $this->isProfileComplete($viewingProfile);
 @endphp
 
@@ -1244,7 +1236,6 @@ new class extends Component {
 
     <div class="w-full h-full flex flex-col ar-panel" style="background:#F2F2F2;overflow:hidden;">
 
-        {{-- ── Sticky Header ── --}}
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             <div class="flex items-center gap-3 min-w-0">
@@ -1264,11 +1255,9 @@ new class extends Component {
             </button>
         </div>
 
-        {{-- ── Body ── --}}
         <div class="flex-1 min-h-0 ar-profile-body">
             <div class="ar-profile-grid">
 
-                {{-- ══ Row 1: Avatar strip ══ --}}
                 <div style="grid-column:1/-1;"
                      x-data="{
                          previewSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
@@ -1330,7 +1319,8 @@ new class extends Component {
                             <div class="relative group" style="width:108px;height:108px;flex-shrink:0;">
                                 <img :src="previewSrc" alt="{{ $viewingProfile['first_name'] ?? '' }}"
                                      class="w-full h-full object-cover shadow-md transition-all" style="border-radius:12px;"
-                                     :class="hasFile ? 'ring-2 ring-[#7A3F91] ring-offset-2' : 'ring-2 ring-[#E0E0E0]'">
+                                     :class="hasFile ? 'ring-2 ring-[#7A3F91] ring-offset-2' : 'ring-2 ring-[#E0E0E0]'"
+                                     onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
                                 <div x-show="saving" class="ar-uploading-overlay">
                                     <i class="fas fa-spinner fa-spin text-[#7A3F91] text-base"></i>
                                 </div>
@@ -1416,21 +1406,18 @@ new class extends Component {
                                 Batch {{ $viewingProfile['batch'] ?? '—' }}
                             </span>
                             <span style="color:#CCCCCC;font-size:.8rem;">•</span>
-                            {{-- Complete chip: uses derived logic (DB flag OR all required fields present) --}}
                             @if($profileIsComplete)
                                 <span class="ar-info-chip" style="background:#ECFDF5;color:#059669;border:1px solid #6ee7b7;">Complete</span>
                             @else
                                 <span class="ar-info-chip" style="background:#FFFBEB;color:#D97706;border:1px solid #fcd34d;">Incomplete</span>
                             @endif
                         </div>
-                        {{-- Email: preserve original casing from DB --}}
                         <p style="font-size:.9rem;color:#444444;font-weight:500;">
                             {{ $viewingProfile['email'] ?? '—' }}
                         </p>
                     </div>
                 </div>{{-- end avatar strip --}}
 
-                {{-- ── Row 2: Student ID | Name ── --}}
                 <div class="ar-card" style="grid-column:1/2;">
                     <div class="ar-card-header"><p>Student ID</p></div>
                     <div class="p-2">
@@ -1463,7 +1450,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 3: Student Data | Father | Mother ── --}}
                 <div class="ar-card">
                     <div class="ar-card-header"><p>Student's Data</p></div>
                     <div class="p-2 grid grid-cols-2 gap-1.5">
@@ -1518,7 +1504,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 4: Address ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
                     <div class="ar-card-header"><p>Permanent Address</p></div>
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
@@ -1541,7 +1526,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- ── Row 5: Additional Info ── --}}
                 <div class="ar-card" style="grid-column:1/-1;">
                     <div class="ar-card-header"><p>Additional Information</p></div>
                     <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
@@ -1559,13 +1543,11 @@ new class extends Component {
                         </div>
                         <div class="ar-cell">
                             <p class="ar-field-label">Email Address</p>
-                            {{-- Email: preserve original casing from DB, no strtoupper/strtolower --}}
                             <p class="ar-field-value">{{ trim($viewingProfile['email'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
-                {{-- ══ Row 6: Employment ══ --}}
                 <div class="ar-card" style="grid-column:1/-1; margin-bottom:4px;">
 
                     <div class="ar-card-header">
@@ -1587,7 +1569,6 @@ new class extends Component {
                     @else
                         <div class="ar-emp-grid">
 
-                            {{-- ── Left column ── --}}
                             <div class="flex flex-col gap-1.5">
 
                                 <div class="ar-cell">
@@ -1632,7 +1613,6 @@ new class extends Component {
 
                             </div>
 
-                            {{-- ── Right column ── --}}
                             <div class="flex flex-col gap-1.5">
 
                                 @if($isWorking)
@@ -1690,9 +1670,49 @@ new class extends Component {
 
 <script>
 (function () {
-    // Register the report-export Alpine store — guarded so it only runs once
-    // even if this Blade file's <script> block executes again after a
-    // Livewire re-render, and callable on demand from x-init as a safety net.
+    // ══ FIX #3 (original): suppress clicks landing right after a
+    // Livewire DOM update (timing window). ══
+    var arSuppressRowClicksUntil = 0;
+    document.addEventListener('livewire:updated', function () {
+        arSuppressRowClicksUntil = Date.now() + 280;
+    });
+
+    // ══ FIX #3b (identity-based — closes the gap the timer alone
+    // missed): the old fix only relied on a fixed 280ms timer. On a
+    // slower device/connection, Livewire's morph can still finish AFTER
+    // that window closes, and the phantom click slips through — this is
+    // the "auto-opens View Details by itself sometimes" bug.
+    //
+    // This adds a second, timing-independent guard: we remember WHICH
+    // alumni row (by data-ar-id) was actually under the pointer at
+    // pointerdown. If, by the time the click event fires, that exact
+    // screen position now belongs to a DIFFERENT alumni's row (because
+    // Livewire swapped the row's content in between mousedown and
+    // mouseup), that's proof the click is phantom — regardless of how
+    // much time passed — and we swallow it. A genuine, intentional click
+    // always has the SAME row id at pointerdown and at click. ══
+    var arPointerDownRowId = null;
+
+    document.addEventListener('pointerdown', function (e) {
+        var row = e.target.closest('.ar-row, .ar-mrow');
+        arPointerDownRowId = row ? row.getAttribute('data-ar-id') : null;
+    }, true);
+
+    document.addEventListener('click', function (e) {
+        var row = e.target.closest('.ar-row, .ar-mrow');
+        if (!row) { arPointerDownRowId = null; return; }
+
+        var rowId = row.getAttribute('data-ar-id');
+        var idChangedUnderneath = arPointerDownRowId !== null && arPointerDownRowId !== rowId;
+        var withinTimedWindow = Date.now() < arSuppressRowClicksUntil;
+
+        if (idChangedUnderneath || withinTimedWindow) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+        arPointerDownRowId = null;
+    }, true);
+
     function registerReportStore() {
         if (!window.Alpine) return;
         if (window.Alpine.store('report')) return;
@@ -1703,17 +1723,6 @@ new class extends Component {
             _lastToggle: 0,
             _lastExport: 0,
 
-            /**
-             * FIX (double open/close bug): debounce toggle calls. If this
-             * button's click listener ever ends up bound more than once on
-             * the same DOM node (e.g. Alpine re-scanning the tree around a
-             * Livewire SPA navigation before the store guard above has run),
-             * a single physical click could fire this twice in the same
-             * tick — which looks like "click once → it opens then instantly
-             * closes" or "close it → it pops back open by itself". Ignoring
-             * a second call within 150ms of the first makes one click always
-             * resolve to exactly one state change.
-             */
             toggle() {
                 const now = Date.now();
                 if (now - this._lastToggle < 150) return;
@@ -1721,13 +1730,6 @@ new class extends Component {
                 this.open = !this.open;
             },
 
-            /**
-             * FIX: reads the actual backend error message (set by
-             * RegistrarAlumniExportController's catch block, e.g.
-             * "Report generation failed: ...") instead of always showing
-             * a generic "Export failed" string. Falls back to the generic
-             * message only if the response body isn't readable/JSON.
-             */
             async readErrorMessage(res, fallback) {
                 try {
                     const data = await res.clone().json();
@@ -1738,33 +1740,17 @@ new class extends Component {
                 return fallback;
             },
 
-            /**
-             * FIX (print "reopens by itself" bug): the export item buttons
-             * use a plain @click (no debounce), so if this node ever ends
-             * up double-bound the same way the toggle button could, a
-             * single physical click fired doExport() TWICE. Both calls
-             * would fetch the same export HTML and build/print an iframe —
-             * the first print dialog is the one you see and cancel, but the
-             * second call's fetch finishes a moment later and calls
-             * frame.contentWindow.print() again on its own, which is what
-             * made it look like the dialog "came back" without a new click.
-             *
-             * Two independent guards close this off:
-             *   1. `exporting` + a 400ms debounce on entry — a second call
-             *      arriving while one is already running (or right after
-             *      one just started) is dropped immediately.
-             *   2. For print specifically, a brand-new <iframe> is created
-             *      per export and the previous one is removed, and its
-             *      `onload` handler nulls itself out right after firing —
-             *      so even in the worst case an old iframe/timer can never
-             *      call print() a second time behind your back.
-             */
             async doExport(type, wire) {
                 const now = Date.now();
                 if (this.exporting || now - this._lastExport < 400) return;
                 this._lastExport = now;
                 this.exporting = true;
                 this.open = false;
+
+                const label = type === 'excel' ? 'Excel file' : type === 'print' ? 'print view' : 'PDF';
+                window.dispatchEvent(new CustomEvent('flash-message', {
+                    detail: { type: 'info', message: 'Generating your ' + label + '… this only takes a moment.' }
+                }));
 
                 const params = new URLSearchParams({
                     type: type,
@@ -1784,12 +1770,6 @@ new class extends Component {
                         }
                         const html = await res.text();
 
-                        // Always start from a fresh iframe. Reusing one
-                        // persistent iframe across print jobs meant a
-                        // leftover `onload` handler (or an in-flight
-                        // setTimeout from a previous, still-resolving call)
-                        // could still be alive and fire print() again later
-                        // — exactly the "reopens on its own" symptom.
                         const oldFrame = document.getElementById('ar-print-frame');
                         if (oldFrame) oldFrame.remove();
 
@@ -1801,6 +1781,16 @@ new class extends Component {
                         frame.style.width = '0';
                         frame.style.height = '0';
                         frame.style.border = '0';
+
+                        let printFired = false;
+                        const firePrintOnce = () => {
+                            if (printFired) return;
+                            printFired = true;
+                            frame.contentWindow.focus();
+                            frame.contentWindow.print();
+                        };
+                        frame.onload = () => setTimeout(firePrintOnce, 150);
+
                         document.body.appendChild(frame);
 
                         const doc = frame.contentWindow.document;
@@ -1808,15 +1798,7 @@ new class extends Component {
                         doc.write(html);
                         doc.close();
 
-                        frame.onload = () => {
-                            // Fire exactly once, then detach — nothing can
-                            // trigger a second print() from this iframe again.
-                            frame.onload = null;
-                            setTimeout(() => {
-                                frame.contentWindow.focus();
-                                frame.contentWindow.print();
-                            }, 150);
-                        };
+                        setTimeout(firePrintOnce, 200);
                     } else {
                         const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
                         if (!res.ok) {
@@ -1853,10 +1835,6 @@ new class extends Component {
         });
     }
 
-    // Exposed globally so the dropdown's x-init can call it directly the
-    // instant that specific DOM node initializes — this is what guarantees
-    // the very first click always works, instead of needing a stray retry
-    // while waiting for alpine:init / livewire:navigated to fire.
     window.__arEnsureReportStore = registerReportStore;
 
     if (window.Alpine) {
@@ -1868,7 +1846,6 @@ new class extends Component {
 
     var tip = document.getElementById('ar-hover-tip');
 
-    // Tooltip only makes sense on devices with real hover + a mouse (desktop).
     function isHoverCapable() {
         return window.matchMedia('(hover: hover) and (pointer: fine)').matches
             && window.innerWidth > 768;
