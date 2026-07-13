@@ -35,7 +35,7 @@ new class extends Component {
     public ?int   $modalBatch   = null;
     public string $modalSearch  = '';
     public int    $modalPage    = 1;
-    public int    $modalPageSize = 200;
+    public int    $modalPageSize = 100;
 
     // ── Stats ─────────────────────────────────────────────────────────────────
     public int    $totalAlumni     = 0;
@@ -636,6 +636,36 @@ new class extends Component {
 
 <div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '')" class="emp-dashboard-root">
 
+{{-- ══ FLASH TOAST — mirrors Alumni Records' toast, shows the "Generating
+     your PDF/Excel/print view… this only takes a moment" info message
+     dispatched right when a report export starts, plus success/error
+     messages. ══ --}}
+<div x-data="{
+        show:false, type:'success', msg:'', timer:null,
+        display(t,m){ this.type=t; this.msg=m; this.show=true; clearTimeout(this.timer); this.timer=setTimeout(()=>this.show=false,5000); }
+     }"
+     @flash-message.window="display($event.detail.type,$event.detail.message)"
+     x-show="show"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0 translate-y-2 scale-95"
+     x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0 scale-95"
+     class="fixed top-4 right-4 z-[200] flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl max-w-sm border-l-4 bg-white"
+     :class="{ 'border-emerald-500':type==='success','border-red-500':type==='error','border-blue-500':type==='info' }"
+     style="display:none">
+    <i class="fas mt-0.5 text-base shrink-0"
+       :class="{ 'fa-circle-check text-emerald-500':type==='success','fa-circle-exclamation text-red-500':type==='error','fa-circle-info text-blue-500':type==='info' }"></i>
+    <div class="flex-1 min-w-0">
+        <p class="font-semibold text-sm text-[#333333]" x-text="type==='success'?'Success':type==='info'?'Info':'Error'"></p>
+        <p class="text-sm mt-0.5 text-[#666666] leading-snug break-words font-normal" x-text="msg"></p>
+    </div>
+    <button @click="show=false" class="text-[#999999] hover:text-[#666666] transition shrink-0 mt-0.5">
+        <i class="fas fa-xmark text-sm"></i>
+    </button>
+</div>
+
 {{-- ══ CURSOR-FOLLOW TOOLTIP (desktop only — hidden on mobile/touch, see CSS + JS below) ══ --}}
 <div id="emp-cursor-tip"
      style="position:fixed;pointer-events:none;z-index:99999;display:none;
@@ -1046,6 +1076,7 @@ new class extends Component {
                  x-init="window.__empEnsureReportStore && window.__empEnsureReportStore()"
                  @click.outside="$store.empReport.open=false" wire:key="emp-report-dropdown">
                 <button type="button" @click.stop="$store.empReport.toggle()" class="ar-report-btn"
+                        :disabled="$store.empReport.exporting"
                         :class="{ 'ar-report-btn-active': $store.empReport.open }">
                     <i class="fas fa-chart-column"></i>
                     <span class="ar-report-tip">Generate Reports</span>
@@ -1062,18 +1093,20 @@ new class extends Component {
                         <span class="cnt">{{ number_format($totalAlumni) }} alumni in this scope</span>
                     </div>
 
-                    <button type="button" @click="$store.empReport.doExport('pdf', $wire)" class="ar-report-menu-item item-pdf">
+                    <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
+                            :disabled="$store.empReport.exporting" class="ar-report-menu-item item-pdf">
                         <span class="ar-item-icon"><i class="fas fa-file-pdf"></i></span>
                         <span class="ar-item-label">Export as PDF</span>
                     </button>
 
-                    <button type="button" @click="$store.empReport.doExport('excel', $wire)" class="ar-report-menu-item item-excel">
+                    <button type="button" @click="$store.empReport.doExport('excel', $wire)"
+                            :disabled="$store.empReport.exporting" class="ar-report-menu-item item-excel">
                         <span class="ar-item-icon"><i class="fas fa-file-excel"></i></span>
                         <span class="ar-item-label">Export as Excel</span>
                     </button>
 
                     <button type="button" @click="$store.empReport.doExport('print', $wire)"
-                            :disabled="$store.empReport.printLock" class="ar-report-menu-item item-print">
+                            :disabled="$store.empReport.exporting || $store.empReport.printLock" class="ar-report-menu-item item-print">
                         <span class="ar-item-icon"><i class="fas fa-print"></i></span>
                         <span class="ar-item-label">Print Current View</span>
                     </button>
@@ -1795,6 +1828,7 @@ new class extends Component {
         window.Alpine.store('empReport', {
             open: false,
             _lastToggle: 0,
+            exporting: false,
             printLock: false,
             _activePrintCleanup: null,
 
@@ -1820,6 +1854,10 @@ new class extends Component {
              * This is independent from the drill-down detail modal.
              */
             async doExport(type, wire) {
+                // Guard against double-clicks while an export (of any type)
+                // is already underway.
+                if (this.exporting) return;
+
                 this.open = false;
 
                 // ── Print re-entry guard ──────────────────────────────────
@@ -1841,6 +1879,15 @@ new class extends Component {
                         this._activePrintCleanup = null;
                     }
                 }
+
+                this.exporting = true;
+
+                // ── "Please wait" info toast — mirrors Alumni Records,
+                //    shown the instant the export request is dispatched. ──
+                var label = type === 'excel' ? 'Excel file' : type === 'print' ? 'print view' : 'PDF';
+                window.dispatchEvent(new CustomEvent('flash-message', {
+                    detail: { type: 'info', message: 'Generating your ' + label + '… this only takes a moment.' }
+                }));
 
                 var self = this;
 
@@ -1898,7 +1945,8 @@ new class extends Component {
                             cleanedUp = true;
                             window.removeEventListener('focus', onWinFocus);
                             if (frame && frame.parentNode) frame.remove();
-                            self.printLock = false;
+                            self.printLock  = false;
+                            self.exporting  = false;
                             if (self._activePrintCleanup === cleanup) self._activePrintCleanup = null;
                         };
                         self._activePrintCleanup = cleanup;
@@ -1959,7 +2007,7 @@ new class extends Component {
 
                         var blob = await res2.blob();
                         var disposition = res2.headers.get('Content-Disposition') || '';
-                        var filename = type === 'excel' ? 'employment-tracking-report.xls' : 'employment-tracking-report.pdf';
+                        var filename = type === 'excel' ? 'employment-tracking-report.xlsx' : 'employment-tracking-report.pdf';
                         var match = disposition.match(/filename="?([^"]+)"?/);
                         if (match) filename = match[1];
 
@@ -1971,9 +2019,12 @@ new class extends Component {
                         a.click();
                         a.remove();
                         window.URL.revokeObjectURL(blobUrl);
+
+                        this.exporting = false;
                     }
                 } catch (e) {
                     if (type === 'print') this.printLock = false;
+                    this.exporting = false;
                     window.dispatchEvent(new CustomEvent('flash-message', {
                         detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
                     }));

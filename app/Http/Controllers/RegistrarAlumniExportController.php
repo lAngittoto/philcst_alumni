@@ -53,8 +53,8 @@ class RegistrarAlumniExportController extends Controller
 
         $hasActiveFilter = $search !== '' || $batch !== '' || $course !== '' || $filter !== 'all';
 
-        // Same deterministic ordering (with `id` tie-breaker) as the
-        // alumni-records Volt component's alumniRecords() computed
+        // Same deterministic ordering (with an id tie-breaker) as the
+        // alumni-records Volt component alumniRecords computed
         // property, so the first row on screen always matches the first
         // row in every export.
         if ($hasActiveFilter) {
@@ -87,20 +87,20 @@ class RegistrarAlumniExportController extends Controller
         return implode(' ', array_filter($parts));
     }
 
-    /**
+    /*
      * FIX (all-rows-showed-Complete bug): this used to OR the DB flag
-     * with a "derived from basic fields" check (first_name, last_name,
+     * with a derived-from-basic-fields check (first_name, last_name,
      * middle_initial, student_id, course_code, batch, email). Those
      * fields are always populated at registration/bulk-import time
      * regardless of whether the alumnus has actually finished their full
-     * profile (address, parents' info, disability, etc. via the alumni
-     * portal) — so that derived check was true for nearly every record,
-     * which made every single row show "Complete" in the exports no
+     * profile (address, parent info, disability, etc via the alumni
+     * portal), so that derived check was true for nearly every record,
+     * which made every single row show Complete in the exports no
      * matter what profile_completed actually said in the database.
      *
-     * profile_completed is the authoritative flag (set by the alumni
-     * portal's own, more thorough completion check), so Status now comes
-     * straight from that column — no derived fallback, no guessing.
+     * profile_completed is the authoritative flag, set by the alumni
+     * portal own more thorough completion check, so Status now comes
+     * straight from that column, no derived fallback, no guessing.
      */
     private function isProfileComplete($item): bool
     {
@@ -128,9 +128,9 @@ class RegistrarAlumniExportController extends Controller
         }
     }
 
-    /**
+    /*
      * Columns: Name, Student ID, Program Code, Batch, Email, Status.
-     * Status now reflects the real profile_completed value per row —
+     * Status now reflects the real profile_completed value per row.
      * Complete and Pending will both actually appear, matching the
      * true mix of alumni records.
      */
@@ -220,9 +220,33 @@ class RegistrarAlumniExportController extends Controller
 
         $filename = 'alumni-records-' . now()->format('Ymd-His') . '.pdf';
 
+        /*
+         * SPEED FIXES:
+         * isHtml5ParserEnabled removed, it was true. The HTML5 parser
+         * carries extra parsing overhead we do not need here, our
+         * markup is simple valid HTML already, so the default faster
+         * parser handles it fine.
+         * isRemoteEnabled explicitly set to false. This stops dompdf
+         * from ever attempting an HTTP fetch for any asset, images,
+         * fonts, etc. We do not embed any remote assets in this
+         * report, so this is a safe free speed guarantee, and it
+         * protects against a silent slowdown if someone adds a remote
+         * image URL here later.
+         * isPhpEnabled removed, it was true. This print view has no
+         * inline php tags of its own, so there is no need to pay the
+         * small overhead of supporting that feature.
+         * defaultFont set to a built-in dompdf font instead of Arial.
+         * dompdf ships DejaVu Sans and Helvetica metrics natively.
+         * Requesting a system font it has to substitute or measure
+         * adds a bit of overhead on every text node.
+         */
         return Pdf::loadHTML($html)
             ->setPaper('a4', 'portrait')
-            ->setOptions(['isHtml5ParserEnabled' => true, 'isPhpEnabled' => true])
+            ->setOptions([
+                'isRemoteEnabled' => false,
+                'dpi'             => 96,
+                'defaultFont'     => 'sans-serif',
+            ])
             ->download($filename);
     }
 
@@ -239,7 +263,7 @@ class RegistrarAlumniExportController extends Controller
     private function missingPackageResponse(string $package): JsonResponse
     {
         return response()->json([
-            'message' => "The \"{$package}\" package isn't installed correctly. "
+            'message' => "The {$package} package is not installed correctly. "
                 . 'Run composer install/require again for it, then retry.',
         ], 500);
     }

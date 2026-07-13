@@ -6,8 +6,13 @@
 <style>
     @page { size: A4 portrait; margin: 14mm 12mm; }
     * { box-sizing: border-box; }
+    /* SPEED FIX: use dompdf's built-in sans-serif (maps to DejaVu Sans
+       internally) instead of "Arial, Helvetica" — dompdf has to locate,
+       load, and metric-match a system font for those names, which adds
+       overhead on every text node. sans-serif uses dompdf's native font
+       directly, no substitution step needed. */
     body {
-        font-family: Arial, Helvetica, sans-serif;
+        font-family: sans-serif;
         color: #111111;
         margin: 0;
         padding: 0;
@@ -30,10 +35,14 @@
     .rp-header p  { margin: 2px 0 0; font-size: 10px; color: #555555; }
     .rp-meta      { font-size: 10px; color: #555555; white-space: nowrap; line-height: 1.5; }
 
+    /* FIX: table-layout:fixed + border-collapse:collapse
+       — avoids dompdf having to auto-measure column widths from
+       content (which gets very slow at 1000+ rows), and collapsed
+       borders render faster than "separate" mode. */
     table {
         width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
+        table-layout: fixed;
+        border-collapse: collapse;
         margin-bottom: 6px;
     }
     thead th {
@@ -53,19 +62,26 @@
         font-size: 10.5px;
         vertical-align: top;
         background: #ffffff;
+        overflow: hidden;
     }
 
     tbody tr td { border-top: none; }
 
+    /* FIX (biggest win): removed border-radius entirely.
+       Rounded-corner rendering is one of the slowest operations in
+       dompdf's rendering engine — at 1500 rows that was 1500 rounded
+       shapes computed one by one. Plain colored, bold text conveys
+       the same Complete/Pending status without the cost. */
     .rp-badge {
-        display: inline-block;
-        padding: 1px 6px;
-        border-radius: 8px;
+        display: inline;
+        padding: 0;
         font-size: 9px;
-        font-weight: 600;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .02em;
     }
-    .rp-complete { background: #ECFDF5; color: #059669; }
-    .rp-pending  { background: #FFFBEB; color: #D97706; }
+    .rp-complete { color: #059669; }
+    .rp-pending  { color: #D97706; }
 
     .rp-page-block { page-break-after: always; }
     .rp-page-block:last-child { page-break-after: auto; }

@@ -6,6 +6,11 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
 
 class EmploymentTrackingExportController extends Controller
 {
@@ -44,7 +49,7 @@ class EmploymentTrackingExportController extends Controller
             ];
 
             if ($type === 'excel') {
-                return $this->exportExcel($records, $summary);
+                return $this->exportExcel($records, $summary, $user->name ?? 'Registrar');
             }
 
             if ($type === 'print') {
@@ -105,27 +110,162 @@ class EmploymentTrackingExportController extends Controller
     }
 
     /**
-     * Simple Excel export using an HTML table served as .xls
-     * (walang dependency sa Maatwebsite\Excel — gumagana agad out of the box).
-     * Kung meron ka ng maatwebsite/excel package, pwede mo palitan ito ng
-     * proper Export class kung gusto mo ng totoong .xlsx.
+     * FIX (Excel "format and extension don't match" warning): dati,
+     * ang exportExcel() ay nagse-serve ng HTML na nilagyan lang ng
+     * ".xls" extension at "application/vnd.ms-excel" content-type.
+     * Ang Excel mismo ay sinisipat/sinni-sniff yung actual bytes ng
+     * file bago ito buksan — nakikita niyang HTML pala ang laman kahit
+     * ".xls" ang pangalan, kaya lumalabas yung "file format and
+     * extension don't match" prompt.
+     *
+     * Ngayon, totoong binary .xlsx na ang gawa gamit ang
+     * PhpOffice\PhpSpreadsheet — parang ginawa na natin sa
+     * RegistrarAlumniExportController — kaya tugma na yung tunay na
+     * laman ng file sa extension nito. Layout mirrors the PDF's
+     * section-by-section structure: report title/meta block muna,
+     * tapos summary counts, tapos yung detailed per-alumnus table.
      */
-    private function exportExcel($records, string $summary)
+    private function exportExcel($records, string $summary, string $generatedBy): \Symfony\Component\HttpFoundation\StreamedResponse
     {
-        $filename = 'employment-tracking-report-' . now()->format('Y-m-d_His') . '.xls';
+        if (! class_exists(Spreadsheet::class)) {
+            return response()->json([
+                'message' => 'Excel export is not available yet. Kulang pa yung "phpoffice/phpspreadsheet" package sa server — patakbuhin muna ang: composer require phpoffice/phpspreadsheet',
+            ], 500);
+        }
 
-        $html = view('registrar.employment-tracking-print', [
-            'records'     => $records,
-            'filters'     => $summary,
-            'generatedAt' => now(),
-            'generatedBy' => auth()->user()->name ?? 'Registrar',
-            'excelMode'   => true,
-        ])->render();
+        $filename = 'employment-tracking-report-' . now()->format('Y-m-d_His') . '.xlsx';
 
-        return response($html, 200, [
-            'Content-Type'        => 'application/vnd.ms-excel',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Employment Tracking');
+
+        $purple = '7A3F91';
+        $lightPurple = 'F5F0FA';
+        $bodyGray = '333333';
+
+        // ---- Section 1: Report header / meta (mirrors PDF header block) ----
+        $sheet->setCellValue('A1', 'Employment Tracking Report');
+        $sheet->mergeCells('A1:D1');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setRGB($purple);
+
+        $sheet->setCellValue('A2', 'Scope: ' . $summary);
+        $sheet->mergeCells('A2:D2');
+        $sheet->getStyle('A2')->getFont()->getColor()->setRGB($bodyGray);
+
+        $sheet->setCellValue('A3', 'Generated: ' . now()->format('F j, Y g:i A') . ' by ' . $generatedBy);
+        $sheet->mergeCells('A3:D3');
+        $sheet->getStyle('A3')->getFont()->setItalic(true)->getColor()->setRGB($bodyGray);
+
+        // ---- Section 2: Summary counts (mirrors PDF summary block) ----
+        $counts = [
+            'Employed'     => 0,
+            'Unemployed'   => 0,
+            'Underemployed' => 0,
+            'No Record'    => 0,
+        ];
+
+        foreach ($records as $r) {
+            $status = $r->employment_status;
+            if ($status === null || $status === '') {
+                $counts['No Record']++;
+            } elseif (isset($counts[$status])) {
+                $counts[$status]++;
+            } else {
+                // Any status value not in the predefined buckets still gets counted
+                // under its own label instead of being silently dropped.
+                $counts[$status] = ($counts[$status] ?? 0) + 1;
+            }
+        }
+
+        $summaryRow = 5;
+        $sheet->setCellValue('A' . $summaryRow, 'Summary');
+        $sheet->getStyle('A' . $summaryRow)->getFont()->setBold(true)->getColor()->setRGB($purple);
+        $summaryRow++;
+
+        foreach ($counts as $label => $count) {
+            $sheet->setCellValue('A' . $summaryRow, $label);
+            $sheet->setCellValue('B' . $summaryRow, $count);
+            $sheet->getStyle('A' . $summaryRow . ':B' . $summaryRow)->getFont()->getColor()->setRGB($bodyGray);
+            $summaryRow++;
+        }
+        $sheet->setCellValue('A' . $summaryRow, 'Total');
+        $sheet->setCellValue('B' . $summaryRow, count($records));
+        $sheet->getStyle('A' . $summaryRow . ':B' . $summaryRow)->getFont()->setBold(true);
+
+        // ---- Section 3: Detailed per-alumnus table ----
+        $tableStartRow = $summaryRow + 2;
+
+        $headers = [
+            'Name', 'Student ID', 'Program', 'Batch', 'Email', 'Contact Number',
+            'Employment Status', 'Course Relevance', 'Work Location', 'Date Recorded',
+        ];
+        $sheet->fromArray($headers, null, 'A' . $tableStartRow);
+
+        $headerRange = 'A' . $tableStartRow . ':J' . $tableStartRow;
+        $sheet->getStyle($headerRange)->getFont()->setBold(true)->getColor()->setRGB($bodyGray);
+        $sheet->getStyle($headerRange)->getFill()
+            ->setFillType(Fill::FILL_SOLID)
+            ->getStartColor()->setRGB($lightPurple);
+        $sheet->getStyle($headerRange)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle($headerRange)->getBorders()->getBottom()->setBorderStyle(Border::BORDER_THIN);
+
+        $dataRow = $tableStartRow + 1;
+        foreach ($records as $r) {
+            $name = $this->formatName($r);
+            $status = ($r->employment_status === null || $r->employment_status === '')
+                ? 'No Record'
+                : $r->employment_status;
+
+            $sheet->fromArray([
+                $name,
+                $r->student_id,
+                $r->course_code,
+                $r->batch,
+                $r->email,
+                $r->contact_number,
+                $status,
+                $r->course_relevance ?? '—',
+                $r->work_location ?? '—',
+                $r->created_at ? \Illuminate\Support\Carbon::parse($r->created_at)->format('M j, Y') : '—',
+            ], null, 'A' . $dataRow);
+
+            $dataRow++;
+        }
+
+        foreach (range('A', 'J') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+        $sheet->freezePane('A' . ($tableStartRow + 1));
+
+        $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
+
+        $filePath = tempnam(sys_get_temp_dir(), 'emp_tracking_xlsx_');
+        $writer->save($filePath);
+
+        return response()->streamDownload(function () use ($filePath) {
+            readfile($filePath);
+            @unlink($filePath);
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
+    }
+
+    private function formatName($item): string
+    {
+        $parts = [trim($item->first_name ?? '')];
+
+        if (trim($item->middle_initial ?? '') !== '') {
+            $parts[] = strtoupper(substr(trim($item->middle_initial), 0, 1)) . '.';
+        }
+
+        $parts[] = trim($item->last_name ?? '');
+
+        if (trim($item->suffix ?? '') !== '') {
+            $parts[] = trim($item->suffix);
+        }
+
+        return implode(' ', array_filter($parts));
     }
 
     /**
