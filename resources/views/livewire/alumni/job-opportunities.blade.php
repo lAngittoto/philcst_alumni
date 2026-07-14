@@ -452,10 +452,13 @@ select.filter-input {
 .pre-wrap { white-space: pre-wrap; }
 
 .share-modal-wrapper {
-    max-height: 90vh;
+    max-height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+@media (min-width: 640px) {
+    .share-modal-wrapper { max-height: 90vh; }
 }
 
 /* Mouse-following "View Details" label — desktop only, hidden on mobile below */
@@ -629,7 +632,7 @@ select.filter-input {
    RESPONSIVE — icon-only on small / touch screens:
    tooltips and the mouse-follow label disappear.
 ───────────────────────────────────────────── */
-@media (max-width: 767px) {
+@media (max-width: 767px), (hover: none) and (pointer: coarse) {
     #jb-cursor-label { display: none !important; }
     .card-share-btn .tip,
     .detail-top-btn .tip,
@@ -773,9 +776,18 @@ select.filter-input {
             @keyframes jbFilterProgress { 0%{left:-40%} 100%{left:100%} }
         </style>
 
-        {{-- ── CARDS BODY ── --}}
-        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
-             wire:loading.class="opacity-40" wire:target="search,filterType,filterLevel,filterSort">
+        {{-- ── CARDS BODY ──
+             CHANGED: was `flex-1 min-h-0 overflow-y-auto`, which forced this
+             block to stretch and fill 100% of the remaining panel height no
+             matter how few job cards there were — that's what pushed the
+             pagination bar all the way down to the bottom with a big empty
+             gray gap above it (see image 1). Now it just hugs its own
+             content and caps out with a max-height (so it still scrolls
+             normally when there ARE many results) — pagination sits right
+             under the cards instead of far below them. --}}
+        <div class="bg-gray-100 p-4 relative overflow-y-auto transition-opacity duration-200"
+             style="max-height:100%;"
+             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterType,filterLevel,filterSort">
 
             @if($this->jobPostings->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -794,52 +806,34 @@ select.filter-input {
                     else                      { $dlClass = 'text-gray-600 font-medium'; $dlIcon = 'fa-calendar'; }
 
                     $descPreview = $job->description ? Str::limit(strip_tags($job->description), 90) : null;
-                    $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
+                    $cardImageUrl = $this::jobImageUrl($job->job_image ?? null);
                 @endphp
 
-                <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
+                <div wire:key="job-card-{{ $job->id }}"
+                     class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
                             cursor-pointer relative select-none flex flex-col group"
                      data-jb-card
                      wire:click="viewJob({{ $job->id }})"
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
+                    {{-- CHANGED: was `h-36 object-cover`, which crops the
+                         image to fill a fixed 36-unit box — that's what was
+                         slicing the top off banner-style images (e.g. the
+                         "We Are HIRING" graphic lost the "We Are" text).
+                         Now it's a taller box with `object-contain` on a
+                         neutral backdrop, so the whole image is always
+                         visible, letterboxed instead of cropped. --}}
+                    <div class="w-full h-40 bg-gray-100 flex-shrink-0 overflow-hidden pointer-events-none">
+                        <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
+                             loading="lazy"
+                             class="w-full h-full object-contain"
+                             onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
+                    </div>
+
                     <div class="flex flex-col flex-1 p-4 gap-2.5">
 
-                        <div class="flex items-start justify-between gap-2">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-[11px] font-semibold uppercase tracking-widest mb-1" style="color:#333333;">{{ $job->company_name }}</p>
-                                <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{{ $job->job_title }}</h3>
-                            </div>
-                            @if($displayType)
-                            <span class="inline-flex shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-md border border-gray-200 bg-gray-50 mt-0.5 whitespace-nowrap" style="color:#333333;">
-                                {{ Str::limit($displayType, 14) }}
-                            </span>
-                            @endif
-                        </div>
-
-                        <div class="flex flex-wrap gap-1.5">
-                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-purple-50 border border-purple-100 text-purple-700">
-                                {{ $job->employment_type }}
-                            </span>
-                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200" style="color:#333333;">
-                                {{ Str::words($job->experience_level, 3, '') }}
-                            </span>
-                        </div>
-
-                        @if($job->location)
-                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
-                            <i class="fas fa-location-dot text-[11px]" style="color:#999;"></i>{{ $job->location }}
-                        </p>
-                        @endif
-
-                        @if($job->salary)
-                        <p class="text-[13px] font-semibold text-emerald-600 flex items-center gap-1.5">
-                            <i class="fas fa-money-bill-wave text-emerald-400 text-[11px]"></i>{{ $job->salary }}
-                        </p>
-                        @else
-                        <p class="text-[13px] italic" style="color:#333333;">Salary not disclosed</p>
-                        @endif
+                        <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{{ $job->job_title }}</h3>
 
                         @if($descPreview)
                         <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
@@ -865,7 +859,7 @@ select.filter-input {
             </div>
 
             @else
-            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 h-full">
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-briefcase text-xl text-gray-400"></i>
                 </div>
@@ -889,7 +883,12 @@ select.filter-input {
             @endif
         </div>
 
-        {{-- ══ PAGINATION BAR ══ --}}
+        {{-- ══ PAGINATION BAR ══
+             CHANGED: added `pb-2` (extra bottom padding) plus a safe-area
+             inset so the bar always has breathing room and never gets
+             flush-cropped by a phone's browser chrome / home-indicator
+             area. `flex-wrap` + `py-2` also keeps it from feeling squished
+             on narrow screens. --}}
         @php
             $total   = $this->jobPostings->total();
             $pp      = $this->jobPostings->perPage();
@@ -900,8 +899,9 @@ select.filter-input {
             $pgStart = max(1, $cp - 2);
             $pgEnd   = min($lp, $cp + 2);
         @endphp
-        <div class="flex items-center justify-between gap-2 flex-wrap px-5 min-h-[48px]
-                    bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0">
+        <div class="flex items-center justify-between gap-2 flex-wrap px-5 py-2.5 min-h-[48px] mt-auto
+                    bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0"
+             style="padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));">
 
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
@@ -1247,7 +1247,7 @@ select.filter-input {
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
-<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45"
+<div class="fixed inset-0 z-[10002] flex items-center justify-center p-0 sm:p-4 bg-black/45"
      x-data="{
          copied:false,
          nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
@@ -1312,7 +1312,7 @@ select.filter-input {
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="$wire.closeShareModal()">
 
-    <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 share-modal-wrapper">
+    <div class="share-sheet bg-white w-full h-full sm:h-auto max-w-full sm:max-w-[920px] rounded-none sm:rounded-2xl shadow-xl border-0 sm:border border-gray-200 share-modal-wrapper">
 
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
@@ -1326,10 +1326,25 @@ select.filter-input {
             </button>
         </div>
 
-        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        {{-- CHANGED: was `flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden`.
+             The `flex-1 min-h-0` made this row stretch to fill the modal's
+             full available height even on mobile (where it's stacked as a
+             column). The LEFT preview panel below also had `flex-1`, so on
+             mobile it stretched to fill that same forced height, shoving
+             "Share via" way down and leaving the big empty gap in the
+             middle (see image 2). Now on mobile the row just wraps its
+             real content (scrolls the whole sheet if needed), and only
+             on md+ (side-by-side) does it go back to the fixed-height,
+             independently-scrolling two-column layout. --}}
+        <div class="flex flex-col md:flex-row md:flex-1 md:min-h-0 overflow-y-auto md:overflow-hidden">
 
-            {{-- LEFT: Preview --}}
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-thin">
+            {{-- LEFT: Preview
+                 CHANGED: `flex-1` → `md:flex-1` so this panel no longer
+                 stretches to fill the row's height on mobile (that stretch
+                 was the direct cause of the gap in image 2). It now just
+                 hugs its content on mobile, and still grows/scrolls
+                 independently on desktop like before. --}}
+            <div class="md:flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 md:overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
@@ -1362,7 +1377,7 @@ select.filter-input {
             </div>
 
             {{-- RIGHT: Share buttons --}}
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-thin">
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 md:overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 {{-- Native share sheet — sends title+text+photo directly to
@@ -1374,7 +1389,13 @@ select.filter-input {
                         <span class="icon-wrap">
                             <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
                         </span>
-                        <div class="text-left flex-1">
+                        {{-- FIX: added min-w-0 — without it this flex-1 text
+                             block couldn't shrink below its content width,
+                             so on narrow/mobile viewports the button forced
+                             extra width and the label/subtitle text visibly
+                             broke apart from the icon instead of wrapping
+                             cleanly inside the button. --}}
+                        <div class="text-left flex-1 min-w-0">
                             <p class="text-xs font-semibold">Share</p>
                             <p class="text-[10px] text-white/70 mt-0.5">Send photo + caption via Messenger, Facebook, or any app</p>
                         </div>
@@ -1387,7 +1408,7 @@ select.filter-input {
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <div class="text-left flex-1">
+                    <div class="text-left flex-1 min-w-0">
                         <p class="text-xs font-semibold">Share on Facebook</p>
                         <p class="text-[10px] text-white/70 mt-0.5">Posts the photo + caption directly</p>
                     </div>
@@ -1400,7 +1421,7 @@ select.filter-input {
                             <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
-                    <div class="text-left flex-1">
+                    <div class="text-left flex-1 min-w-0">
                         <p class="text-xs font-semibold">Send via Messenger</p>
                         <p class="text-[10px] text-white/70 mt-0.5">Opens Messenger to pick a contact</p>
                     </div>
@@ -1414,7 +1435,7 @@ select.filter-input {
                     <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
                         <i class="fas fa-comments text-white text-sm"></i>
                     </span>
-                    <div class="text-left flex-1">
+                    <div class="text-left flex-1 min-w-0">
                         <p class="text-xs font-semibold">Share to Batch Chat</p>
                         <p class="text-[10px] text-white/70 mt-0.5">Choose which of your chats to send to</p>
                     </div>
@@ -1434,7 +1455,7 @@ select.filter-input {
                     <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
                         <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
                     </span>
-                    <div class="flex-1 text-left min-w-0">
+                    <div class="flex-1 min-w-0 text-left">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
                         <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
                     </div>

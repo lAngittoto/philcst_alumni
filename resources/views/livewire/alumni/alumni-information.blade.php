@@ -27,6 +27,7 @@ new class extends Component {
     public string $father_last_name   = '';
     public string $father_given_name  = '';
     public string $father_middle_name = '';
+    public string $father_suffix      = '';
 
     public string $mother_last_name   = '';
     public string $mother_given_name  = '';
@@ -89,7 +90,7 @@ new class extends Component {
         return [
             'email',
             'gender', 'date_of_birth',
-            'father_last_name', 'father_given_name', 'father_middle_name',
+            'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
             'mother_last_name',  'mother_given_name',  'mother_middle_name',
             'dswd_household_no',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
@@ -100,7 +101,7 @@ new class extends Component {
     private function upperCaseFields(): array
     {
         return [
-            'father_last_name', 'father_given_name', 'father_middle_name',
+            'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
             'mother_last_name',  'mother_given_name',  'mother_middle_name',
             'dswd_household_no',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
@@ -125,7 +126,7 @@ new class extends Component {
             'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
             'student_id', 'course_code', 'course_name', 'batch',
             'email', 'gender', 'date_of_birth',
-            'father_last_name', 'father_given_name', 'father_middle_name',
+            'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
             'mother_last_name',  'mother_given_name',  'mother_middle_name',
             'dswd_household_no',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
@@ -165,6 +166,7 @@ new class extends Component {
         $this->father_last_name   = $alumni->father_last_name   ?? '';
         $this->father_given_name  = $alumni->father_given_name  ?? '';
         $this->father_middle_name = $alumni->father_middle_name ?? '';
+        $this->father_suffix      = $alumni->father_suffix      ?? '';
 
         $this->mother_last_name   = $alumni->mother_last_name   ?? '';
         $this->mother_given_name  = $alumni->mother_given_name  ?? '';
@@ -187,6 +189,16 @@ new class extends Component {
         // ── employment ──
         $this->jobOptions = $this->buildJobOptions();
         $this->loadEmploymentRecord();
+
+        // ── Auto-open the Update Employment editor when the alumni was sent
+        //    here directly from the Dashboard's "Update"/"Add Employment
+        //    Record" buttons (flashed via session by goToUpdateEmployment()
+        //    on the dashboard component). This respects the normal 30-day
+        //    cooldown — if locked, startEditingEmployment() will just show
+        //    the "locked" toast instead of opening the editor. ──
+        if (session()->pull('open_employment')) {
+            $this->startEditingEmployment();
+        }
     }
 
     // ══════════ PROFILE COOLDOWN ══════════
@@ -299,6 +311,7 @@ new class extends Component {
                 'father_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'father_given_name'    => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'father_middle_name'   => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'father_suffix'        => ['nullable', 'string', 'max:20', 'regex:' . self::NAME_REGEX],
                 'mother_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'mother_given_name'    => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'mother_middle_name'   => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
@@ -322,6 +335,7 @@ new class extends Component {
                 'father_given_name.regex'       => "Father's given name must not contain numbers.",
                 'father_middle_name.required'   => "Father's middle name is required.",
                 'father_middle_name.regex'      => "Father's middle name must not contain numbers.",
+                'father_suffix.regex'           => "Father's suffix must not contain numbers.",
                 'mother_last_name.required'     => "Mother's last name is required.",
                 'mother_last_name.regex'        => "Mother's last name must not contain numbers.",
                 'mother_given_name.required'    => "Mother's given name is required.",
@@ -363,6 +377,7 @@ new class extends Component {
                 'father_last_name'     => $this->father_last_name     ?: null,
                 'father_given_name'    => $this->father_given_name    ?: null,
                 'father_middle_name'   => $this->father_middle_name   ?: null,
+                'father_suffix'        => $this->father_suffix        ?: null,
                 'mother_last_name'     => $this->mother_last_name     ?: null,
                 'mother_given_name'    => $this->mother_given_name    ?: null,
                 'mother_middle_name'   => $this->mother_middle_name   ?: null,
@@ -437,25 +452,41 @@ new class extends Component {
         return 'general';
     }
 
+    /**
+     * Detects whether a job title is related to the alumni's course.
+     *
+     * Smarter handling for teaching / training roles: an alumnus who becomes
+     * an instructor, professor, trainer, or teacher of a subject that matches
+     * their own field is USING their degree — that should never come out as
+     * "Not Related" just because the literal job title says "Instructor"
+     * instead of, say, "Software Developer".
+     *   - If the title clearly names the subject taught (e.g. "IT Instructor",
+     *     "Accounting Professor") → fully related ('yes').
+     *   - If it's an educator-type title with no explicit subject mentioned
+     *     (e.g. plain "College Instructor", "Faculty") → 'partially', since we
+     *     can't be 100% sure what they teach, but teaching itself still counts
+     *     as applying their education.
+     */
     protected function detectJobRelevance(string $title): string
     {
         $t = strtolower(trim($title));
         if (empty($t)) return '';
         $group = $this->getCourseGroup($this->course_code);
+
         $yes = [
-            'technology'=>['developer','programmer','software','web dev','mobile app','network engineer','database admin','sysadmin','devops','cloud engineer','cybersecurity','data scientist','data analyst','ui/ux','it support','qa engineer','ml engineer','ai engineer','tech lead','systems analyst','ict','computer engineer','full stack','backend','frontend','it officer','helpdesk','network admin','it manager','it specialist','information technology','computer science','system developer','software engineer'],
-            'nursing'=>['nurse','nursing','rn ','registered nurse','icu','er nurse','surgical nurse','ward nurse','dialysis nurse','pediatric nurse','public health nurse','head nurse','charge nurse','clinical nurse','operating room nurse','or nurse'],
+            'technology'=>['developer','programmer','software','web dev','mobile app','network engineer','database admin','sysadmin','devops','cloud engineer','cybersecurity','data scientist','data analyst','ui/ux','it support','qa engineer','ml engineer','ai engineer','tech lead','systems analyst','ict','computer engineer','full stack','backend','frontend','it officer','helpdesk','network admin','it manager','it specialist','information technology','computer science','system developer','software engineer','it instructor','computer instructor','computer science instructor','it teacher','computer teacher','computer science teacher','programming instructor','ict instructor'],
+            'nursing'=>['nurse','nursing','rn ','registered nurse','icu','er nurse','surgical nurse','ward nurse','dialysis nurse','pediatric nurse','public health nurse','head nurse','charge nurse','clinical nurse','operating room nurse','or nurse','nursing instructor','clinical instructor'],
             'education'=>['teacher','instructor','professor','tutor','faculty','educator','academic coordinator','school principal','curriculum developer','lecturer','teaching','special education','classroom teacher','school admin','school head','subject teacher','grade school','high school teacher','college instructor','tesda trainer','tesda teacher','vocational trainer','skills trainer'],
-            'accounting'=>['accountant','auditor','cpa','tax specialist','bookkeeper','accounting','finance officer','budget analyst','payroll','internal auditor','external auditor','financial analyst','management accountant','cost accountant','revenue officer'],
-            'business'=>['marketing manager','sales manager','business analyst','hr officer','operations manager','management trainee','business owner','entrepreneur','brand manager','product manager','account manager','business development','merchandising','trade marketing','retail manager','commercial manager'],
-            'engineering'=>['engineer','civil engineer','mechanical engineer','electrical engineer','structural engineer','construction manager','project engineer','quality engineer','process engineer','industrial engineer','plant engineer','design engineer','site engineer','engineering manager','chief engineer'],
-            'healthcare'=>['pharmacist','physical therapist','radiologic technologist','medical technologist','occupational therapist','respiratory therapist','dentist','dental','midwife','radiographer','med tech','pharmacy','therapist','clinical'],
-            'criminology'=>['police officer','pnp','nbi agent','forensic analyst','criminologist','jail officer','fire officer','law enforcement','detective','intelligence officer','criminal investigator','bureau of corrections','bfp','bucor'],
-            'hospitality'=>['hotel manager','chef','sous chef','restaurant manager','front desk officer','tour guide','event coordinator','flight attendant','travel agent','catering manager','hospitality manager','food and beverage','f&b manager','banquet manager','concierge','housekeeping manager','rooms division'],
-            'psychology'=>['psychologist','guidance counselor','social worker','mental health','psychiatry','behavior analyst','clinical psychologist','counseling','psychology','welfare officer','rehabilitation counselor'],
-            'communications'=>['journalist','reporter','broadcast journalist','public relations','pr officer','content writer','copywriter','social media manager','advertising','media planner','editor','communications officer','news writer','feature writer','anchor','media relations','communications specialist'],
-            'architecture'=>['architect','interior designer','urban planner','draftsman','cad operator','architectural','landscape architect','space planner','master planner','building designer','architectural designer'],
-            'law'=>['lawyer','attorney','legal officer','paralegal','court interpreter','judge','prosecutor','public attorney','legal counsel','law practitioner','notary public','legal consultant','solicitor'],
+            'accounting'=>['accountant','auditor','cpa','tax specialist','bookkeeper','accounting','finance officer','budget analyst','payroll','internal auditor','external auditor','financial analyst','management accountant','cost accountant','revenue officer','accounting instructor','accounting professor'],
+            'business'=>['marketing manager','sales manager','business analyst','hr officer','operations manager','management trainee','business owner','entrepreneur','brand manager','product manager','account manager','business development','merchandising','trade marketing','retail manager','commercial manager','business instructor','marketing instructor'],
+            'engineering'=>['engineer','civil engineer','mechanical engineer','electrical engineer','structural engineer','construction manager','project engineer','quality engineer','process engineer','industrial engineer','plant engineer','design engineer','site engineer','engineering manager','chief engineer','engineering instructor','engineering professor'],
+            'healthcare'=>['pharmacist','physical therapist','radiologic technologist','medical technologist','occupational therapist','respiratory therapist','dentist','dental','midwife','radiographer','med tech','pharmacy','therapist','clinical','allied health instructor'],
+            'criminology'=>['police officer','pnp','nbi agent','forensic analyst','criminologist','jail officer','fire officer','law enforcement','detective','intelligence officer','criminal investigator','bureau of corrections','bfp','bucor','criminology instructor','criminology professor'],
+            'hospitality'=>['hotel manager','chef','sous chef','restaurant manager','front desk officer','tour guide','event coordinator','flight attendant','travel agent','catering manager','hospitality manager','food and beverage','f&b manager','banquet manager','concierge','housekeeping manager','rooms division','hospitality instructor','culinary instructor'],
+            'psychology'=>['psychologist','guidance counselor','social worker','mental health','psychiatry','behavior analyst','clinical psychologist','counseling','psychology','welfare officer','rehabilitation counselor','psychology instructor','psychology professor'],
+            'communications'=>['journalist','reporter','broadcast journalist','public relations','pr officer','content writer','copywriter','social media manager','advertising','media planner','editor','communications officer','news writer','feature writer','anchor','media relations','communications specialist','communications instructor','journalism instructor'],
+            'architecture'=>['architect','interior designer','urban planner','draftsman','cad operator','architectural','landscape architect','space planner','master planner','building designer','architectural designer','architecture instructor'],
+            'law'=>['lawyer','attorney','legal officer','paralegal','court interpreter','judge','prosecutor','public attorney','legal counsel','law practitioner','notary public','legal consultant','solicitor','law professor','bar reviewer'],
             'general'=>[],
         ];
         $partial = [
@@ -474,28 +505,73 @@ new class extends Component {
             'law'=>['compliance','regulatory','policy','governance','legal assistant','court','justice','contracts','documentation','corporate secretary'],
             'general'=>['officer','staff','coordinator','supervisor','manager','specialist'],
         ];
+
         if (str_contains($t, 'tesda')) return $group === 'education' ? 'yes' : 'partially';
+
         foreach ($yes[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'yes'; }
         foreach ($partial[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'partially'; }
+
+        // ── Cross-field teaching detection ──────────────────────────
+        // Catches titles like "College Instructor" or "IT Trainer" for an
+        // alumnus whose course group's own $yes/$partial lists above didn't
+        // already match (e.g. a BSIT grad using a generic "Instructor" title
+        // instead of "IT Instructor"). If the role is clearly an educator
+        // role, check whether the subject matches their field; if the subject
+        // is named, mark fully related, otherwise mark partially related
+        // instead of falling through to "Not Related".
+        $educatorKeywords = ['teacher','instructor','professor','faculty','lecturer','trainer','tutor','coach','mentor','educator','reviewer'];
+        $isEducatorRole = false;
+        foreach ($educatorKeywords as $kw) {
+            if (str_contains($t, $kw)) { $isEducatorRole = true; break; }
+        }
+
+        if ($isEducatorRole) {
+            $subjectKeywords = [
+                'technology'     => ['it','ict','information technology','computer','computing','programming','software','system','network','cybersecurity','coding','web','database'],
+                'nursing'        => ['nursing','health','clinical'],
+                'education'      => [],
+                'accounting'     => ['accounting','bookkeeping','finance','taxation'],
+                'business'       => ['business','marketing','management','entrepreneurship'],
+                'engineering'    => ['engineering','mechanical','electrical','civil','industrial'],
+                'healthcare'     => ['pharmacy','therapy','medical','health'],
+                'criminology'    => ['criminology','criminal justice','law enforcement'],
+                'hospitality'    => ['hospitality','tourism','culinary','hotel'],
+                'psychology'     => ['psychology','counseling','guidance'],
+                'communications' => ['communication','journalism','media','broadcasting'],
+                'architecture'   => ['architecture','design','drafting'],
+                'law'            => ['law','legal'],
+                'general'        => [],
+            ];
+
+            foreach ($subjectKeywords[$group] ?? [] as $kw) {
+                if (str_contains($t, $kw)) return 'yes';
+            }
+
+            // Generic educator title (e.g. "College Instructor") with no named
+            // subject — still applying their education by teaching, so treat
+            // as partially related rather than outright "Not Related".
+            return 'partially';
+        }
+
         return 'no';
     }
 
     protected function buildJobOptions(): array
     {
         $map = [
-            'technology'=>['Software Developer','Web Developer','Mobile App Developer','Systems Analyst','Database Administrator','Network Engineer','IT Support Specialist','Cybersecurity Analyst','Data Analyst / Data Scientist','UI / UX Designer','QA / Test Engineer','DevOps / Cloud Engineer','AI / ML Engineer','Technical Project Manager'],
-            'nursing'=>['Registered Nurse (RN)','ICU / Critical Care Nurse','ER / Emergency Nurse','Head Nurse / Supervisor','OR / Surgical Nurse','Pediatric Nurse','Public Health Nurse','Dialysis Nurse','OFW / International Nurse'],
+            'technology'=>['Software Developer','Web Developer','Mobile App Developer','Systems Analyst','Database Administrator','Network Engineer','IT Support Specialist','Cybersecurity Analyst','Data Analyst / Data Scientist','UI / UX Designer','QA / Test Engineer','DevOps / Cloud Engineer','AI / ML Engineer','Technical Project Manager','IT Instructor / Computer Teacher'],
+            'nursing'=>['Registered Nurse (RN)','ICU / Critical Care Nurse','ER / Emergency Nurse','Head Nurse / Supervisor','OR / Surgical Nurse','Pediatric Nurse','Public Health Nurse','Dialysis Nurse','OFW / International Nurse','Nursing Instructor / Clinical Instructor'],
             'education'=>['Elementary School Teacher','High School Teacher','Special Education Teacher','College Instructor','School Principal / Admin','Academic / Curriculum Coordinator','Tutor / Review Center Instructor'],
-            'accounting'=>['Certified Public Accountant (CPA)','Auditor','Financial Analyst','Tax Specialist','Budget Analyst','Bookkeeper','Accounting Officer / Staff','Internal Auditor','Finance Manager'],
-            'business'=>['Marketing Manager / Officer','Sales Manager','Operations Manager','Business Analyst','HR Officer / HR Manager','Management Trainee','Administrative Officer','Entrepreneur / Business Owner'],
-            'engineering'=>['Civil Engineer','Mechanical Engineer','Electrical Engineer','Electronics Engineer','Chemical Engineer','Industrial Engineer','Project Engineer','Quality Assurance Engineer','Construction Engineer / Manager'],
-            'healthcare'=>['Pharmacist','Physical Therapist','Radiologic Technologist','Medical Technologist','Occupational Therapist','Respiratory Therapist','Midwife','Dentist'],
-            'criminology'=>['PNP Officer / Police Officer','NBI Agent','Criminologist','Jail Officer / BuCor','Forensic Analyst','Security Officer / Supervisor','Fire Officer (BFP)'],
-            'hospitality'=>['Hotel Manager','Front Desk Officer','Restaurant Manager','Chef / Sous Chef','Tour Guide','Event Coordinator','Flight Attendant / Cabin Crew','Travel Agent'],
-            'psychology'=>['Psychologist','Guidance Counselor','HR Officer / Recruiter','Social Worker','Mental Health Counselor','Training & Development Officer'],
-            'communications'=>['Journalist / Reporter','Public Relations Officer','Broadcast Journalist','Content Creator / Writer','Social Media Manager','Copywriter','Advertising Specialist','Media Planner'],
-            'architecture'=>['Architect','Interior Designer','Urban Planner','Draftsman / CAD Operator','Construction Manager'],
-            'law'=>['Lawyer / Attorney','Legal Officer','Court Interpreter','Paralegal','Legal Researcher'],
+            'accounting'=>['Certified Public Accountant (CPA)','Auditor','Financial Analyst','Tax Specialist','Budget Analyst','Bookkeeper','Accounting Officer / Staff','Internal Auditor','Finance Manager','Accounting Instructor / Professor'],
+            'business'=>['Marketing Manager / Officer','Sales Manager','Operations Manager','Business Analyst','HR Officer / HR Manager','Management Trainee','Administrative Officer','Entrepreneur / Business Owner','Business / Marketing Instructor'],
+            'engineering'=>['Civil Engineer','Mechanical Engineer','Electrical Engineer','Electronics Engineer','Chemical Engineer','Industrial Engineer','Project Engineer','Quality Assurance Engineer','Construction Engineer / Manager','Engineering Instructor / Professor'],
+            'healthcare'=>['Pharmacist','Physical Therapist','Radiologic Technologist','Medical Technologist','Occupational Therapist','Respiratory Therapist','Midwife','Dentist','Allied Health Instructor'],
+            'criminology'=>['PNP Officer / Police Officer','NBI Agent','Criminologist','Jail Officer / BuCor','Forensic Analyst','Security Officer / Supervisor','Fire Officer (BFP)','Criminology Instructor / Professor'],
+            'hospitality'=>['Hotel Manager','Front Desk Officer','Restaurant Manager','Chef / Sous Chef','Tour Guide','Event Coordinator','Flight Attendant / Cabin Crew','Travel Agent','Hospitality / Culinary Instructor'],
+            'psychology'=>['Psychologist','Guidance Counselor','HR Officer / Recruiter','Social Worker','Mental Health Counselor','Training & Development Officer','Psychology Instructor / Professor'],
+            'communications'=>['Journalist / Reporter','Public Relations Officer','Broadcast Journalist','Content Creator / Writer','Social Media Manager','Copywriter','Advertising Specialist','Media Planner','Communications / Journalism Instructor'],
+            'architecture'=>['Architect','Interior Designer','Urban Planner','Draftsman / CAD Operator','Construction Manager','Architecture Instructor'],
+            'law'=>['Lawyer / Attorney','Legal Officer','Court Interpreter','Paralegal','Legal Researcher','Law Professor / Bar Reviewer'],
             'general'=>['Administrative Officer','Office Staff','Customer Service Representative','Sales Representative'],
         ];
         $titles = $map[$this->getCourseGroup($this->course_code)] ?? $map['general'];
@@ -506,6 +582,7 @@ new class extends Component {
     protected function loadEmploymentRecord(): void
     {
         $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based','internship'=>'Internship'];
+        $workLocLabels= ['local'=>'Local / PH','abroad'=>'OFW / Abroad'];
         $careerLabels = ['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional'];
         $eduLabels    = ['none'=>'None','pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate'];
         $relLabels    = ['yes'=>'Related to Course','no'=>'Not Related','partially'=>'Partially Related'];
@@ -527,7 +604,7 @@ new class extends Component {
                 'company_name'          => $current->company_name ?? '',
                 'job_title'             => $current->job_title ?? '',
                 'employment_type'       => $typeLabels[$current->employment_type ?? ''] ?? '',
-                'work_location'         => ucfirst($current->work_location ?? ''),
+                'work_location'         => $workLocLabels[$current->work_location ?? ''] ?? ucfirst($current->work_location ?? ''),
                 'career_path_labels'    => array_values(array_filter(array_map(fn($v) => $careerLabels[$v] ?? null, $cp))),
                 'course_relevance'      => $relLabels[$current->course_relevance ?? ''] ?? '',
                 'unemployment_status'   => $unLabels[$current->unemployment_status ?? ''] ?? '',
@@ -681,13 +758,14 @@ new class extends Component {
         $working = in_array($this->employment_status, ['employed', 'self_employed']);
         if ($working && $this->job_title && !$isOther) { $this->course_relevance = 'yes'; }
 
+        // NOTE: education_status is intentionally OPTIONAL — the alumnus can
+        // simply leave "Further Education" unanswered if it doesn't apply.
         $rules = [
             'employment_status' => 'required|in:employed,self_employed,unemployed',
-            'education_status'  => 'required|in:none,pursuing_masteral,pursuing_doctorate',
+            'education_status'  => 'nullable|in:none,pursuing_masteral,pursuing_doctorate',
         ];
         $msgs = [
             'employment_status.required' => 'Please select your employment status.',
-            'education_status.required'  => 'Please select your education status.',
         ];
         if ($working) {
             $rules += [
@@ -823,7 +901,7 @@ new class extends Component {
     color: #333333; margin: 0; line-height: 1.4; padding-top: 1px;
 }
 .field-value { font-size: 1.05rem; font-weight: 600; color: #333333; word-break: break-word; margin: 0; }
-.field-value-empty { font-size: 0.95rem; font-style: italic; font-weight: 400; color: #9ca3af; margin: 0; }
+.field-value-empty { font-size: 0.95rem; font-style: italic; font-weight: 400; color: #333333; margin: 0; }
 
 .addr-toggle {
     display: inline-flex; align-items: center; background: #f3f4f6; border: 1px solid #dcdcdc;
@@ -831,7 +909,7 @@ new class extends Component {
 }
 .addr-toggle-opt {
     display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700;
-    letter-spacing: .02em; color: #555555; background: transparent; border: none; border-radius: 999px;
+    letter-spacing: .02em; color: #333333; background: transparent; border: none; border-radius: 999px;
     padding: 4px 11px; cursor: pointer; transition: background .15s, color .15s;
 }
 .addr-toggle-opt:hover { color: #333333; }
@@ -892,9 +970,58 @@ input[type="date"].field-input:disabled {
 
 .field-block { padding-top: 2px; }
 
+/* ═══════════ Compact suffix dropdown (Father's Name) ═══════════
+   Same short height as .field-input / .addr-select — NOT the tall
+   60px floating-label trigger used on the Register Alumni page. */
+.suffix-compact-wrap { position: relative; }
+.suffix-compact-trigger {
+    width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    gap: 6px; font-size: 1.05rem; font-weight: 600; color: #333333; text-align: center;
+    background: #ffffff; border: 1.5px solid #d6d6d6; border-radius: 0.5rem; padding: 0.45rem 0.65rem;
+    outline: none; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.suffix-compact-trigger:hover { border-color: #b9b9b9; }
+.suffix-compact-trigger.open,
+.suffix-compact-trigger.has-value { border-color: #7a3f91; }
+.suffix-compact-trigger.open { box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
+.suffix-compact-trigger .sfx-placeholder { color: #333333; font-weight: 400; font-style: italic; font-size: 0.95rem; }
+.suffix-compact-trigger .sfx-chevron { font-size: 0.65rem; opacity: .55; transition: transform .18s; margin-left: auto; }
+.suffix-compact-trigger.open .sfx-chevron { transform: rotate(180deg); }
+
+.suffix-compact-panel {
+    position: absolute; top: calc(100% + 6px); left: 0; width: 100%;
+    background: #fff; border: 1.5px solid #E8E0F0; border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(122,63,145,.16);
+    z-index: 220; overflow: hidden;
+}
+.suffix-compact-list {
+    max-height: 176px; overflow-y: auto; padding: 5px;
+    scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+}
+.suffix-compact-list::-webkit-scrollbar { width: 5px; }
+.suffix-compact-list::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+.suffix-compact-item {
+    width: 100%; text-align: left; display: flex; align-items: center; gap: 8px;
+    padding: 6px 9px; border-radius: 7px; border: none; background: transparent;
+    font-size: .82rem; font-weight: 600; color: #333; cursor: pointer;
+    transition: background .1s, color .1s;
+}
+.suffix-compact-item:hover { background: #F5F0FA; color: #7A3F91; }
+.suffix-compact-item.is-selected { background: #7A3F91; color: #fff; }
+.suffix-compact-footer {
+    padding: 5px 8px; border-top: 1px solid #F0E6F8; background: #FDFAFF;
+}
+.suffix-compact-clear {
+    width: 100%; text-align: center; font-size: .7rem; font-weight: 700; color: #333333;
+    background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px;
+    transition: color .12s, background .12s;
+}
+.suffix-compact-clear:hover { color: #dc2626; background: #fef2f2; }
+
 /* ═══════════ Employment Fullscreen Editor ═══════════
-   Solid purple header with icon-only info tooltip (hover to reveal),
-   light gray body sized to content (no forced full-height stretch). */
+   Solid purple header with icon-only info button (no tooltip — see JS
+   below which strips hover text on all viewports per user request).
+   Light gray body sized to content (no forced full-height stretch). */
 .emp-editor-header {
     background: #7a3f91;
 }
@@ -910,21 +1037,7 @@ input[type="date"].field-input:disabled {
     width: 30px; height: 30px; border-radius: 9999px;
     display: inline-flex; align-items: center; justify-content: center;
     background: rgba(255,255,255,.15); color: #ffffff; border: none; cursor: default;
-    transition: background .15s;
 }
-.emp-info-wrap:hover .emp-info-btn { background: rgba(255,255,255,.28); }
-.emp-info-tip {
-    position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(-4px);
-    background: #111827; color: #ffffff; font-size: 11.5px; font-weight: 600;
-    padding: 6px 12px; border-radius: 8px; white-space: nowrap;
-    pointer-events: none; opacity: 0; transition: opacity .15s ease, transform .15s ease;
-    z-index: 210; box-shadow: 0 2px 8px rgba(0,0,0,.18);
-}
-.emp-info-tip::after {
-    content: ''; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
-    border: 4px solid transparent; border-bottom-color: #111827;
-}
-.emp-info-wrap:hover .emp-info-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 .emp-hdr-btn-wrap { position: relative; display: inline-flex; }
 .emp-hdr-btn {
@@ -946,6 +1059,10 @@ input[type="date"].field-input:disabled {
 }
 .emp-hdr-btn-wrap:hover .emp-hdr-tip { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+@media (max-width: 1023px), (hover: none) {
+    .emp-hdr-tip { display: none !important; }
+}
+
 .emp-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
@@ -953,26 +1070,38 @@ input[type="date"].field-input:disabled {
     display: flex;
     flex-direction: column;
 }
+/* Section headers — clearly bigger than the field labels inside the card,
+   so it reads as a header, not just another label. */
 .emp-card-title {
-    font-size: 0.72rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    color: #333333;
-    padding: 0.55rem 0.85rem;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #3d2a49;
+    padding: 0.7rem 0.9rem;
     border-bottom: 1px solid #f0eaf4;
     flex-shrink: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+.emp-card-title .emp-card-optional {
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #333333;
 }
 .emp-card-body { padding: 0.7rem 0.85rem; }
 .emp-radio-tile {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
-    font-size: 0.8rem; font-weight: 600; color: #1f2937;
+    font-size: 0.8rem; font-weight: 500; color: #333333;
     padding: 5px 9px; border-radius: 999px; border: 1.5px solid #e5e7eb;
     transition: border-color .15s, background .15s;
     white-space: nowrap;
 }
 .emp-radio-tile:hover { border-color: #c9b3d6; }
-.emp-radio-tile input:checked ~ span { color: #5e2f72; }
+.emp-radio-tile input:checked ~ span { color: #5e2f72; font-weight: 600; }
 .emp-input-sm {
     width: 100%; box-sizing: border-box; font-size: 0.85rem; font-weight: 500; color: #1f2937;
     background: #f9fafb; border: 1.5px solid #e5e7eb; border-radius: 0.5rem; padding: 0.4rem 0.6rem;
@@ -980,9 +1109,10 @@ input[type="date"].field-input:disabled {
 }
 .emp-input-sm:hover { border-color: #cbd5e1; }
 .emp-input-sm:focus { border-color: #7a3f91; box-shadow: 0 0 0 3px rgba(122,63,145,.1); background: #fff; }
+/* Softer, more readable field labels — no longer overly bold/loud */
 .emp-label-sm {
-    display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .04em; color: #333333; margin-bottom: 0.3rem;
+    display: block; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .025em; color: #333333; margin-bottom: 0.35rem;
 }
 </style>
 
@@ -1314,7 +1444,7 @@ function phAddress(initial) {
                     <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Student ID</p></div>
                     <div class="px-3 py-2.5">
                         <div class="flex flex-col gap-1 field-block">
-                            <p class="field-label">Student ID</p>
+                            <p class="field-label"></p>
                             @if($student_id)<p class="field-value font-mono tracking-wide">{{ strtoupper($student_id) }}</p>
                             @else<p class="field-value-empty">Not provided</p>@endif
                         </div>
@@ -1389,7 +1519,7 @@ function phAddress(initial) {
                 <div class="flex-1 min-w-0 xl:border-r border-b xl:border-b-0 border-gray-200">
                     <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Father's Name</p></div>
                     <div class="px-3 py-2.5">
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                             <div class="flex flex-col items-center gap-1 text-center field-block">
                                 <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
@@ -1418,6 +1548,47 @@ function phAddress(initial) {
                                     @error('father_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
                                 @else
                                     @if($father_middle_name)<p class="field-value">{{ strtoupper($father_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                            <div class="flex flex-col items-center gap-1 text-center field-block">
+                                <p class="field-label">Ext.</p>
+                                @if($editingProfile)
+                                    <div class="suffix-compact-wrap w-full"
+                                         x-data="{
+                                             open: false,
+                                             suffixes: ['Jr.','Sr.','II','III','IV','V','VI','VII','VIII','IX','X'],
+                                             toggle() { this.open = !this.open; },
+                                             close()  { this.open = false; },
+                                             select(val) { $wire.set('father_suffix', val); this.close(); },
+                                             clear()  { $wire.set('father_suffix', ''); this.close(); },
+                                         }"
+                                         @click.outside="close()">
+                                        <button type="button" @click="toggle()"
+                                                :class="{ 'has-value': $wire.father_suffix !== '', 'open': open }"
+                                                class="suffix-compact-trigger {{ $errors->has('father_suffix') ? 'field-error' : '' }}">
+                                            <span x-show="$wire.father_suffix !== ''" x-text="$wire.father_suffix" style="display:none;"></span>
+                                            <span class="sfx-placeholder" x-show="$wire.father_suffix === ''">None</span>
+                                            <i class="fas fa-chevron-down sfx-chevron"></i>
+                                        </button>
+                                        <div x-show="open"
+                                             x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 -translate-y-1 scale-95" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+                                             x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                                             class="suffix-compact-panel" style="display:none;">
+                                            <div class="suffix-compact-list">
+                                                <template x-for="s in suffixes" :key="s">
+                                                    <button type="button" @click.stop="select(s)"
+                                                            :class="{ 'is-selected': $wire.father_suffix === s }"
+                                                            class="suffix-compact-item" x-text="s"></button>
+                                                </template>
+                                            </div>
+                                            <div class="suffix-compact-footer">
+                                                <button type="button" @click.stop="clear()" class="suffix-compact-clear">Clear</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    @error('father_suffix') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($father_suffix)<p class="field-value">{{ strtoupper($father_suffix) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
                         </div>
@@ -1476,7 +1647,7 @@ function phAddress(initial) {
                         <p class="field-label">Permanent Address</p>
                         @if($editingProfile)
                             <div class="flex items-center gap-3">
-                                <p class="text-[10px] font-semibold text-gray-500 flex items-center gap-1" x-show="loading">
+                                <p class="text-[10px] font-semibold text-[#333333] flex items-center gap-1" x-show="loading">
                                     <i class="fas fa-circle-notch fa-spin"></i> Loading location list…
                                 </p>
                                 <button type="button" x-show="loadFailed" @click="retryLoad()"
@@ -1552,9 +1723,10 @@ function phAddress(initial) {
 
                             {{-- Street --}}
                             <div class="flex flex-col gap-1 field-block">
-                                <p class="field-label">Street @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                <p class="field-label">Street Name, Building, House No. @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
                                     <input wire:model="address_street" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        placeholder="Street Name, Building, House No."
                                         class="field-input uppercase {{ $errors->has('address_street') ? 'field-error' : '' }}">
                                     @error('address_street') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
                                 @else
@@ -1631,14 +1803,14 @@ function phAddress(initial) {
                     <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
                         <p class="field-label">Employment Information</p>
                         @if($hasEmploymentRecord && !$this->canEditEmployment)
-                            <span class="text-[10px] font-semibold text-gray-500 flex items-center gap-1">
+                            <span class="text-[10px] font-semibold text-[#333333] flex items-center gap-1">
                                 <i class="fas fa-lock"></i> Locked for {{ $this->employmentCooldownDaysLeft }} day(s)
                             </span>
                         @endif
                     </div>
                     <div class="px-3 py-2.5">
                         @if(!$currentRecord)
-                            <p class="field-value-empty">No employment record yet. Click the <strong>Update Employment</strong> icon above to submit.</p>
+                           <p class="field-value-empty">No employment record yet. You can update your employment details once you've finished updating your <strong>Alumni Information</strong>.</p>
                         @else
                             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                                 <div class="flex flex-col gap-1 field-block">
@@ -1682,10 +1854,7 @@ function phAddress(initial) {
                         <strong class="font-bold">Profile complete.</strong> All required fields are filled.
                     </span>
                 @else
-                    <span class="inline-flex items-center gap-1.5 text-amber-700">
-                        <i class="fas fa-circle-exclamation"></i>
-                        <strong class="font-bold">Profile incomplete.</strong> Fill in all required fields.
-                    </span>
+
                 @endif
             </p>
         </div>
@@ -1726,7 +1895,7 @@ function phAddress(initial) {
     <div x-show="$wire.editingEmployment" x-cloak
          class="fixed inset-0 z-50 flex flex-col overflow-hidden">
 
-        {{-- Header: solid purple, icon-only info tooltip --}}
+        {{-- Header: solid purple, icon-only info button (no hover tooltip) --}}
         <div class="emp-editor-header flex-shrink-0 px-4 sm:px-8 py-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
@@ -1738,7 +1907,6 @@ function phAddress(initial) {
                 </div>
                 <div class="emp-info-wrap">
                     <span class="emp-info-btn"><i class="fas fa-circle-info text-xs"></i></span>
-                    <span class="emp-info-tip">Update your information first to unlock more features.</span>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -1808,9 +1976,9 @@ function phAddress(initial) {
                     @endif
 
                     <div class="emp-card">
-                        <div class="emp-card-title">Further Education</div>
+                        <div class="emp-card-title">Further Education <span class="emp-card-optional">(optional)</span></div>
                         <div class="emp-card-body">
-                            <label class="emp-label-sm">Education Status <span class="text-red-500">*</span></label>
+                            <label class="emp-label-sm">Education Status</label>
                             <div class="flex flex-wrap gap-2">
                                 @foreach(['none'=>'None','pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate'] as $val=>$lbl)
                                 <label class="emp-radio-tile">
@@ -1819,6 +1987,7 @@ function phAddress(initial) {
                                 </label>
                                 @endforeach
                             </div>
+                            <p class="text-[11px] text-[#333333] mt-1.5">You may leave this unanswered if it doesn't apply to you.</p>
                             @error('education_status') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
                         </div>
                     </div>
@@ -1848,7 +2017,7 @@ function phAddress(initial) {
                                 </select>
                                 @error('job_title') <p class="text-[11px] text-red-400 mt-1">{{ $message }}</p> @enderror
                                 @if($job_title && $job_title !== 'Other')
-                                    <p class="text-[11px] text-gray-500 mt-1 font-medium">Auto-detected: Related to your course.</p>
+                                    <p class="text-[11px] text-[#333333] mt-1 font-medium">Auto-detected: Related to your course.</p>
                                 @endif
                                 @if($job_title === 'Other')
                                 <div class="mt-2 space-y-2">
@@ -1868,8 +2037,8 @@ function phAddress(initial) {
                                         };
                                     @endphp
                                     <div>
-                                        <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Relevance: </span>
-                                        <span class="text-[11px] font-semibold text-gray-700">{{ $relText }}</span>
+                                        <span class="text-[11px] font-semibold uppercase tracking-wide text-[#333333]">Relevance: </span>
+                                        <span class="text-[11px] font-semibold text-[#333333]">{{ $relText }}</span>
                                     </div>
                                     @endif
                                 </div>
@@ -1899,7 +2068,7 @@ function phAddress(initial) {
                             <div>
                                 <label class="emp-label-sm">Work Location <span class="text-red-500">*</span></label>
                                 <div class="flex flex-wrap gap-2">
-                                    @foreach(['local'=>'Local','abroad'=>'Abroad'] as $val=>$lbl)
+                                    @foreach(['local'=>'Local / PH','abroad'=>'OFW / Abroad'] as $val=>$lbl)
                                     <label class="emp-radio-tile">
                                         <input wire:model="work_location" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
                                         <span>{{ $lbl }}</span>
@@ -1909,7 +2078,7 @@ function phAddress(initial) {
                                 @error('work_location') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
                             </div>
                             <div>
-                                <label class="emp-label-sm">Career Path <span class="normal-case font-normal text-gray-400">(optional)</span></label>
+                                <label class="emp-label-sm">Career Path <span class="normal-case font-normal text-[#333333]">(optional)</span></label>
                                 <div class="flex flex-wrap gap-2">
                                     @foreach(['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Pro'] as $val=>$lbl)
                                     <label class="emp-radio-tile">

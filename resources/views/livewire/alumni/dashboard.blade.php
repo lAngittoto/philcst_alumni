@@ -171,11 +171,19 @@ new class extends Component {
         $this->redirect(route('job.opportunities'));
     }
 
+    // ── Sends the alumni straight into the Update Employment editor on the
+    //    Alumni Information page instead of just landing on the page. ──
+    public function goToUpdateEmployment(): void
+    {
+        session()->put('open_employment', true);
+        $this->redirect(route('alumni.information'));
+    }
+
     // ── Employment modal ──────────────────────────────────────────
     public function openEmploymentModal(): void
     {
         if (!$this->hasEmployment) {
-            $this->redirect(route('alumni.employment'));
+            $this->redirect(route('alumni.information'));
             return;
         }
 
@@ -409,11 +417,14 @@ new class extends Component {
             <p class="text-sm leading-relaxed mt-0.5 text-gray-700">{{ now()->format('l, F j, Y') }}</p>
         </div>
 
-        @if(!$profileComplete || !$hasEmployment)
+        {{-- Only show this banner for an incomplete PROFILE.
+             Employment reminder is no longer shown here — the Employment
+             stat card below already covers that ("No Record / Add record now"). --}}
+        @if(!$profileComplete)
         <div class="sm:ml-auto flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold bg-[#F9F7FC] border-[#d9c9e8] text-[#111111] w-full sm:w-auto">
             <i class="fas fa-triangle-exclamation text-sm text-[#7A3F91] shrink-0"></i>
-            <span class="flex-1">@if(!$profileComplete) Complete your profile @else Add employment info @endif</span>
-            <a href="{{ !$profileComplete ? route('alumni.information') : route('alumni.employment') }}"
+            <span class="flex-1">Complete your profile</span>
+            <a href="{{ route('alumni.information') }}"
                class="px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90 bg-[#7A3F91] shrink-0">
                 Go <i class="fas fa-arrow-right text-xs ml-0.5"></i>
             </a>
@@ -535,7 +546,8 @@ new class extends Component {
                 <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Active Job Posts</p>
             </button>
 
-            {{-- Card 4: Employment --}}
+            {{-- Card 4: Employment — now goes DIRECTLY into the Update Employment
+                 editor on the Alumni Information page (auto-opens via session flag). --}}
             @php
                 $empCardMap = [
                     'employed'      => ['Employed',      'fa-user-tie',         '#7A3F91', '#F9F7FC', '#E8E0F0'],
@@ -544,11 +556,11 @@ new class extends Component {
                 ];
                 $empCard = $empCardMap[$employmentStatus] ?? null;
             @endphp
-            <a href="{{ route('alumni.employment') }}"
+            <button type="button" wire:click="goToUpdateEmployment"
                class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
-                      transition-all duration-200 active:scale-[.985] no-underline
+                      transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full
                       {{ $hasEmployment ? 'hover:shadow-md hover:border-[#7A3F91]/40' : 'hover:shadow-md hover:border-red-300' }}">
-                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>{{ $hasEmployment ? 'View Employment Status' : 'Add Employment Record' }}</span>
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>{{ $hasEmployment ? 'Update Employment Status' : 'Add Employment Record' }}</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow shrink-0"
                          style="background:{{ $hasEmployment ? ($empCard ? $empCard[2] : '#7A3F91') : '#e11d48' }};">
@@ -572,7 +584,7 @@ new class extends Component {
                         <i class="fas fa-plus-circle"></i> Add record now
                     </p>
                 @endif
-            </a>
+            </button>
 
         </div>{{-- end stat grid --}}
     </div>{{-- end main grid --}}
@@ -599,10 +611,10 @@ new class extends Component {
             </div>
         </div>
         <div class="flex items-center gap-2 shrink-0 ml-2 sm:ml-4">
-            <a href="{{ route('alumni.employment') }}"
-               class="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
-                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Edit</span>
-            </a>
+            <button type="button" wire:click="goToUpdateEmployment"
+               class="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition cursor-pointer">
+                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Update</span>
+            </button>
             <div class="close-btn-wrap">
                 <span class="close-tooltip">Close</span>
                 <button wire:click="closeModal" type="button"
@@ -715,10 +727,10 @@ new class extends Component {
         @endif
 
         <div class="flex flex-wrap gap-2">
-            <a href="{{ route('alumni.employment') }}"
-               class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
-                <i class="fas fa-pen text-xs"></i> Edit Employment
-            </a>
+            <button type="button" wire:click="goToUpdateEmployment"
+               class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91] cursor-pointer">
+                <i class="fas fa-pen text-xs"></i> Update Employment
+            </button>
             <button wire:click="closeModal"
                     class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition bg-white">
                 <i class="fas fa-xmark text-xs"></i> Close
@@ -758,7 +770,7 @@ new class extends Component {
         <div class="flex items-center gap-2 shrink-0 ml-2 sm:ml-4">
             <a href="{{ route('alumni.information') }}"
                class="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
-                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Edit Profile</span>
+                <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Update Profile</span>
             </a>
             <div class="close-btn-wrap">
                 <span class="close-tooltip">Close</span>
@@ -875,10 +887,10 @@ new class extends Component {
                     <i class="fas fa-triangle-exclamation text-xl text-red-400"></i>
                 </div>
                 <p class="font-medium text-gray-700 text-[0.95rem]">No employment record on file.</p>
-                <a href="{{ route('alumni.employment') }}"
-                   class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition hover:opacity-90 bg-red-600">
+                <button type="button" wire:click="goToUpdateEmployment"
+                   class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition hover:opacity-90 bg-red-600 cursor-pointer">
                     <i class="fas fa-plus text-xs"></i> Add Employment Record
-                </a>
+                </button>
             </div>
             @endif
         </div>
@@ -907,7 +919,7 @@ new class extends Component {
         <div class="flex flex-wrap gap-2">
             <a href="{{ route('alumni.information') }}"
                class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
-                <i class="fas fa-pen text-xs"></i> Edit Profile
+                <i class="fas fa-pen text-xs"></i> Update Profile
             </a>
             <button wire:click="closeModal"
                     class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition bg-white">

@@ -692,8 +692,14 @@
 <body class="antialiased" x-data="{ sidebarOpen: false, loggingOut: false }">
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile overlay --}}
+    {{-- Mobile overlay — x-cloak added so it can NEVER paint before Alpine
+         initializes sidebarOpen (that pre-Alpine flash was the "stuck
+         overlay" bug: without x-cloak, the browser paints this element in
+         its default state — visible, since there is no static `hidden`
+         class here — for the split second before Alpine attaches and
+         evaluates x-show="sidebarOpen"). --}}
     <div x-show="sidebarOpen"
+         x-cloak
          x-transition:enter="transition opacity-ease-out duration-300"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100"
@@ -701,12 +707,19 @@
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
          @click="sidebarOpen = false"
-         class="fixed inset-0 z-40 bg-black/50 lg:hidden">
+         class="fixed inset-0 z-[9990] bg-black/50 lg:hidden">
     </div>
 
     {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
-    <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
-           class="reg-sidebar fixed inset-y-0 left-0 z-50 w-20 min-w-[5rem] lg:w-72 lg:min-w-[18rem] transform
+    {{-- `-translate-x-full` is now a STATIC class (always present by default
+         on mobile) instead of being toggled by :class from Alpine. This
+         means the sidebar is hidden off-screen from the very first paint,
+         with zero dependency on Alpine having booted yet. Alpine only ever
+         ADDS `translate-x-0` on top via :class when sidebarOpen is true —
+         it never has to be the one to hide it, which is what removes the
+         "sidebar/overlay briefly stuck open" flash on mobile. --}}
+    <aside :class="{ 'translate-x-0': sidebarOpen }"
+           class="reg-sidebar fixed inset-y-0 left-0 z-[9995] w-20 min-w-[5rem] lg:w-72 lg:min-w-[18rem] -translate-x-full transform
                   transition-transform duration-300
                   lg:translate-x-0 lg:static lg:inset-0
                   flex flex-col h-full text-[#333333] shrink-0">
