@@ -57,6 +57,13 @@ new class extends \Livewire\Volt\Component {
     // ── tick counter — drives staggered work inside the single poll ──
     public int $pollTick = 0;
 
+    // ── Delete-confirmation modal state ─────────────────────────────────────
+    // Kept separate from $openToolbarMsgId on purpose: the toolbar can close
+    // (row re-render, click elsewhere, etc.) without taking the confirm
+    // modal down with it, so the "Yes/No" no longer silently loses its
+    // target message before the click is registered.
+    public ?int $confirmDeleteId = null;
+
     // ── Cache key helpers ──────────────────────────────────────────────────
     private function lastReadCacheKey(int $roomId): string
     {
@@ -585,6 +592,7 @@ new class extends \Livewire\Volt\Component {
         $this->batchmates          = [];
         $this->coordinators        = [];
         $this->openToolbarMsgId    = null;
+        $this->confirmDeleteId     = null;
 
         $maxId = (int) (DB::table('chat_messages')
             ->where('room_id', $id)
@@ -1014,12 +1022,31 @@ new class extends \Livewire\Volt\Component {
         $this->body      = '';
     }
 
+    // ── Delete confirmation modal flow ──────────────────────────────────────
+    // askDeleteConfirmation() just opens the modal for a given message id.
+    // unsend() (below) now does the actual delete AND closes the modal in
+    // one round trip, so there's no separate client-side timing race with
+    // the toolbar/row re-rendering before the wire call lands.
+    public function askDeleteConfirmation(int $id): void
+    {
+        $msg = collect($this->messages)->firstWhere('id', $id);
+        if (! $msg || ! $msg['is_mine']) return;
+        $this->confirmDeleteId  = $id;
+        $this->openToolbarMsgId = null;
+    }
+
+    public function cancelDelete(): void
+    {
+        $this->confirmDeleteId = null;
+    }
+
     public function unsend(int $id): void
     {
         DB::table('chat_messages')->where('id',$id)->where('sender_type','alumni')->where('sender_id',$this->alumniId)->update(['deleted_at' => now()]);
         DB::table('chat_pins')->where('message_id', $id)->delete();
         DB::table('chat_reactions')->where('message_id', $id)->delete();
         $this->openToolbarMsgId = null;
+        $this->confirmDeleteId  = null;
         if ($this->editingId === $id) { $this->editingId = null; $this->body = ''; }
         $this->loadMessages(); $this->loadRooms();
         if ($this->showPins) $this->loadPins();
@@ -1230,32 +1257,32 @@ new class extends \Livewire\Volt\Component {
      ─────────────────────────────────────────────────────────────────────────
      LATEST CHANGES (this update)
      ─────────────────────────────────────────────────────────────────────────
-     1) Event share previews now load through the same AdminEvent /
-        OrganizerEvent Eloquent models (and `photo_url` accessor) that the
-        Upcoming Events page itself uses, instead of guessing raw column
-        names off the shared `events` table. This is what makes a real
-        uploaded event photo actually appear on the chat card instead of
-        the placeholder calendar-icon banner.
-     2) The message list no longer force-scrolls to the bottom while the
-        user has manually scrolled up to read older messages — background
-        polling only auto-scrolls if the user is already near the bottom.
-        Sending a message or switching rooms still always scrolls down.
-     3) The floating scroll nav is a single Messenger-style button,
-        centered at the bottom of the thread, that appears in the
-        direction you're actively scrolling and fades out when you stop.
-        Each tap now nudges the thread by a small amount instead of
-        jumping straight to the very top or very bottom.
-     4) Long shared-post titles (e.g. "...Homecoming 2026") no longer get
-        cut off mid-word/mid-year — the overlay strip now relies on the
-        existing 2-line CSS clamp instead of a hard character truncation.
+     1) Tooltips (`.msgr-tooltip`, the little black hover labels on pin/react/
+        reply/edit/delete/members/pins buttons) are now hidden on mobile —
+        they only show at `sm:` breakpoint and up. Mobile has no hover state
+        anyway, so they used to just sit stuck open after a tap.
+     2) Delete now opens a proper confirmation modal (centered overlay,
+        "Are you sure you want to delete this message?" + Confirm/Cancel)
+        instead of the old inline mini Yes/No that lived inside the reaction
+        toolbar. Confirm calls `unsend()` directly by id — no more
+        client-side setTimeout + row-fade race that could drop the click
+        before Livewire ever saw it. On confirm, the message flips to the
+        existing "This message was deleted" placeholder bubble, same as
+        before.
 ════════════════════════════════════════════════════════════════════════════ --}}
+{{-- wire:poll is paused while the delete-confirm modal is open
+     ($confirmDeleteId set). That poll firing mid-confirm was the most
+     likely source of the "NS_BINDING_ABORTED" console entries — a poll
+     request landing/cancelling at the same moment as the unsend() click.
+     Purely a console-noise fix; nothing about the delete flow itself
+     changes. --}}
 <div
     x-data="{ mobileChatOpen: false }"
     @chat-open-mobile.window="mobileChatOpen = true"
     @chat-close-mobile.window="mobileChatOpen = false"
     class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
-    wire:poll.1500ms="unifiedPoll">
+    @if(! $confirmDeleteId) wire:poll.1500ms="unifiedPoll" @endif>
 
     <style>
         #msgr-room-list button,
@@ -1275,6 +1302,10 @@ new class extends \Livewire\Volt\Component {
             from { opacity: 0; transform: translateX(12px); }
             to   { opacity: 1; transform: translateX(0); }
         }
+        @keyframes msgrModalIn {
+            from { opacity: 0; transform: scale(.94); }
+            to   { opacity: 1; transform: scale(1); }
+        }
 
         button:not(:disabled),
         [role="button"],
@@ -1287,7 +1318,12 @@ new class extends \Livewire\Volt\Component {
 
         .overflow-y-auto { scroll-behavior: smooth; }
 
+        /* ── Tooltips: desktop/hover only ─────────────────────────────────
+           Mobile has no real hover state, so these used to just appear
+           after a tap and sit there. Hidden below `sm:` and only enabled
+           at `sm:` and up. */
         .msgr-tooltip {
+            display: none;
             position: absolute;
             z-index: 999;
             background: #1a1a1a;
@@ -1302,6 +1338,9 @@ new class extends \Livewire\Volt\Component {
             transform: translateY(-2px);
             border: none;
             box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        }
+        @media (min-width: 640px) {
+            .msgr-tooltip { display: block; }
         }
         .msgr-tooltip-wrap:hover .msgr-tooltip {
             opacity: 1;
@@ -1535,6 +1574,33 @@ new class extends \Livewire\Volt\Component {
         .msgr-post-source-row .src-icon i { font-size: 9px; color: #fff; }
         .msgr-post-source-row span {
             font-size: 11px; font-weight: 500; color: #EDE0F5;
+        }
+
+        /* ── Delete confirmation modal ─────────────────────────────────── */
+        .msgr-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(26,15,34,.45);
+            backdrop-filter: blur(2px);
+            z-index: 400;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .msgr-modal-card {
+            width: 100%;
+            max-width: 340px;
+            background: #ffffff;
+            border-radius: 1.1rem;
+            box-shadow: 0 20px 50px rgba(58,27,77,.35);
+            overflow: hidden;
+            animation: msgrModalIn .16s ease-out;
+        }
+        .msgr-modal-icon {
+            width: 46px; height: 46px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            background: #FDECEC; color: #DC2626; flex-shrink: 0;
         }
 
         @media (max-width: 768px) {
@@ -2064,33 +2130,19 @@ new class extends \Livewire\Volt\Component {
                                             </div>
                                             @endif
 
-                                            <div x-data="{ confirmUnsend: false }" class="relative msgr-tooltip-wrap flex items-center">
-                                                <button x-show="!confirmUnsend"
-                                                        @click.stop="confirmUnsend = true"
+                                            {{-- ── Delete button — now just opens the confirm modal ──
+                                                 No more inline x-data Yes/No mini-confirm; the modal
+                                                 lives once at the bottom of the page and is driven by
+                                                 $confirmDeleteId, so a row re-render or the toolbar
+                                                 closing can't yank the confirm state out from under
+                                                 a tap anymore. --}}
+                                            <div class="relative msgr-tooltip-wrap">
+                                                <button wire:click.stop="askDeleteConfirmation({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer
                                                                hover:bg-red-50 hover:text-red-600 transition-all duration-150">
                                                     <i class="fa-solid fa-trash-can text-xs"></i>
                                                 </button>
-                                                <span x-show="!confirmUnsend" class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Delete</span>
-                                                <div x-show="confirmUnsend"
-                                                     x-transition:enter="transition ease-out duration-150"
-                                                     x-transition:enter-start="opacity-0 scale-90"
-                                                     x-transition:enter-end="opacity-100 scale-100"
-                                                     class="flex items-center gap-1" @click.stop>
-                                                    <span class="text-xs text-red-600 font-semibold px-1">Delete?</span>
-                                                    <button @click.stop="
-                                                                confirmUnsend = false;
-                                                                let row = $el.closest('[data-msg-row]');
-                                                                if (row) {
-                                                                    row.style.opacity = '0';
-                                                                    row.style.transform = 'scale(.92)';
-                                                                }
-                                                                setTimeout(() => $wire.unsend({{ $msg['id'] }}), 170);
-                                                            "
-                                                            class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition-all duration-150 cursor-pointer">Yes</button>
-                                                    <button @click.stop="confirmUnsend = false"
-                                                            class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#444] font-semibold hover:bg-[#E8E0F0] transition-all duration-150 cursor-pointer">No</button>
-                                                </div>
+                                                <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Delete</span>
                                             </div>
                                             @endif
 
@@ -2528,6 +2580,55 @@ new class extends \Livewire\Volt\Component {
                 <span class="mx-2 text-[#E8E0F0]">·</span>
                 <span class="w-5 h-5 flex items-center justify-center rounded-lg bg-[#f3eef8]"><i class="fa-solid fa-school text-[#7a3f91]" style="font-size:10px;"></i></span>
                 <span>College chat</span>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    {{-- ══ Delete confirmation modal ══════════════════════════════════════
+         MOVED inside the component's single root div — Livewire/Volt
+         requires exactly one root element per component. Having this
+         modal as a sibling after </div> broke wire:click bindings on its
+         buttons entirely (that's why Confirm/Cancel did nothing), and
+         could also be what triggered the NS_BINDING_ABORTED — the DOM
+         diff patch had two top-level nodes to reconcile instead of one.
+         Single instance, driven purely by $confirmDeleteId (server-side
+         state, not client x-data), so it can never lose track of which
+         message it's confirming. Confirm calls unsend() with the exact
+         id baked into the button — no timers, no row DOM lookups. --}}
+    @if($confirmDeleteId)
+    @php $delMsg = collect($messages)->firstWhere('id', $confirmDeleteId); @endphp
+    <div class="msgr-modal-backdrop" wire:click="cancelDelete">
+        <div class="msgr-modal-card" wire:click.stop>
+            <div class="p-5">
+                <div class="flex items-start gap-3.5">
+                    <div class="msgr-modal-icon">
+                        <i class="fa-solid fa-trash-can text-lg"></i>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-1">
+                        <p class="text-sm font-semibold text-[#1a1a1a]">Delete this message?</p>
+                        <p class="text-xs text-[#666666] mt-1 leading-relaxed">
+                            Are you sure you want to delete this message? This can't be undone
+                            @if($delMsg && (! empty($delMsg['reactions']) || ($delMsg['is_pinned'] ?? false)))
+                                , and it will also remove its reactions{{ ($delMsg['is_pinned'] ?? false) ? ' and unpin it' : '' }}
+                            @endif
+                            .
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="flex border-t border-[#E8E0F0]">
+                <button wire:click="cancelDelete"
+                        class="flex-1 py-3 text-sm font-semibold text-[#555555] hover:bg-[#f5f5f5] transition-all duration-150 cursor-pointer">
+                    Cancel
+                </button>
+                <div class="w-px bg-[#E8E0F0]"></div>
+                <button wire:click="unsend({{ $confirmDeleteId }})"
+                        wire:loading.attr="disabled" wire:target="unsend"
+                        class="flex-1 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 transition-all duration-150 cursor-pointer disabled:opacity-60">
+                    <span wire:loading.remove wire:target="unsend">Confirm</span>
+                    <span wire:loading wire:target="unsend">Deleting…</span>
+                </button>
             </div>
         </div>
     </div>

@@ -649,6 +649,34 @@ select.filter-input {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .detail-label { font-style: italic; }
+
+/* ─────────────────────────────────────────────
+   SHARE MODAL — image thumbnail preview
+───────────────────────────────────────────── */
+.share-photo-preview {
+    width: 100%;
+    height: 140px;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+}
+.share-photo-preview img {
+    width: 100%; height: 100%; object-fit: contain;
+}
+.share-photo-preview .dl-badge {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(17,24,39,.75); color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    padding: 3px 8px; border-radius: 999px;
+    display: flex; align-items: center; gap: 4px;
+    pointer-events: none;
+}
 </style>
 
 {{-- Mouse-following cursor label — hidden on mobile via CSS + JS guard below --}}
@@ -817,13 +845,6 @@ select.filter-input {
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
-                    {{-- CHANGED: was `h-36 object-cover`, which crops the
-                         image to fill a fixed 36-unit box — that's what was
-                         slicing the top off banner-style images (e.g. the
-                         "We Are HIRING" graphic lost the "We Are" text).
-                         Now it's a taller box with `object-contain` on a
-                         neutral backdrop, so the whole image is always
-                         visible, letterboxed instead of cropped. --}}
                     <div class="w-full h-40 bg-gray-100 flex-shrink-0 overflow-hidden pointer-events-none">
                         <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
                              loading="lazy"
@@ -883,12 +904,7 @@ select.filter-input {
             @endif
         </div>
 
-        {{-- ══ PAGINATION BAR ══
-             CHANGED: added `pb-2` (extra bottom padding) plus a safe-area
-             inset so the bar always has breathing room and never gets
-             flush-cropped by a phone's browser chrome / home-indicator
-             area. `flex-wrap` + `py-2` also keeps it from feeling squished
-             on narrow screens. --}}
+        {{-- ══ PAGINATION BAR ══ --}}
         @php
             $total   = $this->jobPostings->total();
             $pp      = $this->jobPostings->perPage();
@@ -1027,13 +1043,8 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- Body: fixed-height two-column layout. The overall page never
-         scrolls — only the sidebar / main content panels scroll on
-         their own if they genuinely have more content than fits. --}}
     <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden">
 
-        {{-- LEFT: sidebar — title, badges, and all the "meta" info that
-             used to sit stacked at the top now lives here instead. --}}
         <div class="w-full lg:w-[340px] lg:flex-none bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
 
             @if($isPhilcst)
@@ -1121,7 +1132,6 @@ select.filter-input {
             </div>
         </div>
 
-        {{-- RIGHT: description / qualifications / how-to-apply --}}
         <div class="flex-1 min-w-0 lg:overflow-y-auto lg:scroll-thin bg-gray-100">
             <div class="max-w-[900px] mx-auto px-5 py-4 pb-8 flex flex-col gap-4">
 
@@ -1214,7 +1224,10 @@ select.filter-input {
 @endif
 
 
-{{-- ══ SHARE MODAL — native share sheet first, no copy/paste needed ══ --}}
+{{-- ══ SHARE MODAL — semi-automated: auto-copies caption + auto-downloads
+     the photo, then launches straight into Facebook/Messenger's composer
+     already scrolled/focused on the text box, so the user only needs to
+     Ctrl+V the caption and attach the already-downloaded photo. ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->jobDetailUrl($shareJobId);
@@ -1222,28 +1235,65 @@ select.filter-input {
         ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
         : '';
 
-    $fieldCount = (int)(bool)$shareEmpType + (int)(bool)$shareLocation + (int)(bool)$shareExpLevel + (int)(bool)$shareSalary + (int)(bool)$shareDlFormatted;
-    $descLimit  = $fieldCount >= 4 ? 100 : ($fieldCount >= 2 ? 140 : 180);
-    $shareDescPreview = mb_strlen($shareDescription) > $descLimit
-        ? mb_substr($shareDescription, 0, $descLimit) . '…'
+    $shareDescPreview = mb_strlen($shareDescription) > 160
+        ? mb_substr($shareDescription, 0, 160) . '…'
         : $shareDescription;
+
+    // Qualifications / instructions for the currently-shared job, needed
+    // here because the detail-view's $hasQual/$qualLines/$hasInstr/
+    // $instrLines only exist inside the @if($showDetail) block above —
+    // this is a separate @if scope with its own $job-less context, so we
+    // recompute them from the share* properties captured in openShareModal().
+    $shareJobModel = \App\Models\JobPosting::find($shareJobId);
+    $hasQual  = $shareJobModel && !empty($shareJobModel->qualifications);
+    $hasInstr = $shareJobModel && !empty($shareJobModel->application_instructions);
+
+    $qualLines = $hasQual
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobModel->qualifications)), fn($l) => $l !== ''))
+        : [];
+    $instrLines = $hasInstr
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobModel->application_instructions)), fn($l) => $l !== ''))
+        : [];
 
     // NOTE: this text is meant to be posted directly (via the native share
     // sheet / pasted into Facebook) as the post's own caption — it does
     // NOT include the job link, since the alumni portal isn't deployed
     // publicly yet and a raw "alumniphilcst.com" link would just show up
     // as a dead/unusable link box in the post composer.
+    //
+    // CHANGED (per request): dropped all the "kiddie" emoji meta lines
+    // (company/location/employment type/experience level/deadline/college)
+    // entirely from the caption — it now goes straight from the
+    // "WE ARE HIRING" opener into the full job description. Requirements
+    // keep only 📌 and ✅. Closing line ends with a single 💜 followed by
+    // the hashtag #YourFutureStarsHere, no other emoji anywhere else.
     $fbLines   = [];
-    $fbLines[] = "🎯 Job Opening: {$shareJobTitle}";
-    $fbLines[] = "🏢 {$shareCompany}";
-    if ($shareLocation)    $fbLines[] = "📍 {$shareLocation}";
-    if ($shareEmpType)     $fbLines[] = "💼 {$shareEmpType}";
-    if ($shareExpLevel)    $fbLines[] = "📊 {$shareExpLevel}";
-    if ($shareSalary)      $fbLines[] = "💰 {$shareSalary}";
-    if ($shareDlFormatted) $fbLines[] = "📅 Deadline: {$shareDlFormatted}";
-    if ($shareCollege)     $fbLines[] = "🏫 For: {$shareCollege}";
+    $fbLines[] = "WE ARE HIRING: " . strtoupper($shareJobTitle);
+
+    if (trim($shareDescription) !== '') {
+        $fbLines[] = '';
+        $fbLines[] = trim($shareDescription);
+    }
+
+    if ($hasQual) {
+        $fbLines[] = '';
+        $fbLines[] = '📌 Requirements & Qualifications:';
+        foreach ($qualLines as $line) {
+            $fbLines[] = "✅ {$line}";
+        }
+    }
+
+    if ($hasInstr) {
+        $fbLines[] = '';
+        $fbLines[] = 'How to Apply:';
+        foreach ($instrLines as $line) {
+            $fbLines[] = "- {$line}";
+        }
+    }
+
     $fbLines[] = '';
-    $fbLines[] = "Apply now through the PHILCST Alumni Portal 👇";
+    $fbLines[] = "Apply now through PHILCST Alumni Connect 💜";
+    $fbLines[] = "#YourFutureStarsHere";
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
@@ -1251,13 +1301,13 @@ select.filter-input {
      x-data="{
          copied:false,
          nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         downloading:false,
+         downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
          jobTitle:  {{ json_encode($shareJobTitle) }},
          baseUrl:   {{ json_encode($shareBaseUrl) }},
          imageUrl:  {{ json_encode($shareImageUrl) }},
-         // Fetches the job photo and turns it into a File so the native
-         // share sheet can attach it, same as posting a photo + caption
-         // directly — no link required.
+
          async buildImageFile() {
              if (!this.imageUrl) return null;
              try {
@@ -1267,6 +1317,47 @@ select.filter-input {
                  return new File([blob], 'job-photo.' + ext, { type: blob.type });
              } catch (e) { return null; }
          },
+
+         async autoCopyCaption() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) {
+                     await navigator.clipboard.writeText(this.shareText);
+                 } else {
+                     const ta = document.createElement('textarea');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
+                 }
+                 return true;
+             } catch (e) { return false; }
+         },
+
+         async autoDownloadImage() {
+             if (!this.imageUrl) return false;
+             this.downloading = true;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url  = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'job-photo.' + ext;
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloading = false;
+                 this.downloaded  = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) {
+                 this.downloading = false;
+                 return false;
+             }
+         },
+
          async nativeShare() {
              try {
                  const shareData = { title: this.jobTitle, text: this.shareText };
@@ -1275,24 +1366,33 @@ select.filter-input {
                      shareData.files = [file];
                  }
                  await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
+             } catch (e) { /* cancelled by user, nothing to do */ }
          },
+
          async shareOnFacebook() {
-             // No deployed site yet, so we deliberately do NOT pass a `u`
-             // link param to Facebook's sharer — that's what was causing
-             // the dead 'alumniphilcst.com' link box to show up in the
-             // post composer. If this device supports the native share
-             // sheet (photo + caption, no link), use that instead since
-             // it behaves exactly like a normal FB post.
              if (this.nativeShareSupported) { await this.nativeShare(); return; }
-             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             await this.autoCopyCaption();
+             await this.autoDownloadImage();
+             $wire.dispatch('flash-message', {
+                 type: 'success',
+                 message: 'Photo downloaded! If the caption isn\'t pre-filled in the composer, just paste it (Ctrl+V) — it\'s already copied to your clipboard.'
+             });
+             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
              const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
              window.open(url,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
          },
+
          async shareOnMessenger() {
              if (this.nativeShareSupported) { await this.nativeShare(); return; }
+             await this.autoCopyCaption();
+             await this.autoDownloadImage();
+             $wire.dispatch('flash-message', {
+                 type: 'success',
+                 message: 'Caption copied and photo downloaded! In Messenger, paste (Ctrl+V) the caption and attach the downloaded photo.'
+             });
              window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
          },
+
          async copyLinkFn() {
              try {
                  if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(this.shareText); }
@@ -1326,26 +1426,22 @@ select.filter-input {
             </button>
         </div>
 
-        {{-- CHANGED: was `flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden`.
-             The `flex-1 min-h-0` made this row stretch to fill the modal's
-             full available height even on mobile (where it's stacked as a
-             column). The LEFT preview panel below also had `flex-1`, so on
-             mobile it stretched to fill that same forced height, shoving
-             "Share via" way down and leaving the big empty gap in the
-             middle (see image 2). Now on mobile the row just wraps its
-             real content (scrolls the whole sheet if needed), and only
-             on md+ (side-by-side) does it go back to the fixed-height,
-             independently-scrolling two-column layout. --}}
         <div class="flex flex-col md:flex-row md:flex-1 md:min-h-0 overflow-y-auto md:overflow-hidden">
 
-            {{-- LEFT: Preview
-                 CHANGED: `flex-1` → `md:flex-1` so this panel no longer
-                 stretches to fill the row's height on mobile (that stretch
-                 was the direct cause of the gap in image 2). It now just
-                 hugs its content on mobile, and still grows/scrolls
-                 independently on desktop like before. --}}
+            {{-- LEFT: Preview --}}
             <div class="md:flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 md:overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+
+                @if($shareImageUrl)
+                <div class="share-photo-preview">
+                    <img src="{{ $shareImageUrl }}" alt="{{ $shareJobTitle }}"
+                         onerror="this.style.display='none'">
+                    <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
+                        <i class="fas" :class="downloading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                        <span x-text="downloading ? 'Downloading…' : 'Downloaded'"></span>
+                    </span>
+                </div>
+                @endif
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
                     <div class="border-b border-gray-100 px-4 py-3 bg-gray-50">
@@ -1369,9 +1465,10 @@ select.filter-input {
                 <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
                     <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
                     <p class="text-xs leading-relaxed" style="color:#333333;">
-                        Sharing sends the job's photo and caption straight into the post —
-                        no link needed. Use <strong>Share</strong> to open your device's
-                        share sheet and pick Messenger, Facebook, or any app.
+                        Tapping <strong>Facebook</strong> opens the post composer with the caption
+                        already filled in — just attach the photo that was auto-downloaded.
+                        <strong>Messenger</strong> auto-copies the caption and downloads the photo,
+                        then opens Messenger for you to paste and attach.
                     </p>
                 </div>
             </div>
@@ -1380,21 +1477,11 @@ select.filter-input {
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 md:overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                {{-- Native share sheet — sends title+text+photo directly to
-                     Messenger, Facebook, or any app the person picks, no
-                     copy/paste step at all. This is the primary option on
-                     phones and most modern browsers. --}}
                 <template x-if="nativeShareSupported">
                     <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
                         <span class="icon-wrap">
                             <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
                         </span>
-                        {{-- FIX: added min-w-0 — without it this flex-1 text
-                             block couldn't shrink below its content width,
-                             so on narrow/mobile viewports the button forced
-                             extra width and the label/subtitle text visibly
-                             broke apart from the icon instead of wrapping
-                             cleanly inside the button. --}}
                         <div class="text-left flex-1 min-w-0">
                             <p class="text-xs font-semibold">Share</p>
                             <p class="text-[10px] text-white/70 mt-0.5">Send photo + caption via Messenger, Facebook, or any app</p>
@@ -1402,19 +1489,16 @@ select.filter-input {
                     </button>
                 </template>
 
-                {{-- Facebook — no link, just the caption; uses native share
-                     (photo + text) automatically when supported --}}
                 <button type="button" @click="shareOnFacebook()" class="share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
                     <div class="text-left flex-1 min-w-0">
                         <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Posts the photo + caption directly</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Downloads photo, copies caption, opens Facebook's share window</p>
                     </div>
                 </button>
 
-                {{-- Messenger --}}
                 <button type="button" @click="shareOnMessenger()" class="share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
@@ -1423,13 +1507,10 @@ select.filter-input {
                     </span>
                     <div class="text-left flex-1 min-w-0">
                         <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Opens Messenger to pick a contact</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Downloads photo, copies caption, opens Messenger</p>
                     </div>
-                    <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
-                {{-- Batch Chat — opens the forward-style destination picker
-                     (like Messenger's forward), instead of sending straight away --}}
                 <button type="button" wire:click="openForwardModal"
                         class="share-option-btn" style="background:#7a3f91;">
                     <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
@@ -1437,7 +1518,7 @@ select.filter-input {
                     </span>
                     <div class="text-left flex-1 min-w-0">
                         <p class="text-xs font-semibold">Share to Batch Chat</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Choose which of your chats to send to</p>
+                        <p class="text-[10px] text-white/70 mt-0.5">Choose which of your chats to send to — fully automatic</p>
                     </div>
                     <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>

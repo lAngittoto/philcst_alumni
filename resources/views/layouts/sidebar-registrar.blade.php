@@ -15,11 +15,45 @@
         .bell-badge { pointer-events: none; }
 
         /* ════════════════════════════════════════════════════════
+           LIVEWIRE LOADING BAR (blue, top of viewport)
+           FIX: this is now a STATIC element that is the very first
+           child of <body> (see markup below) instead of an element
+           that JS creates/moves around at runtime. wire:navigate
+           morphs the DOM in place on every navigation, and an
+           element that only exists because JS injected it could get
+           dropped or displaced mid-morph — that was the cause of the
+           bar looking "putol" (cut off / disappearing) inside the
+           registrar layout. A static element that's always present
+           in the template can't be lost that way; JS below only
+           toggles its width/opacity, never creates or moves it.
+           position:fixed + inset + a very high z-index also means it
+           always draws across the FULL viewport width, above the
+           sidebar, never clipped by it.
+        ════════════════════════════════════════════════════════ */
+        #lw-loading-bar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            width: 0%;
+            height: 3px;
+            background: #2563EB;
+            box-shadow: 0 0 8px rgba(37,99,235,0.6);
+            z-index: 2147483647;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* ════════════════════════════════════════════════════════
            SIDEBAR
         ════════════════════════════════════════════════════════ */
         .reg-sidebar {
             background: #FFFFFF;
             border-right: 1px solid #E5E5E5;
+            transition:
+                width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease,
+                border-color 0.25s ease;
         }
         .reg-hamburger-line { background: #7A3F91; }
 
@@ -66,16 +100,44 @@
             background: #fff;
             flex-shrink: 0;
         }
+
+        /* ── MENU label row + inline collapse icon-button ─────────
+           The label and the collapse toggle sit on the SAME row,
+           label on the left, tiny icon-only button on the right. ── */
+        .reg-nav-section-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1rem;
+            margin-top: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
         .reg-nav-section-label {
             font-size: 11px;
             font-weight: 800;
             letter-spacing: 0.16em;
             color: #000000;
             opacity: 0.45;
-            padding: 0 1rem;
-            margin-top: 0.25rem;
-            margin-bottom: 0.5rem;
         }
+
+        /* Icon-only collapse toggle — sits right next to "MENU" */
+        .reg-collapse-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 7px;
+            background: #F0E9F6;
+            border: none;
+            color: #7A3F91;
+            cursor: pointer;
+            font-size: 10px;
+            flex-shrink: 0;
+            transition: background-color 0.15s ease, transform 0.2s ease;
+        }
+        .reg-collapse-icon-btn:hover { background: #E4D3F0; }
+        .reg-collapse-icon-btn:active { transform: scale(0.88); }
 
         /* Logout */
         .reg-logout-btn {
@@ -134,13 +196,67 @@
             box-shadow: none !important;
         }
 
+        /* ── Collapsed state (desktop only, manual << >> toggle) ── */
+        @media (min-width: 1024px) {
+            .reg-sidebar.is-collapsed {
+                width: 5rem;
+                min-width: 5rem;
+            }
+            .reg-sidebar.is-collapsed .reg-nav-label,
+            .reg-sidebar.is-collapsed .reg-nav-section-label,
+            .reg-sidebar.is-collapsed .reg-nav-dot,
+            .reg-sidebar.is-collapsed .reg-logout-label-text,
+            .reg-sidebar.is-collapsed .reg-brand-text {
+                display: none !important;
+            }
+            .reg-sidebar.is-collapsed .reg-nav-link {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            .reg-sidebar.is-collapsed .reg-nav-icon {
+                margin-right: 0;
+            }
+            .reg-sidebar.is-collapsed .reg-nav-section-row {
+                justify-content: center;
+                padding: 0 0.5rem;
+            }
+            .reg-sidebar.is-collapsed .reg-logout-btn {
+                gap: 0;
+                padding: 0.9rem;
+            }
+            .reg-sidebar.is-collapsed .reg-logout-btn i.fa-right-from-bracket,
+            .reg-sidebar.is-collapsed .reg-logout-spinner {
+                margin-right: 0 !important;
+            }
+
+            /* ── Modal-open state: sidebar fully closes (not just collapses),
+                 so it never covers/overlaps modal content on desktop.
+                 FIX: transition is disabled here so the sidebar disappears
+                 instantly instead of sliding/animating away, which used to
+                 visually compete with the modal's own pop-in animation. ── */
+            .reg-sidebar.is-modal-hidden {
+                width: 0 !important;
+                min-width: 0 !important;
+                opacity: 0;
+                pointer-events: none;
+                overflow: hidden;
+                border-right-color: transparent;
+                transition: none !important;
+            }
+            .reg-sidebar.is-modal-hidden .reg-nav-label,
+            .reg-sidebar.is-modal-hidden .reg-brand-text {
+                display: none !important;
+            }
+        }
+
         @media (max-width: 1023px) {
             .reg-sidebar { box-shadow: 0 0 60px rgba(0,0,0,0.18); }
 
             /* ── Icon-only nav on mobile: hide labels, section titles, active dots ── */
             .reg-nav-label,
             .reg-nav-section-label,
-            .reg-nav-dot {
+            .reg-nav-dot,
+            .reg-nav-section-row {
                 display: none !important;
             }
             .reg-nav-link {
@@ -166,106 +282,123 @@
         }
 
         /* ════════════════════════════════════════════════════════
-           NOTIFICATION PANEL
+           NOTIFICATIONS PANEL — item layout + colored icon chips
         ════════════════════════════════════════════════════════ */
         .notif-item {
-            cursor: pointer;
-            position: relative;
             display: flex;
             align-items: flex-start;
-            gap: 13px;
+            gap: 12px;
             padding: 14px 18px;
-            border-bottom: 0.5px solid #EEEEEE;
-            transition: background 0.12s ease;
+            cursor: pointer;
+            border-bottom: 1px solid #F3EEF8;
+            transition: background .12s ease;
         }
-        .notif-item:last-child  { border-bottom: none; }
-        .notif-item.is-unread   { background: #FBFAFF; }
-        .notif-item.is-read     { background: #FFFFFF; }
-        .notif-item:hover       { background: #F5F0FB; }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-item:hover { background: #FAF7FC; }
+        .notif-item.is-read { background: #FCFBFD; }
 
         .notif-icon-wrap {
-            width: 38px; height: 38px;
+            width: 38px;
+            height: 38px;
             border-radius: 10px;
-            display: flex; align-items: center; justify-content: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
-            margin-top: 1px;
-            font-size: 15px;
+            font-size: 14px;
         }
-        .notif-icon-alumni  { background: #F0E9F8; color: #7A3F91; }
-        .notif-icon-import  { background: #EAFAF3; color: #0E8058; }
-        .notif-icon-chat    { background: #FEF0E6; color: #C06A20; }
-        .notif-icon-default { background: #F3F3F3; color: #888888; }
+        .notif-icon-alumni  { background: #EDE9FE; color: #7C3AED; }
+        .notif-icon-import  { background: #DBEAFE; color: #2563EB; }
+        .notif-icon-chat    { background: #DCFCE7; color: #16A34A; }
+        .notif-icon-default { background: #F3E8FF; color: #7A3F91; }
 
-        .notif-body         { flex: 1; min-width: 0; }
+        .notif-body { flex: 1; min-width: 0; }
 
         .notif-title-row {
             display: flex;
             align-items: center;
             gap: 6px;
             flex-wrap: wrap;
-            margin-bottom: 4px;
         }
-        .notif-title-text      { font-size: 13px; font-weight: 600; color: #222222; line-height: 1.35; }
-        .notif-title-text.is-read { color: #555555; font-weight: 500; }
+        .notif-title-text {
+            font-size: .85rem;
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+        .notif-title-text.is-read { font-weight: 600; color: #666666; }
 
         .notif-tag {
-            display: inline-flex;
-            align-items: center;
-            padding: 2px 7px;
-            border-radius: 20px;
-            font-size: 9px;
+            font-size: .6rem;
             font-weight: 700;
-            letter-spacing: 0.08em;
             text-transform: uppercase;
-            flex-shrink: 0;
+            letter-spacing: .04em;
+            padding: 2px 7px;
+            border-radius: 999px;
+            white-space: nowrap;
         }
-        .notif-tag-alumni  { background: #EDE1F9; color: #5A2270; }
-        .notif-tag-import  { background: #D1FAE5; color: #065F46; }
-        .notif-tag-chat    { background: #FEE8D1; color: #953F0E; }
+        .notif-tag-alumni { background: #EDE9FE; color: #7C3AED; }
+        .notif-tag-import { background: #DBEAFE; color: #2563EB; }
+        .notif-tag-chat   { background: #DCFCE7; color: #16A34A; }
 
         .notif-count-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 20px; height: 18px;
+            font-size: .65rem;
+            font-weight: 800;
             background: #7A3F91;
-            color: #ffffff;
-            font-size: 9px;
-            font-weight: 700;
-            border-radius: 20px;
-            padding: 0 5px;
-            flex-shrink: 0;
+            color: #fff;
+            padding: 1px 6px;
+            border-radius: 999px;
         }
 
         .notif-unread-dot {
-            width: 7px; height: 7px;
-            background: #DC2626;
+            width: 8px; height: 8px;
             border-radius: 50%;
+            background: #7A3F91;
             flex-shrink: 0;
             margin-top: 4px;
         }
 
         .notif-message-text {
-            font-size: 12px;
+            font-size: .8rem;
             color: #555555;
-            line-height: 1.5;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            margin-bottom: 6px;
+            line-height: 1.45;
+            margin-top: 2px;
         }
 
-        .notif-time-row { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #AAAAAA; }
-        .notif-time-row i { font-size: 10px; }
+        .notif-time-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 6px;
+            font-size: .68rem;
+            color: #aaaaaa;
+            font-weight: 500;
+        }
+        .notif-time-row i { font-size: .62rem; }
 
-        /* ── MOBILE: full-screen notification panel (Messenger-style) ──────────
-           Overrides the desktop floating-panel inline styles (top/left/width/
-           border-radius/etc. set via style="" + positionPanel()) using
-           !important, since an !important rule in an external stylesheet
-           always wins over a non-important inline style. No JS changes
-           needed — positionPanel() can keep writing left/top/width, this
-           simply overrides it on small screens. ── */
+        /* ── Read/Unread section divider ─────────────────────────── */
+        .notif-divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px 6px;
+        }
+        .notif-divider::before,
+        .notif-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #EDE4F5;
+        }
+        .notif-divider-label {
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #B9A6C7;
+            white-space: nowrap;
+        }
+
+        /* ── Mobile: notification panel goes true full-screen ────── */
         @media (max-width: 1023px) {
             #notif-panel {
                 top: 0 !important;
@@ -278,10 +411,6 @@
                 max-height: 100% !important;
                 border-radius: 0 !important;
                 border: none !important;
-                box-shadow: none !important;
-            }
-            #notif-list {
-                max-height: none !important;
             }
         }
     </style>
@@ -296,6 +425,27 @@
         'registrar.employment.tracking': '/registrar/employment/tracking',
         'registrar.alumni.register':     '/registrar/alumni/register',
     };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  GLOBAL "MODAL OPEN" STORE
+    // ─────────────────────────────────────────────────────────────────────────
+    document.addEventListener('alpine:init', function () {
+        if (!Alpine.store('modal')) {
+            Alpine.store('modal', { open: false });
+        }
+    });
+    window.addEventListener('modal-opened', function () {
+        var s = window.Alpine && Alpine.store('modal');
+        if (s) s.open = true;
+    });
+    window.addEventListener('modal-closed', function () {
+        var s = window.Alpine && Alpine.store('modal');
+        if (s) s.open = false;
+    });
+    document.addEventListener('livewire:navigated', function () {
+        var s = window.Alpine && Alpine.store('modal');
+        if (s) s.open = false;
+    });
 
     // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
@@ -329,9 +479,6 @@
             _groupByDay(rows) {
                 var map = new Map();
                 Array.from(rows)
-                    // Employment updates and alumni profile updates are excluded
-                    // entirely — they never show up in the bell, no matter which
-                    // source (Livewire event or backend) produced them.
                     .filter(function (n) {
                         var rawDedup = n.dedup_key || '';
                         var isEmpEvent = (
@@ -570,20 +717,15 @@
     function positionPanel() {
         var btn   = document.getElementById('bell-btn');
         var panel = document.getElementById('notif-panel');
-        var aside = document.querySelector('aside');
         if (!btn || !panel) return;
         var btnRect = btn.getBoundingClientRect();
         if (window.innerWidth >= 1024) {
             panel.style.left  = (btnRect.right - 400) + 'px';
             panel.style.top   = (btnRect.bottom  + 8)  + 'px';
             panel.style.width = '400px';
-        } else {
-            // Mobile: the CSS media query (#notif-panel !important rules)
-            // forces this full-screen regardless of what's set here.
-            panel.style.left  = '0px';
-            panel.style.top   = '0px';
-            panel.style.width = '100%';
         }
+        // Mobile: the CSS media query (#notif-panel !important rules)
+        // fully owns full-screen layout — no inline overrides needed here.
     }
     window.positionPanel = positionPanel;
     window.addEventListener('resize', function () {
@@ -597,10 +739,6 @@
     window.__sidebarNotifsMarkRead = function (routeName) {
         var s = window.__safeNotifsStore();
         if (!s) return;
-        // No cross-mapping: only the exact sidebar link clicked clears its own
-        // notifs. "New Alumni Registered" and "Bulk Import Complete" both link
-        // to registrar.alumni, so their badge only clears when the user opens
-        // Alumni Records — clicking Register Alumni must NOT clear them.
         s.markReadByRoute(routeName);
     };
 
@@ -686,19 +824,101 @@
             });
         });
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  LIVEWIRE BLUE LOADING BAR (top of viewport, shows during navigate/requests)
+    //  FIX: the bar element (#lw-loading-bar) is now a STATIC element that
+    //  lives directly in the blade markup as the very first child of <body>
+    //  (see below), instead of being created/injected by this script at
+    //  runtime. This script now only ever LOOKS UP the existing element by
+    //  id and toggles its width/opacity — it never creates it and never
+    //  moves it around the DOM. That's what was causing the bar to render
+    //  "putol" (broken/cut off) in the registrar layout: the previous
+    //  version had a syntax/structural bug in ensureBar() and relied on
+    //  dynamically appending the bar to <body> on every run, which could
+    //  race with Livewire's wire:navigate DOM morph.
+    // ─────────────────────────────────────────────────────────────────────────
+    (function () {
+        var hideTimer = null;
+        var creepTimer = null;
+
+        function ensureBar() {
+            return document.getElementById('lw-loading-bar');
+        }
+
+        function start() {
+            var b = ensureBar();
+            if (!b) return;
+            clearTimeout(hideTimer);
+            clearInterval(creepTimer);
+            // Hard reset — don't trust any leftover inline state.
+            b.style.transition = 'none';
+            b.style.opacity = '1';
+            b.style.width = '0%';
+            void b.offsetWidth; // force reflow
+            b.style.transition = 'width 0.4s ease-out, opacity 0.2s ease';
+            b.style.width = '30%';
+
+            // Keep gently creeping forward (never reaching 90%) for as long
+            // as the request takes, so the bar is always visibly moving
+            // instead of sitting frozen at 75% on slow requests.
+            var current = 30;
+            creepTimer = setInterval(function () {
+                current += (90 - current) * 0.12;
+                if (current < 90) b.style.width = current + '%';
+            }, 400);
+        }
+
+        function finish() {
+            var b = ensureBar();
+            if (!b) return;
+            clearInterval(creepTimer);
+            b.style.transition = 'width 0.25s ease';
+            b.style.width = '100%';
+            hideTimer = setTimeout(function () {
+                b.style.transition = 'opacity 0.3s ease';
+                b.style.opacity = '0';
+                setTimeout(function () {
+                    b.style.transition = 'none';
+                    b.style.width = '0%';
+                }, 300);
+            }, 200);
+        }
+
+        document.addEventListener('livewire:navigating', start);
+        document.addEventListener('livewire:navigated', finish);
+        document.addEventListener('livewire:init', function () {
+            document.addEventListener('livewire:request', start);
+            Livewire.hook('request', function ({ succeed, fail }) {
+                succeed(function () { finish(); });
+                fail(function () { finish(); });
+            });
+        });
+    })();
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
-<body class="antialiased" x-data="{ sidebarOpen: false, loggingOut: false }">
+<body class="antialiased"
+      x-data="{
+          sidebarOpen: false,
+          sidebarCollapsed: localStorage.getItem('reg_sidebar_collapsed') === '1',
+          loggingOut: false
+      }"
+      x-init="$watch('sidebarCollapsed', value => localStorage.setItem('reg_sidebar_collapsed', value ? '1' : '0'))">
+
+{{-- Blue Livewire loading bar — STATIC placeholder, always the very first
+     element in <body>. Fixed positioning + top:0/left:0/right:0 means it
+     always spans the FULL viewport width and sits above the sidebar
+     (z-index 2147483647), so it can never be cut off/"putol" by the
+     sidebar or by any DOM morph during wire:navigate. The script above
+     only toggles this element's width/opacity — it never creates or
+     relocates it. --}}
+<div id="lw-loading-bar"></div>
+
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile overlay — x-cloak added so it can NEVER paint before Alpine
-         initializes sidebarOpen (that pre-Alpine flash was the "stuck
-         overlay" bug: without x-cloak, the browser paints this element in
-         its default state — visible, since there is no static `hidden`
-         class here — for the split second before Alpine attaches and
-         evaluates x-show="sidebarOpen"). --}}
-    <div x-show="sidebarOpen"
+    {{-- Mobile overlay — hidden entirely while a modal is open, same as the sidebar --}}
+    <div x-show="sidebarOpen && !($store.modal && $store.modal.open)"
          x-cloak
          x-transition:enter="transition opacity-ease-out duration-300"
          x-transition:enter-start="opacity-0"
@@ -711,14 +931,11 @@
     </div>
 
     {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
-    {{-- `-translate-x-full` is now a STATIC class (always present by default
-         on mobile) instead of being toggled by :class from Alpine. This
-         means the sidebar is hidden off-screen from the very first paint,
-         with zero dependency on Alpine having booted yet. Alpine only ever
-         ADDS `translate-x-0` on top via :class when sidebarOpen is true —
-         it never has to be the one to hide it, which is what removes the
-         "sidebar/overlay briefly stuck open" flash on mobile. --}}
-    <aside :class="{ 'translate-x-0': sidebarOpen }"
+    <aside :class="{
+                'translate-x-0':  sidebarOpen && !($store.modal && $store.modal.open),
+                'is-collapsed':   sidebarCollapsed,
+                'is-modal-hidden': ($store.modal && $store.modal.open)
+           }"
            class="reg-sidebar fixed inset-y-0 left-0 z-[9995] w-20 min-w-[5rem] lg:w-72 lg:min-w-[18rem] -translate-x-full transform
                   transition-transform duration-300
                   lg:translate-x-0 lg:static lg:inset-0
@@ -726,7 +943,7 @@
 
         {{-- Sidebar Header --}}
         <div class="flex items-center justify-center lg:justify-start h-24 px-2 lg:px-5 border-b border-[#E5E5E5] shrink-0">
-            <div class="min-w-0 hidden lg:block">
+            <div class="min-w-0 hidden lg:block reg-brand-text">
                 <p class="text-[15px] uppercase tracking-[0.18em] font-extrabold text-[#7A3F91] leading-none">
                     PHILCST
                 </p>
@@ -738,7 +955,19 @@
 
         {{-- Navigation --}}
         <nav class="flex-1 px-2 lg:px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
-            <p class="reg-nav-section-label">MENU</p>
+
+            <div class="reg-nav-section-row">
+                <p class="reg-nav-section-label">MENU</p>
+                <button type="button"
+                        @click="sidebarCollapsed = !sidebarCollapsed"
+                        title="Collapse sidebar"
+                        class="reg-collapse-icon-btn hidden lg:flex">
+                    <i class="fas"
+                       :class="sidebarCollapsed ? 'fa-angles-right' : 'fa-angles-left'"
+                       style="font-size:11px;line-height:1;"></i>
+                </button>
+            </div>
+
             @php
                 $sidebarLinks = [
                     ['route' => 'registrar.dashboard',           'icon' => 'gauge-high',  'label' => 'Dashboard'],
@@ -795,8 +1024,7 @@
     {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
-        {{-- Top bar (universal — hamburger on mobile only, single bell always) --}}
-        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+        <header class="sticky top-0 flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
                        shrink-0 z-30">
             <button @click="sidebarOpen = !sidebarOpen"
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
@@ -853,9 +1081,6 @@
 
 {{-- ══════════════════════════════════════════════════════════════════════════
      NOTIFICATION PANEL
-     Desktop: small floating card near the bell (positioned via positionPanel()).
-     Mobile (<1024px): forced full-screen, Messenger-style, via the
-     "#notif-panel" !important media query in <style> above.
 ════════════════════════════════════════════════════════════════════════════ --}}
 <div
     id="notif-panel"
@@ -877,10 +1102,13 @@
         z-index: 9999;
         transform-origin: top left;
         min-height: 520px;
-        background: #FFFFFF;
+        background-color: #FFFFFF;
+        opacity: 1;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         border-radius: 16px;
-        border: 0.5px solid #E0D8ED;
-        box-shadow: 0 20px 48px -8px rgba(90,34,112,0.18), 0 4px 16px rgba(0,0,0,0.08);
+        border: 1px solid #E0D8ED;
+        box-shadow: 0 12px 28px -6px rgba(90,34,112,0.22), 0 2px 8px rgba(0,0,0,0.06);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -908,7 +1136,6 @@
                     onmouseout="this.style.background='transparent'">
                 Mark all read
             </button>
-            {{-- Close (X) button: no tooltip/title anywhere (mobile & desktop) --}}
             <button type="button"
                     @click.stop="$store.notifs && $store.notifs.close()"
                     aria-label="Close notifications"
@@ -931,7 +1158,6 @@
     {{-- Scrollable list --}}
     <div id="notif-list" class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
-        {{-- Empty state --}}
         <template x-if="$store.notifs && $store.notifs.items.length === 0">
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:56px 24px; text-align:center;">
                 <div style="width:56px; height:56px; background:#F3F3F3; border-radius:14px; display:flex; align-items:center; justify-content:center; margin-bottom:16px; border:0.5px solid #EEEEEE;">
@@ -944,9 +1170,14 @@
             </div>
         </template>
 
-        {{-- Notification items --}}
         <template x-if="$store.notifs">
-            <template x-for="notif in $store.notifs.items" :key="notif.id">
+            <template x-for="(notif, notifIdx) in $store.notifs.items" :key="notif.id">
+                <div>
+                    <div class="notif-divider"
+                         x-show="notif.read && notifIdx > 0 && !$store.notifs.items[notifIdx - 1].read"
+                         x-cloak>
+                        <span class="notif-divider-label">Already Read</span>
+                    </div>
                 <div
                     class="notif-item"
                     :class="notif.read ? 'is-read' : 'is-unread'"
@@ -959,7 +1190,6 @@
                         }
                     ">
 
-                    {{-- Icon --}}
                     <div class="notif-icon-wrap"
                          :class="{
                              'notif-icon-alumni':  notif.icon === 'user-graduate',
@@ -970,10 +1200,8 @@
                         <i class="fas" :class="'fa-' + (notif.icon || 'bell')"></i>
                     </div>
 
-                    {{-- Body --}}
                     <div class="notif-body">
 
-                        {{-- Title row --}}
                         <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
                             <div class="notif-title-row">
                                 <span class="notif-title-text"
@@ -981,7 +1209,6 @@
                                       x-text="notif.title">
                                 </span>
 
-                                {{-- Type tags --}}
                                 <span x-show="notif.icon === 'user-graduate'" x-cloak
                                       class="notif-tag notif-tag-alumni">New Alumni</span>
                                 <span x-show="notif.icon === 'file-import'" x-cloak
@@ -989,21 +1216,17 @@
                                 <span x-show="notif.icon === 'comment-dots'" x-cloak
                                       class="notif-tag notif-tag-chat">Message</span>
 
-                                {{-- Count badge --}}
                                 <span x-show="Number(notif.count) > 1" x-cloak
                                       class="notif-count-badge"
                                       x-text="'×' + Number(notif.count)">
                                 </span>
                             </div>
 
-                            {{-- Unread dot --}}
                             <span x-show="!notif.read" x-cloak class="notif-unread-dot"></span>
                         </div>
 
-                        {{-- Message --}}
                         <p class="notif-message-text" x-text="notif.message"></p>
 
-                        {{-- Timestamp --}}
                         <div class="notif-time-row">
                             <i class="fas fa-clock"></i>
                             <span x-text="notif.created_at
@@ -1015,6 +1238,7 @@
                             </span>
                         </div>
                     </div>
+                </div>
                 </div>
             </template>
         </template>

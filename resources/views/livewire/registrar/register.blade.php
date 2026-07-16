@@ -228,18 +228,20 @@ new class extends Component {
         $this->successMsg = '';
     }
 
-    public function openImportModal(): void
-    {
-        $this->resetImport();
-        $this->showImportModal = true;
-    }
+public function openImportModal(): void
+{
+    $this->resetImport();
+    $this->showImportModal = true;
+    $this->dispatch('modal-opened');
+}
 
-    public function closeImportModal(): void
-    {
-        if ($this->importStep === 'processing') return;
-        $this->showImportModal = false;
-        $this->resetImport();
-    }
+public function closeImportModal(): void
+{
+    if ($this->importStep === 'processing') return;
+    $this->showImportModal = false;
+    $this->resetImport();
+    $this->dispatch('modal-closed');
+}
 
     public function resetImport(): void
     {

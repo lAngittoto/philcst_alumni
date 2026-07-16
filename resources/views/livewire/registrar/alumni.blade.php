@@ -220,6 +220,8 @@ new class extends Component {
             $this->viewingProfileId  = $id;
             $this->newAlumniPhoto    = null;
             $this->activeModal       = 'viewProfile';
+            $this->dispatch('modal-opened');
+            
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to load profile.');
         }
@@ -232,11 +234,9 @@ new class extends Component {
         try {
             $alumni = Alumni::findOrFail($this->viewingProfileId);
 
-            if ($alumni->profile_photo
-                && !str_contains($alumni->profile_photo, 'default.png')
-                && Storage::disk('public')->exists($alumni->profile_photo)) {
-                Storage::disk('public')->delete($alumni->profile_photo);
-            }
+if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png')) {
+    Storage::disk('public')->delete($alumni->profile_photo);
+}
 
             $path = $this->newAlumniPhoto->store('alumni-photos', 'public');
             $alumni->update(['profile_photo' => $path]);
@@ -281,6 +281,7 @@ new class extends Component {
         $this->viewingProfile    = null;
         $this->viewingEmployment = null;
         $this->newAlumniPhoto    = null;
+        $this->dispatch('modal-closed');
     }
 };
 ?>
@@ -1275,14 +1276,57 @@ new class extends Component {
                                  this.originalSrc = this.previewSrc;
                              });
                          },
-                         onFileChange(event) {
-                             const file = event.target.files[0];
-                             if (!file) return;
-                             this.pendingFile = file; this.hasFile = true; this.isDefaultPending = false;
-                             const reader = new FileReader();
-                             reader.onload = (e) => { this.previewSrc = e.target.result; };
-                             reader.readAsDataURL(file);
-                         },
+async onFileChange(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    this.isDefaultPending = false;
+
+    try {
+        const compressed = await this.compressImage(file, 500, 500, 0.75);
+        this.pendingFile = compressed;
+        this.hasFile = true;
+
+        const reader = new FileReader();
+        reader.onload = (e) => { this.previewSrc = e.target.result; };
+        reader.readAsDataURL(compressed);
+    } catch (err) {
+        // fallback: gamitin na lang yung original kung nag-fail yung compress
+        this.pendingFile = file;
+        this.hasFile = true;
+        const reader = new FileReader();
+        reader.onload = (e) => { this.previewSrc = e.target.result; };
+        reader.readAsDataURL(file);
+    }
+},
+
+compressImage(file, maxW, maxH, quality) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            img.onload = () => {
+                let w = img.width, h = img.height;
+                if (w > maxW || h > maxH) {
+                    const ratio = Math.min(maxW / w, maxH / h);
+                    w = Math.round(w * ratio);
+                    h = Math.round(h * ratio);
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                canvas.toBlob((blob) => {
+                    if (!blob) return reject(new Error('compress failed'));
+                    resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+},
                          setDefault() {
                              this.pendingFile = null; this.hasFile = true;
                              this.isDefaultPending = true; this.previewSrc = this.defaultSrc;

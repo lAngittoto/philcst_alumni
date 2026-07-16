@@ -19,17 +19,10 @@ new class extends Component {
     public ?int   $viewingEventId    = null;
     public ?string $viewingEventType = null;
 
-    // ── Tracks whether the currently-open View Details modal was opened
-    //    via a deep link (?event=...&type=...) rather than a normal card
-    //    click. mount() forces filterStatus to '' (All Events) so a deep
-    //    link always resolves, even for a completed event. Without this
-    //    flag, closing the modal would leave the filter stuck on "All
-    //    Events" instead of going back to "Upcoming". ─────────────────────
     public bool   $deepLinkedView    = false;
 
     public bool   $showRsvpModal = false;
     public ?string $rsvpResponse  = null;
-    public string $rsvpMessage    = '';
 
     public string $alumniCollege = '';
     public array  $alumniCourses = [];
@@ -51,12 +44,8 @@ new class extends Component {
     public int    $alumniId     = 0;
     public int    $alumniRoomId = 0;
 
-    // The alumni's chat rooms (batch chat + college-wide chat), used by the
-    // "forward"-style destination picker in the Share modal — mirrors the
-    // same pattern used in job-opportunities.blade.php.
     public array  $alumniChatRooms = [];
 
-    // Forward-to-chat destination picker (Messenger-forward style)
     public bool   $showForwardModal = false;
     public array  $selectedRoomIds  = [];
 
@@ -80,11 +69,6 @@ new class extends Component {
             ->first();
         $this->alumniRoomId = $room ? (int) $room->id : 0;
 
-        // Build the list of chat rooms this alumni can forward an event post
-        // to. Room 1: their own batch chat (course_code + batch). Room 2:
-        // the COLLEGE-wide chat — stored the same way messenger.blade.php's
-        // ensureRoomsExist() creates it: `department` = college name,
-        // `course_code` = the CLG_ marker, `batch` = 0.
         $chatRooms = collect();
         if ($this->alumniRoomId) {
             $chatRooms->push([
@@ -108,7 +92,6 @@ new class extends Component {
         }
         $this->alumniChatRooms = $chatRooms->values()->toArray();
 
-        // Read filter flashed from dashboard navigation
         $filter = session()->pull('events_filter');
         if ($filter === 'upcoming') {
             $this->filterStatus = 'upcoming';
@@ -116,35 +99,26 @@ new class extends Component {
             $this->filterStatus = '';
         }
 
-        // ── Deep-link support: /upcoming/events?event=49&type=ORGANIZER ──
-        // Messenger's "View Event" button and shared event cards both link
-        // here with an `event` + `type` query string. Previously the link
-        // just landed on the plain events list and the person had to find
-        // and click the card themselves. Now the matching event's detail
-        // view opens automatically on load, exactly as if they'd clicked
-        // "View Details" on the card themselves.
         $eventParam = request()->query('event');
         $typeParam  = strtoupper((string) request()->query('type', ''));
 
         if ($eventParam !== null && in_array($typeParam, ['ADMIN', 'ORGANIZER'], true)) {
-            // Make sure filters don't accidentally hide the linked event —
-            // switch to "All Events" so the deep link always resolves,
-            // whether the event is upcoming or already completed.
             $this->filterStatus  = '';
-            // Remember this was a deep link so closeViewModal() knows to
-            // put the filter back to "Upcoming" instead of leaving it on
-            // "All Events" once the person is done viewing.
             $this->deepLinkedView = true;
             $this->viewEvent((int) $eventParam, $typeParam);
         }
     }
 
-    // Same marker scheme used in messenger.blade.php's chat_rooms table:
-    // the college-wide room is stored with course_code = 'CLG_' + a short
-    // hash of the college name, and batch = 0.
     private function collegeMarker(string $college): string
     {
         return 'CLG_' . substr(md5($college), 0, 12);
+    }
+
+    private function isEventCompleted($event): bool
+    {
+        $now = \Carbon\Carbon::now('UTC');
+        return ($event->event_end_date && $event->event_end_date <= $now) ||
+               (!$event->event_end_date && $event->event_date <= $now);
     }
 
     public function resetFilters(): void
@@ -259,7 +233,13 @@ new class extends Component {
             $organizerQ->where(fn($sub) => $sub->where('title', 'like', "%{$s}%")->orWhere('venue', 'like', "%{$s}%"));
         }
 
-        return $adminQ->get()->concat($organizerQ->get())->sortByDesc('created_at')->values();
+        $merged = $adminQ->get()->concat($organizerQ->get())->sortByDesc('created_at')->values();
+
+        if ($this->filterStatus === '') {
+            $merged = $merged->sortBy(fn($event) => $this->isEventCompleted($event) ? 1 : 0)->values();
+        }
+
+        return $merged;
     }
 
     #[Computed]
@@ -319,14 +299,6 @@ new class extends Component {
         $this->viewingEventType = null;
         $this->resetRsvpModal();
 
-        // ── If this View Details was opened via a deep link (chat share /
-        //    "View Event" button), mount() had forced filterStatus to ''
-        //    (All Events) just so the link could resolve. Now that the
-        //    person is done looking and is closing the modal, snap the
-        //    filter back to "Upcoming" — same as landing on the page
-        //    fresh — instead of leaving them stuck on "All Events". A
-        //    normal card click never sets this flag, so closing that way
-        //    still leaves whatever filter the person had chosen alone. ──
         if ($this->deepLinkedView) {
             $this->filterStatus   = 'upcoming';
             $this->page           = 1;
@@ -336,7 +308,7 @@ new class extends Component {
 
     public function openRsvpModal(): void  { $this->showRsvpModal = true; }
     public function closeRsvpModal(): void { $this->showRsvpModal = false; $this->resetRsvpModal(); }
-    private function resetRsvpModal(): void { $this->rsvpResponse = null; $this->rsvpMessage = ''; }
+    private function resetRsvpModal(): void { $this->rsvpResponse = null; }
 
     public function submitRsvp(string $response): void
     {
@@ -349,11 +321,10 @@ new class extends Component {
         try {
             EventRsvp::updateOrCreate(
                 ['event_id' => $this->viewingEventId, 'alumni_id' => $alumni->id],
-                ['response' => $response, 'message' => trim($this->rsvpMessage) ?: null]
+                ['response' => $response]
             );
             $this->dispatch('flash-message', type: 'success', message: "Your RSVP has been recorded as {$response}!");
-            $this->closeRsvpModal();
-            $this->closeViewModal();
+            unset($this->alumniRsvp);
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to save RSVP. Please try again.');
         }
@@ -412,9 +383,6 @@ new class extends Component {
         return $base . $path;
     }
 
-    // ── Forward-to-chat destination picker (Messenger-forward style) ──
-    // Mirrors job-opportunities.blade.php: instead of posting straight to
-    // the batch chat, the alumnus picks one or both of their chats first.
     public function openForwardModal(): void
     {
         if (empty($this->alumniChatRooms)) {
@@ -422,7 +390,6 @@ new class extends Component {
             return;
         }
 
-        // Preselect their own batch chat by default.
         $this->selectedRoomIds  = $this->alumniRoomId ? [$this->alumniRoomId] : [];
         $this->showForwardModal = true;
     }
@@ -442,11 +409,6 @@ new class extends Component {
         }
     }
 
-    // Sends a short marker into each selected chat — mirrors the
-    // job-opportunities marker approach ("[[JOB:{id}]]"). messenger.
-    // blade.php resolves this marker fresh from the DB and renders a
-    // real image+text preview card, instead of a raw (and, since the
-    // portal isn't publicly deployed yet, dead) link.
     public function confirmSendToChat(): void
     {
         if (empty($this->selectedRoomIds)) {
@@ -507,9 +469,6 @@ new class extends Component {
 <div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
 <style>
-/* ─────────────────────────────────────────────
-   FILTER SELECTS
-───────────────────────────────────────────── */
 select.filter-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
@@ -541,7 +500,6 @@ select.filter-input {
     overflow: hidden;
 }
 
-/* Mouse-following "View Details" label — desktop only, hidden on mobile below */
 #ev-cursor-label {
     position: fixed;
     z-index: 99999;
@@ -603,7 +561,6 @@ select.filter-input {
 }
 .card-share-btn:hover .tip { opacity: 1; }
 
-/* status badges on card photo/banner */
 .badge-card-upcoming {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
@@ -645,9 +602,6 @@ select.filter-input {
 .detail-top-btn.close-btn:hover { background: rgba(255,255,255,.22); }
 .detail-top-btn.close-btn svg { width: 13px; height: 13px; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
 
-/* ─────────────────────────────────────────────
-   SHARE MODAL — clean / flat, no gradients.
-───────────────────────────────────────────── */
 .share-close-btn {
     position: relative;
     display: inline-flex; align-items: center; justify-content: center;
@@ -687,9 +641,6 @@ select.filter-input {
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 
-/* ─────────────────────────────────────────────
-   PHILCST "OFFICIAL POST" DETAIL STYLING
-───────────────────────────────────────────── */
 .philcst-post-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 14px; overflow: hidden; }
 .philcst-post-ribbon {
     display: inline-flex; align-items: center; gap: 6px;
@@ -699,30 +650,53 @@ select.filter-input {
 }
 
 /* ─────────────────────────────────────────────
-   DETAIL VIEW — fixed-height, no page scroll.
-   Two columns: left sidebar (meta/info), right
-   content. Only the two inner panels scroll on
-   their own if their content is long — the page
-   itself never grows past the viewport.
+   SIDEBAR META LABELS — unified font-weight/size
+   for ALL labels (Venue, Date & Time, Open For,
+   Responses, Your RSVP, Posted). Previously some
+   used .detail-label (italic, different weight)
+   causing mismatched look; now every meta label
+   in the sidebar uses this single consistent
+   class/style. Sizes bumped up for readability. ──
 ───────────────────────────────────────────── */
 .detail-side-item { display: flex; align-items: flex-start; gap: 10px; }
 .detail-side-icon {
-    flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px;
+    flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px;
     background: #f5eef9; color: #7a3f91;
-    display: flex; align-items: center; justify-content: center; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
 }
-.detail-side-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
-.detail-side-value { font-size: 13.5px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+.detail-side-label {
+    font-size: 11.5px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .08em; color: #666; margin: 0; font-style: normal !important;
+}
+.detail-side-value { font-size: 15.5px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+.detail-side-sub   { font-size: 13px; margin-top: 2px; color: #666; }
 
-/* ─────────────────────────────────────────────
-   RESPONSIVE — icon-only on small / touch screens:
-   tooltips and the mouse-follow label disappear.
-───────────────────────────────────────────── */
+#ev-detail-outer { position: relative; }
+
 @media (max-width: 767px) {
     #ev-cursor-label { display: none !important; }
     .card-share-btn .tip,
     .detail-top-btn .tip,
     .share-close-btn .tip { display: none !important; }
+
+    #share-modal-backdrop {
+        padding: 0 !important;
+        align-items: stretch !important;
+        justify-content: stretch !important;
+        background: #fff !important;
+    }
+    .share-modal-wrapper {
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+        border-radius: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .share-modal-wrapper .share-sheet-header {
+        padding-top: max(0.75rem, env(safe-area-inset-top)) !important;
+    }
 }
 
 .detail-page * {
@@ -734,16 +708,25 @@ select.filter-input {
     font-size: 15px; font-weight: 600; color: #fff; line-height: 1.3;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.detail-label { font-style: italic; }
+
+/* ─────────────────────────────────────────────
+   RSVP MODAL — indicator rows (read-only) shown
+   after the alumni has already responded, in
+   place of the 3 clickable action buttons.
+───────────────────────────────────────────── */
+.rsvp-indicator-row {
+    width: 100%; padding: 0.875rem 1rem; border-radius: 0.75rem;
+    border: 2px solid; display: flex; align-items: center; gap: 0.75rem;
+    opacity: .55; filter: grayscale(.15);
+}
+.rsvp-indicator-row.is-selected { opacity: 1; filter: none; }
 </style>
 
-{{-- Mouse-following cursor label — hidden on mobile via CSS + JS guard below --}}
 <div id="ev-cursor-label">
     <svg viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
     View Details
 </div>
 
-{{-- ── FLASH TOAST ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show" x-cloak
@@ -769,10 +752,8 @@ select.filter-input {
     </button>
 </div>
 
-{{-- ══ MAIN LAYOUT ══ --}}
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
-    {{-- PAGE HEADER --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
         <div class="flex items-center gap-4">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
@@ -790,10 +771,8 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- ══ CONTENT BLOCK ══ --}}
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
-        {{-- ── FILTER BAR ── --}}
         <div class="bg-gray-100 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
@@ -838,8 +817,17 @@ select.filter-input {
 
         </div>
 
-        {{-- ── CARDS BODY ── --}}
-        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto">
+        <div class="ev-filter-progress-track" wire:loading wire:target="search,filterStatus">
+            <div class="ev-filter-progress-bar"></div>
+        </div>
+        <style>
+            .ev-filter-progress-track { height:2px; width:100%; overflow:hidden; background:transparent; position:relative; }
+            .ev-filter-progress-bar { position:absolute; top:0; left:0; height:100%; width:40%; border-radius:99px; background:linear-gradient(135deg,#7a3f91,#9b59b6); animation:evFilterProgress 1s ease-in-out infinite; }
+            @keyframes evFilterProgress { 0%{left:-40%} 100%{left:100%} }
+        </style>
+
+        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
+             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus">
 
             @if($this->pagedEvents->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -847,10 +835,7 @@ select.filter-input {
                 @php
                     $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
                                     (!$event->event_end_date && $event->event_date <= now('UTC'));
-                    $eventDate    = $event->event_date->setTimezone('Asia/Manila');
-                    $eventEndDate = $event->event_end_date?->setTimezone('Asia/Manila');
                     $postedAgo    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila')->diffForHumans();
-                    $timeDisplay  = $eventDate->format('g:i A') . ($eventEndDate ? ' – ' . $eventEndDate->format('g:i A') : '');
                     $hasPhoto     = !empty($event->photo_url);
                     $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 90) : null;
                     $displaySrc   = $event->event_source === 'ADMIN' ? 'PHILCST' : null;
@@ -863,13 +848,12 @@ select.filter-input {
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
-                    {{-- Photo or gradient banner --}}
                     @if($hasPhoto)
-                    <div class="relative w-full flex-shrink-0" style="height:130px;">
+                    <div class="relative w-full flex-shrink-0" style="height:200px;">
                         <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
                              class="w-full h-full object-cover">
-                        <div class="absolute inset-x-0 bottom-0 h-10 pointer-events-none"
-                             style="background:linear-gradient(to top,rgba(0,0,0,.45),transparent);"></div>
+                        <div class="absolute inset-x-0 bottom-0 h-16 pointer-events-none"
+                             style="background:linear-gradient(to top,rgba(0,0,0,.55),transparent);"></div>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
                                 <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
@@ -880,8 +864,8 @@ select.filter-input {
                     </div>
                     @else
                     <div class="relative w-full flex items-center justify-center flex-shrink-0"
-                         style="height:72px; background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
-                        <i class="fas fa-calendar-days text-white/20 text-3xl"></i>
+                         style="height:130px; background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
+                        <i class="fas fa-calendar-days text-white/20 text-4xl"></i>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
                                 <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
@@ -904,23 +888,6 @@ select.filter-input {
                             </span>
                             @endif
                         </div>
-
-                        <div class="flex flex-wrap gap-1.5">
-                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-purple-50 border border-purple-100 text-purple-700">
-                                {{ $eventDate->format('M d, Y') }}
-                            </span>
-                            @if($timeDisplay)
-                            <span class="inline-flex items-center text-[12px] font-medium px-2.5 py-0.5 rounded-md bg-gray-100 border border-gray-200" style="color:#333333;">
-                                {{ $timeDisplay }}
-                            </span>
-                            @endif
-                        </div>
-
-                        @if($event->venue)
-                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
-                            <i class="fas fa-location-dot text-[11px]" style="color:#999;"></i>{{ $event->venue }}
-                        </p>
-                        @endif
 
                         @if($event->target_participants)
                         <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
@@ -981,7 +948,6 @@ select.filter-input {
             @endif
         </div>
 
-        {{-- ══ PAGINATION BAR ══ --}}
         @if($filterStatus !== 'upcoming')
         @php
             $total   = $this->events->count();
@@ -1049,11 +1015,10 @@ select.filter-input {
         </div>
         @endif
 
-    </div>{{-- end content-block --}}
+    </div>
 </div>
 
 
-{{-- ══ FULL-SCREEN EVENT DETAIL — fixed height, no page scroll ══ --}}
 @if($showViewModal && $this->viewingEvent)
 @php
     $event        = $this->viewingEvent;
@@ -1086,7 +1051,6 @@ select.filter-input {
 <div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto lg:overflow-hidden"
      @keydown.escape.window="$wire.closeViewModal()">
 
-    {{-- Purple top bar --}}
     <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
 
         <div class="flex items-center gap-3 flex-1 min-w-0">
@@ -1119,14 +1083,9 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- Body: fixed-height two-column layout. The overall page never
-         scrolls — only the sidebar / main content panels scroll on
-         their own if they genuinely have more content than fits. --}}
-    <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden">
+    <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row">
 
-        {{-- LEFT: sidebar — title, badges, and all the "meta" info that
-             used to sit stacked across the top now lives here instead. --}}
-        <div class="w-full lg:w-[340px] lg:flex-none bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
+        <div class="w-full lg:w-[340px] lg:flex-none lg:min-h-0 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
 
             @if($hasPhoto)
                 <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
@@ -1140,7 +1099,7 @@ select.filter-input {
                 @endif
 
                 <div>
-                    <p class="text-[9px] font-bold uppercase tracking-[.16em] mb-1" style="color:#666;">Event Title</p>
+                    <p class="detail-side-label mb-1">Event Title</p>
                     <h2 class="text-lg font-semibold leading-snug mb-1" style="color:#333333;">{{ $event->title }}</h2>
                     @if($displaySrc)
                     <p class="text-xs font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $displaySrc }}</p>
@@ -1173,7 +1132,7 @@ select.filter-input {
                             <p class="detail-side-label">Venue</p>
                             <p class="detail-side-value">{{ $event->venue ?: '—' }}</p>
                             @if($event->venue_address)
-                                <p class="text-[11px] mt-0.5" style="color:#666;">{{ $event->venue_address }}</p>
+                                <p class="detail-side-sub">{{ $event->venue_address }}</p>
                             @endif
                         </div>
                     </div>
@@ -1182,7 +1141,7 @@ select.filter-input {
                         <div class="min-w-0">
                             <p class="detail-side-label">Date &amp; Time</p>
                             <p class="detail-side-value">{{ $eventDate->format('M d, Y') }}</p>
-                            <p class="text-[11px] mt-0.5" style="color:#666;">{{ $timeDisplay }}</p>
+                            <p class="detail-side-sub">{{ $timeDisplay }}</p>
                         </div>
                     </div>
                     <div class="detail-side-item">
@@ -1197,7 +1156,7 @@ select.filter-input {
                         <div class="min-w-0">
                             <p class="detail-side-label">Responses</p>
                             <p class="detail-side-value text-emerald-600">{{ $event->confirmed_count }} Attending</p>
-                            <p class="text-[11px] mt-0.5" style="color:#666;">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</p>
+                            <p class="detail-side-sub">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</p>
                         </div>
                     </div>
                     <div class="detail-side-item">
@@ -1207,7 +1166,7 @@ select.filter-input {
                             <p class="detail-side-value {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
                             @if(!$isCompleted)
                                 <button wire:click="openRsvpModal"
-                                        class="text-[11px] font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
+                                        class="text-[13px] font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
                                     {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
                                 </button>
                             @endif
@@ -1218,88 +1177,82 @@ select.filter-input {
                         <div class="min-w-0">
                             <p class="detail-side-label">Posted</p>
                             <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
-                            <p class="text-[11px] mt-0.5" style="color:#666;">{{ $createdPH->diffForHumans() }}</p>
+                            <p class="detail-side-sub">{{ $createdPH->diffForHumans() }}</p>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        {{-- RIGHT: description / notes / contact info --}}
-        <div class="flex-1 min-w-0 lg:overflow-y-auto lg:scroll-thin bg-gray-100">
-            <div class="max-w-[1200px] mx-auto px-5 py-3 pb-4 flex flex-col gap-3">
+        <div id="ev-detail-outer" class="flex-1 min-w-0 lg:min-h-0 lg:overflow-y-auto scroll-thin bg-gray-100 flex">
+            <div id="ev-detail-inner" class="max-w-[1100px] w-full mx-auto px-5 py-6 flex flex-col gap-4">
 
-                <div class="{{ ($hasDesc && ($hasNotes || $hasContact)) ? 'grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-3 items-start' : '' }}">
+                @if($hasDesc || $hasNotes || $hasContact)
+                <div class="philcst-post-card">
+                    <div class="px-5 py-4 flex flex-col gap-4">
 
-                    {{-- LEFT (of this sub-grid): Description --}}
-                    @if($hasDesc)
-                        @if($isPhilcst)
-                        {{-- ═══ PHILCST "OFFICIAL POST" LAYOUT ═══ --}}
-                        <div class="philcst-post-card">
-                            <div class="px-4 py-3 flex flex-col gap-3">
-                                <div>
-                                    <p class="text-base font-bold" style="color:#333333;">📢 {{ strtoupper($event->title) }}</p>
-                                    <p class="text-[12px] mt-1 leading-relaxed" style="color:#333333;">
-                                        The Philippine College of Science and Technology invites you to join this event! ✨
-                                    </p>
-                                </div>
-                                <div class="pre-wrap text-[14px] leading-relaxed" style="color:#333333;">{{ trim($event->description) }}</div>
-                                <p class="text-[13px] font-semibold" style="color:#333333;">
-                                    🗓️ {{ $eventDate->format('F d, Y') }} · {{ $timeDisplay }} &nbsp;•&nbsp; 📍 {{ $event->venue ?: 'TBA' }}
+                        @if($hasDesc)
+                            @if($isPhilcst)
+                            <div>
+                                <p class="text-lg font-bold" style="color:#333333;">📢 {{ strtoupper($event->title) }}</p>
+                                <p class="text-[14px] mt-1 leading-relaxed" style="color:#333333;">
+                                    The Philippine College of Science and Technology invites you to join this event! ✨
                                 </p>
                             </div>
-                        </div>
-                        @else
-                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                            <div class="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-                                <span class="text-[13px] font-bold uppercase tracking-[.08em] detail-label" style="color:#333333;">About This Event</span>
+                          <div class="pre-wrap text-[16px] leading-relaxed overflow-y-auto scroll-thin" style="color:#000000;max-height:320px;">{{ trim($event->description) }}</div>
+                            <p class="text-[15px] font-semibold" style="color:#333333;">
+                                🗓️ {{ $eventDate->format('F d, Y') }} · {{ $timeDisplay }} &nbsp;•&nbsp; 📍 {{ $event->venue ?: 'TBA' }}
+                            </p>
+                            @else
+                            <div>
+                                <p class="detail-side-label mb-1.5 flex items-center gap-1.5">
+                                    <i class="fas fa-align-left text-[#7a3f91] text-xs"></i>  <span class="text-black">About This Event</span>
+                                </p>
                             </div>
-                            <div class="px-4 py-3 text-[14px] leading-relaxed pre-wrap" style="color:#333333;">{{ $event->description }}</div>
+                           <div class="pre-wrap text-[16px] leading-relaxed overflow-y-auto scroll-thin" style="color:#000000;max-height:320px;">{{ $event->description }}</div>
+                            @endif
+                        @endif
+@if($hasNotes)
+                        <div style="padding-bottom:48px;">
+                            <div class="border-t border-gray-100" style="padding-top:24px;">
+<p class="detail-side-label flex items-center gap-1.5" style="margin-bottom:16px;">
+                                    <i class="fas fa-note-sticky text-[#7a3f91] text-xs"></i>  <span class="text-black">Additional Notes</span>
+                                </p>
+                                <div class="pre-wrap text-[16px] leading-relaxed overflow-y-auto scroll-thin" style="color:#000000;max-height:320px;">{{ $event->notes }}</div>
+                            </div>
                         </div>
                         @endif
-                    @endif
 
-                    {{-- RIGHT (of this sub-grid): Notes stacked above Contact, beside the description --}}
-                    @if($hasNotes || $hasContact)
-                    <div class="flex flex-col gap-3">
-                        @if($hasNotes)
-                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                            <div class="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-                                <span class="text-[13px] font-bold uppercase tracking-[.08em] detail-label" style="color:#333333;">Additional Notes</span>
-                            </div>
-                            <div class="px-4 py-3 text-[14px] leading-relaxed pre-wrap" style="color:#333333;">{{ $event->notes }}</div>
-                        </div>
-                        @endif
                         @if($hasContact)
-                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                            <div class="px-4 py-2.5 border-b border-gray-100 bg-emerald-50">
-                                <span class="text-[13px] font-bold uppercase tracking-[.08em] detail-label text-emerald-700">Contact Information</span>
-                            </div>
-                            <div class="px-4 py-3 flex flex-col gap-1.5">
+                        <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-4 py-3">
+                            <p class="text-base font-bold text-emerald-800 mb-2 flex items-center gap-1.5">
+                                <i class="fas fa-address-card text-xs"></i> Contact Information
+                            </p>
+                            <div class="flex flex-col gap-1.5">
                                 @if($event->contact_person)
-                                    <p class="text-[14px] font-semibold flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-user text-[12px]" style="color:#999;"></i>{{ $event->contact_person }}
+                                    <p class="text-[16px] font-semibold flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-user text-[13px]" style="color:#999;"></i>{{ $event->contact_person }}
                                     </p>
                                 @endif
                                 @if($event->contact_email)
-                                    <p class="text-[14px] flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-envelope text-[12px]" style="color:#999;"></i>{{ $event->contact_email }}
+                                    <p class="text-[16px] flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-envelope text-[13px]" style="color:#999;"></i>{{ $event->contact_email }}
                                     </p>
                                 @endif
                                 @if($event->contact_phone)
-                                    <p class="text-[14px] flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-phone text-[12px]" style="color:#999;"></i>{{ $event->contact_phone }}
+                                    <p class="text-[16px] flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-phone text-[13px]" style="color:#999;"></i>{{ $event->contact_phone }}
                                     </p>
                                 @endif
                             </div>
                         </div>
                         @endif
+
                     </div>
-                    @endif
-
                 </div>
+                @endif
 
-                <p class="text-center text-[11px]" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+                <p class="text-center text-[13px]" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
             </div>
         </div>
 
@@ -1309,69 +1262,120 @@ select.filter-input {
 @endif
 
 
-{{-- ══ RSVP MODAL ══ --}}
+{{-- ══ RSVP MODAL ══
+     Changes: no X close button (Cancel button only at bottom); no
+     message/optional textarea; once the alumni already has an RSVP,
+     the 3 action rows become read-only indicators with the chosen one
+     highlighted, instead of clickable buttons. Submitting an RSVP no
+     longer auto-closes this modal or the event view — alumni stays put
+     and simply sees the indicator update. ══ --}}
 @if($showRsvpModal)
+@php $currentRsvp = $this->alumniRsvp; @endphp
 <div class="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      @keydown.escape.window="$wire.closeRsvpModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden relative share-sheet">
         <div class="px-6 py-5 border-b border-white/10" style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-            <div class="flex items-center justify-between">
-                <h2 class="text-lg font-semibold text-white flex items-center gap-2">
-                    <i class="fas fa-calendar-plus text-white/80"></i> Confirm Your RSVP
-                </h2>
-                <button wire:click="closeRsvpModal" type="button"
-                        class="detail-top-btn close-btn" aria-label="Close">
-                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2 2L12 12M12 2L2 12"/>
-                    </svg>
-                </button>
-            </div>
+            <h2 class="text-lg font-semibold text-white flex items-center gap-2">
+                <i class="fas fa-calendar-plus text-white/80"></i> Confirm Your RSVP
+            </h2>
             <p class="text-sm text-white/70 mt-0.5">Let us know if you're attending this event</p>
         </div>
         <div class="px-6 py-5 space-y-3">
-            <button type="button" wire:click="submitRsvp('CONFIRMED')" wire:loading.attr="disabled"
-                    class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-emerald-200 hover:border-emerald-400 bg-white cursor-pointer group">
-                <span class="w-9 h-9 rounded-xl bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center flex-shrink-0 transition">
-                    <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
-                </span>
-                <div class="flex-1 text-left">
-                    <p class="font-semibold text-emerald-700 text-sm">I'm Attending</p>
-                    <p class="text-xs text-emerald-600">Confirm your attendance</p>
+
+            @if($currentRsvp)
+                {{-- Read-only indicators — the chosen response is highlighted,
+                     the other two are dimmed. Tapping Change on the sidebar
+                     re-opens this same modal so alumni can still update. --}}
+                <div class="rsvp-indicator-row {{ $currentRsvp->response === 'CONFIRMED' ? 'is-selected' : '' }}" style="{{ $currentRsvp->response === 'CONFIRMED' ? 'border-color:#7a3f91;background:#f5eef9;' : 'border-color:#e5e7eb;background:#fff;' }}">
+                    <span class="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p class="font-semibold text-emerald-700 text-sm">I'm Attending</p>
+                        <p class="text-xs text-emerald-600">Confirm your attendance</p>
+                    </div>
+                    @if($currentRsvp->response === 'CONFIRMED')<i class="fas fa-check-circle text-emerald-600"></i>@endif
                 </div>
-                <i class="fas fa-chevron-right text-emerald-400 text-xs"></i>
-            </button>
-            <button type="button" wire:click="submitRsvp('TENTATIVE')" wire:loading.attr="disabled"
-                    class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-amber-200 hover:border-amber-400 bg-white cursor-pointer group">
-                <span class="w-9 h-9 rounded-xl bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center flex-shrink-0 transition">
-                    <i class="fas fa-circle-question text-amber-600 text-lg"></i>
-                </span>
-                <div class="flex-1 text-left">
-                    <p class="font-semibold text-amber-700 text-sm">Maybe</p>
-                    <p class="text-xs text-amber-600">You might attend</p>
+                <div class="rsvp-indicator-row {{ $currentRsvp->response === 'TENTATIVE' ? 'is-selected' : '' }}" style="{{ $currentRsvp->response === 'TENTATIVE' ? 'border-color:#7a3f91;background:#f5eef9;' : 'border-color:#e5e7eb;background:#fff;' }}">
+                    <span class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-circle-question text-amber-600 text-lg"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p class="font-semibold text-amber-700 text-sm">Maybe</p>
+                        <p class="text-xs text-amber-600">You might attend</p>
+                    </div>
+                    @if($currentRsvp->response === 'TENTATIVE')<i class="fas fa-check-circle text-amber-600"></i>@endif
                 </div>
-                <i class="fas fa-chevron-right text-amber-400 text-xs"></i>
-            </button>
-            <button type="button" wire:click="submitRsvp('DECLINED')" wire:loading.attr="disabled"
-                    class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-red-200 hover:border-red-400 bg-white cursor-pointer group">
-                <span class="w-9 h-9 rounded-xl bg-red-100 group-hover:bg-red-200 flex items-center justify-center flex-shrink-0 transition">
-                    <i class="fas fa-circle-xmark text-red-600 text-lg"></i>
-                </span>
-                <div class="flex-1 text-left">
-                    <p class="font-semibold text-red-700 text-sm">I Can't Attend</p>
-                    <p class="text-xs text-red-600">You won't be attending</p>
+                <div class="rsvp-indicator-row {{ $currentRsvp->response === 'DECLINED' ? 'is-selected' : '' }}" style="{{ $currentRsvp->response === 'DECLINED' ? 'border-color:#7a3f91;background:#f5eef9;' : 'border-color:#e5e7eb;background:#fff;' }}">
+                    <span class="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-circle-xmark text-red-600 text-lg"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p class="font-semibold text-red-700 text-sm">I Can't Attend</p>
+                        <p class="text-xs text-red-600">You won't be attending</p>
+                    </div>
+                    @if($currentRsvp->response === 'DECLINED')<i class="fas fa-check-circle text-red-600"></i>@endif
                 </div>
-                <i class="fas fa-chevron-right text-red-400 text-xs"></i>
-            </button>
-            <div class="pt-1">
-                <label class="block text-xs font-semibold uppercase tracking-widest mb-2 text-gray-500">
-                    Message <span class="font-normal normal-case text-gray-400">— optional</span>
-                </label>
-                <textarea wire:model="rsvpMessage" rows="2"
-                          placeholder="Add a personal note or question…"
-                          class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-none text-gray-900"
-                          maxlength="200"></textarea>
-                <p class="text-xs mt-1 text-gray-400">{{ strlen($rsvpMessage) }}/200</p>
-            </div>
+
+                <p class="text-xs text-center text-gray-400 pt-1">Tap a different option below to change your response.</p>
+
+                <div class="flex flex-col gap-2 pt-1">
+                    @if($currentRsvp->response !== 'CONFIRMED')
+                    <button type="button" wire:click="submitRsvp('CONFIRMED')" wire:loading.attr="disabled"
+                            class="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">
+                        Switch to I'm Attending
+                    </button>
+                    @endif
+                    @if($currentRsvp->response !== 'TENTATIVE')
+                    <button type="button" wire:click="submitRsvp('TENTATIVE')" wire:loading.attr="disabled"
+                            class="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-amber-200 text-amber-700 hover:bg-amber-50 transition cursor-pointer">
+                        Switch to Maybe
+                    </button>
+                    @endif
+                    @if($currentRsvp->response !== 'DECLINED')
+                    <button type="button" wire:click="submitRsvp('DECLINED')" wire:loading.attr="disabled"
+                            class="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition cursor-pointer">
+                        Switch to I Can't Attend
+                    </button>
+                    @endif
+                </div>
+            @else
+                {{-- No RSVP yet — normal clickable action buttons --}}
+                <button type="button" wire:click="submitRsvp('CONFIRMED')" wire:loading.attr="disabled"
+                        class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-emerald-200 hover:border-emerald-400 bg-white cursor-pointer group">
+                    <span class="w-9 h-9 rounded-xl bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center flex-shrink-0 transition">
+                        <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p class="font-semibold text-emerald-700 text-sm">I'm Attending</p>
+                        <p class="text-xs text-emerald-600">Confirm your attendance</p>
+                    </div>
+                    <i class="fas fa-chevron-right text-emerald-400 text-xs"></i>
+                </button>
+                <button type="button" wire:click="submitRsvp('TENTATIVE')" wire:loading.attr="disabled"
+                        class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-amber-200 hover:border-amber-400 bg-white cursor-pointer group">
+                    <span class="w-9 h-9 rounded-xl bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center flex-shrink-0 transition">
+                        <i class="fas fa-circle-question text-amber-600 text-lg"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p class="font-semibold text-amber-700 text-sm">Maybe</p>
+                        <p class="text-xs text-amber-600">You might attend</p>
+                    </div>
+                    <i class="fas fa-chevron-right text-amber-400 text-xs"></i>
+                </button>
+                <button type="button" wire:click="submitRsvp('DECLINED')" wire:loading.attr="disabled"
+                        class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-red-200 hover:border-red-400 bg-white cursor-pointer group">
+                    <span class="w-9 h-9 rounded-xl bg-red-100 group-hover:bg-red-200 flex items-center justify-center flex-shrink-0 transition">
+                        <i class="fas fa-circle-xmark text-red-600 text-lg"></i>
+                    </span>
+                    <div class="flex-1 text-left">
+                        <p class="font-semibold text-red-700 text-sm">I Can't Attend</p>
+                        <p class="text-xs text-red-600">You won't be attending</p>
+                    </div>
+                    <i class="fas fa-chevron-right text-red-400 text-xs"></i>
+                </button>
+            @endif
+
         </div>
         <div class="px-6 py-4 border-t border-gray-100 bg-gray-50">
             <button wire:click="closeRsvpModal" type="button"
@@ -1384,7 +1388,6 @@ select.filter-input {
 @endif
 
 
-{{-- ══ SHARE MODAL — native share sheet first, no copy/paste needed ══ --}}
 @if($showShareModal)
 @php
     $shTimeStr        = $shareTime . ($shareEndTime ? ' – ' . $shareEndTime : '');
@@ -1395,11 +1398,6 @@ select.filter-input {
         ? mb_substr($shareDescription, 0, $descLimit) . '…'
         : $shareDescription;
 
-    // NOTE: this text is meant to be posted directly (via the native share
-    // sheet / pasted into Facebook) as the post's own caption — it does
-    // NOT include the events page link, since the alumni portal isn't
-    // deployed publicly yet and a raw "alumniphilcst.com" link would just
-    // show up as a dead/unusable link box in the post composer.
     $fbLines = [];
     if ($isCompleted) {
         $fbLines[] = "🏆 Event Highlights: {$shareEventTitle}";
@@ -1421,16 +1419,13 @@ select.filter-input {
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
-<div class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45"
+<div id="share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45"
      x-data="{
          copied:false,
          nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          shareText: {{ json_encode($fbPostText) }},
          eventTitle: {{ json_encode($shareEventTitle) }},
          imageUrl:  {{ json_encode($sharePhotoUrl) }},
-         // Fetches the event photo and turns it into a File so the native
-         // share sheet can attach it, same as posting a photo + caption
-         // directly — no link required.
          async buildImageFile() {
              if (!this.imageUrl) return null;
              try {
@@ -1451,12 +1446,6 @@ select.filter-input {
              } catch (e) { /* cancelled by user — nothing to do */ }
          },
          async shareOnFacebook() {
-             // No deployed site yet, so we deliberately do NOT pass a `u`
-             // link param to Facebook's sharer — that would just show up
-             // as a dead 'alumniphilcst.com' link box in the post composer.
-             // If this device supports the native share sheet (photo +
-             // caption, no link), use that instead — it behaves exactly
-             // like a normal FB post.
              if (this.nativeShareSupported) { await this.nativeShare(); return; }
              const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
              const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
@@ -1487,7 +1476,7 @@ select.filter-input {
 
     <div class="share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 share-modal-wrapper">
 
-        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+        <div class="share-sheet-header flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
@@ -1501,7 +1490,6 @@ select.filter-input {
 
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            {{-- LEFT: Preview --}}
             <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
@@ -1538,14 +1526,9 @@ select.filter-input {
                 </div>
             </div>
 
-            {{-- RIGHT: Share buttons --}}
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-thin">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                {{-- Native share sheet — sends title+text+photo directly to
-                     Messenger, Facebook, or any app the person picks, no
-                     copy/paste step at all. Primary option on phones and
-                     most modern browsers. --}}
                 <template x-if="nativeShareSupported">
                     <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
                         <span class="icon-wrap">
@@ -1558,8 +1541,6 @@ select.filter-input {
                     </button>
                 </template>
 
-                {{-- Facebook — no link, just the caption; uses native share
-                     (photo + text) automatically when supported --}}
                 <button type="button" @click="shareOnFacebook()" class="share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
@@ -1570,7 +1551,6 @@ select.filter-input {
                     </div>
                 </button>
 
-                {{-- Messenger --}}
                 <button type="button" @click="shareOnMessenger()" class="share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
@@ -1584,8 +1564,6 @@ select.filter-input {
                     <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
-                {{-- Batch Chat — opens the forward-style destination picker
-                     (like Messenger's forward), instead of sending straight away --}}
                 <button type="button" wire:click="openForwardModal"
                         class="share-option-btn" style="background:#7a3f91;">
                     <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
@@ -1625,7 +1603,6 @@ select.filter-input {
 @endif
 
 
-{{-- ══ FORWARD-TO-CHAT MODAL — pick one or both of your chats, Messenger-forward style ══ --}}
 @if($showForwardModal)
 <div class="fixed inset-0 z-[10003] flex items-center justify-center p-4 bg-black/45"
      @keydown.escape.window="$wire.closeForwardModal()">
@@ -1695,7 +1672,6 @@ select.filter-input {
 </div>
 @endif
 
-{{-- ── Mouse-following cursor label logic (desktop / mouse devices only) ── --}}
 <script>
 (function () {
     function isTouchOrSmall() {
@@ -1703,10 +1679,24 @@ select.filter-input {
                (window.matchMedia('(pointer: coarse)').matches);
     }
 
+    // Auto-fit/shrink-to-fit was removed — the right panel now scrolls
+    // normally (see #ev-detail-outer's lg:overflow-y-auto) instead of
+    // scaling font size down to squeeze everything into one screen.
+    // Kept as a no-op so existing call sites below don't need touching.
+    function evAutoFitDetail() { /* no-op: panel scrolls instead of scaling */ }
+
+    let evResizeTimer = null;
+    window.addEventListener('resize', function () {
+        clearTimeout(evResizeTimer);
+        evResizeTimer = setTimeout(evAutoFitDetail, 120);
+    });
+
     function init() {
         const label = document.getElementById('ev-cursor-label');
-        if (!label) return;
 
+        evAutoFitDetail();
+
+        if (!label) return;
         if (isTouchOrSmall()) return;
 
         let activeCard = null;
@@ -1769,6 +1759,7 @@ select.filter-input {
         document.addEventListener('livewire:navigated', () => {
             document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
             attachListeners();
+            evAutoFitDetail();
         });
 
         if (window.Livewire) {
@@ -1776,6 +1767,7 @@ select.filter-input {
                 requestAnimationFrame(() => {
                     document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
                     attachListeners();
+                    evAutoFitDetail();
                 });
             });
             try {
@@ -1784,6 +1776,7 @@ select.filter-input {
                         requestAnimationFrame(() => {
                             document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
                             attachListeners();
+                            evAutoFitDetail();
                         });
                     });
                 });
@@ -1804,12 +1797,6 @@ select.filter-input {
 })();
 </script>
 
-{{-- ── Clean the address bar after a deep link auto-opens the modal ──
-     /upcoming/events?event=49&type=ORGANIZER lands here, opens the
-     matching event automatically (see mount() above), then this strips
-     the ?event=&type= query string from the visible URL so the bar
-     reads as a clean /upcoming/events — the modal stays open either way,
-     it's just no longer driven by the (now removed) query string. --}}
 <script>
 (function () {
     var params = new URLSearchParams(window.location.search);
@@ -1819,4 +1806,4 @@ select.filter-input {
 })();
 </script>
 
-</div>{{-- end root --}}
+</div>
