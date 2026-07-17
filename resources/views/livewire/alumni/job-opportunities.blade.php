@@ -51,6 +51,7 @@ new class extends Component {
     public string $shareDescription = '';
     public string $shareCollege     = '';
     public string $shareImageUrl    = '';
+    public bool   $shareIsPhilcst   = false;
 
     public function mount(): void
     {
@@ -259,6 +260,9 @@ new class extends Component {
         $this->shareDescription = $job->description ?? '';
         $this->shareCollege     = $job->target_college ?? '';
         $this->shareImageUrl    = $this::jobImageUrl($job->job_image ?? null);
+        // Same rule used in the detail view: it's an "official PHILCST
+        // post" when company_type was left equal to company_name.
+        $this->shareIsPhilcst   = ($job->company_type === $job->company_name);
         $this->showShareModal   = true;
     }
 
@@ -276,6 +280,7 @@ new class extends Component {
         $this->shareDescription = '';
         $this->shareCollege     = '';
         $this->shareImageUrl    = '';
+        $this->shareIsPhilcst   = false;
     }
 
     public function jobsBaseUrl(): string
@@ -579,6 +584,7 @@ select.filter-input {
 }
 .share-close-btn:hover .tip { opacity: 1; }
 
+/* Simplified share option row — icon + label only (no subtext paragraph) */
 .share-option-btn {
     width: 100%; display: flex; align-items: center; gap: 0.75rem;
     padding: 0.75rem 1rem; border-radius: 0.75rem;
@@ -592,6 +598,7 @@ select.filter-input {
     background: rgba(255,255,255,.92);
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
+.share-option-btn .label-text { flex: 1; text-align: left; }
 
 /* ─────────────────────────────────────────────
    PHILCST "OFFICIAL POST" DETAIL STYLING
@@ -677,6 +684,26 @@ select.filter-input {
     display: flex; align-items: center; gap: 4px;
     pointer-events: none;
 }
+
+/* ─────────────────────────────────────────────
+   PRE-SHARE "DOWNLOAD IMAGE?" CONFIRM MODAL
+───────────────────────────────────────────── */
+.dl-confirm-icon {
+    width: 3rem; height: 3rem; border-radius: 0.9rem;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; flex-shrink: 0;
+}
+.dl-confirm-btn {
+    flex: 1; padding: 0.65rem 1rem; border-radius: 0.75rem;
+    font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+    transition: filter .15s, transform .1s; border: none;
+}
+.dl-confirm-btn:active { transform: scale(.97); }
+.dl-confirm-btn.primary { background: #7a3f91; color: #fff; }
+.dl-confirm-btn.primary:hover { filter: brightness(0.95); }
+.dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
+.dl-confirm-btn.secondary:hover { background: #e5e7eb; }
 </style>
 
 {{-- Mouse-following cursor label — hidden on mobile via CSS + JS guard below --}}
@@ -1224,10 +1251,12 @@ select.filter-input {
 @endif
 
 
-{{-- ══ SHARE MODAL — semi-automated: auto-copies caption + auto-downloads
-     the photo, then launches straight into Facebook/Messenger's composer
-     already scrolled/focused on the text box, so the user only needs to
-     Ctrl+V the caption and attach the already-downloaded photo. ══ --}}
+{{-- ══ SHARE MODAL — simplified: icon + label only per option (no
+     subtext). Facebook/Messenger no longer auto-download the image —
+     instead, a small confirm modal asks the alumni if they want to
+     download the photo first (Download / Skip), THEN the Facebook or
+     Messenger tab opens. The caption is still auto-copied to clipboard
+     either way, since that part isn't disruptive. ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->jobDetailUrl($shareJobId);
@@ -1261,14 +1290,30 @@ select.filter-input {
     // publicly yet and a raw "alumniphilcst.com" link would just show up
     // as a dead/unusable link box in the post composer.
     //
-    // CHANGED (per request): dropped all the "kiddie" emoji meta lines
-    // (company/location/employment type/experience level/deadline/college)
-    // entirely from the caption — it now goes straight from the
-    // "WE ARE HIRING" opener into the full job description. Requirements
-    // keep only 📌 and ✅. Closing line ends with a single 💜 followed by
-    // the hashtag #YourFutureStarsHere, no other emoji anywhere else.
+    // SMART CAPTION:
+    // - PHILCST posting  → alumni already know it's PHILCST, so the meta
+    //   line (company/location/employment/experience/deadline) is skipped
+    //   entirely. Goes straight from "WE ARE HIRING" into the description.
+    // - Partner-company posting → the meta line IS included (company,
+    //   location, employment type, experience level, deadline) right
+    //   after the opener, since it's not obviously a PHILCST post and
+    //   readers need that context before the description.
     $fbLines   = [];
     $fbLines[] = "WE ARE HIRING: " . strtoupper($shareJobTitle);
+
+    if (! $shareIsPhilcst) {
+        $metaBits = [];
+        if ($shareCompany)      $metaBits[] = $shareCompany;
+        if ($shareLocation)     $metaBits[] = $shareLocation;
+        if ($shareEmpType)      $metaBits[] = $shareEmpType;
+        if ($shareExpLevel)     $metaBits[] = $shareExpLevel;
+        if ($metaBits) {
+            $fbLines[] = implode(' • ', $metaBits);
+        }
+        if ($shareDlFormatted) {
+            $fbLines[] = 'Deadline: ' . $shareDlFormatted;
+        }
+    }
 
     if (trim($shareDescription) !== '') {
         $fbLines[] = '';
@@ -1291,6 +1336,9 @@ select.filter-input {
         }
     }
 
+    // PHILCST postings skip the meta line up top, so give partner-company
+    // postings that already showed the deadline once a plain closing —
+    // no need to repeat it again down here for either case.
     $fbLines[] = '';
     $fbLines[] = "Apply now through PHILCST Alumni Connect 💜";
     $fbLines[] = "#YourFutureStarsHere";
@@ -1307,6 +1355,10 @@ select.filter-input {
          jobTitle:  {{ json_encode($shareJobTitle) }},
          baseUrl:   {{ json_encode($shareBaseUrl) }},
          imageUrl:  {{ json_encode($shareImageUrl) }},
+
+         // Pre-share confirm modal state
+         showDlConfirm: false,
+         pendingTarget: null, // 'facebook' | 'messenger'
 
          async buildImageFile() {
              if (!this.imageUrl) return null;
@@ -1333,7 +1385,7 @@ select.filter-input {
              } catch (e) { return false; }
          },
 
-         async autoDownloadImage() {
+         async downloadImage() {
              if (!this.imageUrl) return false;
              this.downloading = true;
              try {
@@ -1369,28 +1421,67 @@ select.filter-input {
              } catch (e) { /* cancelled by user, nothing to do */ }
          },
 
-         async shareOnFacebook() {
-             if (this.nativeShareSupported) { await this.nativeShare(); return; }
-             await this.autoCopyCaption();
-             await this.autoDownloadImage();
-             $wire.dispatch('flash-message', {
-                 type: 'success',
-                 message: 'Photo downloaded! If the caption isn\'t pre-filled in the composer, just paste it (Ctrl+V) — it\'s already copied to your clipboard.'
-             });
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             window.open(url,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+         // Step 1: user taps Facebook or Messenger -> open the download
+         // choice modal first (no auto-download anymore).
+         askShare(target) {
+             if (this.nativeShareSupported) { this.nativeShare(); return; }
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
          },
 
-         async shareOnMessenger() {
-             if (this.nativeShareSupported) { await this.nativeShare(); return; }
-             await this.autoCopyCaption();
-             await this.autoDownloadImage();
+         // Step 2a: user chose to download the image in the confirm modal.
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             this.proceedToTarget();
+         },
+
+         // Step 2b: user chose to skip the download.
+         proceedToTarget() {
+             this.showDlConfirm = false;
+             const target = this.pendingTarget;
+             this.pendingTarget = null;
+             if (target === 'facebook') this.openFacebook();
+             else if (target === 'messenger') this.openMessenger();
+         },
+
+         cancelDlConfirm() {
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
+         },
+
+         // Copies the caption FIRST, while this page still has focus, then
+         // opens the Facebook/Messenger window. This order matters: some
+         // browsers (Firefox especially) silently fail
+         // navigator.clipboard.writeText() once focus has already moved to
+         // another window/tab, which left the user's OLD clipboard content
+         // in place instead of the caption — that's why the wrong text
+         // (page source) was showing up pasted into Facebook's composer.
+         // Copying before opening/focusing the popup guarantees the write
+         // happens while this document is still the focused one.
+         async openFacebook() {
+             const copyOk = await this.autoCopyCaption();
+             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
+             const win = window.open(url, 'philcst_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             if (win) { try { win.focus(); } catch(e) {} }
              $wire.dispatch('flash-message', {
-                 type: 'success',
-                 message: 'Caption copied and photo downloaded! In Messenger, paste (Ctrl+V) the caption and attach the downloaded photo.'
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
              });
-             window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
+         },
+
+         async openMessenger() {
+             const copyOk = await this.autoCopyCaption();
+             const win = window.open('https://www.messenger.com/new', 'philcst_messenger_share', 'noopener,noreferrer');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+             });
          },
 
          async copyLinkFn() {
@@ -1410,7 +1501,7 @@ select.filter-input {
      x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
-     @keydown.escape.window="$wire.closeShareModal()">
+     @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareModal()}">
 
     <div class="share-sheet bg-white w-full h-full sm:h-auto max-w-full sm:max-w-[920px] rounded-none sm:rounded-2xl shadow-xl border-0 sm:border border-gray-200 share-modal-wrapper">
 
@@ -1443,32 +1534,19 @@ select.filter-input {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
-                    <div class="border-b border-gray-100 px-4 py-3 bg-gray-50">
-                        <p class="font-semibold leading-tight" style="font-size:clamp(12px,1.2vw,14px);color:#333333;">{{ $shareJobTitle }}</p>
-                        <p class="font-medium mt-0.5" style="font-size:clamp(10px,1vw,12px);color:#333333;">{{ $shareCompany }}</p>
-                        <div class="flex flex-wrap gap-1 mt-1.5">
-                            @if($shareEmpType)     <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareEmpType }}</span> @endif
-                            @if($shareLocation)    <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareLocation }}</span> @endif
-                            @if($shareExpLevel)    <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareExpLevel }}</span> @endif
-                            @if($shareSalary)      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-emerald-700 bg-emerald-50" style="font-size:clamp(9px,0.85vw,11px);">{{ $shareSalary }}</span> @endif
-                            @if($shareDlFormatted) <span class="inline-flex items-center px-1.5 py-0.5 rounded text-red-600 bg-red-50" style="font-size:clamp(9px,0.85vw,11px);">Deadline: {{ $shareDlFormatted }}</span> @endif
-                        </div>
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div class="px-4 py-3 overflow-y-auto scroll-thin" style="max-height:140px;">
+                        <p class="pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
+                        <p class="pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
-                    @if($shareDescPreview)
-                    <div class="px-4 py-2">
-                        <p class="leading-relaxed" style="font-size:clamp(10px,0.9vw,12px);color:#333333;">{{ $shareDescPreview }}</p>
-                    </div>
-                    @endif
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
                 </div>
 
                 <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
                     <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
                     <p class="text-xs leading-relaxed" style="color:#333333;">
-                        Tapping <strong>Facebook</strong> opens the post composer with the caption
-                        already filled in — just attach the photo that was auto-downloaded.
-                        <strong>Messenger</strong> auto-copies the caption and downloads the photo,
-                        then opens Messenger for you to paste and attach.
+                        The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                        into the Facebook or Messenger window that opens.
                     </p>
                 </div>
             </div>
@@ -1482,33 +1560,24 @@ select.filter-input {
                         <span class="icon-wrap">
                             <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
                         </span>
-                        <div class="text-left flex-1 min-w-0">
-                            <p class="text-xs font-semibold">Share</p>
-                            <p class="text-[10px] text-white/70 mt-0.5">Send photo + caption via Messenger, Facebook, or any app</p>
-                        </div>
+                        <span class="label-text text-xs font-semibold">Share</span>
                     </button>
                 </template>
 
-                <button type="button" @click="shareOnFacebook()" class="share-option-btn" style="background:#1877F2;">
+                <button type="button" @click="askShare('facebook')" class="share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <div class="text-left flex-1 min-w-0">
-                        <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Downloads photo, copies caption, opens Facebook's share window</p>
-                    </div>
+                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
                 </button>
 
-                <button type="button" @click="shareOnMessenger()" class="share-option-btn" style="background:#0084FF;">
+                <button type="button" @click="askShare('messenger')" class="share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
                             <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
-                    <div class="text-left flex-1 min-w-0">
-                        <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Downloads photo, copies caption, opens Messenger</p>
-                    </div>
+                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
                 </button>
 
                 <button type="button" wire:click="openForwardModal"
@@ -1516,10 +1585,7 @@ select.filter-input {
                     <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
                         <i class="fas fa-comments text-white text-sm"></i>
                     </span>
-                    <div class="text-left flex-1 min-w-0">
-                        <p class="text-xs font-semibold">Share to Batch Chat</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Choose which of your chats to send to — fully automatic</p>
-                    </div>
+                    <span class="label-text text-xs font-semibold">Share to Batch Chat</span>
                     <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
                 </button>
 
@@ -1543,6 +1609,45 @@ select.filter-input {
                 </button>
 
                 <p class="text-[10px] text-center" style="color:#333333;">Sharing is disabled for expired postings.</p>
+            </div>
+        </div>
+    </div>
+
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ──
+         Shown right after tapping Facebook/Messenger, before opening the
+         target window. Lets the alumni choose Download or Skip (they may
+         already have the photo saved from a previous share). --}}
+    <div x-show="showDlConfirm" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
+         @click.self="cancelDlConfirm()">
+        <div class="share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+            <div class="flex items-start gap-3">
+                <span class="dl-confirm-icon"><i class="fas fa-image"></i></span>
+                <div class="min-w-0 pt-0.5">
+                    <p class="text-sm font-semibold" style="color:#333333;">Download the job photo?</p>
+                    <p class="text-xs mt-1 leading-relaxed" style="color:#333333;">
+                        You'll need to attach a photo to your post. Download it now, or skip if you already have it saved.
+                    </p>
+                </div>
+            </div>
+
+            @if($shareImageUrl)
+            <div class="share-photo-preview" style="height:110px;">
+                <img src="{{ $shareImageUrl }}" alt="{{ $shareJobTitle }}" onerror="this.style.display='none'">
+            </div>
+            @endif
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="proceedToTarget()" class="dl-confirm-btn secondary">
+                    Skip
+                </button>
+                <button type="button" @click="confirmDownloadThenGo()" class="dl-confirm-btn primary" :disabled="downloading">
+                    <span x-show="!downloading"><i class="fas fa-download mr-1"></i>Download</span>
+                    <span x-show="downloading" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i>Downloading…</span>
+                </button>
             </div>
         </div>
     </div>
