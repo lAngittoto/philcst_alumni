@@ -834,7 +834,33 @@ new class extends Component {
                 : 'Employment information updated successfully!';
 
             $this->dispatch('show-toast', type: 'success', message: $this->successMessage);
-            $this->dispatch('refresh-alumni-notifs');
+
+            // ── FIX: this used to dispatch a bare 'refresh-alumni-notifs'
+            //    event with no payload, and the layout's matching listener
+            //    only called _fetch() (re-reads existing notifications) —
+            //    it never actually SAVED a new notification row. That's why
+            //    updating employment never produced a bell notification.
+            //
+            //    Now we dispatch 'employment-updated' with the actual
+            //    status/company/job details, which the layout's dedicated
+            //    listener uses to create a real notification via
+            //    _saveAlumniNotif(), the same way profile-updated and
+            //    event-announced already do. ──
+            $statusLabel = match ($this->employment_status) {
+                'employed'      => 'Employed',
+                'self_employed' => 'Self-Employed',
+                'unemployed'    => 'Unemployed',
+                default         => ucfirst($this->employment_status),
+            };
+
+            $this->dispatch(
+                'employment-updated',
+                is_new: $isNew,
+                status: $statusLabel,
+                company: $working ? ($this->company_name ?: '') : '',
+                job_title: $working ? ($finalJobTitle ?: '') : '',
+            );
+
             $this->loadEmploymentRecord();
 
             Log::info("Employment saved | alumni_id:{$this->alumniId} | status:{$this->employment_status}");

@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Alumni;
 use App\Models\AlumniNotification;
 use App\Models\AdminEvent;
+use App\Models\JobPosting;
 use App\Models\OrganizerEvent;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -131,6 +133,84 @@ class AlumniNotificationController extends Controller
             ->update(['read' => true]);
 
         return response()->json(['success' => true]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PUBLIC: Notify all alumni targeted by a newly-posted job.
+    //
+    //  Called SERVER-SIDE from OrganizerJobManagement::savePost() right after
+    //  the JobPosting row is created — this is NOT triggered by a client-side
+    //  `window` event.
+    //
+    //  ROOT CAUSE THIS FIXES: the old code only did
+    //  $this->dispatch('job-posted', [...]) from the ORGANIZER's Livewire
+    //  component. Livewire's dispatch() fires a `window` CustomEvent inside
+    //  whichever browser tab the organizer is using. The alumni layout's
+    //  `job-posted` window.addEventListener(...) lives in a completely
+    //  different person's browser session (a different device/tab/login
+    //  entirely) — there is no realtime transport (no broadcast/Pusher/Echo)
+    //  connecting the organizer's tab to the alumni's tab, so that listener
+    //  could never fire. That's why "New Job Posting" never appeared in the
+    //  alumni bell no matter how many jobs were posted — profile-updated /
+    //  employment-updated worked fine because in those cases the SAME person
+    //  (the alumni) is the one dispatching AND listening, in the same tab.
+    //
+    //  FIX: insert the notification rows directly here, on the server, for
+    //  every alumni in the job's target college(s) — the same approach
+    //  already used for event notifications via syncEventNotifications()
+    //  below, just triggered at post-time instead of at fetch-time.
+    //
+    //  alumni_notifications.alumni_id is per-row (see migration), so every
+    //  targeted alumni needs their own notification row. This bulk-inserts
+    //  them in chunks instead of firing N individual ->create() calls.
+    // ─────────────────────────────────────────────────────────────────────────
+    public function notifyAlumniOfNewJob(JobPosting $job): void
+    {
+        if (empty($job->target_college)) return;
+
+        $colleges = array_values(array_filter(array_map('trim', explode(',', $job->target_college))));
+        if (empty($colleges)) return;
+
+        $dedupKey = 'job-posted::' . $job->id;
+
+        // Alumni IDs already notified for this exact job — safety net in case
+        // this ever runs twice for the same job (e.g. a retried request).
+        $alreadyNotified = AlumniNotification::where('dedup_key', $dedupKey)
+            ->pluck('alumni_id')
+            ->all();
+
+        $targetAlumniIds = Alumni::whereHas('course', function ($q) use ($colleges) {
+                $q->whereIn('college', $colleges);
+            })
+            ->when(!empty($alreadyNotified), fn ($q) => $q->whereNotIn('id', $alreadyNotified))
+            ->pluck('id');
+
+        if ($targetAlumniIds->isEmpty()) return;
+
+        $message = $job->job_title . ' at ' . $job->company_name .
+                   ($job->location ? ' — ' . $job->location : '') . '.';
+
+        $now = now();
+
+        $rows = $targetAlumniIds->map(fn ($alumniId) => [
+            'alumni_id'  => $alumniId,
+            'icon'       => 'briefcase',
+            'title'      => 'New Job Posting',
+            'message'    => $message,
+            'link_route' => 'job.opportunities',
+            'link_label' => 'View Job',
+            'dedup_key'  => $dedupKey,
+            'read'       => false,
+            'count'      => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->all();
+
+        // Bulk insert in chunks — avoids N individual queries when a college
+        // has many alumni, and avoids one giant query if the list is huge.
+        foreach (array_chunk($rows, 500) as $chunk) {
+            AlumniNotification::insert($chunk);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

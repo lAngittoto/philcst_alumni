@@ -17,7 +17,7 @@
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
-        /* ── Sidebar (desktop) bell — old design ── */
+        /* ── Sidebar (desktop) bell ── */
         #alumni-bell-btn {
             background: transparent !important;
             border: none !important;
@@ -38,7 +38,7 @@
             box-shadow: none !important;
         }
 
-        /* ── Mobile top-bar bell (icon only) — kept from current/new version, untouched behavior ── */
+        /* ── Mobile top-bar bell (icon only) ── */
         .alm-topbar-bell {
             background: transparent !important;
             border: none !important;
@@ -67,74 +67,23 @@
 
         .bell-badge { pointer-events: none; }
         .notif-item { cursor: pointer; position: relative; }
-        .notif-hover-label {
-            pointer-events: none;
-            position: fixed;
-            background: rgba(0,0,0,0.82);
-            color: #fff;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            padding: 4px 10px;
-            border-radius: 20px;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            white-space: nowrap;
-            z-index: 99999;
-        }
-        .notif-item:hover .notif-hover-label { opacity: 1; }
-
-        /* ── Close button tooltip ── */
-        .notif-close-wrap {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .notif-close-tip {
-            position: absolute;
-            top: calc(100% + 7px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: #1a1a1a;
-            color: #fff;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            padding: 4px 10px;
-            border-radius: 7px;
-            white-space: nowrap;
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            z-index: 100000;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.30);
-        }
-        .notif-close-tip::after {
-            content: '';
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            border: 5px solid transparent;
-            border-bottom-color: #1a1a1a;
-        }
-        .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
 
         /* ════════════════════════════════════════════════════════
-           ALUMNI SIDEBAR — GRADUATE / ALUMNI THEME (OLD / RESTORED)
+           ALUMNI SIDEBAR — GRADUATE / ALUMNI THEME
         ════════════════════════════════════════════════════════ */
+        .alm-sidebar {
+            transition:
+                width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease,
+                border-color 0.25s ease;
+        }
+
         .alm-sidebar-header {
             background: #7A3F91;
             position: relative;
             overflow: hidden;
-        }
-        .alm-sidebar-header::after {
-            content: '';
-            position: absolute;
-            top: -40px; right: -30px;
-            width: 130px; height: 130px;
-            display: none;
         }
         .alm-cap-badge {
             width: 42px; height: 42px;
@@ -162,16 +111,39 @@
         }
         .alm-nav-icon { transition: transform 0.2s ease; }
 
+        /* ── MENU label row + inline collapse icon-button (desktop) ── */
+        .alm-nav-section-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1rem;
+            margin-bottom: 0.5rem;
+        }
         .alm-section-label {
             font-size: 10.5px;
             font-weight: 800;
             letter-spacing: 0.16em;
             color: #9A8AA8;
-            padding: 0 1rem;
-            margin-bottom: 0.5rem;
         }
+        .alm-collapse-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 7px;
+            background: #F3EBFA;
+            border: none;
+            color: #7A3F91;
+            cursor: pointer;
+            font-size: 10px;
+            flex-shrink: 0;
+            transition: background-color 0.15s ease, transform 0.2s ease;
+        }
+        .alm-collapse-icon-btn:hover { background: #E9D8F5; }
+        .alm-collapse-icon-btn:active { transform: scale(0.88); }
 
-        /* Logout button + spinner */
+        /* Logout button + spinner (registrar style) */
         .alm-logout-btn {
             position: relative;
             width: 100%;
@@ -179,26 +151,22 @@
             align-items: center;
             justify-content: center;
             gap: 0.55rem;
-            padding: 1rem 1rem;
-            border-radius: 14px;
-            font-weight: 800;
-            font-size: 0.72rem;
+            padding: 0.9rem 1rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.75rem;
             text-transform: uppercase;
-            letter-spacing: 0.14em;
+            letter-spacing: 0.12em;
             color: #fff;
             background: #7A3F91;
             border: none;
             cursor: pointer;
             overflow: hidden;
-            box-shadow: 0 8px 18px -6px rgba(122,63,145,0.55);
-            transition: filter 0.2s ease, transform 0.15s ease;
+            transition: background-color 0.2s ease, transform 0.15s ease;
         }
-        .alm-logout-btn:hover   { filter: brightness(1.1); }
+        .alm-logout-btn:hover   { background: #6A3580; }
         .alm-logout-btn:active  { transform: scale(0.97); }
-        .alm-logout-btn:disabled {
-            cursor: not-allowed;
-            filter: grayscale(0.15) brightness(0.95);
-        }
+        .alm-logout-btn:disabled { cursor: not-allowed; background: #8E5DA3; }
         .alm-logout-spinner {
             width: 14px; height: 14px;
             border-radius: 50%;
@@ -209,6 +177,45 @@
         }
         @keyframes alm-spin { to { transform: rotate(360deg); } }
         .alm-logout-text-swap { display: inline-flex; align-items: center; }
+
+        /* ── Collapsed state (desktop only, manual << >> toggle) ── */
+        @media (min-width: 1024px) {
+            .alm-sidebar.is-collapsed {
+                width: 5rem;
+                min-width: 5rem;
+            }
+            .alm-sidebar.is-collapsed .alm-nav-label,
+            .alm-sidebar.is-collapsed .alm-section-label,
+            .alm-sidebar.is-collapsed .alm-active-dot,
+            .alm-sidebar.is-collapsed .alm-logout-label-text,
+            .alm-sidebar.is-collapsed .alm-brand-text {
+                display: none !important;
+            }
+            .alm-sidebar.is-collapsed .alm-sidebar-header {
+                justify-content: center;
+                padding-left: 0;
+                padding-right: 0;
+            }
+            .alm-sidebar.is-collapsed .alm-nav-link {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            .alm-sidebar.is-collapsed .alm-nav-icon {
+                margin-right: 0 !important;
+            }
+            .alm-sidebar.is-collapsed .alm-nav-section-row {
+                justify-content: center;
+                padding: 0 0.5rem;
+            }
+            .alm-sidebar.is-collapsed .alm-logout-btn {
+                gap: 0;
+                padding: 0.9rem;
+            }
+            .alm-sidebar.is-collapsed .alm-logout-btn i.fa-right-from-bracket,
+            .alm-sidebar.is-collapsed .alm-logout-spinner {
+                margin-right: 0 !important;
+            }
+        }
 
         @media (max-width: 1023px) {
             #alumni-sidebar-aside {
@@ -224,6 +231,7 @@
 
             /* Icon-only nav on mobile: hide labels + section title + active dot */
             #alumni-sidebar-aside .alm-section-label,
+            #alumni-sidebar-aside .alm-nav-section-row,
             #alumni-sidebar-aside .alm-nav-link span:not(.alm-nav-icon) {
                 display: none !important;
             }
@@ -249,35 +257,60 @@
             }
         }
 
-        /* Mobile topbar — icon mark + icon-only bell, no "Alumni Portal" text clutter */
-        .alm-mobile-topbar-mark {
-            display: flex; align-items: center; gap: 8px;
-        }
-        .alm-mobile-topbar-mark .alm-mark-icon {
-            width: 30px; height: 30px;
-            border-radius: 9px;
-            background: #7A3F91;
-            display: flex; align-items: center; justify-content: center;
-            color: #fff; font-size: 13px;
+        /* ════════════════════════════════════════════════════════
+           NOTIFICATION PANEL
+        ════════════════════════════════════════════════════════ */
+        .notif-icon-wrap {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
         }
 
-        /* ════════════════════════════════════════════════════════
-           NOTIFICATION PANEL — refined
-        ════════════════════════════════════════════════════════ */
-        #alumni-notif-panel {
-            max-width: calc(100vw - 16px);
+        /* ── Read/Unread section divider (registrar style) ── */
+        .notif-divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px 6px;
         }
+        .notif-divider::before,
+        .notif-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #ECE2F8;
+        }
+        .notif-divider-label {
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #B9A6C7;
+            white-space: nowrap;
+        }
+
+        /* ── Mobile: notification panel goes true full-screen (registrar style) ── */
         @media (max-width: 1023px) {
             #alumni-notif-panel {
-                left: 8px !important;
-                right: 8px;
-                width: auto !important;
-                min-height: 0 !important;
-                max-height: 80vh;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                min-height: 100% !important;
+                max-height: 100% !important;
+                max-width: 100% !important;
+                border-radius: 0 !important;
+                border: none !important;
             }
             #alumni-notif-panel .notif-list-scroll {
-                max-height: calc(80vh - 130px) !important;
+                max-height: none !important;
+                flex: 1;
             }
         }
     </style>
@@ -303,6 +336,51 @@
         'alumni.messenger':   '/alumni/messenger',
         'alumni.yearbook':    '/alumni/yearbook',
     };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  LOCAL READ-STATE TRACKING  (fixes: mark-read notif "coming back" as
+    //  unread after navigating to another sidebar item / refreshing / polling)
+    //
+    //  Root cause of the bug: markRead() only updated the in-memory item and
+    //  fired PATCH requests to the server, but the very next _fetch() (from
+    //  polling, livewire:navigated, or a plain page refresh) rebuilt `items`
+    //  straight from the server response. If that PATCH hadn't finished
+    //  committing yet (race condition), or if the grouping logic saw ANY
+    //  unread row and flipped the whole group back to unread, the badge
+    //  count would reappear even though the user already read it.
+    //
+    //  Fix: keep a persistent (sessionStorage-backed) set of notif ids the
+    //  user has read locally. Every fetch/group pass forces those ids to
+    //  read=true BEFORE grouping, so a slow PATCH or a stale server response
+    //  can never resurrect an already-read notification.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__alumniLocalReadIds = (function () {
+        var KEY = 'alm_locally_read_ids';
+        var set;
+        try {
+            var raw = sessionStorage.getItem(KEY);
+            set = new Set(raw ? JSON.parse(raw) : []);
+        } catch (e) {
+            set = new Set();
+        }
+        return {
+            has: function (id) { return set.has(String(id)); },
+            add: function (id) {
+                set.add(String(id));
+                this._persist();
+            },
+            addMany: function (ids) {
+                var self = this;
+                (ids || []).forEach(function (id) { set.add(String(id)); });
+                this._persist();
+            },
+            _persist: function () {
+                try {
+                    sessionStorage.setItem(KEY, JSON.stringify(Array.from(set)));
+                } catch (e) { /* ignore quota errors */ }
+            },
+        };
+    })();
 
     // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
@@ -331,6 +409,14 @@
                     });
                     if (res.ok) {
                         var raw = await res.json();
+                        // Force any locally-marked-read id to read=true BEFORE
+                        // grouping — this is what stops a slow/late-committing
+                        // PATCH (or a stale server row) from re-appearing as
+                        // unread after navigation, refresh, or the next poll.
+                        var localReads = window.__alumniLocalReadIds;
+                        Array.from(raw).forEach(function (n) {
+                            if (localReads.has(n.id)) n.read = true;
+                        });
                         this.items = this._groupByDay(raw);
                     }
                 } catch (e) { /* silently fail */ }
@@ -338,6 +424,7 @@
 
             _groupByDay(rows) {
                 var map = new Map();
+                var localReads = window.__alumniLocalReadIds;
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
@@ -375,8 +462,16 @@
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
                             g.count = (g.count || 1) + (n.count || 1);
-                            if (!n.read) g.read = false;
                             g._ids.push(n.id);
+
+                            // Only flip the group back to unread if this member
+                            // is unread AND hasn't been locally marked read.
+                            // Previously: `if (!n.read) g.read = false;` — this
+                            // let a single stale/unread row drag an otherwise
+                            // fully-read group back into "unread" state.
+                            if (!n.read && !localReads.has(n.id)) {
+                                g.read = false;
+                            }
 
                             if (isMessageEvent) {
                                 g.message = g.count + ' new message(s) today.';
@@ -390,6 +485,7 @@
                             }
                         } else {
                             map.set(groupKey, Object.assign({}, n, {
+                                read:  n.read || localReads.has(n.id),
                                 count: n.count || 1,
                                 _ids:  [n.id],
                                 title: isMessageEvent ? (n.title || 'New Message')
@@ -415,24 +511,38 @@
 
             async markRead(item) {
                 if (item.read) return;
+
+                var ids = Array.isArray(item._ids) ? item._ids : [item.id];
+
+                // Mark locally read FIRST (persisted to sessionStorage) so no
+                // race with the server PATCH below, and no future _fetch()/poll
+                // can ever resurrect this notif as unread.
+                window.__alumniLocalReadIds.addMany(ids);
                 item.read = true;
-                var ids  = Array.isArray(item._ids) ? item._ids : [item.id];
+
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                for (var i = 0; i < ids.length; i++) {
-                    try {
-                        await window.fetch('/alumni/notifications/' + ids[i] + '/read', {
-                            method: 'PATCH',
-                            headers: {
-                                'X-CSRF-TOKEN':     csrf,
-                                'X-Requested-With': 'XMLHttpRequest',
-                            }
-                        });
-                    } catch (e) { /* ignore */ }
-                }
+                // Await every PATCH so a caller that navigates right after
+                // markRead() (see the notif click handler below) is guaranteed
+                // the server has committed the read state first.
+                await Promise.all(ids.map(function (id) {
+                    return window.fetch('/alumni/notifications/' + id + '/read', {
+                        method: 'PATCH',
+                        headers: {
+                            'X-CSRF-TOKEN':     csrf,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        }
+                    }).catch(function () { /* ignore network errors */ });
+                }));
             },
 
             async markAllRead() {
-                this.items.forEach(function (n) { n.read = true; });
+                var allIds = [];
+                this.items.forEach(function (n) {
+                    n.read = true;
+                    allIds = allIds.concat(Array.isArray(n._ids) ? n._ids : [n.id]);
+                });
+                window.__alumniLocalReadIds.addMany(allIds);
+
                 try {
                     await window.fetch('/alumni/notifications/read-all', {
                         method: 'PATCH',
@@ -449,22 +559,25 @@
                     return n.link_route === routeName && !n.read;
                 });
                 if (matched.length === 0) return;
+
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                for (var i = 0; i < matched.length; i++) {
-                    matched[i].read = true;
-                    var ids = matched[i]._ids || [matched[i].id];
-                    for (var j = 0; j < ids.length; j++) {
-                        try {
-                            await window.fetch('/alumni/notifications/' + ids[j] + '/read', {
-                                method: 'PATCH',
-                                headers: {
-                                    'X-CSRF-TOKEN':     csrf,
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                }
-                            });
-                        } catch (e) { /* ignore */ }
-                    }
-                }
+                var allIds = [];
+
+                matched.forEach(function (n) {
+                    n.read = true;
+                    allIds = allIds.concat(n._ids || [n.id]);
+                });
+                window.__alumniLocalReadIds.addMany(allIds);
+
+                await Promise.all(allIds.map(function (id) {
+                    return window.fetch('/alumni/notifications/' + id + '/read', {
+                        method: 'PATCH',
+                        headers: {
+                            'X-CSRF-TOKEN':     csrf,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        }
+                    }).catch(function () { /* ignore network errors */ });
+                }));
             },
         };
     };
@@ -544,6 +657,8 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  PANEL POSITIONING — anchored to the single top-right bell button
+    //  (Mobile goes fully full-screen via CSS media query, so no inline
+    //  overrides are needed for mobile here — matches registrar behavior.)
     // ─────────────────────────────────────────────────────────────────────────
     function positionAlumniPanel() {
         var btn   = document.getElementById('alumni-bell-btn');
@@ -554,10 +669,6 @@
             panel.style.left  = (btnRect.right - 400) + 'px';
             panel.style.top   = (btnRect.bottom + 8) + 'px';
             panel.style.width = '400px';
-        } else {
-            panel.style.left  = '8px';
-            panel.style.top   = (btnRect.bottom + 8) + 'px';
-            panel.style.width = (window.innerWidth - 16) + 'px';
         }
     }
     window.positionAlumniPanel = positionAlumniPanel;
@@ -565,20 +676,6 @@
     window.addEventListener('resize', function () {
         var s = window.__safeAlumniNotifsStore();
         if (s && s.open) positionAlumniPanel();
-    });
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  CURSOR-FOLLOWING TOOLTIP
-    // ─────────────────────────────────────────────────────────────────────────
-    document.addEventListener('mousemove', function (e) {
-        var target = e.target;
-        if (!target || typeof target.closest !== 'function') return;
-        var item = target.closest('.notif-item');
-        if (!item) return;
-        var label = item.querySelector('.notif-hover-label');
-        if (!label) return;
-        label.style.left = (e.clientX + 14) + 'px';
-        label.style.top  = (e.clientY + 14) + 'px';
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -651,6 +748,50 @@
             });
         });
 
+        // ── New job posting (dispatched by the Organizer Job Management
+        //    Volt component's savePost() method after logAudit()). Uses
+        //    the 'briefcase' icon — same as employment-updated — since
+        //    isJobEvent in _groupByDay() already treats dedup_key prefix
+        //    'job-posted::' as the primary signal (icon is just a
+        //    fallback), so grouping/badges stay correct either way.
+        window.addEventListener('job-posted', function (e) {
+            var d = _alumniDetail(e);
+            _saveAlumniNotif({
+                icon:       'briefcase',
+                title:      'New Job Posting',
+                message:    (d.title || 'A new job') + ' at ' + (d.company || 'a company') + ' was just posted.',
+                link_route: 'job.opportunities',
+                link_label: 'View Job',
+                dedup_key:  'job-posted::' + (d.id || ''),
+            });
+        });
+
+        // ── Employment update / creation (dispatched by the Alumni
+        //    Information Volt component's saveEmployment() method).
+        window.addEventListener('employment-updated', function (e) {
+            var d = _alumniDetail(e);
+            var isNew    = !!d.is_new;
+            var status   = d.status  || 'Updated';
+            var company  = d.company || '';
+            var jobTitle = d.job_title || '';
+
+            var message;
+            if (company && jobTitle) {
+                message = 'Your employment status is now "' + status + '" — ' + jobTitle + ' at ' + company + '.';
+            } else {
+                message = 'Your employment status has been updated to "' + status + '".';
+            }
+
+            _saveAlumniNotif({
+                icon:       'briefcase',
+                title:      isNew ? 'Employment Record Added' : 'Employment Status Updated',
+                message:    message,
+                link_route: 'alumni.information',
+                link_label: 'View Details',
+                dedup_key:  'employment-updated::' + Math.floor(Date.now() / 1000),
+            });
+        });
+
         window.addEventListener('message-received', function (e) {
             var d = _alumniDetail(e);
 
@@ -692,9 +833,11 @@
     class="antialiased"
     x-data="{
         open: false,
+        sidebarCollapsed: localStorage.getItem('alm_sidebar_collapsed') === '1',
         loggingOut: false,
         profileComplete: {{ (bool)(auth()->user()?->alumni?->profile_completed ?? false) ? 'true' : 'false' }}
     }"
+    x-init="$watch('sidebarCollapsed', value => localStorage.setItem('alm_sidebar_collapsed', value ? '1' : '0'))"
     x-on:profile-updated.window="profileComplete = $event.detail.completed"
     @click="$store.alumniNotifs && $store.alumniNotifs.open && $store.alumniNotifs.close()">
 
@@ -713,23 +856,26 @@
         class="fixed inset-0 z-40 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR (old / restored design) ══ --}}
+    {{-- ══ SIDEBAR ══ --}}
     <aside
         id="alumni-sidebar-aside"
-        :class="open ? 'translate-x-0' : '-translate-x-full'"
-        class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
+        :class="{
+            'translate-x-0': open,
+            '-translate-x-full': !open,
+            'is-collapsed': sidebarCollapsed
+        }"
+        class="alm-sidebar fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
                lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
 
-        {{-- Sidebar header — graduate-themed (purple, cap badge). Bell now lives in the top-right bar only. --}}
+        {{-- Sidebar header — graduate-themed (purple, cap badge) --}}
         <div class="alm-sidebar-header flex items-center h-24 px-5 shrink-0">
-
             <div class="flex items-center gap-3 min-w-0 flex-1 relative z-10">
                 <div class="alm-cap-badge">
                     <i class="fa-solid fa-graduation-cap text-white" style="font-size:17px;"></i>
                 </div>
-                <div class="min-w-0">
+                <div class="min-w-0 alm-brand-text">
                     <h1 class="text-[19px] font-bold tracking-tight text-white leading-tight truncate">
                         Alumni<span class="font-semibold text-white/70">Portal</span>
                     </h1>
@@ -742,7 +888,18 @@
 
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
-            <p class="alm-section-label">MENU</p>
+
+            <div class="alm-nav-section-row">
+                <p class="alm-section-label">MENU</p>
+                <button type="button"
+                        @click="sidebarCollapsed = !sidebarCollapsed"
+                        title="Collapse sidebar"
+                        class="alm-collapse-icon-btn hidden lg:flex">
+                    <i class="fas"
+                       :class="sidebarCollapsed ? 'fa-angles-right' : 'fa-angles-left'"
+                       style="font-size:11px;line-height:1;"></i>
+                </button>
+            </div>
 
             @php
                 $sidebarLinks = [
@@ -789,6 +946,7 @@
                 @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
+                   title="{{ $link['label'] }}"
                    @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
                    class="alm-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
@@ -799,13 +957,13 @@
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="font-medium tracking-wide flex-1 text-[14px]
+                    <span class="alm-nav-label font-medium tracking-wide flex-1 text-[14px]
                                  {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
-                        <span class="ml-auto w-1.5 h-6 rounded-full shrink-0"
+                        <span class="alm-active-dot ml-auto w-1.5 h-6 rounded-full shrink-0"
                               style="background:#7A3F91;"></span>
                     @endif
                 </a>
@@ -813,22 +971,25 @@
         </nav>
 
         {{-- Logout --}}
-        <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
+        <div class="p-2 lg:p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
                   @submit="loggingOut = true">
                 @csrf
                 <button type="submit"
                         :disabled="loggingOut"
+                        title="Logout"
                         class="alm-logout-btn">
                     <template x-if="!loggingOut">
                         <span class="alm-logout-text-swap">
-                            <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                            <span class="alm-logout-label-text">Logout</span>
                         </span>
                     </template>
                     <template x-if="loggingOut">
                         <span class="alm-logout-text-swap">
-                            <span class="alm-logout-spinner mr-2"></span> Logging out…
+                            <span class="alm-logout-spinner mr-2"></span>
+                            <span class="alm-logout-label-text">Logging out…</span>
                         </span>
                     </template>
                 </button>
@@ -952,15 +1113,13 @@
                 Mark all read
             </button>
 
-            <div class="notif-close-wrap ml-1">
-                <span class="notif-close-tip">Close</span>
-                <button type="button"
-                        @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
-                        class="w-7 h-7 flex items-center justify-center rounded-lg
-                               text-white/50 hover:text-white hover:bg-white/10 transition">
-                    <i class="fas fa-xmark" style="font-size:14px;"></i>
-                </button>
-            </div>
+            <button type="button"
+                    @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
+                    aria-label="Close notifications"
+                    class="w-7 h-7 flex items-center justify-center rounded-lg
+                           text-white/50 hover:text-white hover:bg-white/10 transition ml-1">
+                <i class="fas fa-xmark" style="font-size:14px;"></i>
+            </button>
         </div>
     </div>
 
@@ -992,102 +1151,106 @@
         </template>
 
         <template x-if="$store.alumniNotifs">
-            <template x-for="notif in $store.alumniNotifs.items" :key="notif.id">
-                <div
-                    class="notif-item flex items-start gap-4 px-5 py-4
-                           border-b border-[#F5F5F5] last:border-b-0
-                           transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
-                    @click.stop="
-                        $store.alumniNotifs.markRead(notif);
-                        $store.alumniNotifs.close();
-                        if (notif.link_route) {
-                            const url = window.__alumniRouteMap[notif.link_route] || '/alumni/dashboard';
-                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
-                        }
-                    ">
-
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         style="background:#F3EBFA;">
-                        <i class="fas text-[#7A3F91]"
-                           :class="'fa-' + (notif.icon || 'bell')"
-                           style="font-size:15px;"></i>
+            <template x-for="(notif, notifIdx) in $store.alumniNotifs.items" :key="notif.id">
+                <div>
+                    <div class="notif-divider"
+                         x-show="notif.read && notifIdx > 0 && !$store.alumniNotifs.items[notifIdx - 1].read"
+                         x-cloak>
+                        <span class="notif-divider-label">Already Read</span>
                     </div>
 
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-start justify-between gap-2">
-                            <div class="flex items-center gap-1.5 flex-wrap">
-                                <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
-                                   style="font-size:13px;line-height:1.4;"
-                                   x-text="notif.title"></p>
+                    <div
+                        class="notif-item flex items-start gap-4 px-5 py-4
+                               border-b border-[#F5F5F5] last:border-b-0
+                               transition-colors duration-150 select-none"
+                        :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
+                        @click.stop="
+                            $store.alumniNotifs.markRead(notif).then(() => {
+                                $store.alumniNotifs.close();
+                                if (notif.link_route) {
+                                    const url = window.__alumniRouteMap[notif.link_route] || '/alumni/dashboard';
+                                    window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                                }
+                            });
+                        ">
 
-                                <span
-                                    x-show="Number(notif.count) > 1"
-                                    x-cloak
-                                    class="inline-flex items-center justify-center
-                                           min-w-[22px] h-5 rounded-full px-1.5
-                                           text-[10px] font-black text-white leading-none"
-                                    style="background:#7A3F91;"
-                                    x-text="'×' + Number(notif.count)">
-                                </span>
+                        <div class="notif-icon-wrap" style="background:#F3EBFA;">
+                            <i class="fas text-[#7A3F91]"
+                               :class="'fa-' + (notif.icon || 'bell')"
+                               style="font-size:15px;"></i>
+                        </div>
 
-                                <span
-                                    x-show="notif.icon === 'briefcase' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:#7A3F91;">
-                                    NEW JOB POSTING
-                                </span>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
+                                       style="font-size:13px;line-height:1.4;"
+                                       x-text="notif.title"></p>
 
-                                <span
-                                    x-show="(notif.icon === 'calendar' || notif.icon === 'circle-check') && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:#059669;">
-                                    NEW EVENT
-                                </span>
+                                    <span
+                                        x-show="Number(notif.count) > 1"
+                                        x-cloak
+                                        class="inline-flex items-center justify-center
+                                               min-w-[22px] h-5 rounded-full px-1.5
+                                               text-[10px] font-black text-white leading-none"
+                                        style="background:#7A3F91;"
+                                        x-text="'×' + Number(notif.count)">
+                                    </span>
 
-                                <span
-                                    x-show="notif.icon === 'comments' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:#7A3F91;">
-                                    NEW MESSAGE
-                                </span>
+                                    <span
+                                        x-show="notif.icon === 'briefcase' && !notif.read"
+                                        x-cloak
+                                        class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                        style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                               background:#7A3F91;">
+                                        EMPLOYMENT
+                                    </span>
+
+                                    <span
+                                        x-show="(notif.icon === 'calendar' || notif.icon === 'circle-check') && !notif.read"
+                                        x-cloak
+                                        class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                        style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                               background:#059669;">
+                                        NEW EVENT
+                                    </span>
+
+                                    <span
+                                        x-show="notif.icon === 'comments' && !notif.read"
+                                        x-cloak
+                                        class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                        style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                               background:#7A3F91;">
+                                        NEW MESSAGE
+                                    </span>
+                                </div>
+
+                                <span x-show="!notif.read" x-cloak
+                                      class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                             </div>
 
-                            <span x-show="!notif.read" x-cloak
-                                  class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
-                        </div>
+                            <p class="text-[#666666] mt-1 leading-relaxed"
+                               style="font-size:12px;
+                                      display:-webkit-box;
+                                      -webkit-line-clamp:2;
+                                      -webkit-box-orient:vertical;
+                                      overflow:hidden;"
+                               x-text="notif.message">
+                            </p>
 
-                        <p class="text-[#666666] mt-1 leading-relaxed"
-                           style="font-size:12px;
-                                  display:-webkit-box;
-                                  -webkit-line-clamp:2;
-                                  -webkit-box-orient:vertical;
-                                  overflow:hidden;"
-                           x-text="notif.message">
-                        </p>
-
-                        <div class="flex items-center gap-1 mt-2">
-                            <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                            <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                  x-text="notif.created_at
-                                      ? new Date(notif.created_at).toLocaleString('en-PH',{
-                                          month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit'
-                                        })
-                                      : ''">
-                            </span>
+                            <div class="flex items-center gap-1 mt-2">
+                                <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
+                                <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
+                                      x-text="notif.created_at
+                                          ? new Date(notif.created_at).toLocaleString('en-PH',{
+                                              month:'short',day:'numeric',year:'numeric',
+                                              hour:'2-digit',minute:'2-digit'
+                                            })
+                                          : ''">
+                                </span>
+                            </div>
                         </div>
                     </div>
-
-                    <span class="notif-hover-label">
-                        <i class="fas fa-eye" style="font-size:10px;margin-right:5px;"></i>View Details
-                    </span>
                 </div>
             </template>
         </template>

@@ -523,6 +523,32 @@ new class extends Component {
             severity: 'info'
         );
 
+
+
+
+        // ── NOTIFY ALUMNI (NEW) ─────────────────────────────────────────────
+        // This was missing entirely: creating a job here never told the
+        // alumni-facing notification bell that anything happened, no matter
+        // which organization category was chosen (PHILCST / Partner Company /
+        // Custom all flow through this same savePost() method, so this one
+        // dispatch covers all three). The alumni layout's notification store
+        // already had grouping logic ready for a "job-posted" event (icon
+        // 'briefcase', dedup_key prefix 'job-posted::') — it just never had
+        // an event to listen for, since nothing here was ever dispatching it.
+        //
+        // This mirrors exactly how 'profile-updated' / 'event-announced' /
+        // 'employment-updated' are dispatched elsewhere in the codebase:
+        // $this->dispatch(...) from a Volt component fires a `window`
+        // CustomEvent of the same name, which the alumni layout's plain
+        // window.addEventListener(...) picks up and turns into a saved,
+        // polled notification.
+        $this->dispatch('job-posted', [
+            'id'             => $job->id,
+            'title'          => $job->job_title,
+            'company'        => $job->company_name,
+            'target_college' => $job->target_college,
+        ]);
+
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
         $this->resetPostFields();
