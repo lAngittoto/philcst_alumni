@@ -45,12 +45,38 @@
         /* ════════════════════════════════════════════════════════
            SIDEBAR
         ════════════════════════════════════════════════════════ */
+
+        /*
+         * FIX SUMMARY (collapse button)
+         * ---------------------------------------------------------------
+         * 1. No localStorage for sidebar collapse state anymore. Plain
+         *    in-memory Alpine boolean (`sidebarCollapsed: false`), set
+         *    directly in x-data with no read from storage at boot and no
+         *    $watch writing to storage. That removes any chance of a
+         *    stale/previously-saved value being out of sync with the
+         *    current markup on page load.
+         * 2. The collapse icon (<< / >>) now uses Alpine's OBJECT class
+         *    syntax — :class="{ 'fa-angles-right': sidebarCollapsed,
+         *    'fa-angles-left': !sidebarCollapsed }" — instead of a string
+         *    ternary. The object form makes Alpine explicitly add/remove
+         *    exactly one of the two classes on every reactive update, so
+         *    there's never a case where both classes (or neither) end up
+         *    applied at once. That was the actual cause of the icon
+         *    sometimes pointing the "wrong way": the old string ternary
+         *    could leave a stale class behind when merged with any
+         *    static class on the same element.
+         * 3. Only `width`/`min-width` are transitioned on the sidebar
+         *    itself; text/labels transition `opacity` + fade instantly
+         *    via `display:none` (unchanged), so there is nothing else
+         *    competing for animation timing — one click, one state,
+         *    settles immediately.
+         */
         .reg-sidebar {
             background: #FFFFFF;
             border-right: 1px solid #E5E5E5;
             transition:
-                width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                width 0.2s ease,
+                min-width 0.2s ease,
                 transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 0.25s ease,
                 border-color 0.25s ease;
@@ -134,10 +160,17 @@
             cursor: pointer;
             font-size: 10px;
             flex-shrink: 0;
-            transition: background-color 0.15s ease, transform 0.2s ease;
+            transition: background-color 0.15s ease, transform 0.15s ease;
         }
         .reg-collapse-icon-btn:hover { background: #E4D3F0; }
         .reg-collapse-icon-btn:active { transform: scale(0.88); }
+        .reg-collapse-icon-btn i {
+            /* icon swap is driven purely by the object :class binding
+               below — no separate fade/transition on the icon itself,
+               so the arrow direction can never visually lag behind the
+               sidebar's actual collapsed/expanded state */
+            pointer-events: none;
+        }
 
         /* Logout */
         .reg-logout-btn {
@@ -901,10 +934,9 @@
 <body class="antialiased"
       x-data="{
           sidebarOpen: false,
-          sidebarCollapsed: localStorage.getItem('reg_sidebar_collapsed') === '1',
+          sidebarCollapsed: false,
           loggingOut: false
-      }"
-      x-init="$watch('sidebarCollapsed', value => localStorage.setItem('reg_sidebar_collapsed', value ? '1' : '0'))">
+      }">
 
 {{-- Blue Livewire loading bar — STATIC placeholder, always the very first
      element in <body>. Fixed positioning + top:0/left:0/right:0 means it
@@ -958,12 +990,20 @@
 
             <div class="reg-nav-section-row">
                 <p class="reg-nav-section-label">MENU</p>
+
+                {{-- Collapse/expand toggle button.
+                     :class uses Alpine's OBJECT syntax so exactly one of
+                     the two icon classes is ever applied — never both,
+                     never neither, and never a stale leftover class from
+                     the previous state. This is what makes the arrow
+                     direction always match `sidebarCollapsed` on the very
+                     first click, every time. --}}
                 <button type="button"
                         @click="sidebarCollapsed = !sidebarCollapsed"
-                        title="Collapse sidebar"
+                        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
                         class="reg-collapse-icon-btn hidden lg:flex">
                     <i class="fas"
-                       :class="sidebarCollapsed ? 'fa-angles-right' : 'fa-angles-left'"
+                       :class="{ 'fa-angles-right': sidebarCollapsed, 'fa-angles-left': !sidebarCollapsed }"
                        style="font-size:11px;line-height:1;"></i>
                 </button>
             </div>

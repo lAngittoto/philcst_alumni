@@ -214,6 +214,108 @@ class AlumniNotificationController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  PUBLIC: Notify all alumni targeted by a job posting that was just
+    //  turned back ACTIVE (INACTIVE → ACTIVE via the organizer's Activate
+    //  button, or a restore that lands back on ACTIVE).
+    //
+    //  Called SERVER-SIDE from OrganizerJobManagement::executeToggleStatus()
+    //  and ::executeRestoreJob() — same reasoning as notifyAlumniOfNewJob()
+    //  above: a client-side `window` event in the organizer's tab can never
+    //  reach a different alumni's browser session, so this has to happen on
+    //  the server at the moment the status actually flips.
+    //
+    //  Deliberately reuses the EXACT SAME 'job-posted::{id}' dedup_key,
+    //  title ("New Job Posting"), and icon ('briefcase') as
+    //  notifyAlumniOfNewJob() above — a re-activated job and a brand-new job
+    //  are the same kind of event to the alumni ("the job is open now"), so
+    //  they land in the same notification / counter instead of being split
+    //  into a separate "Job Activated" type.
+    //
+    //  ── BUG FIXED HERE ──────────────────────────────────────────────────
+    //  Because the dedup_key is identical to the original posting's, if that
+    //  alumni was already notified when the job was first created (and
+    //  hasn't had that row deleted), the store()-style "increment on match"
+    //  behavior is replicated: bump count + flip back to unread on existing
+    //  rows, and only insert fresh rows for alumni who never got the
+    //  original notification.
+    //
+    //  BUT the old version only touched `updated_at`, `read`, and `count` on
+    //  the existing row — it never refreshed `created_at`. Every list in the
+    //  UI (index() query, the JS store's sort, and the "Jul 17" timestamp
+    //  rendered in the panel) is driven off `created_at`. So a job that was
+    //  posted yesterday, then deactivated, then re-activated today, kept
+    //  showing yesterday's date and could get buried under newer
+    //  notifications (or look like nothing new happened) — even though it
+    //  WAS flipped back to unread in the database.
+    //
+    //  FIX: also bump `created_at` to `now()` when reusing an existing row,
+    //  so a reactivated job reads as a brand-new notification (today's date,
+    //  top of the list) exactly like a first-time post would.
+    // ─────────────────────────────────────────────────────────────────────────
+    public function notifyAlumniOfActivatedJob(JobPosting $job): void
+    {
+        if (empty($job->target_college)) return;
+
+        $colleges = array_values(array_filter(array_map('trim', explode(',', $job->target_college))));
+        if (empty($colleges)) return;
+
+        $dedupKey = 'job-posted::' . $job->id;
+
+        $targetAlumniIds = Alumni::whereHas('course', function ($q) use ($colleges) {
+                $q->whereIn('college', $colleges);
+            })
+            ->pluck('id');
+
+        if ($targetAlumniIds->isEmpty()) return;
+
+        // Alumni who already have a notification row for this exact job
+        // (from the original post) — bump those instead of duplicating.
+        $existingRows = AlumniNotification::where('dedup_key', $dedupKey)
+            ->whereIn('alumni_id', $targetAlumniIds)
+            ->get(['id', 'alumni_id']);
+
+        $existingAlumniIds = $existingRows->pluck('alumni_id')->all();
+        $now = now();
+
+        if ($existingRows->isNotEmpty()) {
+            AlumniNotification::whereIn('id', $existingRows->pluck('id'))
+                ->update([
+                    'read'       => false,
+                    'count'      => DB::raw('count + 1'),
+                    // FIX: refresh created_at too — not just updated_at —
+                    // so the notification sorts and displays as NEW (today),
+                    // instead of keeping the original post date.
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]);
+        }
+
+        $newAlumniIds = $targetAlumniIds->diff($existingAlumniIds);
+        if ($newAlumniIds->isEmpty()) return;
+
+        $message = $job->job_title . ' at ' . $job->company_name .
+                   ($job->location ? ' — ' . $job->location : '') . '.';
+
+        $rows = $newAlumniIds->map(fn ($alumniId) => [
+            'alumni_id'  => $alumniId,
+            'icon'       => 'briefcase',
+            'title'      => 'New Job Posting',
+            'message'    => $message,
+            'link_route' => 'job.opportunities',
+            'link_label' => 'View Job',
+            'dedup_key'  => $dedupKey,
+            'read'       => false,
+            'count'      => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->all();
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            AlumniNotification::insert($chunk);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  PRIVATE: Auto-sync event notifications for this alumni
     //  Runs on every GET /alumni/notifications so the panel stays current.
     // ─────────────────────────────────────────────────────────────────────────

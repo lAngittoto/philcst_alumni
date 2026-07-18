@@ -9,6 +9,7 @@ use App\Models\JobPosting;
 use App\Models\JobOption;
 use App\Models\AuditLog;
 use App\Http\Controllers\JobController;
+use App\Http\Controllers\AlumniNotificationController;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
@@ -36,7 +37,7 @@ new class extends Component {
     public string $postSalary                       = '';
     public string $postDeadline                     = '';
     public string $postDescription                  = '';
-    public string $postQualifications               = '';
+    public string $postQualifications                = '';
     public string $postApplicationInstructions      = '';
     public array  $postTargetColleges               = [];
     public array  $postErrors                       = [];
@@ -523,31 +524,21 @@ new class extends Component {
             severity: 'info'
         );
 
-
-
-
-        // ── NOTIFY ALUMNI (NEW) ─────────────────────────────────────────────
-        // This was missing entirely: creating a job here never told the
-        // alumni-facing notification bell that anything happened, no matter
-        // which organization category was chosen (PHILCST / Partner Company /
-        // Custom all flow through this same savePost() method, so this one
-        // dispatch covers all three). The alumni layout's notification store
-        // already had grouping logic ready for a "job-posted" event (icon
-        // 'briefcase', dedup_key prefix 'job-posted::') — it just never had
-        // an event to listen for, since nothing here was ever dispatching it.
+        // ── NOTIFY ALUMNI (server-side, direct DB insert) ───────────────────
+        // Was previously $this->dispatch('job-posted', [...]) — a client-side
+        // `window` CustomEvent that only ever fired inside THIS organizer's
+        // own browser tab. The alumni layout's `job-posted` listener lives in
+        // a completely different person's session, so it could never receive
+        // it — there is no realtime transport (no broadcast/Pusher/Echo)
+        // wiring the two tabs together. That's why "New Job Posting" never
+        // showed up for alumni no matter how many jobs got posted.
         //
-        // This mirrors exactly how 'profile-updated' / 'event-announced' /
-        // 'employment-updated' are dispatched elsewhere in the codebase:
-        // $this->dispatch(...) from a Volt component fires a `window`
-        // CustomEvent of the same name, which the alumni layout's plain
-        // window.addEventListener(...) picks up and turns into a saved,
-        // polled notification.
-        $this->dispatch('job-posted', [
-            'id'             => $job->id,
-            'title'          => $job->job_title,
-            'company'        => $job->company_name,
-            'target_college' => $job->target_college,
-        ]);
+        // Fix: call the controller method directly, here on the server,
+        // right after the JobPosting row exists. This inserts one
+        // alumni_notifications row per targeted alumni immediately —
+        // no client-side event, no dependency on anyone's browser tab
+        // being open.
+        app(AlumniNotificationController::class)->notifyAlumniOfNewJob($job);
 
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
@@ -855,6 +846,17 @@ new class extends Component {
                 severity:  'info'
             );
 
+            // ── NOTIFY ALUMNI: job just turned ACTIVE (server-side) ─────────
+            // Same reasoning as savePost() above — a client-side window
+            // event can't cross browser sessions, so this has to be a direct
+            // server call. Only fires when the job is actually going
+            // INACTIVE → ACTIVE (not on deactivate). Reuses the same
+            // "New Job Posting" notification shape/dedup_key as a brand-new
+            // post, per instruction — it's still just one job either way.
+            if ($newStatus === 'ACTIVE') {
+                app(AlumniNotificationController::class)->notifyAlumniOfActivatedJob($job);
+            }
+
             $this->dispatch('job-management-updated', [
                 'id'     => $job->id,
                 'title'  => $job->job_title,
@@ -1010,6 +1012,13 @@ new class extends Component {
             newValues: ['status' => $newStatus],
             severity:  'info'
         );
+
+        // ── NOTIFY ALUMNI: restored job landed back on ACTIVE (server-side) ─
+        // Only fires when the restore actually put the job back to ACTIVE
+        // (not when it comes back INACTIVE due to a passed deadline).
+        if ($newStatus === 'ACTIVE') {
+            app(AlumniNotificationController::class)->notifyAlumniOfActivatedJob($job);
+        }
 
         $this->dispatch('job-management-updated', [
             'id'     => $job->id,
@@ -3070,6 +3079,7 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
         </div>
     </div>
+
 </div>
 @endif
 
@@ -3090,113 +3100,11 @@ tr.row-deleted:hover td { opacity: 1; }
     if ($shareSalary)      $fbLines[] = "💰 {$shareSalary}";
     if ($shareDlFormatted) $fbLines[] = "📅 Deadline: {$shareDlFormatted}";
     if ($shareCollege)     $fbLines[] = "🏫 For: {$shareCollege}";
-    $fbLines[] = '';
-    $fbLines[] = "Apply now through the PHILCST Alumni Portal 👇";
-    $fbLines[] = $shareBaseUrl;
-    $fbPostText = implode("\n", $fbLines);
+    $fbLines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
+    $fbLines[] = "👀 Check it out on the Alumni Portal → " . $this->jobsBaseUrl();
+
+    $body = implode("\n", $fbLines);
 @endphp
-<div wire:ignore
-     class="fixed inset-0 z-[70] flex items-center justify-center p-4"
-     x-data="{
-         open: false,
-         copied: false, fbCopied: false, messengerCopied: false,
-         fbText:  {{ json_encode($fbPostText) }},
-         baseUrl: {{ json_encode($shareBaseUrl) }},
-         close() { this.open = false; setTimeout(() => $wire.closeShareModal(), 250); },
-         async copyText(text) {
-             try {
-                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); }
-                 else { const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');document.body.removeChild(ta); }
-             } catch(e) {}
-         },
-         async shareOnFacebook() {
-             await this.copyText(this.fbText); this.fbCopied=true;
-             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             window.open('https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(this.baseUrl),'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             setTimeout(()=>{this.fbCopied=false;},7000);
-         },
-         async shareOnMessenger() {
-             await this.copyText(this.fbText); this.messengerCopied=true;
-             const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-             if (isMobile) { window.location.href='fb-messenger://share/?link='+encodeURIComponent(this.baseUrl); setTimeout(()=>window.open('https://www.messenger.com/','_blank','noopener'),1500); }
-             else { window.open('https://www.messenger.com/','_blank','noopener'); }
-             setTimeout(()=>{this.messengerCopied=false;},7000);
-         },
-         async copyLinkFn() { await this.copyText(this.baseUrl); this.copied=true; setTimeout(()=>this.copied=false,2500); }
-     }"
-     x-init="requestAnimationFrame(() => { open = true })"
-     @keydown.escape.window="close()">
-    <div x-show="open" x-cloak
-         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-         x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-         class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="close()"></div>
-    <div x-show="open" x-cloak
-         x-transition:enter="transition ease-out duration-250" x-transition:enter-start="opacity-0 scale-95 translate-y-4" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-         x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100 scale-100 translate-y-0" x-transition:leave-end="opacity-0 scale-95 translate-y-4"
-         class="relative w-full max-w-5xl bg-white shadow-2xl flex flex-col rounded-2xl overflow-hidden will-change-transform" style="max-height: 90vh;">
-        <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0 bg-white">
-            <h2 class="text-base font-semibold flex items-center gap-2.5 text-[#333333]"><i class="fas fa-share-nodes text-sky-600 text-sm"></i><span>Share Job Posting</span></h2>
-            {{-- CHANGE 2: pure X no loading --}}
-            <button @click="close()" type="button" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100 transition cursor-pointer text-[#333333]"><i class="fas fa-xmark text-base"></i></button>
-        </div>
-        <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
-            <div class="flex-1 px-6 py-5 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-4 overflow-y-auto scroll-c">
-                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0 text-[#333333]">Post preview</p>
-                <div class="rounded-2xl border border-gray-200 overflow-hidden shadow-sm flex-shrink-0">
-                    <div class="border-b border-gray-200 px-5 py-4 bg-[#f9f7fc]">
-                        <p class="font-semibold text-base leading-tight text-[#333333]">{{ $shareJobTitle }}</p>
-                        <p class="text-sm mt-1 font-semibold text-[#555555]">{{ $shareCompany }}</p>
-                        <div class="flex flex-wrap gap-1.5 mt-2">
-                            @if($shareEmpType)<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700"><i class="fas fa-clock text-[10px]"></i>{{ $shareEmpType }}</span>@endif
-                            @if($shareLocation)<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-[#333333]"><i class="fas fa-location-dot text-[10px]"></i>{{ $shareLocation }}</span>@endif
-                            @if($shareExpLevel)<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-purple-100 text-purple-700"><i class="fas fa-layer-group text-[10px]"></i>{{ $shareExpLevel }}</span>@endif
-                            @if($shareSalary)<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700"><i class="fas fa-money-bill-wave text-[10px]"></i>{{ $shareSalary }}</span>@endif
-                            @if($shareDlFormatted)<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-600"><i class="fas fa-calendar-xmark text-[10px]"></i>Deadline: {{ $shareDlFormatted }}</span>@endif
-                            @if($shareCollege)<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700"><i class="fas fa-building-columns text-[10px]"></i>{{ $shareCollege }}</span>@endif
-                        </div>
-                    </div>
-                    @if($shareDescPreview)<div class="px-5 py-3.5 border-b border-gray-100"><p class="text-sm leading-relaxed text-[#333333]">{{ $shareDescPreview }}</p></div>@endif
-                    <div class="px-5 py-2 flex items-center gap-2 bg-[#f9f7fc]"><i class="fas fa-globe text-xs text-[#555555]"></i><span class="text-xs uppercase tracking-wider font-semibold text-[#333333]">{{ strtoupper($shareHost) }}</span></div>
-                </div>
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
-                    <div><p class="text-sm font-semibold text-blue-800 mb-1">How sharing works</p><p class="text-sm text-blue-700 leading-relaxed">Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the full job caption to your clipboard and opens the platform. Just press <kbd class="bg-blue-100 px-1.5 rounded font-mono text-xs">Ctrl+V</kbd> to paste.</p></div>
-                </div>
-                <div class="bg-[#f5eef9] border border-[#d4aaeb] rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-users text-[#7a3f91] text-sm flex-shrink-0 mt-0.5"></i>
-                    <div><p class="text-sm font-semibold text-[#5e2f72]">Post to Batch Chats</p><p class="text-sm mt-0.5 text-purple-700">Sends the job caption directly to all batch chat rooms for <strong>{{ $shareCollege ?: ($this->organizerCollege ?: 'your college') }}</strong>.</p></div>
-                </div>
-            </div>
-            <div class="w-full md:w-80 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto scroll-c">
-                <p class="text-xs font-bold uppercase tracking-widest text-[#333333]">Share via</p>
-                <div x-show="fbCopied" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" class="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-start gap-2"><i class="fas fa-check text-emerald-600 text-sm mt-0.5 flex-shrink-0"></i><div><p class="text-sm font-semibold text-emerald-800">Share dialog opened!</p><p class="text-xs text-emerald-700 mt-0.5">Press Ctrl+V in the post to paste the caption.</p></div></div>
-                <div x-show="messengerCopied" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-2"><i class="fas fa-check text-blue-600 text-sm mt-0.5 flex-shrink-0"></i><div><p class="text-sm font-semibold text-blue-800">Messenger opened!</p><p class="text-xs text-blue-700 mt-0.5">Press Ctrl+V in chat to paste the caption.</p></div></div>
-                <button type="button" @click="shareOnFacebook()" class="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group"><span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg></span><span class="flex-1 text-left"><span class="block font-semibold text-sm">Share on Facebook</span><span class="block text-xs text-white/70 mt-0.5">Opens share dialog · caption copied</span></span><i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i></button>
-                <button type="button" @click="shareOnMessenger()" class="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group" style="background:linear-gradient(to right,#00B2FF,#006AFF);"><span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5"><defs><linearGradient id="mgr_org_jb" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs><path fill="url(#mgr_org_jb)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/></svg></span><span class="flex-1 text-left"><span class="block font-semibold text-sm">Send via Messenger</span><span class="block text-xs text-white/70 mt-0.5">Opens Messenger · caption copied</span></span><i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i></button>
-                <div class="relative my-0.5"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div><div class="relative flex justify-center"><span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white text-[#555555]">or post directly</span></div></div>
-                <button type="button" wire:click="shareToAlumniChats"
-                        wire:loading.attr="disabled"
-                        wire:target="shareToAlumniChats"
-                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-[#d4aaeb] hover:border-[#7a3f91] hover:bg-[#ede4f5] disabled:opacity-60 disabled:cursor-not-allowed bg-[#f5eef9] text-[#5e2f72]">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-[#7a3f91]"><i class="fas fa-users text-white text-sm"></i></span>
-                    <span class="flex-1 text-left">
-                        <span wire:loading.remove wire:target="shareToAlumniChats" class="block font-semibold text-sm">Post to Batch Chats</span>
-                        <span wire:loading wire:target="shareToAlumniChats" class="block font-semibold text-sm"><i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…</span>
-                        <span class="block text-xs mt-0.5 text-[#7a3f91]">Sends to all batch rooms in your college</span>
-                    </span>
-                    <i class="fas fa-paper-plane text-sm text-[#7a3f91]"></i>
-                </button>
-                <div class="relative my-0.5"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div><div class="relative flex justify-center"><span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white text-[#555555]">or copy link</span></div></div>
-                <button type="button" @click="copyLinkFn()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-gray-300 hover:bg-gray-50 font-semibold text-sm transition cursor-pointer group bg-white text-[#333333]"><span class="w-9 h-9 bg-gray-100 group-hover:bg-gray-200 rounded-xl flex items-center justify-center flex-shrink-0 transition"><i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-[#555555]'" class="text-base"></i></span><div class="flex-1 text-left min-w-0"><p class="font-semibold text-sm" :class="copied ? 'text-emerald-600' : ''" x-text="copied ? '✓ Link copied!' : 'Copy Jobs Page Link'"></p><p class="text-xs font-mono mt-0.5 truncate text-[#555555]">{{ $shareBaseUrl }}</p></div></button>
-                {{-- CHANGE 1: Cancel button in share modal has loading --}}
-                <button type="button" @click="close()"
-                        class="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold hover:bg-gray-50 transition mt-1 text-[#333333] flex items-center justify-center gap-1.5">
-                    <i class="fas fa-xmark mr-1.5 text-xs"></i> Close
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
 @endif
 
 <script>

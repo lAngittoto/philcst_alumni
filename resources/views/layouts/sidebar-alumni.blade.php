@@ -71,19 +71,40 @@
         /* ════════════════════════════════════════════════════════
            ALUMNI SIDEBAR — GRADUATE / ALUMNI THEME
         ════════════════════════════════════════════════════════ */
+
+        /*
+         * FIX SUMMARY (collapse button)
+         * ---------------------------------------------------------------
+         * No localStorage, no pre-boot script, no multi-property timing
+         * choreography. Just: `width` transitions on the sidebar, and
+         * `opacity` + `max-width` transition on the text labels, both at
+         * the same 0.2s. `justify-content`/`flex`/`gap` are NOT animated
+         * (they can't be tweened smoothly by browsers anyway — animating
+         * them was pure visual noise that could look like a stray
+         * "half state"). Icon re-centering happens instantly via the
+         * `.is-collapsed` class the moment the boolean flips.
+         */
         .alm-sidebar {
-            transition:
-                width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.25s ease,
-                border-color 0.25s ease;
+            width: 18rem;
+            min-width: 18rem;
+            transition: width 0.2s ease, min-width 0.2s ease;
         }
 
         .alm-sidebar-header {
             background: #7A3F91;
             position: relative;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+        .alm-header-inner {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-width: 0;
+            flex: 1;
+            position: relative;
+            z-index: 10;
         }
         .alm-cap-badge {
             width: 42px; height: 42px;
@@ -110,6 +131,17 @@
             border: 1px solid #E0CFEE;
         }
         .alm-nav-icon { transition: transform 0.2s ease; }
+
+        /* ── Fade/width-collapsible text (labels, brand text, etc.) ──
+           Only opacity + max-width transition, same 0.2s duration as the
+           sidebar's own width transition, so they finish together. ── */
+        .alm-collapsible-text {
+            opacity: 1;
+            max-width: 220px;
+            overflow: hidden;
+            white-space: nowrap;
+            transition: opacity 0.2s ease, max-width 0.2s ease;
+        }
 
         /* ── MENU label row + inline collapse icon-button (desktop) ── */
         .alm-nav-section-row {
@@ -138,10 +170,15 @@
             cursor: pointer;
             font-size: 10px;
             flex-shrink: 0;
-            transition: background-color 0.15s ease, transform 0.2s ease;
+            transition: background-color 0.15s ease, transform 0.15s ease;
         }
         .alm-collapse-icon-btn:hover { background: #E9D8F5; }
         .alm-collapse-icon-btn:active { transform: scale(0.88); }
+        .alm-collapse-icon-btn i {
+            /* icon swap is instant — no separate fade so the arrow direction
+               never lags behind the sidebar's collapsed/expanded state */
+            pointer-events: none;
+        }
 
         /* Logout button + spinner (registrar style) */
         .alm-logout-btn {
@@ -178,23 +215,35 @@
         @keyframes alm-spin { to { transform: rotate(360deg); } }
         .alm-logout-text-swap { display: inline-flex; align-items: center; }
 
-        /* ── Collapsed state (desktop only, manual << >> toggle) ── */
+        /* ── Collapsed state (desktop only, manual << >> toggle) ──
+           Relies on `.alm-collapsible-text` (opacity + max-width transition,
+           now perfectly in sync with the sidebar width transition — same
+           duration/easing on both) instead of `display:none !important`
+           for labels, so everything animates together and settles after
+           the FIRST click every time. ── */
         @media (min-width: 1024px) {
             .alm-sidebar.is-collapsed {
-                width: 5rem;
-                min-width: 5rem;
+                width: 5rem !important;
+                min-width: 5rem !important;
             }
-            .alm-sidebar.is-collapsed .alm-nav-label,
-            .alm-sidebar.is-collapsed .alm-section-label,
-            .alm-sidebar.is-collapsed .alm-active-dot,
-            .alm-sidebar.is-collapsed .alm-logout-label-text,
-            .alm-sidebar.is-collapsed .alm-brand-text {
-                display: none !important;
+
+            .alm-sidebar.is-collapsed .alm-collapsible-text {
+                opacity: 0;
+                max-width: 0;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+                pointer-events: none;
             }
+
             .alm-sidebar.is-collapsed .alm-sidebar-header {
                 justify-content: center;
                 padding-left: 0;
                 padding-right: 0;
+            }
+            .alm-sidebar.is-collapsed .alm-header-inner {
+                flex: 0 0 auto;
+                justify-content: center;
+                gap: 0;
             }
             .alm-sidebar.is-collapsed .alm-nav-link {
                 justify-content: center;
@@ -439,10 +488,20 @@
                             rawDedup.startsWith('message-received::') ||
                             n.icon  === 'comments'
                         );
+
+                        // ── JOB EVENTS — MERGED ──────────────────────────
+                        // A brand-new posting (job-posted::) and an existing
+                        // posting being turned back on (job-status-activated::)
+                        // are both treated as ONE "New Job Postings" bucket —
+                        // it's still just one job either way, so they share
+                        // the same group/day and the same counter instead of
+                        // being split into separate notification types.
                         var isJobEvent = (
                             rawDedup.startsWith('job-posted::') ||
-                            n.icon  === 'briefcase'
+                            rawDedup.startsWith('job-status-activated::') ||
+                            n.icon === 'briefcase'
                         );
+
                         var isCalendarEvent = (
                             rawDedup.startsWith('event-announced::') ||
                             n.icon  === 'calendar'
@@ -466,9 +525,6 @@
 
                             // Only flip the group back to unread if this member
                             // is unread AND hasn't been locally marked read.
-                            // Previously: `if (!n.read) g.read = false;` — this
-                            // let a single stale/unread row drag an otherwise
-                            // fully-read group back into "unread" state.
                             if (!n.read && !localReads.has(n.id)) {
                                 g.read = false;
                             }
@@ -489,9 +545,12 @@
                                 count: n.count || 1,
                                 _ids:  [n.id],
                                 title: isMessageEvent ? (n.title || 'New Message')
-                                     : isJobEvent ? (n.title || 'New Job Posting')
+                                     : isJobEvent ? 'New Job Postings'
                                      : isCalendarEvent ? (n.title || 'New Event Announced')
                                      : n.title,
+                                message: isJobEvent
+                                     ? '1 new job posting(s) today.'
+                                     : n.message,
                                 icon:  isMessageEvent ? 'comments'
                                      : isJobEvent ? 'briefcase'
                                      : isCalendarEvent ? 'calendar'
@@ -749,11 +808,7 @@
         });
 
         // ── New job posting (dispatched by the Organizer Job Management
-        //    Volt component's savePost() method after logAudit()). Uses
-        //    the 'briefcase' icon — same as employment-updated — since
-        //    isJobEvent in _groupByDay() already treats dedup_key prefix
-        //    'job-posted::' as the primary signal (icon is just a
-        //    fallback), so grouping/badges stay correct either way.
+        //    Volt component's savePost() method after logAudit()).
         window.addEventListener('job-posted', function (e) {
             var d = _alumniDetail(e);
             _saveAlumniNotif({
@@ -763,6 +818,36 @@
                 link_route: 'job.opportunities',
                 link_label: 'View Job',
                 dedup_key:  'job-posted::' + (d.id || ''),
+            });
+        });
+
+        // ── Job posting status changes (dispatched by the Organizer Job
+        //    Management Volt component's executeToggleStatus() and
+        //    executeRestoreJob() methods as 'job-management-updated', with
+        //    an `action` of 'activated' | 'deactivated' | 'restored').
+        //
+        //    ONLY 'activated' actually notifies the alumni now, and it's
+        //    saved with the SAME 'job-posted::'-style shape (icon:
+        //    'briefcase', title: 'New Job Posting') so _groupByDay() folds
+        //    it straight into the same "New Job Postings" bucket as a
+        //    brand-new post — it's still just one job either way.
+        //
+        //    'deactivated' and 'restored' are intentionally ignored here —
+        //    no notification is created for those, per instruction: only
+        //    new jobs and activated jobs should ever notify alumni.
+        window.addEventListener('job-management-updated', function (e) {
+            var d      = _alumniDetail(e);
+            var action = d.action || 'updated';
+
+            if (action !== 'activated') return;
+
+            _saveAlumniNotif({
+                icon:       'briefcase',
+                title:      'New Job Posting',
+                message:    (d.title || 'A job') + ' is now open and visible to alumni.',
+                link_route: 'job.opportunities',
+                link_label: 'View Job',
+                dedup_key:  'job-status-activated::' + (d.id || '') + '::' + Math.floor(Date.now() / 60000),
             });
         });
 
@@ -829,15 +914,23 @@
     </script>
 </head>
 
+
 <body
     class="antialiased"
     x-data="{
         open: false,
-        sidebarCollapsed: localStorage.getItem('alm_sidebar_collapsed') === '1',
+        sidebarCollapsed: false,
         loggingOut: false,
-        profileComplete: {{ (bool)(auth()->user()?->alumni?->profile_completed ?? false) ? 'true' : 'false' }}
+        profileComplete: {{ (bool)(auth()->user()?->alumni?->profile_completed ?? false) ? 'true' : 'false' }},
+        toggleSidebar() {
+            // Plain in-memory boolean. No localStorage, no pre-boot script,
+            // no persistence layer of any kind — just flip it. Every visual
+            // consequence (icon direction, text fade, widths) is a pure
+            // :class/:title binding off this exact boolean, so what you see
+            // always matches this value with zero extra moving parts.
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+        }
     }"
-    x-init="$watch('sidebarCollapsed', value => localStorage.setItem('alm_sidebar_collapsed', value ? '1' : '0'))"
     x-on:profile-updated.window="profileComplete = $event.detail.completed"
     @click="$store.alumniNotifs && $store.alumniNotifs.open && $store.alumniNotifs.close()">
 
@@ -864,18 +957,23 @@
             '-translate-x-full': !open,
             'is-collapsed': sidebarCollapsed
         }"
-        class="alm-sidebar fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform
+        class="alm-sidebar fixed inset-y-0 left-0 z-50 transform
                lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
 
-        {{-- Sidebar header — graduate-themed (purple, cap badge) --}}
-        <div class="alm-sidebar-header flex items-center h-24 px-5 shrink-0">
-            <div class="flex items-center gap-3 min-w-0 flex-1 relative z-10">
+        {{-- Sidebar header — graduate-themed (purple, cap badge).
+             Text elements use `.alm-collapsible-text` (opacity + max-width
+             transition, now perfectly synced with the sidebar's own 0.2s
+             width transition — same duration/easing everywhere) instead of
+             `display:none !important`, so the collapse settles correctly
+             after exactly one click. --}}
+        <div class="alm-sidebar-header h-24 px-5 shrink-0">
+            <div class="alm-header-inner">
                 <div class="alm-cap-badge">
                     <i class="fa-solid fa-graduation-cap text-white" style="font-size:17px;"></i>
                 </div>
-                <div class="min-w-0 alm-brand-text">
+                <div class="min-w-0 alm-collapsible-text">
                     <h1 class="text-[19px] font-bold tracking-tight text-white leading-tight truncate">
                         Alumni<span class="font-semibold text-white/70">Portal</span>
                     </h1>
@@ -890,13 +988,32 @@
         <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
 
             <div class="alm-nav-section-row">
-                <p class="alm-section-label">MENU</p>
+                <p class="alm-section-label alm-collapsible-text">MENU</p>
+
+                {{-- Collapse/expand toggle button.
+                     Icon direction is a direct, one-to-one ternary off the
+                     SAME `sidebarCollapsed` boolean the sidebar width and
+                     text fades use — so it can never point the "wrong way"
+                     or lag behind: collapsed → show angles-right (meaning
+                     "click to expand"), expanded → show angles-left
+                     (meaning "click to collapse").
+
+                     IMPORTANT: the <i> tag carries a STATIC default class
+                     of `fa-angles-left` that matches the default Alpine
+                     state (`sidebarCollapsed: false`, i.e. expanded). This
+                     is what was missing before — with no static fallback
+                     class, the icon had nothing to render before Alpine
+                     finished hydrating on the client, so on any slow
+                     paint/hydration you'd briefly see the wrong (or no)
+                     arrow. Now the static class already matches truth on
+                     first paint, and Alpine's :class binding only takes
+                     over cleanly after that — no flash, no mismatch. --}}
                 <button type="button"
-                        @click="sidebarCollapsed = !sidebarCollapsed"
-                        title="Collapse sidebar"
+                        @click.stop="toggleSidebar()"
+                        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
                         class="alm-collapse-icon-btn hidden lg:flex">
                     <i class="fas"
-                       :class="sidebarCollapsed ? 'fa-angles-right' : 'fa-angles-left'"
+                       :class="{ 'fa-angles-right': sidebarCollapsed, 'fa-angles-left': !sidebarCollapsed }"
                        style="font-size:11px;line-height:1;"></i>
                 </button>
             </div>
@@ -957,13 +1074,13 @@
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="alm-nav-label font-medium tracking-wide flex-1 text-[14px]
+                    <span class="alm-nav-label alm-collapsible-text font-medium tracking-wide flex-1 text-[14px]
                                  {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
-                        <span class="alm-active-dot ml-auto w-1.5 h-6 rounded-full shrink-0"
+                        <span class="alm-active-dot alm-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
                               style="background:#7A3F91;"></span>
                     @endif
                 </a>
@@ -983,13 +1100,13 @@
                     <template x-if="!loggingOut">
                         <span class="alm-logout-text-swap">
                             <i class="fa-solid fa-right-from-bracket mr-2"></i>
-                            <span class="alm-logout-label-text">Logout</span>
+                            <span class="alm-logout-label-text alm-collapsible-text">Logout</span>
                         </span>
                     </template>
                     <template x-if="loggingOut">
                         <span class="alm-logout-text-swap">
                             <span class="alm-logout-spinner mr-2"></span>
-                            <span class="alm-logout-label-text">Logging out…</span>
+                            <span class="alm-logout-label-text alm-collapsible-text">Logging out…</span>
                         </span>
                     </template>
                 </button>
@@ -1203,7 +1320,7 @@
                                         class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                         style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                                background:#7A3F91;">
-                                        EMPLOYMENT
+                                        NEW JOB
                                     </span>
 
                                     <span
