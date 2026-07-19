@@ -32,15 +32,18 @@ new class extends Component {
     public bool  $showModal = false;
     public array $modalData = [];
 
-    // ── NEW: tracks the last seen emp update timestamp so we only notify once ──
+    // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
 
+    // NOTE: filterStatus / filterCourse deliberately removed from queryString.
+    // Deep-linking from the dashboard now goes exclusively through the
+    // session handoff below (session('organizer_employment_filter')), so the
+    // browser URL always stays clean (/organizer/alumni/employment) instead
+    // of showing ?course=BSED or ?status=employed.
     protected $queryString = [
         'search'          => ['except' => ''],
-        'filterStatus'    => ['except' => ''],
         'filterRelevance' => ['except' => ''],
         'filterBatch'     => ['except' => ''],
-        'filterCourse'    => ['except' => ''],
     ];
 
     public function mount(): void
@@ -68,9 +71,17 @@ new class extends Component {
                 ->toArray();
         }
 
-        // Auto-apply filter from dashboard card click
+        // Deep-link filters coming from the dashboard's clickable tiles
+        // (Alumni per Program rows, Employment Snapshot tiles). The
+        // dashboard stashes the target filter into the session right before
+        // redirecting here, so the filter is applied on load with a fully
+        // clean URL — no ?course= or ?status= query params ever appear.
         $sessionFilter = session()->pull('organizer_employment_filter', null);
-        if ($sessionFilter !== null && $sessionFilter !== '') {
+        if (is_array($sessionFilter)) {
+            $this->filterStatus = $sessionFilter['status'] ?? '';
+            $this->filterCourse = $sessionFilter['course'] ?? '';
+        } elseif (is_string($sessionFilter) && $sessionFilter !== '') {
+            // backward-compat: older single-value session payload
             $this->filterStatus = $sessionFilter;
         }
 
@@ -109,7 +120,7 @@ new class extends Component {
             ->count();
     }
 
-    // ── NEW: called by JS polling every 15s to check for new emp updates ──────
+    // ── called by JS polling every 15s to check for new emp updates ──────
     public function checkEmploymentUpdates(): void
     {
         $q = DB::table('employment_trackings as et')
@@ -321,7 +332,7 @@ new class extends Component {
 
 }; ?>
 
-<div class="flex flex-col" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col">
 
 <style>
 .ae-hover-tip {
@@ -402,6 +413,40 @@ select.ae-filter-input.ae-active {
     user-select: none;
 }
 
+/* ── Collapsible stat-cards panel ──
+   Uses the CSS grid-template-rows 1fr/0fr trick so the collapse/expand
+   is a smooth height animation without needing JS to measure content
+   height (which is what makes accordion/sidebar-style toggles feel
+   "in/out"). */
+.ae-cards-collapse {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows .32s ease;
+}
+.ae-cards-collapse.ae-cards-closed { grid-template-rows: 0fr; }
+.ae-cards-inner { overflow: hidden; min-height: 0; }
+
+.ae-cards-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 0.65rem;
+    background: #fff;
+    border: 1px solid #E8E0F0;
+    color: #7a3f91;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background-color .15s, border-color .15s, transform .15s;
+    flex-shrink: 0;
+}
+.ae-cards-toggle-btn:hover { background: #f5f0fa; border-color: #c4b5d4; }
+.ae-cards-toggle-btn:active { transform: scale(0.96); }
+.ae-cards-toggle-btn i { transition: transform .3s ease; }
+
 .ae-table-block {
     display: flex;
     flex-direction: column;
@@ -409,8 +454,6 @@ select.ae-filter-input.ae-active {
     overflow: hidden;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    flex: 1;
-    min-height: 0;
 }
 .ae-table-block-filter {
     background: #F5F5F5;
@@ -502,10 +545,10 @@ select.ae-filter-input.ae-active {
 </div>
 
 {{-- MAIN LAYOUT --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full">
 
     {{-- PAGE HEADER --}}
-    <div class="flex items-center gap-4 flex-shrink-0">
+    <div class="flex items-center gap-4 flex-shrink-0" x-data="{ cardsOpen: true }">
         <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
              style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
             <i class="fas fa-chart-line text-white text-lg"></i>
@@ -527,135 +570,142 @@ select.ae-filter-input.ae-active {
             </p>
         </div>
 
-        {{-- Live polling indicator --}}
-        <div class="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-100"
-             title="Auto-checking for employment updates every 15 seconds">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span class="text-xs font-semibold text-emerald-700 hidden sm:inline">Live</span>
+        {{-- Stat cards collapse toggle (replaces the old "Live" indicator) --}}
+        <button type="button"
+                @click="cardsOpen = !cardsOpen"
+                class="ae-cards-toggle-btn ml-auto">
+            <i class="fas fa-chevron-up" :class="!cardsOpen ? 'rotate-180' : ''"></i>
+            <span x-text="cardsOpen ? 'Hide Stats' : 'Show Stats'"></span>
+        </button>
+
+    {{-- STAT CARDS (collapsible) --}}
+    <div class="ae-cards-collapse w-full" :class="!cardsOpen ? 'ae-cards-closed' : ''">
+        <div class="ae-cards-inner">
+            <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 pt-1">
+
+                {{-- Total Alumni --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow" style="background:#7A3F91;">
+                            <i class="fa-solid fa-users text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">All</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalAlumni }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Total Alumni</p>
+                </div>
+
+                {{-- Employed --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
+                            <i class="fa-solid fa-briefcase text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 uppercase">Work</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalEmployed }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Employed</p>
+                    @if($totalAlumni > 0)
+                        <div class="mt-2 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-emerald-500 rounded-full" style="width:{{ min(($totalEmployed/max($totalAlumni,1))*100,100) }}%;"></div>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Self-Employed --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
+                            <i class="fa-solid fa-store text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">Self</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalSelf }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Self-Employed</p>
+                    @if($totalAlumni > 0)
+                        <div class="mt-2 h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-blue-500 rounded-full" style="width:{{ min(($totalSelf/max($totalAlumni,1))*100,100) }}%;"></div>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Unemployed --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
+                            <i class="fa-solid fa-circle-pause text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Idle</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalUnemployed }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Unemployed</p>
+                    @if($totalAlumni > 0)
+                        <div class="mt-2 h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-amber-400 rounded-full" style="width:{{ min(($totalUnemployed/max($totalAlumni,1))*100,100) }}%;"></div>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Not Filled --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
+                            <i class="fa-solid fa-circle-question text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-[#666666] border border-gray-200 uppercase">N/A</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalNotFilled }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Not Filled</p>
+                    @if($totalAlumni > 0)
+                        <div class="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="h-full bg-gray-400 rounded-full" style="width:{{ min(($totalNotFilled/max($totalAlumni,1))*100,100) }}%;"></div>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Local --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
+                            <i class="fa-solid fa-house text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-100 uppercase">PH</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalLocal }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Local</p>
+                    @if($totalAlumni > 0)
+                        <div class="mt-2 h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-teal-500 rounded-full" style="width:{{ min(($totalLocal/max($totalAlumni,1))*100,100) }}%;"></div>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- OFW --}}
+                <div class="ae-stat-card">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
+                            <i class="fa-solid fa-plane-departure text-white text-base"></i>
+                        </div>
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-100 uppercase">OFW</span>
+                    </div>
+                    <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalOFW }}</p>
+                    <p class="text-sm text-[#666666] mt-1 font-normal">Abroad (OFW)</p>
+                    @if($totalAlumni > 0)
+                        <div class="mt-2 h-1.5 bg-orange-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-orange-500 rounded-full" style="width:{{ min(($totalOFW/max($totalAlumni,1))*100,100) }}%;"></div>
+                        </div>
+                    @endif
+                </div>
+
+            </div>
         </div>
     </div>
+    {{-- /STAT CARDS --}}
 
-    {{-- STAT CARDS --}}
-    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0">
-
-        {{-- Total Alumni --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow" style="background:#7A3F91;">
-                    <i class="fa-solid fa-users text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">All</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalAlumni }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Total Alumni</p>
-        </div>
-
-        {{-- Employed --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
-                    <i class="fa-solid fa-briefcase text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 uppercase">Work</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalEmployed }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Employed</p>
-            @if($totalAlumni > 0)
-                <div class="mt-2 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-emerald-500 rounded-full" style="width:{{ min(($totalEmployed/max($totalAlumni,1))*100,100) }}%;"></div>
-                </div>
-            @endif
-        </div>
-
-        {{-- Self-Employed --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
-                    <i class="fa-solid fa-store text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">Self</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalSelf }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Self-Employed</p>
-            @if($totalAlumni > 0)
-                <div class="mt-2 h-1.5 bg-blue-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-blue-500 rounded-full" style="width:{{ min(($totalSelf/max($totalAlumni,1))*100,100) }}%;"></div>
-                </div>
-            @endif
-        </div>
-
-        {{-- Unemployed --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
-                    <i class="fa-solid fa-circle-pause text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Idle</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalUnemployed }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Unemployed</p>
-            @if($totalAlumni > 0)
-                <div class="mt-2 h-1.5 bg-amber-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-amber-400 rounded-full" style="width:{{ min(($totalUnemployed/max($totalAlumni,1))*100,100) }}%;"></div>
-                </div>
-            @endif
-        </div>
-
-        {{-- Not Filled --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
-                    <i class="fa-solid fa-circle-question text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-[#666666] border border-gray-200 uppercase">N/A</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalNotFilled }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Not Filled</p>
-            @if($totalAlumni > 0)
-                <div class="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div class="h-full bg-gray-400 rounded-full" style="width:{{ min(($totalNotFilled/max($totalAlumni,1))*100,100) }}%;"></div>
-                </div>
-            @endif
-        </div>
-
-        {{-- Local --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
-                    <i class="fa-solid fa-house text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-100 uppercase">PH</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalLocal }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Local</p>
-            @if($totalAlumni > 0)
-                <div class="mt-2 h-1.5 bg-teal-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-teal-500 rounded-full" style="width:{{ min(($totalLocal/max($totalAlumni,1))*100,100) }}%;"></div>
-                </div>
-            @endif
-        </div>
-
-        {{-- OFW --}}
-        <div class="ae-stat-card">
-            <div class="flex items-start justify-between mb-3">
-                <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
-                    <i class="fa-solid fa-plane-departure text-white text-base"></i>
-                </div>
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-100 uppercase">OFW</span>
-            </div>
-            <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalOFW }}</p>
-            <p class="text-sm text-[#666666] mt-1 font-normal">Abroad (OFW)</p>
-            @if($totalAlumni > 0)
-                <div class="mt-2 h-1.5 bg-orange-100 rounded-full overflow-hidden">
-                    <div class="h-full bg-orange-500 rounded-full" style="width:{{ min(($totalOFW/max($totalAlumni,1))*100,100) }}%;"></div>
-                </div>
-            @endif
-        </div>
-
-    </div>
+    </div>{{-- /page header + cards x-data scope --}}
 
     {{-- UNIFIED BLOCK --}}
-    <div class="ae-table-block min-h-0">
+    <div class="ae-table-block">
 
         {{-- FILTER BAR --}}
         <div class="ae-table-block-filter flex flex-wrap gap-2 items-center">
@@ -696,11 +746,11 @@ select.ae-filter-input.ae-active {
                 <option value="no">Not Related</option>
             </select>
 
-            {{-- Course --}}
+            {{-- Programs (formerly "Courses") --}}
             @if($courses->isNotEmpty())
                 <select wire:model.live="filterCourse"
                         class="ae-filter-input {{ $filterCourse ? 'ae-active' : '' }}">
-                    <option value="">All Courses</option>
+                    <option value="">All Programs</option>
                     @foreach($courses as $c)
                         <option value="{{ $c->code }}">{{ $c->code }}</option>
                     @endforeach
@@ -764,10 +814,10 @@ select.ae-filter-input.ae-active {
         </div>
 
         {{-- TABLE WRAPPER --}}
-        <div class="relative flex-1 min-h-0 flex flex-col">
+        <div class="relative flex flex-col">
 
             @if($rows->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff;"
+            <div class="overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff; max-height: 55vh;"
                  wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
                 <table class="w-full bg-white border-collapse">
@@ -775,7 +825,7 @@ select.ae-filter-input.ae-active {
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10" style="color:#555555;">#</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Alumni</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Course</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Program</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#555555;">Batch</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Job Title</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#555555;">Email Address</th>
@@ -912,7 +962,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             @else
-            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-users-slash text-xl text-gray-400"></i>
                 </div>
@@ -1070,9 +1120,17 @@ select.ae-filter-input.ae-active {
             : asset('storage/alumni-photos/default.png')
         );
 @endphp
+{{-- x-data + wire:click.self on the backdrop lets Alpine manage this element
+     properly (fixes the escape-key/$wire scope) and lets clicking the dark
+     backdrop close the modal too. @click.stop on the inner card stops that
+     backdrop handler from firing when you click inside the card itself, so
+     it never intercepts clicks meant for the X button. --}}
 <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4"
+     x-data
+     wire:click.self="closeModal"
      @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl w-full max-w-lg max-h-[95vh] sm:max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]"
+         @click.stop
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
          x-transition:enter-end="opacity-100 scale-100 translate-y-0">
@@ -1091,7 +1149,10 @@ select.ae-filter-input.ae-active {
                     <p class="text-xs text-white/70 font-mono mt-0.5">{{ $modalData['student_id'] ?? '—' }}</p>
                 </div>
             </div>
-            <button wire:click="closeModal"
+            <button type="button"
+                    wire:click="closeModal"
+                    wire:loading.attr="disabled"
+                    wire:target="closeModal"
                     class="ae-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
                 <i class="fa-solid fa-xmark text-base"></i>
             </button>
@@ -1104,7 +1165,7 @@ select.ae-filter-input.ae-active {
                 <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
                     @foreach([
-                        'Course'  => $md['course_code']    ?? '—',
+                        'Program' => $md['course_code']    ?? '—',
                         'Batch'   => $md['batch']          ?? '—',
                         'Gender'  => $md['gender']         ?? '—',
                         'Contact' => $md['contact_number'] ?? '—',
@@ -1159,7 +1220,7 @@ select.ae-filter-input.ae-active {
                             </div>
                         @endforeach
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] sm:col-span-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-1.5">Job Related to Course?</p>
+                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-1.5">Job Related to Program?</p>
                             @if($relModal)
                                 <p class="text-sm font-semibold text-[#333333]">{{ $relModal[0] }}</p>
                             @else
@@ -1234,49 +1295,62 @@ select.ae-filter-input.ae-active {
     document.addEventListener('livewire:updated', bindRows);
 
     // ── Employment update polling — every 15 seconds ───────────────────────
-    // Calls the Livewire method checkEmploymentUpdates() which:
-    //   1. Queries DB for records newer than lastSeenEmpAt
-    //   2. Dispatches `employment-updated` browser event for each one
-    //   3. The layout's existing `employment-updated` listener saves the notif
-    var _empPollTimer = null;
+    // Calls the Livewire method checkEmploymentUpdates() on THIS component.
+    //
+    // We find this exact Volt component instance by walking up from this
+    // <script> tag — which is always rendered inside this component's root
+    // element — to the nearest [wire:id] ancestor. That is guaranteed to be
+    // alumni-employment, instead of searching the whole page for a
+    // "close enough" match.
+    var _empPollTimer  = null;
+    var _thisComponent = null;
+
+    function resolveThisComponent() {
+        if (_thisComponent) return _thisComponent;
+        if (typeof Livewire === 'undefined') return null;
+
+        var scriptEl = document.currentScript;
+        var rootEl   = scriptEl ? scriptEl.closest('[wire\\:id]') : null;
+
+        if (rootEl) {
+            var id = rootEl.getAttribute('wire:id');
+            try {
+                var comp = Livewire.find(id);
+                if (comp) {
+                    _thisComponent = comp;
+                    return comp;
+                }
+            } catch (e) { /* fall through to safe no-op below */ }
+        }
+        return null;
+    }
+
+    function pollOnce() {
+        var comp = resolveThisComponent();
+        if (!comp || typeof comp.call !== 'function') return;
+
+        try {
+            var result = comp.call('checkEmploymentUpdates');
+            if (result && typeof result.catch === 'function') {
+                result.catch(function () { /* silent — non-fatal poll miss */ });
+            }
+        } catch (e) {
+            _thisComponent = null;
+        }
+    }
 
     function startEmpPolling() {
         if (_empPollTimer) clearInterval(_empPollTimer);
-        _empPollTimer = setInterval(function () {
-            if (typeof Livewire !== 'undefined') {
-                // Find this component and call its method
-                var comp = Livewire.find(
-                    document.querySelector('[wire\\:id]') &&
-                    document.querySelector('[wire\\:id]').getAttribute('wire:id')
-                );
-                if (comp) {
-                    comp.call('checkEmploymentUpdates');
-                } else {
-                    // Fallback: call on first Livewire component found
-                    Livewire.all().forEach(function(c) {
-                        if (c.__instance && c.__instance.effects) {
-                            try { c.call('checkEmploymentUpdates'); } catch(e) {}
-                        }
-                    });
-                }
-            }
-        }, 15000); // poll every 15 seconds
+        _thisComponent = null; // re-resolve fresh after every (re)start
+        _empPollTimer = setInterval(pollOnce, 15000); // poll every 15 seconds
     }
 
-    // Start polling after Livewire is ready
-    document.addEventListener('livewire:initialized', function () {
-        startEmpPolling();
-    });
-    // Also restart after navigation
-    document.addEventListener('livewire:navigated', function () {
-        startEmpPolling();
-    });
-    // Immediate start if Livewire already loaded
+    document.addEventListener('livewire:initialized', startEmpPolling);
+    document.addEventListener('livewire:navigated', startEmpPolling);
     if (typeof Livewire !== 'undefined') {
         setTimeout(startEmpPolling, 500);
     }
 
-    // Stop polling when page is hidden to save resources
     document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'hidden') {
             if (_empPollTimer) clearInterval(_empPollTimer);

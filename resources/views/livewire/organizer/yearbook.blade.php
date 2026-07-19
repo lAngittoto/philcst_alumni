@@ -16,15 +16,24 @@ new class extends Component {
     public string $course = '';
     public int    $page   = 1;
 
+    public string $organizerDepartment = '';
+
     protected $queryString = [];
 
-    const PER_PAGE = 200;
+    const PER_PAGE = 100;
 
     public function mount(): void
     {
         if (!auth()->check() || !auth()->user()?->organizer) {
             abort(403, 'Access denied. Organizers only.');
         }
+
+        // Used only to highlight the organizer's own college section
+        // (glowing badge) among the full directory below — does NOT
+        // restrict which alumni are visible.
+        $this->organizerDepartment = DB::table('organizer')
+            ->where('user_id', auth()->id())
+            ->value('department') ?? '';
     }
 
     public function updatingBatch():  void { $this->page = 1; }
@@ -65,6 +74,18 @@ new class extends Component {
         return '2_' . $lower;
     }
 
+    /**
+     * Organizer sees EVERY alumnus, regardless of batch or college —
+     * unlike the alumni-facing yearbook (which is locked to the logged-in
+     * alumni's own batch for privacy). No batch/college restriction is
+     * applied here beyond whatever the organizer explicitly picks in the
+     * filter bar. This is intentional and unchanged from before.
+     *
+     * Section headers are grouped by COURSE/PROGRAM (unchanged, back to
+     * original behavior). Within each course group, members are sorted
+     * by BATCH descending first (latest year, e.g. 2026, on top), then
+     * A-Z (last name, then first name) within the same batch year.
+     */
     #[Computed]
     public function groupedAlumni()
     {
@@ -89,21 +110,32 @@ new class extends Component {
         if ($this->batch !== '') $q->where('batch', $this->batch);
         if ($this->course !== '') $q->where('course_code', $this->course);
 
-        $all = $q->orderByDesc('batch')
-                 ->orderBy('last_name')
-                 ->orderBy('first_name')
-                 ->get();
+        $all = $q->get();
 
-        $courseMap = $this->courses->keyBy('code');
+        $courseMap   = $this->courses->keyBy('code');
+        $collegeMap  = DB::table('courses')->pluck('college', 'code');
+        $myDept      = $this->organizerDepartment;
 
         $grouped = $all->groupBy('course_code')
-            ->map(function ($members, $code) use ($courseMap) {
-                $name = $courseMap[$code]?->name ?? $code;
+            ->map(function ($members, $code) use ($courseMap, $collegeMap, $myDept) {
+                $name    = $courseMap[$code]?->name ?? $code;
+                $college = $collegeMap[$code] ?? '';
                 return [
-                    'courseCode' => $code,
-                    'courseName' => $name,
-                    'sortKey'    => $this->courseSortKey($name),
-                    'members'    => $members,
+                    'courseCode'  => $code,
+                    'courseName'  => $name,
+                    'sortKey'     => $this->courseSortKey($name),
+                    // Marks this course group as belonging to the
+                    // organizer's own college, for the glowing badge below.
+                    'isMyCollege' => ($myDept !== '' && $college === $myDept),
+                    // Batch descending (latest year first), then A-Z
+                    // (last name, then first name) within the same batch.
+                    'members'     => $members
+                        ->sortBy('first_name')
+                        ->sortBy('last_name')
+                        ->sortByDesc(function ($m) {
+                            return is_numeric($m->batch) ? (int) $m->batch : -PHP_INT_MAX;
+                        })
+                        ->values(),
                 ];
             })
             ->sortBy('sortKey')
@@ -124,62 +156,72 @@ new class extends Component {
         return DB::table('alumni')->whereNull('deleted_at')->count();
     }
 
+    /**
+     * Flattens groupedAlumni into a single ordered list of
+     * ['group' => ..., 'member' => ...] rows, preserving batch order
+     * (latest first) and A-Z order within each batch. This flat list is
+     * what actually gets sliced into pages of exactly PER_PAGE (100)
+     * members — so a page always shows 100 alumni (e.g. "1–100",
+     * "101–200"), even if that means a batch group's cards continue
+     * onto the next page.
+     */
     #[Computed]
-    public function pages(): array
+    public function flatRows(): array
     {
-        $pages   = [];
-        $current = [];
-        $count   = 0;
-
+        $rows = [];
         foreach ($this->groupedAlumni as $group) {
-            $size = $group['members']->count();
-
-            if ($count > 0 && ($count + $size) > self::PER_PAGE) {
-                $pages[]  = $current;
-                $current  = [];
-                $count    = 0;
+            foreach ($group['members'] as $member) {
+                $rows[] = ['group' => $group, 'member' => $member];
             }
-
-            $current[] = $group;
-            $count    += $size;
         }
-
-        if (!empty($current)) $pages[] = $current;
-
-        return $pages;
+        return $rows;
     }
 
     #[Computed]
     public function totalPages(): int
     {
-        return max(1, count($this->pages));
+        return max(1, (int) ceil($this->totalFiltered / self::PER_PAGE));
     }
 
+    /**
+     * Returns the current page's rows re-grouped by batch, so the
+     * template can still render one section header per batch — but the
+     * underlying slice is a strict 100-row window into flatRows(), so
+     * page size is always exactly PER_PAGE (except the last page).
+     * A course group that spans two pages simply gets its header
+     * repeated on both, with only the members that actually fall on
+     * that page.
+     */
     #[Computed]
     public function currentPageGroups(): array
     {
-        return $this->pages[$this->page - 1] ?? [];
+        $offset = ($this->page - 1) * self::PER_PAGE;
+        $slice  = array_slice($this->flatRows, $offset, self::PER_PAGE);
+
+        $out = [];
+        foreach ($slice as $row) {
+            $code = $row['group']['courseCode'];
+            if (!isset($out[$code])) {
+                $out[$code] = $row['group'];
+                $out[$code]['members'] = collect();
+            }
+            $out[$code]['members']->push($row['member']);
+        }
+
+        return array_values($out);
     }
 
     #[Computed]
     public function pageFrom(): int
     {
         if ($this->totalFiltered === 0) return 0;
-        $before = 0;
-        for ($i = 0; $i < $this->page - 1; $i++) {
-            foreach ($this->pages[$i] as $g) $before += $g['members']->count();
-        }
-        return $before + 1;
+        return (($this->page - 1) * self::PER_PAGE) + 1;
     }
 
     #[Computed]
     public function pageTo(): int
     {
-        $sum = 0;
-        for ($i = 0; $i < $this->page; $i++) {
-            foreach (($this->pages[$i] ?? []) as $g) $sum += $g['members']->count();
-        }
-        return $sum;
+        return min($this->page * self::PER_PAGE, $this->totalFiltered);
     }
 
     public function previousPage(): void
@@ -244,225 +286,265 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height"
+     x-data="{
+        setAvailHeight() {
+            const rect = this.$el.getBoundingClientRect();
+            const bottomSafe = 8;
+            const avail = window.innerHeight - rect.top - bottomSafe;
+            this.$el.style.setProperty('--yb-avail-h', avail + 'px');
+        }
+     }"
+     x-init="
+        setAvailHeight();
+        window.addEventListener('resize', () => setAvailHeight());
+        window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
+     ">
 
 <style>
-/* ── Card hover ── */
-.yb-card {
-    transition: border-color .15s ease, box-shadow .15s ease;
-}
-.yb-card:hover {
-    border-color: #c49ed8 !important;
-    box-shadow: 0 4px 14px rgba(122,63,145,.14);
-}
+/* ── Base ──────────────────────────────────────────────── */
+.yb-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
+.yb-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
 
-/* ── Badges ── */
 .yb-section-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 14px;
-    border-radius: 9999px;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: .02em;
-    background: #F3E8FF;
-    color: #7A3F91;
-    border: 1.5px solid #D8B4FE;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 14px; border-radius: 9999px;
+    font-size: 12px; font-weight: 700; letter-spacing: .02em;
+    background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
 }
 .yb-batch-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 10px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    background: #F3E8FF;
-    color: #7A3F91;
-    border: 1.5px solid #D8B4FE;
-}
-.yb-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 12px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .04em;
-    background: rgba(122,63,145,.10);
-    color: #7A3F91;
-    border: 1px solid rgba(122,63,145,.22);
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+    background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
 }
 
-/* ── Scrollbar ── */
+/* ── "My college" glowing section badge ──────────────────
+   Marks the batch group(s) that include at least one alumnus from the
+   organizer's own college among the full directory, so they can find
+   their own section at a glance. Glow lives on the badge only — the
+   cards underneath stay unstyled. ── */
+.yb-section-badge-mine {
+    border-color: #7A3F91 !important;
+    border-width: 1.5px !important;
+    animation: ybSectionGlowPulse 2.2s ease-in-out infinite;
+}
+@keyframes ybSectionGlowPulse {
+    0%, 100% {
+        box-shadow: 0 0 0 2px rgba(122,63,145,.18), 0 3px 10px rgba(122,63,145,.14);
+    }
+    50% {
+        box-shadow: 0 0 0 5px rgba(122,63,145,.30), 0 5px 16px rgba(122,63,145,.28);
+    }
+}
+.yb-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 12px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    background: rgba(122,63,145,.10); color: #7A3F91;
+    border: 1px solid rgba(122,63,145,.22); white-space: nowrap;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────── */
 .yb-scroll::-webkit-scrollbar       { width: 5px; }
 .yb-scroll::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
 .yb-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Loading overlay ── */
-.yb-loading-overlay {
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
+/* ── Filtering progress bar (replaces the old full-screen spinner
+     overlay — thin animated bar under the filter row, same pattern
+     as the alumni-facing yearbook, much less jarring on mobile) ── */
+.yb-filter-progress-track {
+    height: 2px;
+    width: 100%;
+    overflow: hidden;
+    background: transparent;
+    position: relative;
+    flex-shrink: 0;
+}
+.yb-filter-progress-bar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 40%;
+    border-radius: 99px;
+    background: #7A3F91;
+    animation: ybFilterProgress 1s ease-in-out infinite;
+}
+@keyframes ybFilterProgress {
+    0%   { left: -40%; }
+    100% { left: 100%; }
 }
 
+/* ── Entry animation ────────────────────────────────────── */
 @keyframes ybFadeUp {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 .yb-grid-wrap { animation: ybFadeUp .22s cubic-bezier(.4,0,.2,1) both; }
 
-/* ── Filter inputs — match employment page style ── */
+/* ── Search input ───────────────────────────────────────── */
 .yb-search-input {
     padding: 0.5rem 0.75rem 0.5rem 2.25rem;
-    border: 1px solid #E8E0F0;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    background: #fff;
-    color: #333333;
+    border: 1px solid #E8E0F0; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500;
+    background: #fff; color: #333333;
     transition: border-color .15s, box-shadow .15s;
-    outline: none;
-    width: 100%;
+    outline: none; width: 100%;
 }
 .yb-search-input::placeholder { color: #999999; font-weight: 400; }
 .yb-search-input:hover  { border-color: #c4b5d4; }
 .yb-search-input:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 
-/* ── Dropdown trigger — match employment page style ── */
+/* ── Dropdown trigger ───────────────────────────────────── */
 .yb-dd-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #E8E0F0;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    background: #fff;
-    color: #333333;
-    cursor: pointer;
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+    border: 1px solid #E8E0F0; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500;
+    background: #fff; color: #333333;
+    cursor: pointer; white-space: nowrap;
     transition: border-color .15s, box-shadow .15s;
-    outline: none;
-    user-select: none;
-    padding-right: 2.25rem;
+    outline: none; user-select: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
-    background-repeat: no-repeat;
-    background-size: 1.25em 1.25em;
+    background-repeat: no-repeat; background-size: 1.25em 1.25em;
 }
 .yb-dd-btn:hover  { border-color: #c4b5d4; }
 .yb-dd-btn.active { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); color: #7a3f91; }
 .yb-dd-btn:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 
-/* ── Dropdown panel ── */
+/* ── Dropdown panel ─────────────────────────────────────── */
 .yb-dd-panel {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 100%;
-    max-height: 224px;
-    overflow-y: auto;
-    background: #fff;
-    border: 1.5px solid #E8E0F0;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(122,63,145,.13);
-    z-index: 600;
-    padding: 4px;
-    scrollbar-width: thin;
-    scrollbar-color: #d4b8e8 transparent;
+    position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 224px; overflow-y: auto;
+    background: #fff; border: 1.5px solid #E8E0F0;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
+    z-index: 600; padding: 4px;
+    scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
 }
 .yb-dd-panel::-webkit-scrollbar       { width: 4px; }
 .yb-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
-
 .yb-dd-item {
-    display: block;
-    width: 100%;
-    padding: 6px 12px;
-    border-radius: 7px;
-    text-align: left;
-    font-size: 12px;
-    font-weight: 600;
-    color: #333333;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background .12s, color .12s;
+    display: block; width: 100%; padding: 6px 12px;
+    border-radius: 7px; text-align: left;
+    font-size: 12px; font-weight: 600; color: #333333;
+    background: transparent; border: none; cursor: pointer;
+    white-space: nowrap; transition: background .12s, color .12s;
 }
-.yb-dd-item:hover  { background: #F5F0FA; color: #7A3F91; }
-.yb-dd-item.sel    { background: #F0E6F8; color: #7A3F91; }
+.yb-dd-item:hover { background: #F5F0FA; color: #7A3F91; }
+.yb-dd-item.sel   { background: #F0E6F8; color: #7A3F91; }
 
-/* ── Table block (mirrors employment page) ── */
+/* ── Main block ─────────────────────────────────────────── */
 .yb-table-block {
-    display: flex;
-    flex-direction: column;
-    border-radius: 1rem;
-    overflow: hidden;
+    display: flex; flex-direction: column;
+    border-radius: 1rem; overflow: hidden;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    flex: 1;
-    min-height: 0;
+    flex: 1; min-height: 0;
 }
 .yb-filter-bar {
-    background: #F5F5F5;
-    border-bottom: 1px solid #E8E0F0;
-    padding: 0.6rem 0.875rem;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 50;
-    overflow: visible;
+    background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
+    padding: 0.6rem 0.875rem; flex-shrink: 0;
+    position: relative; z-index: 50; overflow: visible;
 }
 .yb-pagination-bar {
     flex-shrink: 0;
     background: linear-gradient(to right, #7a3f91, #9b59b6);
-    padding: 0 1rem;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    border-top: 1px solid rgba(122,63,145,.3);
+    padding: 0 1rem; min-height: 48px;
+    display: flex; align-items: center;
+    justify-content: space-between; gap: 0.5rem;
+    flex-wrap: wrap; border-top: 1px solid rgba(122,63,145,.3);
+    /* Safety net: always pinned to the bottom of the table block,
+       so it can never end up scrolled out of view, no matter how
+       tall the card area ends up being. */
+    position: sticky;
+    bottom: 0;
+    z-index: 30;
 }
-
-/* ── Pagination buttons ── */
 .yb-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 32px; height: 32px; padding: 0 10px;
-    border-radius: 8px; font-size: 12px; font-weight: 700;
-    transition: all .15s;
+    border-radius: 8px; font-size: 12px; font-weight: 700; transition: all .15s;
 }
 .yb-pg-active { background: #fff; color: #7a3f91; }
 .yb-pg-nav    { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.25); }
 .yb-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .yb-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
+
+/* ── Root height ─────────────────────────────────────────
+   Desktop: reserve 180px for surrounding layout chrome.
+   Mobile: instead of guessing a fixed px offset for the
+   topbar (hamburger/bell), --yb-avail-h is measured live via
+   Alpine (window.innerHeight - element's actual top offset),
+   so the block always fits exactly under whatever topbar
+   height the layout actually has, on any device. Falls back
+   to the 100dvh calc if JS hasn't run yet.
+──────────────────────────────────────────────────────── */
+.yb-root-height {
+    height: calc(100vh - 180px);
+    max-height: calc(100vh - 180px);
+    overflow: hidden;
+}
+
+/* ── Mobile responsiveness ──────────────────────────────── */
+@media (max-width: 640px) {
+    .yb-filter-bar { gap: 8px; }
+}
+
+/*
+   Mobile pagination visibility fix:
+   Use the JS-measured --yb-avail-h custom property (falls back
+   to 100dvh if not yet set) so the block height always matches
+   the REAL visible space under the app's topbar. Combined with
+   the sticky pagination bar above, the page/pagination is now
+   guaranteed visible without needing to scroll the outer page.
+*/
+@media (max-width: 767px) {
+    html, body { overflow: hidden !important; }
+
+    .yb-root-height {
+        height: var(--yb-avail-h, 100dvh) !important;
+        max-height: var(--yb-avail-h, 100dvh) !important;
+        overflow: hidden !important;
+    }
+
+    /* Compact header on mobile to free up vertical space */
+    .yb-mobile-subtitle { display: none; }
+    .yb-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
+    .yb-mobile-title { font-size: 1rem !important; }
+
+    .yb-filter-bar { padding: 0.45rem 0.65rem; }
+    .yb-dd-btn, .yb-search-input { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+
+    .yb-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
+    .yb-pagination-bar p { font-size: 11px; }
+
+    .yb-pagination-bar {
+        padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
+    }
+}
 </style>
 
-{{-- ══ MAIN LAYOUT — matches employment page exactly ══ --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
-
     {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-book-open text-white text-lg"></i>
+    <div class="flex flex-col gap-3 flex-shrink-0">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-4">
+                <div class="yb-mobile-header-icon w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
+                     style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                    <i class="fas fa-book-open text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="yb-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
+                    <p class="yb-mobile-subtitle text-xs leading-relaxed mt-0.5" style="color:#555555;">Complete Alumni Directory</p>
+                </div>
             </div>
-            <div>
-                <h1 class="text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                <p class="text-xs leading-relaxed mt-0.5" style="color:#555555;">All Colleges &amp; Courses</p>
+            <div class="flex items-center gap-2">
+                <span class="yb-chip">
+                    <i class="fas fa-graduation-cap text-[10px]"></i>
+                    {{ number_format($this->totalAlumni) }} Alumni
+                </span>
             </div>
-        </div>
-        <div class="flex items-center gap-2">
-            <span class="yb-chip">
-                <i class="fas fa-graduation-cap text-[10px]"></i>
-                {{ number_format($this->totalAlumni) }} Alumni
-            </span>
         </div>
     </div>
 
@@ -521,7 +603,7 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Course dropdown ── --}}
+            {{-- Program dropdown ── --}}
             <div class="relative" x-data="{ open: false }" @click.outside="open = false">
                 <button type="button"
                         @click="open = !open"
@@ -530,7 +612,7 @@ new class extends Component {
                     @if($course !== '')
                         <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
                     @else
-                        <span>All Courses</span>
+                        <span>All Programs</span>
                     @endif
                 </button>
                 <div x-show="open"
@@ -545,7 +627,7 @@ new class extends Component {
                     <button type="button"
                             @click="$wire.set('course', ''); open = false"
                             :class="{ 'sel': $wire.course === '' }"
-                            class="yb-dd-item">All Courses</button>
+                            class="yb-dd-item">All Programs</button>
                     @foreach($this->courses as $c)
                     <button type="button"
                             @click="$wire.set('course', '{{ $c->code }}'); open = false"
@@ -592,49 +674,43 @@ new class extends Component {
             </div>
         </div>
 
+        {{-- Filtering progress bar — replaces the old blurred full-overlay
+             spinner. Same lightweight pattern as the alumni-facing
+             yearbook: a thin animated bar under the filter row, much
+             friendlier on small screens than a blocking overlay. --}}
+        <div class="yb-filter-progress-track" wire:loading wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
+            <div class="yb-filter-progress-bar"></div>
+        </div>
+
         {{-- ── SCROLLABLE CARDS AREA ── --}}
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
              x-data="{ showTop: false }">
 
             <div id="yb-organizer-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-4"
-                 wire:loading.class="opacity-40 pointer-events-none"
+                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4"
+                 wire:loading.class="opacity-50"
                  wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
 
-                {{-- Loading overlay --}}
-                <div wire:loading
-                     wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
-                     class="yb-loading-overlay absolute inset-0 z-20 flex items-center justify-center"
-                     style="background:rgba(243,244,246,.75);">
-                    <div class="flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-xl border bg-white"
-                         style="border-color:#E8E0F0;">
-                        <svg class="animate-spin w-4 h-4" style="color:#7A3F91;"
-                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10"
-                                    stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                        </svg>
-                        <span class="text-xs font-semibold" style="color:#7A3F91;">Loading alumni…</span>
-                    </div>
-                </div>
-
                 @if($this->totalFiltered > 0)
-                <div class="yb-grid-wrap space-y-6">
+                <div class="yb-grid-wrap space-y-2"
+                     wire:key="results-{{ md5($search . '|' . $batch . '|' . $course . '|' . $page) }}">
                     @foreach($this->currentPageGroups as $group)
-                    <div>
-                        {{-- Section header --}}
-                        <div class="flex items-center gap-2 mb-3 px-1">
-                            <span class="yb-section-badge">
-                                <i class="fas fa-bookmark" style="font-size:10px;"></i>
+                    <div wire:key="group-{{ $group['courseCode'] }}">
+                        {{-- Section header — per COURSE/PROGRAM (unchanged) --}}
+                        <div class="flex items-center gap-2 pt-2 pb-2 px-1">
+                            <span class="yb-section-badge {{ $group['isMyCollege'] ? 'yb-section-badge-mine' : '' }}">
                                 {{ $group['courseName'] }}
                             </span>
-                            <span class="text-xs font-semibold ml-auto shrink-0" style="color:#c0a0d8;">
+                            <div class="flex-1 h-px" style="background:#D8B4FE;"></div>
+                            <span class="text-xs font-semibold shrink-0" style="color:#c0a0d8;">
                                 {{ $group['members']->count() }} shown
                             </span>
                         </div>
 
-                        {{-- Card grid --}}
+                        {{-- Card grid — within this course group, sorted by
+                             batch descending (latest year first), then A-Z
+                             (last name, then first name) within same batch --}}
                         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                             @foreach($group['members'] as $alumni)
                             <div wire:key="alum-{{ $alumni->id }}"
@@ -653,21 +729,21 @@ new class extends Component {
                                     </div>
                                 </div>
 
-                               {{-- Card body --}}
-<div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
-    <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
-       style="color:#111111;">
-        {{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}
-    </p>
-    <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
-       style="color:#111111; letter-spacing:0.02em;">
-        {{ $group['courseName'] }}
-    </p>
-    <span class="yb-batch-badge">
-        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
-        Class of {{ $alumni->batch ?? '—' }}
-    </span>
-</div>
+                                {{-- Card body --}}
+                                <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
+                                    <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
+                                       style="color:#111111;">
+                                        {{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}
+                                    </p>
+                                    <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
+                                       style="color:#111111; letter-spacing:0.02em;">
+                                        {{ $group['courseName'] }}
+                                    </p>
+                                    <span class="yb-batch-badge">
+                                        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
+                                        Class of {{ $alumni->batch ?? '—' }}
+                                    </span>
+                                </div>
                             </div>
                             @endforeach
                         </div>
@@ -704,7 +780,7 @@ new class extends Component {
 
         </div>{{-- end scrollable area --}}
 
-        {{-- ── PAGINATION ── --}}
+        {{-- ── PAGINATION (sticky — always visible, no extra scroll needed) ── --}}
         @php
             $total   = $this->totalFiltered;
             $cp      = $this->page;
@@ -716,7 +792,7 @@ new class extends Component {
         @endphp
         <div class="yb-pagination-bar">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
-                Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
+                Showing <strong class="text-white font-bold">{{ number_format($from) }}–{{ number_format($to) }}</strong>
                 of <strong class="text-white font-bold">{{ number_format($total) }}</strong>
                 alumni
                 @if($search || $batch || $course)
@@ -764,7 +840,5 @@ new class extends Component {
         </div>
 
     </div>{{-- /yb-table-block --}}
-
-</div>{{-- /main layout --}}
 
 </div>{{-- /root --}}

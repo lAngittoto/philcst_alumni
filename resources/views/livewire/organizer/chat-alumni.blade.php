@@ -84,6 +84,12 @@ new class extends Component {
     // ── Tick counter — drives staggered work inside the single poll ───────
     public int $pollTick = 0;
 
+    // ── Toolbar-open message (mobile-friendly single toggle) ──────────────
+    public ?int $openToolbarMsgId = null;
+
+    // ── Delete-confirmation modal state ────────────────────────────────────
+    public ?int $confirmDeleteId = null;
+
     // ── Online presence timeout (minutes) — 1 min = offline ──────────────
     private int $onlineMinutes = 1;
 
@@ -152,6 +158,51 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Batch label helper — always "Batch 2026 · BSIT" style, never flipped
+    // ─────────────────────────────────────────────────────────────────────
+    private function batchLabel(string $courseCode, int|string $batch): string
+    {
+        return 'Batch ' . $batch . ' · ' . strtoupper($courseCode);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // College marker helper — MUST match alumni/messenger.blade.php exactly.
+    // The alumni side renames the legacy course_code='' college room to a
+    // 'CLG_<hash>' marker the first time an alumni visits, so we need to
+    // recognize both the legacy empty string AND the marker to find the
+    // real college-wide room instead of mistaking it for a course GC.
+    //
+    // IMPORTANT: this marker is an internal DB identifier ONLY. It must
+    // NEVER be rendered to the user anywhere (room list, header, tooltip,
+    // title attribute, etc). Every display path below always resolves the
+    // human-readable college label instead — see collegeDisplayLabel().
+    // ─────────────────────────────────────────────────────────────────────
+    private function collegeMarker(string $college): string
+    {
+        return 'CLG_' . substr(md5($college), 0, 12);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Human-readable label for ANY room — the single source of truth used
+    // by the room list, chat header, and pin tooltip so a raw CLG_xxxx
+    // marker (or any other internal code) can never leak into the UI.
+    // ─────────────────────────────────────────────────────────────────────
+    private function collegeDisplayLabel(string $department): string
+    {
+        return $department . ' · All Courses & Batches';
+    }
+
+    private function roomDisplayName(array $r): string
+    {
+        return match ($r['type'] ?? '') {
+            'staff'   => 'Staff Chat',
+            'college' => $this->collegeDisplayLabel($r['department'] ?: $this->department),
+            'course'  => strtoupper($r['course_code']) . ' · All Batches GC',
+            default   => $r['name'] ?? 'Group Chat',
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Helper: is this room the alumni-side college-wide room?
     // ─────────────────────────────────────────────────────────────────────
     private function roomIsCollegeWide($row): bool
@@ -198,7 +249,7 @@ new class extends Component {
         $this->pingPresence();
         $this->loadRooms();
         $this->seedNotifiedPointers();
-        
+
         // ─ FIX: CHECK AND DISPATCH NOTIFICATIONS IMMEDIATELY ON MOUNT ─
         // This ensures red dots show up on login without needing to visit chat first
         $this->checkAndDispatchNewMessageNotifications();
@@ -262,7 +313,7 @@ new class extends Component {
 
                 if (! $exists) {
                     DB::table('chat_rooms')->insertGetId([
-                        'name'        => strtoupper($b->course_code) . ' · Batch ' . $b->batch,
+                        'name'        => $this->batchLabel($b->course_code, $b->batch),
                         'course_code' => $b->course_code,
                         'batch'       => (int) $b->batch,
                         'department'  => $this->department,
@@ -417,7 +468,7 @@ new class extends Component {
             }
 
             $count     = count($newMessages);
-            $roomLabel = $room['name'] ?? 'Group Chat';
+            $roomLabel = $this->roomDisplayName($room);
             $bodySnip  = mb_substr($latest->body ?? '', 0, 60);
             $preview   = $bodySnip . (mb_strlen($latest->body ?? '') > 60 ? '…' : '');
 
@@ -487,7 +538,7 @@ new class extends Component {
             $batch       = (int) ($this->room['batch'] ?? 0);
 
             $roomLabel = $this->isCollegeRoom
-                ? ($this->department . ' · All Courses & Batches')
+                ? $this->collegeDisplayLabel($this->department)
                 : ($this->isCourseRoom
                     ? strtoupper($courseCode) . ' All Batches GC'
                     : ($this->room['name'] ?? 'Group Chat'));
@@ -631,10 +682,13 @@ new class extends Component {
         $collegeItem    = null;
 
         if ($this->department) {
+            $marker = $this->collegeMarker($this->department);
             $collegeRoomRow = DB::table('chat_rooms')
                 ->where('department', $this->department)
-                ->where('course_code', '')
                 ->where('batch', 0)
+                ->where(function ($q) use ($marker) {
+                    $q->where('course_code', '')->orWhere('course_code', $marker);
+                })
                 ->first();
         }
 
@@ -694,7 +748,11 @@ new class extends Component {
                 }
             }
 
-            $collegeLabel  = $this->department . ' · All Courses & Batches';
+            // ── FIX: always render the clean human label, NEVER the raw
+            //         CLG_xxxx marker or empty-string course_code. This
+            //         label is used for the room list AND is the same
+            //         string every tooltip / header derives from.
+            $collegeLabel  = $this->collegeDisplayLabel($this->department);
             $matchesSearch = $search === ''
                 || str_contains(strtolower($collegeLabel), strtolower($search))
                 || str_contains(strtolower($this->department), strtolower($search));
@@ -725,10 +783,13 @@ new class extends Component {
         }
 
         // ── 3. Course GC rooms ────────────────────────────────────────
+        $collegeMarkerCode = $this->department ? $this->collegeMarker($this->department) : null;
+
         $courseGcRows = DB::table('chat_rooms as r')
             ->where('r.batch', 0)
             ->where('r.course_code', '!=', '__director__')
             ->where('r.course_code', '!=', '')
+            ->where('r.course_code', 'not like', 'CLG_%')
             ->where(function ($q) {
                 $q->where('r.department', $this->department);
                 if (! empty($this->deptCourseCodes)) {
@@ -804,7 +865,7 @@ new class extends Component {
 
             return [
                 'id'             => $r->id,
-                'name'           => $r->name,
+                'name'           => $label,
                 'course_code'    => $r->course_code,
                 'course_name'    => $courseName,
                 'batch'          => 0,
@@ -901,7 +962,7 @@ new class extends Component {
 
             return [
                 'id'             => $r->id,
-                'name'           => $r->name,
+                'name'           => $self->batchLabel($r->course_code, $r->batch),
                 'course_code'    => $r->course_code,
                 'course_name'    => '',
                 'batch'          => (int) $r->batch,
@@ -929,16 +990,31 @@ new class extends Component {
         $allRooms = $allRooms->merge($courseGcRooms)->merge($batchRooms);
 
         // ── MESSENGER-STYLE SORT ───────────────────────────────────────
+        // Priority: pinned rooms first, unpinned after. Within EACH of
+        // those two groups: unread rooms bubble to the very top (so a red
+        // dot always surfaces before older read chats), then everything
+        // is ordered by most recent activity, and finally alphabetically
+        // for rooms that have no messages yet.
+        $sortGroup = function ($group) {
+            $unread       = $group->filter(fn ($r) => $r['has_unread']);
+            $read         = $group->filter(fn ($r) => ! $r['has_unread']);
+
+            $unreadWithMsg    = $unread->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
+            $unreadWithoutMsg = $unread->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+
+            $readWithMsg    = $read->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
+            $readWithoutMsg = $read->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+
+            return $unreadWithMsg->merge($unreadWithoutMsg)
+                ->merge($readWithMsg)->merge($readWithoutMsg)
+                ->values();
+        };
+
         $pinned   = $allRooms->filter(fn ($r) => $r['is_pinned_room']);
         $unpinned = $allRooms->filter(fn ($r) => ! $r['is_pinned_room']);
 
-        $pinnedWithMsg    = $pinned->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
-        $pinnedWithoutMsg = $pinned->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
-        $pinnedSorted     = $pinnedWithMsg->merge($pinnedWithoutMsg)->values();
-
-        $unpinnedWithMsg    = $unpinned->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
-        $unpinnedWithoutMsg = $unpinned->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
-        $unpinnedSorted     = $unpinnedWithMsg->merge($unpinnedWithoutMsg)->values();
+        $pinnedSorted   = $sortGroup($pinned);
+        $unpinnedSorted = $sortGroup($unpinned);
 
         $this->rooms = $pinnedSorted->merge($unpinnedSorted)->values()->toArray();
     }
@@ -982,6 +1058,8 @@ new class extends Component {
         $this->coordinators        = [];
         $this->staffDirectors      = [];
         $this->staffCoords         = [];
+        $this->openToolbarMsgId    = null;
+        $this->confirmDeleteId     = null;
 
         $maxId = (int) (DB::table('chat_messages')
             ->where('room_id', $id)
@@ -1003,7 +1081,13 @@ new class extends Component {
 
         $this->loadTypingIndicators();
         $this->loadRooms();
-        $this->dispatch('chat-scroll-bottom');
+        $this->dispatch('chat-scroll-bottom-force');
+        $this->dispatch('chat-open-mobile');
+    }
+
+    public function backToList(): void
+    {
+        $this->dispatch('chat-close-mobile');
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1276,10 +1360,28 @@ new class extends Component {
         $this->notifyAlumniInRoom($body);
 
         $this->body = ''; $this->replyTo = null; $this->showMentions = false;
+        $this->openToolbarMsgId = null;
         $this->stopTyping();
         $this->loadMessages();
         $this->loadRooms();
-        $this->dispatch('chat-scroll-bottom');
+        $this->dispatch('chat-scroll-bottom-force');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Toolbar toggle (single open toolbar, mobile-tap friendly)
+    // ─────────────────────────────────────────────────────────────────────
+    public function toggleToolbar(int $msgId): void
+    {
+        $this->openToolbarMsgId = ($this->openToolbarMsgId === $msgId) ? null : $msgId;
+        $this->reactionsPopupMsgId = null;
+        $this->reactionsPopupData  = [];
+    }
+
+    public function closeToolbar(): void
+    {
+        $this->openToolbarMsgId    = null;
+        $this->reactionsPopupMsgId = null;
+        $this->reactionsPopupData  = [];
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1290,6 +1392,7 @@ new class extends Component {
         $msg = collect($this->messages)->firstWhere('id', $id);
         if (! $msg || ! $msg['is_mine']) return;
         $this->editingId = $id; $this->editBody = $msg['body'];
+        $this->openToolbarMsgId = null;
     }
 
     public function saveEdit(): void
@@ -1303,11 +1406,28 @@ new class extends Component {
 
     public function cancelEdit(): void { $this->editingId = null; $this->editBody = ''; }
 
+    // ── Delete confirmation modal flow ──────────────────────────────────────
+    public function askDeleteConfirmation(int $id): void
+    {
+        $msg = collect($this->messages)->firstWhere('id', $id);
+        if (! $msg || ! $msg['is_mine']) return;
+        $this->confirmDeleteId  = $id;
+        $this->openToolbarMsgId = null;
+    }
+
+    public function cancelDelete(): void
+    {
+        $this->confirmDeleteId = null;
+    }
+
     public function unsend(int $id): void
     {
         DB::table('chat_messages')->where('id',$id)->where('sender_type','organizer')->where('sender_id',$this->coordinatorId)
             ->update(['deleted_at'=>now()]);
         DB::table('chat_pins')->where('message_id',$id)->delete();
+        $this->openToolbarMsgId = null;
+        $this->confirmDeleteId  = null;
+        if ($this->editingId === $id) { $this->editingId = null; $this->editBody = ''; }
         $this->loadMessages(); $this->loadRooms();
         if ($this->showPins) $this->loadPins();
     }
@@ -1326,6 +1446,7 @@ new class extends Component {
         } else {
             DB::table('chat_reactions')->insert(['message_id'=>$msgId,'reactor_type'=>'organizer','reactor_id'=>$this->coordinatorId,'reaction'=>$reaction,'created_at'=>now(),'updated_at'=>now()]);
         }
+        $this->openToolbarMsgId = null;
         $this->loadMessages();
         if ($this->reactionsPopupMsgId === $msgId) $this->openReactionsPopup($msgId);
     }
@@ -1370,6 +1491,7 @@ new class extends Component {
         } else {
             DB::table('chat_pins')->insert(['room_id'=>$this->roomId,'message_id'=>$msgId,'pinned_by_type'=>'organizer','pinned_by_id'=>$this->coordinatorId,'created_at'=>now(),'updated_at'=>now()]);
         }
+        $this->openToolbarMsgId = null;
         $this->loadMessages();
         if ($this->showPins) $this->loadPins();
     }
@@ -1379,6 +1501,8 @@ new class extends Component {
         $msg = collect($this->messages)->firstWhere('id',$id);
         if (! $msg) return;
         $this->replyTo = ['id'=>$msg['id'],'body'=>$msg['body'],'name'=>$msg['sender_name']];
+        $this->openToolbarMsgId = null;
+        $this->dispatch('focus-input');
     }
 
     public function clearReply(): void { $this->replyTo = null; }
@@ -1402,6 +1526,12 @@ new class extends Component {
         $this->showPins    = ! $this->showPins;
         $this->showMembers = false;
         if ($this->showPins) $this->loadPins();
+    }
+
+    public function closeSidePanel(): void
+    {
+        $this->showMembers = false;
+        $this->showPins    = false;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1556,18 +1686,236 @@ new class extends Component {
 }; ?>
 
 {{-- ══════════════════════════════════════════════════════════════════════
-     TEMPLATE — wire:poll.1500ms unified poll
+     TEMPLATE — Messenger-style responsive UI (matches alumni messenger)
+     - height: calc(100vh - 180px) to match alumni messenger.blade.php
+     - Mobile: sidebar/chat pane toggle via mobileChatOpen, back button
+     - All action buttons (react/reply/pin/edit/delete) work via a single
+       toggled toolbar (mobile tap-friendly) instead of hover-only x-data
+     - Delete now uses a confirm modal instead of inline yes/no
+     - Batch labels always render "Batch 2026 · BSIT" (never flipped)
+     - Room search now shows a thin animated filtering progress bar,
+       matching the yearbook page, while wire:model.live.debounce is
+       resolving on the server
+     - Pin/unpin tooltip no longer gets clipped/overlapped by the
+       message list — raised z-index + safer positioning
+     - Room names / headers / notification text NEVER leak the raw
+       CLG_xxxx college marker; everything routes through
+       roomDisplayName()/collegeDisplayLabel() in the class above
 ══════════════════════════════════════════════════════════════════════════ --}}
-<div class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
-     style="height: calc(100vh - 90px);"
-     wire:poll.1500ms="unifiedPoll">
+<div
+    x-data="{ mobileChatOpen: false }"
+    @chat-open-mobile.window="mobileChatOpen = true"
+    @chat-close-mobile.window="mobileChatOpen = false"
+    class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
+    style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
+    @if(! $confirmDeleteId) wire:poll.1500ms="unifiedPoll" @endif>
+
+    <style>
+        #org-room-list button,
+        #org-room-list .org-pin-btn,
+        .org-bubble,
+        .org-panel,
+        .org-tooltip { transition: all .16s cubic-bezier(.4,0,.2,1); }
+
+        #org-room-list > div { transition: transform .18s ease, opacity .18s ease; }
+
+        .org-bubble { transform-origin: bottom; animation: orgPop .14s ease-out; }
+        @keyframes orgPop {
+            from { opacity: 0; transform: translateY(6px) scale(.97); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes orgPanelIn {
+            from { opacity: 0; transform: translateX(12px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes orgModalIn {
+            from { opacity: 0; transform: scale(.94); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+        @keyframes orgFadeUp {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        button:not(:disabled),
+        [role="button"],
+        .org-pin-btn,
+        #org-room-list > div button,
+        label[for] { cursor: pointer; }
+        button:disabled { cursor: not-allowed; }
+
+        #org-room-list { overflow-x: hidden; }
+        .overflow-y-auto { scroll-behavior: smooth; }
+
+        /* ── Tooltips: desktop/hover only ─────────────────────────────── */
+        .org-tooltip {
+            display: none;
+            position: absolute;
+            z-index: 999;
+            background: #1a1a1a;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 11px;
+            line-height: 1.3;
+            letter-spacing: .02em;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(-2px);
+            border: none;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        }
+        @media (min-width: 640px) {
+            .org-tooltip { display: block; }
+        }
+        .org-tooltip-wrap:hover .org-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ── Pin/Unpin tooltip fix ────────────────────────────────────────
+           Previously this tooltip could render underneath sibling room
+           rows (or get its right edge clipped) because the wrapping
+           <div> only got z-30 while the room list itself stacked new
+           rows on top as it re-rendered. Bump this specific tooltip
+           wrapper + tooltip well above the room list/rows, switch long
+           labels ("Unpin room") to wrap instead of clipping, and nudge
+           it fully into view instead of relying on centered overflow. ── */
+        #org-room-list .org-pin-tooltip-wrap {
+            z-index: 950;
+        }
+        #org-room-list .org-pin-tooltip-wrap .org-tooltip {
+            z-index: 951;
+            white-space: normal;
+            max-width: 140px;
+            text-align: center;
+        }
+
+        #org-chat-header { position: relative; z-index: 10; }
+        #msg-list { overflow-x: visible; }
+        .org-reaction-toolbar { z-index: 300; }
+        .org-reaction-toolbar .org-tooltip { z-index: 301; }
+
+        .org-reactions-popup { z-index: 300; }
+        .org-reactions-popup-list {
+            height: 230px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #c9aee0 #f5f0fa;
+        }
+        .org-reactions-popup-list::-webkit-scrollbar { width: 6px; }
+        .org-reactions-popup-list::-webkit-scrollbar-track { background: #f5f0fa; }
+        .org-reactions-popup-list::-webkit-scrollbar-thumb { background: #c9aee0; border-radius: 999px; }
+        .org-reactions-popup-list::-webkit-scrollbar-thumb:hover { background: #ad8ac7; }
+
+        /* ── Scroll-to-top / scroll-to-bottom floating nav ──────────────── */
+        .org-scroll-nav {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 14px;
+            display: flex;
+            gap: 8px;
+            z-index: 50;
+            pointer-events: none;
+        }
+        .org-scroll-nav .org-scroll-btn { pointer-events: auto; }
+        .org-scroll-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 1px solid #ddd3e8;
+            color: #6b2490;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            box-shadow: 0 2px 10px rgba(107,36,144,.20);
+            cursor: pointer;
+            transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
+        }
+        .org-scroll-btn:hover {
+            background: #f2e8f9;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 14px rgba(107,36,144,.28);
+        }
+        .org-scroll-btn:active { transform: translateY(0) scale(.94); }
+
+        /* ── Delete confirmation modal ─────────────────────────────────── */
+        .org-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(26,15,34,.45);
+            backdrop-filter: blur(2px);
+            z-index: 400;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .org-modal-card {
+            width: 100%;
+            max-width: 340px;
+            background: #ffffff;
+            border-radius: 1.1rem;
+            box-shadow: 0 20px 50px rgba(58,27,77,.35);
+            overflow: hidden;
+            animation: orgModalIn .16s ease-out;
+        }
+        .org-modal-icon {
+            width: 46px; height: 46px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            background: #FDECEC; color: #DC2626; flex-shrink: 0;
+        }
+
+        /* ── Search filtering progress bar (matches yearbook style) ─────── */
+        .org-filter-progress-track {
+            height: 2px;
+            width: 100%;
+            overflow: hidden;
+            background: transparent;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .org-filter-progress-bar {
+            position: absolute;
+            top: 0; left: 0;
+            height: 100%;
+            width: 40%;
+            border-radius: 99px;
+            background: #6b2490;
+            animation: orgFilterProgress 1s ease-in-out infinite;
+        }
+        @keyframes orgFilterProgress {
+            0%   { left: -40%; }
+            100% { left: 100%; }
+        }
+
+        /* ── Smoother room-list & message list transitions ──────────────── */
+        #org-room-list, #msg-list {
+            transition: opacity .15s ease;
+        }
+        .org-room-fade {
+            animation: orgFadeUp .16s ease-out both;
+        }
+
+        @media (max-width: 768px) {
+            #org-sidebar { display: none; }
+            #org-sidebar.org-mobile-show { display: flex; width: 100% !important; }
+            #org-chatpane { display: none; }
+            #org-chatpane.org-mobile-show { display: flex; width: 100% !important; }
+        }
+    </style>
 
     @php $defaultAv = asset('storage/alumni-photos/default.png'); @endphp
 
     {{-- ══════════════════════════════════════════════════════════════════
          LEFT SIDEBAR
          ══════════════════════════════════════════════════════════════════ --}}
-    <div class="w-80 flex-shrink-0 flex flex-col border-r border-[#ddd3e8] bg-white">
+    <div id="org-sidebar"
+         :class="mobileChatOpen ? '' : 'org-mobile-show'"
+         class="w-full md:w-80 flex-shrink-0 flex flex-col border-r border-[#ddd3e8] bg-white">
 
         {{-- Sidebar header --}}
         <div class="px-4 py-3.5 border-b border-[#5c2778] flex-shrink-0" style="background:#6b2490;">
@@ -1609,6 +1957,12 @@ new class extends Component {
             </div>
         </div>
 
+        {{-- Filtering progress bar — shows while room search / list is
+             resolving on the server, mirrors the yearbook page's UX --}}
+        <div class="org-filter-progress-track flex-shrink-0" wire:loading wire:target="roomSearch">
+            <div class="org-filter-progress-bar"></div>
+        </div>
+
         {{-- Chat count label --}}
         <div class="px-4 pt-2.5 pb-1 flex-shrink-0 bg-white">
             <div class="flex items-center justify-between">
@@ -1622,7 +1976,8 @@ new class extends Component {
         </div>
 
         {{-- Room list --}}
-        <div class="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5 bg-white">
+        <div id="org-room-list" class="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5 bg-white"
+             wire:loading.class="opacity-60" wire:target="roomSearch">
             @forelse($rooms as $r)
             @php
                 $hasUnread  = $r['has_unread'];
@@ -1631,10 +1986,10 @@ new class extends Component {
                 $hasMsg     = ! empty($r['latest_body']);
             @endphp
 
-            <div class="relative" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
+            <div wire:key="org-room-{{ $r['id'] }}" class="relative org-room-fade" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
 
                 <button wire:click="selectRoom({{ $r['id'] }})"
-                        class="w-full text-left rounded-xl px-3 py-3 transition-all border
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all border cursor-pointer
                                @if($isActive)      border-[#c49bdb] bg-[#f2e8f9]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
                                @else               border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa] @endif">
@@ -1690,7 +2045,7 @@ new class extends Component {
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Batches</span>
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} members</span>
                                 @else
-                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>{{ $r['batch'] }}</span>
+                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>Batch {{ $r['batch'] }}</span>
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ strtoupper($r['course_code']) }}</span>
                                 @endif
                             </div>
@@ -1716,8 +2071,10 @@ new class extends Component {
                     </div>
                 </button>
 
-                {{-- Pin/Unpin button on hover --}}
-                <div class="absolute top-2 right-2 z-30"
+                {{-- Pin/Unpin button on hover — org-pin-tooltip-wrap carries
+                     the raised z-index fix so this tooltip always renders
+                     above neighboring room rows instead of being clipped --}}
+                <div class="absolute top-2 right-2 z-30 org-tooltip-wrap org-pin-tooltip-wrap"
                      x-show="hovered"
                      x-transition:enter="transition ease-out duration-100"
                      x-transition:enter-start="opacity-0 scale-90"
@@ -1726,21 +2083,16 @@ new class extends Component {
                      x-transition:leave-start="opacity-100 scale-100"
                      x-transition:leave-end="opacity-0 scale-90"
                      style="display:none;">
-                    <div class="relative group/pintip">
-                        <button wire:click.stop="togglePinRoom({{ $r['id'] }})"
-                                title="{{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}"
-                                class="w-7 h-7 rounded-full flex items-center justify-center shadow-md border transition-all
-                                       {{ $isPinnedRm
-                                           ? 'bg-amber-400 border-amber-500 text-white hover:bg-amber-500'
-                                           : 'bg-white border-[#ddd3e8] text-[#aaaaaa] hover:bg-amber-50 hover:text-amber-500 hover:border-amber-300' }}">
-                            <i class="fa-solid fa-thumbtack" style="font-size:10px;"></i>
-                        </button>
-                        <span class="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2
-                                     bg-gray-900 text-white text-[10px] font-semibold px-2 py-1 rounded-lg whitespace-nowrap
-                                     opacity-0 group-hover/pintip:opacity-100 transition-opacity duration-150 z-50 shadow-lg">
-                            {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
-                        </span>
-                    </div>
+                    <button wire:click.stop="togglePinRoom({{ $r['id'] }})"
+                            class="org-pin-btn w-7 h-7 rounded-full flex items-center justify-center shadow-md border transition-all
+                                   {{ $isPinnedRm
+                                       ? 'bg-amber-400 border-amber-500 text-white hover:bg-amber-500'
+                                       : 'bg-white border-[#ddd3e8] text-[#aaaaaa] hover:bg-amber-50 hover:text-amber-500 hover:border-amber-300' }}">
+                        <i class="fa-solid fa-thumbtack" style="font-size:10px;"></i>
+                    </button>
+                    <span class="org-tooltip top-full right-0 mt-2 px-2.5 py-1.5 rounded-lg">
+                        {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
+                    </span>
                 </div>
 
             </div>
@@ -1770,10 +2122,16 @@ new class extends Component {
          MAIN AREA
          ══════════════════════════════════════════════════════════════════ --}}
     @if($room)
-    <div class="flex flex-1 min-w-0 flex-col">
+    <div id="org-chatpane"
+         :class="mobileChatOpen ? 'org-mobile-show' : ''"
+         class="flex flex-col flex-1 min-w-0 w-full">
 
         {{-- Chat header --}}
-        <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778]" style="background:#6b2490;">
+        <div id="org-chat-header" class="flex items-center gap-3 px-3 sm:px-5 py-3.5 flex-shrink-0 border-b border-[#5c2778]" style="background:#6b2490;">
+            <button @click="mobileChatOpen = false" wire:click="backToList"
+                    class="md:hidden w-8 h-8 -ml-1 flex items-center justify-center rounded-full text-white hover:bg-white/15 transition-all duration-200 flex-shrink-0 cursor-pointer">
+                <i class="fa-solid fa-arrow-left text-sm"></i>
+            </button>
             <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/20 border border-white/30">
                 <i class="fa-solid {{ $isStaffRoom ? 'fa-shield-halved' : ($isCollegeRoom ? 'fa-school' : ($isCourseRoom ? 'fa-layer-group' : 'fa-users')) }} text-white text-sm"></i>
             </div>
@@ -1782,7 +2140,7 @@ new class extends Component {
                     @if($isStaffRoom) Staff Chat
                     @elseif($isCollegeRoom) {{ $department }} · All Courses & Batches
                     @elseif($isCourseRoom) {{ strtoupper($room['course_code']) }} · All Batches GC
-                    @else {{ $room['name'] ?? 'Group Chat' }}
+                    @else Batch {{ $room['batch'] }} · {{ strtoupper($room['course_code']) }}
                     @endif
                 </p>
                 <div class="flex items-center gap-2 flex-wrap mt-0.5">
@@ -1791,281 +2149,336 @@ new class extends Component {
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
                         <span class="text-white/75 text-xs font-semibold">{{ $onlineCount }}/{{ $totalCount }} online</span>
                     </div>
-                    <span class="text-white/30 text-xs">·</span>
+                    <span class="text-white/30 text-xs hidden sm:inline">·</span>
                     @endif
                     @if($isStaffRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators</span>
+                    <span class="text-white/60 text-xs font-semibold items-center gap-1 hidden sm:flex"><i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators</span>
                     @elseif($isCollegeRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-school text-[10px]"></i>All Courses & Batches · {{ $totalCount }} members total</span>
+                    <span class="text-white/60 text-xs font-semibold items-center gap-1 hidden sm:flex"><i class="fa-solid fa-school text-[10px]"></i>All Courses & Batches · {{ $totalCount }} members total</span>
                     @elseif($isCourseRoom)
-                    <span class="text-white/60 text-xs font-semibold flex items-center gap-1"><i class="fa-solid fa-users-between-lines text-[10px]"></i>All Batch Years · {{ $totalCount }} members total</span>
+                    <span class="text-white/60 text-xs font-semibold items-center gap-1 hidden sm:flex"><i class="fa-solid fa-users-between-lines text-[10px]"></i>All Batch Years · {{ $totalCount }} members total</span>
                     @else
-                    <span class="text-white/60 text-xs font-semibold">{{ strtoupper($room['course_code']) }} · Batch {{ $room['batch'] }}</span>
+                    <span class="text-white/60 text-xs font-semibold">{{ $totalCount }} members</span>
                     @endif
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
                 <button wire:click="togglePins"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer"
                         style="{{ $showPins ? 'background:rgba(255,255,255,.28);color:#fff;border-color:rgba(255,255,255,.40);' : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.20);' }}">
                     <i class="fa-solid fa-thumbtack text-xs"></i><span class="hidden sm:inline ml-1">Pins</span>
                 </button>
                 <button wire:click="toggleMembers"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer"
                         style="{{ $showMembers ? 'background:rgba(255,255,255,.28);color:#fff;border-color:rgba(255,255,255,.40);' : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.20);' }}">
                     <i class="fa-solid fa-user-group text-xs"></i><span class="hidden sm:inline ml-1">Members</span>
                 </button>
             </div>
         </div>
 
-        <div class="flex flex-1 min-h-0">
+        <div class="flex flex-1 min-h-0 relative">
             <div class="flex flex-col flex-1 min-w-0">
 
                 {{-- Message list --}}
-                <div id="msg-list"
-                     class="flex-1 overflow-y-auto px-4 py-4 bg-[#fafafa]"
-                     x-data
-                     x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
-                     @chat-scroll-bottom.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
-                     @click="$wire.closeReactionsPopup()">
+                <div id="org-chat-body-wrap" class="flex-1 min-h-0 flex flex-col"
+                     x-data="{
+                         nearBottom: true,
+                         scrollDir: null,
+                         dirTimer: null,
+                         lastTop: 0,
+                         onScroll(el) {
+                             const cur = el.scrollTop;
+                             this.scrollDir = cur < this.lastTop ? 'up' : (cur > this.lastTop ? 'down' : this.scrollDir);
+                             this.lastTop = cur;
+                             this.nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
+                             clearTimeout(this.dirTimer);
+                             this.dirTimer = setTimeout(() => { this.scrollDir = null; }, 1200);
+                         }
+                     }">
 
-                    @php
-                        $prevDate    = null;
-                        $prevSendKey = null;
-                        $lastIdx     = count($messages) - 1;
-                    @endphp
+                    <div id="msg-list"
+                         class="flex-1 overflow-y-auto px-3 sm:px-4 py-4 bg-[#fafafa]"
+                         x-init="lastTop = $el.scrollTop; $el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
+                         @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
+                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; scrollDir = null; })"
+                         @click="$wire.closeToolbar()">
 
-                    @forelse($messages as $msgIdx => $msg)
                         @php
-                            $dateChanged = $msg['date'] !== $prevDate;
-                            $senderKey   = $msg['sender_type'] . $msg['sender_id'];
-                            $sameGroup   = ! $dateChanged && $senderKey === $prevSendKey;
-                            $prevDate    = $msg['date'];
-                            $prevSendKey = $senderKey;
-                            $isLast      = $msgIdx === $lastIdx;
-
-                            if ($msg['is_mine']) {
-                                $bubbleBg  = 'background:#6b2490;';
-                                $bubbleCls = 'text-white rounded-br-none';
-                                $avatarGrad = 'background:#6b2490;';
-                            } elseif ($msg['is_director']) {
-                                $bubbleBg  = 'background:#7A3F91;';
-                                $bubbleCls = 'text-white rounded-bl-none';
-                                $avatarGrad = 'background:#4a1d78;';
-                            } elseif ($msg['is_coordinator']) {
-                                $bubbleBg  = 'background:#6b2490;';
-                                $bubbleCls = 'text-white rounded-bl-none';
-                                $avatarGrad = 'background:#6b2490;';
-                            } else {
-                                $bubbleBg  = '';
-                                $bubbleCls = 'bg-white border border-[#ddd3e8] text-[#333333] rounded-bl-none';
-                                $avatarGrad = 'background:#6b2490;';
-                            }
-                            $senderPhotoSrc = $msg['sender_photo'] ?: $defaultAv;
+                            $prevDate    = null;
+                            $prevSendKey = null;
+                            $lastIdx     = count($messages) - 1;
                         @endphp
 
-                        @if($dateChanged)
-                        <div class="flex items-center gap-3 my-4">
-                            <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                            <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">{{ $msg['date_label'] }}</span>
-                            <div class="flex-1 h-px bg-[#ddd3e8]"></div>
-                        </div>
-                        @endif
+                        @forelse($messages as $msgIdx => $msg)
+                            @php
+                                $dateChanged = $msg['date'] !== $prevDate;
+                                $senderKey   = $msg['sender_type'] . $msg['sender_id'];
+                                $sameGroup   = ! $dateChanged && $senderKey === $prevSendKey;
+                                $prevDate    = $msg['date'];
+                                $prevSendKey = $senderKey;
+                                $isLast      = $msgIdx === $lastIdx;
+                                $toolbarOpen = $openToolbarMsgId === $msg['id'];
 
-                        <div class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}"
-                             x-data="{ open: false, confirmUnsend: false }"
-                             @click.outside="open = false; confirmUnsend = false">
+                                if ($msg['is_mine']) {
+                                    $bubbleBg  = 'background:#6b2490;';
+                                    $bubbleCls = 'text-white rounded-br-none';
+                                    $avatarGrad = 'background:#6b2490;';
+                                } elseif ($msg['is_director']) {
+                                    $bubbleBg  = 'background:#7A3F91;';
+                                    $bubbleCls = 'text-white rounded-bl-none';
+                                    $avatarGrad = 'background:#4a1d78;';
+                                } elseif ($msg['is_coordinator']) {
+                                    $bubbleBg  = 'background:#6b2490;';
+                                    $bubbleCls = 'text-white rounded-bl-none';
+                                    $avatarGrad = 'background:#6b2490;';
+                                } else {
+                                    $bubbleBg  = '';
+                                    $bubbleCls = 'bg-white border border-[#ddd3e8] text-[#333333] rounded-bl-none';
+                                    $avatarGrad = 'background:#6b2490;';
+                                }
+                                $senderPhotoSrc = $msg['sender_photo'] ?: $defaultAv;
+                            @endphp
 
-                            @if(! $msg['is_mine'])
-                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
-                                 style="{{ $avatarGrad }}" title="{{ $msg['sender_name'] }}">
-                                <img src="{{ $senderPhotoSrc }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                            @if($dateChanged)
+                            <div class="flex items-center gap-3 my-4">
+                                <div class="flex-1 h-px bg-[#ddd3e8]"></div>
+                                <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">{{ $msg['date_label'] }}</span>
+                                <div class="flex-1 h-px bg-[#ddd3e8]"></div>
                             </div>
                             @endif
 
-                            <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[70%]">
+                            <div wire:key="org-msg-{{ $msg['id'] }}" class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}">
 
-                                @if(! $msg['is_mine'] && ! $sameGroup)
-                                <p class="text-xs font-semibold px-1 mb-0.5 {{ $msg['is_director'] ? 'text-violet-700' : 'text-[#6b2490]' }}">
-                                    {{ $msg['sender_name'] }}
-                                    @if($msg['is_director'])
-                                        <span class="ml-1 text-[10px] font-semibold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded"><i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director</span>
-                                    @elseif($msg['is_coordinator'])
-                                        <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">Coordinator</span>
-                                    @elseif($isCollegeRoom)
-                                        @if($msg['sender_course'])
-                                            <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">{{ strtoupper($msg['sender_course']) }}</span>
+                                @if(! $msg['is_mine'])
+                                <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
+                                     style="{{ $avatarGrad }}" title="{{ $msg['sender_name'] }}">
+                                    <img src="{{ $senderPhotoSrc }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                </div>
+                                @endif
+
+                                <div class="flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[82%] sm:max-w-[70%]">
+
+                                    @if(! $msg['is_mine'] && ! $sameGroup)
+                                    <p class="text-xs font-semibold px-1 mb-0.5 {{ $msg['is_director'] ? 'text-violet-700' : 'text-[#6b2490]' }}">
+                                        {{ $msg['sender_name'] }}
+                                        @if($msg['is_director'])
+                                            <span class="ml-1 text-[10px] font-semibold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded"><i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Director</span>
+                                        @elseif($msg['is_coordinator'])
+                                            <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">Coordinator</span>
+                                        @elseif($isCollegeRoom)
+                                            @if($msg['sender_course'])
+                                                <span class="ml-1 text-[10px] font-semibold bg-[#f2e8f9] text-[#6b2490] px-1.5 py-0.5 rounded">{{ strtoupper($msg['sender_course']) }}</span>
+                                            @endif
+                                            @if($msg['sender_batch'])
+                                                <span class="ml-1 text-[10px] font-semibold bg-[#ede0f5] text-[#5c2d7a] px-1.5 py-0.5 rounded">Batch {{ $msg['sender_batch'] }}</span>
+                                            @endif
+                                        @elseif($isCourseRoom)
+                                            @if($msg['sender_batch'])
+                                                <span class="ml-1 text-[10px] font-semibold bg-[#ede0f5] text-[#5c2d7a] px-1.5 py-0.5 rounded">Batch {{ $msg['sender_batch'] }}</span>
+                                            @endif
                                         @endif
-                                        @if($msg['sender_batch'])
-                                            <span class="ml-1 text-[10px] font-semibold bg-[#ede0f5] text-[#5c2d7a] px-1.5 py-0.5 rounded">Batch {{ $msg['sender_batch'] }}</span>
-                                        @endif
-                                    @elseif($isCourseRoom)
-                                        @if($msg['sender_batch'])
-                                            <span class="ml-1 text-[10px] font-semibold bg-[#ede0f5] text-[#5c2d7a] px-1.5 py-0.5 rounded">Batch {{ $msg['sender_batch'] }}</span>
-                                        @endif
+                                    </p>
                                     @endif
-                                </p>
-                                @endif
 
-                                @if($msg['is_pinned'])
-                                <div class="flex items-center gap-1 text-xs text-amber-600 font-semibold mb-0.5 px-1">
-                                    <i class="fa-solid fa-thumbtack text-xs"></i> Pinned
-                                </div>
-                                @endif
-
-                                @if($msg['reply_to'])
-                                <div class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#ddd3e8] text-[#666666]' }}">
-                                    <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
-                                    <span class="truncate block text-xs">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
-                                </div>
-                                @endif
-
-                                @if($editingId === $msg['id'])
-                                <div class="flex flex-col gap-1.5 min-w-[220px]">
-                                    <textarea wire:model="editBody" rows="2"
-                                              class="text-sm rounded-lg border border-[#6b2490] px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#6b2490]/30 w-full bg-white shadow-sm"
-                                              wire:keydown.escape="cancelEdit"></textarea>
-                                    <div class="flex gap-1.5 justify-end">
-                                        <button wire:click="cancelEdit" class="text-xs px-3 py-1.5 rounded-lg border border-[#ddd3e8] text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">Cancel</button>
-                                        <button wire:click="saveEdit" class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition" style="background:#6b2490;">Save</button>
-                                    </div>
-                                </div>
-                                @else
-                                @php
-                                    $safe = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
-                                    $mentionClass = $msg['is_mine']
-                                        ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
-                                        : 'font-semibold text-[#6b2490] bg-[#f2e8f9] px-0.5 rounded';
-                                    $formatted = preg_replace('/@(everyone|\w+(?:\s\w+)?)/u', '<span class="'.$mentionClass.'">@$1</span>', $safe);
-                                @endphp
-                                <div @click.stop="open = !open; confirmUnsend = false"
-                                     class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words shadow-sm cursor-pointer select-none transition-opacity active:opacity-80 {{ $bubbleCls }}"
-                                     style="{{ $bubbleBg }}">
-                                    {!! $formatted !!}
-                                    @if($msg['edited'])<span class="text-xs opacity-50 ml-1 italic">(edited)</span>@endif
-                                </div>
-                                @endif
-
-                                {{-- Action toolbar --}}
-                                <div x-show="open"
-                                     x-transition:enter="transition ease-out duration-150"
-                                     x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
-                                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                                     x-cloak
-                                     class="flex flex-wrap items-center gap-1.5 mt-2 bg-white border border-[#ddd3e8] rounded-2xl px-3 py-2 shadow-lg z-10 w-auto">
-                                    @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎'] as $rk=>$re)
-                                    <button wire:click="react({{ $msg['id'] }},'{{ $rk }}')" @click.stop
-                                            class="text-[1.3rem] leading-none transition-transform hover:scale-125 active:scale-110 {{ $msg['my_reaction']===$rk?'opacity-100 scale-110':'opacity-50 hover:opacity-100' }}"
-                                            title="{{ ucfirst($rk) }}">{{ $re }}</button>
-                                    @endforeach
-                                    <span class="w-px h-5 bg-[#ddd3e8] block"></span>
-                                    <button wire:click="setReply({{ $msg['id'] }})" @click.stop="open=false"
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666] hover:text-[#6b2490] hover:bg-[#f2e8f9] transition text-xs font-semibold">
-                                        <i class="fa-solid fa-reply text-xs"></i><span class="hidden sm:inline">Reply</span>
-                                    </button>
-                                    <button wire:click="togglePin({{ $msg['id'] }})" @click.stop
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold {{ $msg['is_pinned']?'text-amber-600 bg-amber-50 hover:bg-amber-100':'text-[#666666] hover:text-amber-600 hover:bg-amber-50' }}">
-                                        <i class="fa-solid fa-thumbtack text-xs"></i><span class="hidden sm:inline">{{ $msg['is_pinned']?'Unpin':'Pin' }}</span>
-                                    </button>
-                                    @if(! empty($msg['reactions']))
-                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})" @click.stop
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold {{ $reactionsPopupMsgId===$msg['id']?'text-[#6b2490] bg-[#f2e8f9]':'text-[#666666] hover:text-[#6b2490] hover:bg-[#f2e8f9]' }}">
-                                        <i class="fa-solid fa-face-smile text-xs"></i><span class="hidden sm:inline">Reactions</span>
-                                    </button>
-                                    @endif
-                                    @if($msg['is_mine'])
-                                    <span class="w-px h-5 bg-[#ddd3e8] block"></span>
-                                    <button wire:click="startEdit({{ $msg['id'] }})" @click.stop="open=false"
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666] hover:text-blue-600 hover:bg-blue-50 transition text-xs font-semibold">
-                                        <i class="fa-solid fa-pen text-xs"></i><span class="hidden sm:inline">Edit</span>
-                                    </button>
-                                    <div x-show="!confirmUnsend">
-                                        <button @click.stop="confirmUnsend=true"
-                                                class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666] hover:text-red-600 hover:bg-red-50 transition text-xs font-semibold">
-                                            <i class="fa-solid fa-trash-can text-xs"></i><span class="hidden sm:inline">Unsend</span>
-                                        </button>
-                                    </div>
-                                    <div x-show="confirmUnsend" class="flex items-center gap-1">
-                                        <span class="text-xs text-red-600 font-semibold">Delete?</span>
-                                        <button wire:click="unsend({{ $msg['id'] }})" @click.stop class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">Yes</button>
-                                        <button @click.stop="confirmUnsend=false" class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#666666] font-semibold hover:bg-[#ddd3e8] transition">No</button>
+                                    @if($msg['is_pinned'])
+                                    <div class="flex items-center gap-1 text-xs text-amber-600 font-semibold mb-0.5 px-1">
+                                        <i class="fa-solid fa-thumbtack text-xs"></i> Pinned
                                     </div>
                                     @endif
-                                </div>
 
-                                {{-- Reactions popup --}}
-                                @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
-                                <div class="mt-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-xl z-20 w-64 overflow-hidden" @click.stop>
-                                    <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#ddd3e8] bg-[#fafafa]">
-                                        <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest"><i class="fa-solid fa-face-smile text-[#6b2490] mr-1.5"></i>Reactions</p>
-                                        <button wire:click="closeReactionsPopup" class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition"><i class="fa-solid fa-xmark text-xs"></i></button>
+                                    @if($msg['reply_to'])
+                                    <div class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#ddd3e8] text-[#666666]' }}">
+                                        <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
+                                        <span class="truncate block text-xs">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
                                     </div>
-                                    <div class="max-h-52 overflow-y-auto">
-                                        @php $emojiMap=['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
-                                        @foreach($reactionsPopupData as $rKey=>$rGroup)
-                                        <div class="px-3.5 py-2 border-b border-[#ddd3e8] last:border-0">
-                                            <div class="flex items-center gap-1.5 mb-1.5">
-                                                <span class="text-base">{{ $emojiMap[$rKey]??'👍' }}</span>
-                                                <span class="text-xs font-semibold text-[#666666]">{{ count($rGroup) }} {{ count($rGroup)===1?'person':'people' }}</span>
+                                    @endif
+
+                                    <div class="relative">
+
+                                        @if($editingId === $msg['id'])
+                                        <div class="flex flex-col gap-1.5 min-w-[220px]">
+                                            <textarea wire:model="editBody" rows="2"
+                                                      class="text-sm rounded-lg border border-[#6b2490] px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#6b2490]/30 w-full bg-white shadow-sm"
+                                                      wire:keydown.escape="cancelEdit"></textarea>
+                                            <div class="flex gap-1.5 justify-end">
+                                                <button wire:click="cancelEdit" class="text-xs px-3 py-1.5 rounded-lg border border-[#ddd3e8] text-[#666666] hover:bg-[#f5f5f5] transition font-semibold cursor-pointer">Cancel</button>
+                                                <button wire:click="saveEdit" class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition cursor-pointer" style="background:#6b2490;">Save</button>
                                             </div>
-                                            @foreach($rGroup as $reactor)
-                                            <div class="flex items-center gap-2 py-1">
-                                                <div class="w-6 h-6 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
-                                                    <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                                                </div>
-                                                <div class="flex-1 min-w-0">
-                                                    <p class="text-xs font-semibold text-[#333333] truncate">{{ $reactor['name'] }}@if($reactor['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
-                                                    <p class="text-[10px] font-medium {{ $reactor['type']==='director'?'text-violet-700':'text-[#6b2490]' }}">{{ ucfirst($reactor['type']) }}</p>
-                                                </div>
+                                        </div>
+                                        @else
+                                        @php
+                                            $safe = htmlspecialchars($msg['body'], ENT_QUOTES, 'UTF-8');
+                                            $mentionClass = $msg['is_mine']
+                                                ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
+                                                : 'font-semibold text-[#6b2490] bg-[#f2e8f9] px-0.5 rounded';
+                                            $formatted = preg_replace('/@(everyone|\w+(?:\s\w+)?)/u', '<span class="'.$mentionClass.'">@$1</span>', $safe);
+                                        @endphp
+                                        <button wire:click.stop="toggleToolbar({{ $msg['id'] }})"
+                                             class="org-bubble text-left px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words w-full cursor-pointer shadow-sm {{ $bubbleCls }} {{ $toolbarOpen ? 'ring-2 ring-[#6b2490]/30' : '' }}"
+                                             style="{{ $bubbleBg }}">
+                                            {!! $formatted !!}
+                                            @if($msg['edited'])<span class="text-xs opacity-50 ml-1 italic">(edited)</span>@endif
+                                        </button>
+                                        @endif
+
+                                        {{-- Action toolbar --}}
+                                        @if($toolbarOpen)
+                                        <div class="org-reaction-toolbar absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }}
+                                                    flex flex-wrap items-center gap-0.5 bg-white border border-[#ddd3e8] rounded-2xl px-2 py-1.5 shadow-xl whitespace-nowrap animate-[orgPop_.14s_ease-out]"
+                                             @click.stop>
+                                            @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎'] as $rk=>$re)
+                                            <div class="relative org-tooltip-wrap">
+                                                <button wire:click.stop="react({{ $msg['id'] }},'{{ $rk }}')"
+                                                        class="w-9 h-9 flex items-center justify-center rounded-xl text-xl leading-none transition-all duration-150 cursor-pointer hover:scale-125 active:scale-110 {{ $msg['my_reaction']===$rk?'bg-[#f2e8f9] ring-2 ring-[#6b2490]':'hover:bg-[#f9f5fd]' }}">{{ $re }}</button>
+                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">{{ ucfirst($rk) }}</span>
                                             </div>
                                             @endforeach
+
+                                            <span class="w-px h-5 bg-[#ddd3e8] mx-0.5 flex-shrink-0"></span>
+
+                                            <div class="relative org-tooltip-wrap">
+                                                <button wire:click.stop="setReply({{ $msg['id'] }})"
+                                                        class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer hover:bg-[#f2e8f9] hover:text-[#6b2490] transition-all duration-150">
+                                                    <i class="fa-solid fa-reply text-xs"></i>
+                                                </button>
+                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Reply</span>
+                                            </div>
+
+                                            <div class="relative org-tooltip-wrap">
+                                                <button wire:click.stop="togglePin({{ $msg['id'] }})"
+                                                        class="w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-150 cursor-pointer {{ $msg['is_pinned']?'text-amber-600 bg-amber-50 hover:bg-amber-100':'text-[#555] hover:bg-amber-50 hover:text-amber-600' }}">
+                                                    <i class="fa-solid fa-thumbtack text-xs"></i>
+                                                </button>
+                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">{{ $msg['is_pinned']?'Unpin':'Pin' }}</span>
+                                            </div>
+
+                                            @if($msg['is_mine'])
+                                            <span class="w-px h-5 bg-[#ddd3e8] mx-0.5 flex-shrink-0"></span>
+
+                                            <div class="relative org-tooltip-wrap">
+                                                <button wire:click.stop="startEdit({{ $msg['id'] }})"
+                                                        class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer hover:bg-[#f2e8f9] hover:text-[#6b2490] transition-all duration-150">
+                                                    <i class="fa-solid fa-pen text-xs"></i>
+                                                </button>
+                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Edit</span>
+                                            </div>
+
+                                            <div class="relative org-tooltip-wrap">
+                                                <button wire:click.stop="askDeleteConfirmation({{ $msg['id'] }})"
+                                                        class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer hover:bg-red-50 hover:text-red-600 transition-all duration-150">
+                                                    <i class="fa-solid fa-trash-can text-xs"></i>
+                                                </button>
+                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Delete</span>
+                                            </div>
+                                            @endif
                                         </div>
+                                        @endif
+
+                                        {{-- Reactions popup --}}
+                                        @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
+                                        <div class="org-reactions-popup absolute top-full mt-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} bg-white border border-[#ddd3e8] rounded-2xl shadow-xl w-64 max-w-[80vw] overflow-hidden animate-[orgPop_.14s_ease-out]" wire:click.stop>
+                                            <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#ddd3e8] bg-[#fafafa]">
+                                                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest"><i class="fa-solid fa-face-smile text-[#6b2490] mr-1.5"></i>Reactions</p>
+                                                <button wire:click="closeReactionsPopup" class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer"><i class="fa-solid fa-xmark text-xs"></i></button>
+                                            </div>
+                                            <div class="org-reactions-popup-list">
+                                                @php $emojiMap=['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
+                                                @foreach($reactionsPopupData as $rKey=>$rGroup)
+                                                <div class="px-3.5 py-2 border-b border-[#ddd3e8] last:border-0">
+                                                    <div class="flex items-center gap-1.5 mb-1.5">
+                                                        <span class="text-base">{{ $emojiMap[$rKey]??'👍' }}</span>
+                                                        <span class="text-xs font-semibold text-[#666666]">{{ count($rGroup) }} {{ count($rGroup)===1?'person':'people' }}</span>
+                                                    </div>
+                                                    @foreach($rGroup as $reactor)
+                                                    <div class="flex items-center gap-2 py-1">
+                                                        <div class="w-6 h-6 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
+                                                            <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                                        </div>
+                                                        <div class="flex-1 min-w-0">
+                                                            <p class="text-xs font-semibold text-[#333333] truncate">{{ $reactor['name'] }}@if($reactor['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
+                                                            <p class="text-[10px] font-medium {{ $reactor['type']==='director'?'text-violet-700':'text-[#6b2490]' }}">{{ ucfirst($reactor['type']) }}</p>
+                                                        </div>
+                                                    </div>
+                                                    @endforeach
+                                                </div>
+                                                @endforeach
+                                            </div>
+                                        </div>
+                                        @endif
+
+                                    </div>
+
+                                    {{-- Reaction counts --}}
+                                    @if(! empty($msg['reactions']))
+                                    <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine']?'justify-end':'justify-start' }}">
+                                        @foreach($msg['reactions'] as $rk=>$cnt)
+                                        @php $emoji=match($rk){'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍'}; @endphp
+                                        <button wire:click.stop="openReactionsPopup({{ $msg['id'] }})"
+                                                class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all cursor-pointer
+                                                       {{ $msg['my_reaction']===$rk?'bg-[#f2e8f9] border-[#c49bdb] text-[#6b2490] font-semibold':'bg-white border-[#ddd3e8] text-[#666666] hover:border-[#c49bdb]' }}">
+                                            {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
+                                        </button>
                                         @endforeach
                                     </div>
+                                    @endif
+
+                                    <p class="text-xs text-[#999999] mt-0.5 px-1">{{ $msg['time'] }}</p>
+                                </div>
+
+                                @if($msg['is_mine'])
+                                <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end" style="background:#6b2490;">
+                                    <img src="{{ $coordinatorPhoto ?: $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
                                 </div>
                                 @endif
+                            </div>
 
-                                {{-- Reaction counts --}}
-                                @if(! empty($msg['reactions']))
-                                <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine']?'justify-end':'justify-start' }}">
-                                    @foreach($msg['reactions'] as $rk=>$cnt)
-                                    @php $emoji=match($rk){'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍'}; @endphp
-                                    <button wire:click="react({{ $msg['id'] }},'{{ $rk }}')"
-                                            class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all
-                                                   {{ $msg['my_reaction']===$rk?'bg-[#f2e8f9] border-[#c49bdb] text-[#6b2490] font-semibold':'bg-white border-[#ddd3e8] text-[#666666] hover:border-[#c49bdb]' }}">
-                                        {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
-                                    </button>
-                                    @endforeach
+                        @empty
+                            <div class="flex flex-col items-center justify-center h-full py-20 text-[#999999] select-none">
+                                <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f2e8f9]">
+                                    <i class="fa-solid fa-hand-pointer text-4xl text-[#6b2490]"></i>
                                 </div>
-                                @endif
-
-                                <p class="text-xs text-[#999999] mt-0.5 px-1">{{ $msg['time'] }}</p>
+                                <p class="text-base font-semibold text-[#333333]">No messages yet</p>
+                                <p class="text-sm text-[#999999] mt-2 max-w-xs text-center leading-relaxed">
+                                    @if($isStaffRoom) Start the internal staff conversation! 👋
+                                    @elseif($isCollegeRoom) Start the {{ $department }} college-wide conversation! 👋
+                                    @elseif($isCourseRoom) Start the {{ strtoupper($room['course_code']) }} all-batches conversation! 👋
+                                    @else Be the first to message this batch! 👋
+                                    @endif
+                                </p>
                             </div>
+                        @endforelse
 
-                            @if($msg['is_mine'])
-                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end" style="background:#6b2490;">
-                                <img src="{{ $coordinatorPhoto ?: $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                            </div>
-                            @endif
-                        </div>
+                        <div class="h-10"></div>
+                    </div>
 
-                    @empty
-                        <div class="flex flex-col items-center justify-center h-full py-20 text-[#999999] select-none">
-                            <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f2e8f9]">
-                                <i class="fa-solid fa-hand-pointer text-4xl text-[#6b2490]"></i>
-                            </div>
-                            <p class="text-base font-semibold text-[#333333]">No messages yet</p>
-                            <p class="text-sm text-[#999999] mt-2 max-w-xs text-center leading-relaxed">
-                                @if($isStaffRoom) Start the internal staff conversation! 👋
-                                @elseif($isCollegeRoom) Start the {{ $department }} college-wide conversation! 👋
-                                @elseif($isCourseRoom) Start the {{ strtoupper($room['course_code']) }} all-batches conversation! 👋
-                                @else Be the first to message this batch! 👋
-                                @endif
-                            </p>
-                        </div>
-                    @endforelse
+                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav ─────────────── --}}
+                    <div class="org-scroll-nav">
+                        <button type="button" class="org-scroll-btn"
+                                x-show="scrollDir === 'up'"
+                                x-transition:enter="transition ease-out duration-150"
+                                x-transition:enter-start="opacity-0 translate-y-1"
+                                x-transition:enter-end="opacity-100 translate-y-0"
+                                x-transition:leave="transition ease-in duration-150"
+                                x-transition:leave-start="opacity-100"
+                                x-transition:leave-end="opacity-0"
+                                onclick="document.getElementById('msg-list').scrollBy({top:-300,behavior:'smooth'});"
+                                style="display:none;">
+                            <i class="fa-solid fa-arrow-up"></i>
+                        </button>
+                        <button type="button" class="org-scroll-btn"
+                                x-show="scrollDir === 'down'"
+                                x-transition:enter="transition ease-out duration-150"
+                                x-transition:enter-start="opacity-0 translate-y-1"
+                                x-transition:enter-end="opacity-100 translate-y-0"
+                                x-transition:leave="transition ease-in duration-150"
+                                x-transition:leave-start="opacity-100"
+                                x-transition:leave-end="opacity-0"
+                                onclick="document.getElementById('msg-list').scrollBy({top:300,behavior:'smooth'});"
+                                style="display:none;">
+                            <i class="fa-solid fa-arrow-down"></i>
+                        </button>
+                    </div>
 
-                    <div class="h-10"></div>
                 </div>
 
                 {{-- Typing indicator --}}
@@ -2088,25 +2501,25 @@ new class extends Component {
 
                 {{-- Reply bar --}}
                 @if($replyTo)
-                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#ddd3e8] bg-[#f2e8f9] flex-shrink-0">
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#ddd3e8] bg-[#f2e8f9] flex-shrink-0 animate-[orgPop_.14s_ease-out]">
                     <div class="w-1 h-10 rounded-full flex-shrink-0" style="background:#6b2490;"></div>
                     <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-[#6b2490] truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
                         <p class="text-xs text-[#666666] truncate">{{ Str::limit($replyTo['body'],90) }}</p>
                     </div>
-                    <button wire:click="clearReply" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                    <button wire:click="clearReply" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0 cursor-pointer">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
                 @endif
 
                 {{-- Compose bar --}}
-                <div class="px-4 py-3 border-t border-[#ddd3e8] bg-white flex-shrink-0" x-data>
+                <div class="px-3 sm:px-4 py-3 border-t border-[#ddd3e8] bg-white flex-shrink-0" x-data>
                     @if($showMentions && ! empty($mentionSuggestions))
-                    <div class="mb-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-md overflow-hidden">
+                    <div class="mb-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-md overflow-hidden animate-[orgPop_.14s_ease-out]">
                         @foreach($mentionSuggestions as $sug)
                         <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
-                                class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f2e8f9] transition-colors text-left">
+                                class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f2e8f9] transition-colors text-left cursor-pointer">
                             <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
                                 @if($sug['name']==='everyone')<i class="fa-solid fa-users text-xs"></i>
                                 @else{{ strtoupper(substr($sug['name'],0,1)) }}@endif
@@ -2131,7 +2544,7 @@ new class extends Component {
                             <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
-                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? strtoupper($room['course_code']).' All Batches GC' : ($room['name']??'group'))) }}… (@ to mention)"
+                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? strtoupper($room['course_code']).' All Batches GC' : ('Batch '.$room['batch'].' · '.strtoupper($room['course_code'])))) }}… (@ to mention)"
                                 rows="1"
                                 @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
                                 @focus-input.window="$el.focus()"
@@ -2139,13 +2552,18 @@ new class extends Component {
                                 class="w-full resize-none rounded-xl border border-[#ddd3e8] bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
-                        <button wire:click="sendMessage"
-                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm"
+                        <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
+                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60 cursor-pointer"
                                 style="background:#6b2490;">
-                            <i class="fa-solid fa-paper-plane text-base"></i>
+                            <i class="fa-solid fa-paper-plane text-base" wire:loading.remove wire:target="sendMessage"></i>
+                            <span class="hidden items-center gap-1" wire:loading.flex wire:target="sendMessage">
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:0ms;animation-duration:800ms;"></span>
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:150ms;animation-duration:800ms;"></span>
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:300ms;animation-duration:800ms;"></span>
+                            </span>
                         </button>
                     </div>
-                    <p class="text-xs text-[#999999] text-center mt-1.5">
+                    <p class="text-xs text-[#999999] text-center mt-1.5 hidden sm:block">
                         <kbd class="bg-[#f5f5f5] border border-[#ddd3e8] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
                         <kbd class="bg-[#f5f5f5] border border-[#ddd3e8] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
                         <kbd class="bg-[#f5f5f5] border border-[#ddd3e8] rounded px-1 py-0.5 text-xs">@</kbd> mention
@@ -2155,7 +2573,10 @@ new class extends Component {
 
             {{-- Side panel (Members / Pins) --}}
             @if($showMembers || $showPins)
-            <div class="w-72 border-l border-[#ddd3e8] flex flex-col flex-shrink-0 bg-white">
+            <div wire:key="org-side-panel-{{ $showPins ? 'pins' : 'members' }}"
+                 class="org-panel w-full md:w-72 flex flex-col flex-shrink-0 bg-white border-l border-[#ddd3e8]
+                        fixed md:static inset-0 z-[150] md:z-auto"
+                 style="animation: orgPanelIn .16s ease-out;">
                 <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#ddd3e8] flex-shrink-0 bg-[#f9f7fc]">
                     @if($showPins)
                         <i class="fa-solid fa-thumbtack text-amber-600"></i>
@@ -2173,7 +2594,7 @@ new class extends Component {
                         <i class="fa-solid fa-user-group text-[#6b2490]"></i>
                         <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) + count($coordinators) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @endif
-                    <button wire:click="{{ $showPins?'togglePins':'toggleMembers' }}" class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition">
+                    <button wire:click="closeSidePanel" class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
                 </div>
@@ -2348,7 +2769,7 @@ new class extends Component {
                                         <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
                                         <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
                                     </div>
-                                    <button wire:click="togglePin({{ $pin['id'] }})" class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                                    <button wire:click="togglePin({{ $pin['id'] }})" class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0 cursor-pointer">
                                         <i class="fa-solid fa-xmark text-xs"></i>
                                     </button>
                                 </div>
@@ -2372,7 +2793,9 @@ new class extends Component {
 
     @else
     {{-- No room selected --}}
-    <div class="flex flex-1 items-center justify-center bg-[#fafafa]">
+    <div id="org-chatpane"
+         :class="mobileChatOpen ? 'org-mobile-show' : ''"
+         class="hidden md:flex flex-1 items-center justify-center bg-[#fafafa]">
         <div class="flex flex-col items-center text-center px-8">
             <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f2e8f9]">
                 <i class="fa-solid fa-hand-pointer text-4xl text-[#6b2490]"></i>
@@ -2390,6 +2813,48 @@ new class extends Component {
                 <span class="mx-1 text-[#ddd3e8]">·</span>
                 <span class="w-5 h-5 flex items-center justify-center rounded-lg bg-[#f2e8f9]"><i class="fa-solid fa-users text-[#6b2490]" style="font-size:10px;"></i></span>
                 <span>Batch</span>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    {{-- ══ Delete confirmation modal ══════════════════════════════════════
+         Single instance inside the component root, driven by
+         $confirmDeleteId (server-side state), so Confirm/Cancel wire:click
+         bindings always work — no lost state from row re-renders. --}}
+    @if($confirmDeleteId)
+    @php $delMsg = collect($messages)->firstWhere('id', $confirmDeleteId); @endphp
+    <div class="org-modal-backdrop" wire:click="cancelDelete">
+        <div class="org-modal-card" wire:click.stop>
+            <div class="p-5">
+                <div class="flex items-start gap-3.5">
+                    <div class="org-modal-icon">
+                        <i class="fa-solid fa-trash-can text-lg"></i>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-1">
+                        <p class="text-sm font-semibold text-[#1a1a1a]">Delete this message?</p>
+                        <p class="text-xs text-[#666666] mt-1 leading-relaxed">
+                            Are you sure you want to delete this message? This can't be undone
+                            @if($delMsg && (! empty($delMsg['reactions']) || ($delMsg['is_pinned'] ?? false)))
+                                , and it will also remove its reactions{{ ($delMsg['is_pinned'] ?? false) ? ' and unpin it' : '' }}
+                            @endif
+                            .
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="flex border-t border-[#ddd3e8]">
+                <button wire:click="cancelDelete"
+                        class="flex-1 py-3 text-sm font-semibold text-[#555555] hover:bg-[#f5f5f5] transition-all duration-150 cursor-pointer">
+                    Cancel
+                </button>
+                <div class="w-px bg-[#ddd3e8]"></div>
+                <button wire:click="unsend({{ $confirmDeleteId }})"
+                        wire:loading.attr="disabled" wire:target="unsend"
+                        class="flex-1 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 transition-all duration-150 cursor-pointer disabled:opacity-60">
+                    <span wire:loading.remove wire:target="unsend">Confirm</span>
+                    <span wire:loading wire:target="unsend">Deleting…</span>
+                </button>
             </div>
         </div>
     </div>

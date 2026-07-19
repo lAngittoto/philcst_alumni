@@ -187,6 +187,29 @@ new class extends Component {
             ->get()
             ->toArray();
     }
+
+    /**
+     * ── Deep-link into Employment Tracking with a clean URL ──
+     * Stashes the desired filter (status and/or course/program code) into
+     * the session, then redirects to the plain employment route with no
+     * query string at all. The employment page's mount() picks this up via
+     * session()->pull('organizer_employment_filter') and applies it before
+     * first render — so the address bar only ever shows
+     * /organizer/alumni/employment, never ?course=BSED or ?status=employed,
+     * and the corresponding filter dropdown shows the applied value instead
+     * of staying on "All Statuses" / "All Programs".
+     */
+    public function goToEmployment(string $status = '', string $course = ''): void
+    {
+        session([
+            'organizer_employment_filter' => [
+                'status' => $status,
+                'course' => $course,
+            ],
+        ]);
+
+        $this->redirect(route('organizer.alumni/employment'), navigate: true);
+    }
 };
 ?>
 
@@ -270,10 +293,30 @@ new class extends Component {
 .org-info-value { font-size: 0.875rem; font-weight: 600; color: #111111; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .org-info-value-sm { font-size: 0.80rem; font-weight: 600; color: #111111; text-align: right; word-break: break-all; max-width: 160px; }
 
-/* ── Chips ── */
+/* ── Chips section wrapper ── */
 .org-chips-section { padding: 0.65rem 1rem; }
 .org-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; margin-bottom: 0.4rem; }
-.org-chip { font-size: 0.72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: #F0E6F8; color: #333333; border: 1px solid #D8BEF0; display: inline-block; margin: 2px 2px 2px 0; }
+
+/* ── Chips — base shape, color comes from status-specific classes below ──
+     (previously all chips shared one flat lavender bg regardless of
+     status, so "Rejected · 1" looked the same as "Approved · 2" — now
+     each status gets its own readable color) ── */
+.org-chip {
+    font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid transparent; margin: 2px 4px 2px 0;
+}
+.org-chip i { font-size: 7px; }
+
+/* Event status chips */
+.org-chip-approved  { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
+.org-chip-pending   { background: #FEF6E7; color: #B5750A; border-color: #FBE4B4; }
+.org-chip-completed { background: #EAF1FE; color: #1D4ED8; border-color: #C9DBFC; }
+.org-chip-rejected  { background: #FDECEC; color: #C0311A; border-color: #F8C9C2; }
+
+/* Job status chips */
+.org-chip-active   { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
+.org-chip-inactive { background: #F1F1F3; color: #52525B; border-color: #E1E1E5; }
 
 /* ── Scrollbar ── */
 .org-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
@@ -375,24 +418,25 @@ new class extends Component {
                     <span class="org-info-value text-emerald-700">{{ number_format($verifiedAlumni) }}</span>
                 </div>
 
-                {{-- Quick chips --}}
+                {{-- Quick chips — Events (color-coded per status) --}}
                 <div class="org-chips-section">
                     <p class="org-chips-label">Events Overview</p>
                     <div>
-                        <span class="org-chip">Approved · {{ $approvedEvents }}</span>
-                        <span class="org-chip">Pending · {{ $pendingEvents }}</span>
-                        <span class="org-chip">Completed · {{ $completedEvents }}</span>
+                        <span class="org-chip org-chip-approved"><i class="fas fa-circle"></i>Approved · {{ $approvedEvents }}</span>
+                        <span class="org-chip org-chip-pending"><i class="fas fa-circle"></i>Pending · {{ $pendingEvents }}</span>
+                        <span class="org-chip org-chip-completed"><i class="fas fa-circle"></i>Completed · {{ $completedEvents }}</span>
                         @if($rejectedEvents > 0)
-                            <span class="org-chip">Rejected · {{ $rejectedEvents }}</span>
+                            <span class="org-chip org-chip-rejected"><i class="fas fa-circle"></i>Rejected · {{ $rejectedEvents }}</span>
                         @endif
                     </div>
                 </div>
 
+                {{-- Quick chips — Jobs (color-coded per status) --}}
                 <div class="org-chips-section">
                     <p class="org-chips-label">Job Postings</p>
                     <div>
-                        <span class="org-chip">Active · {{ $activeJobs }}</span>
-                        <span class="org-chip">Inactive · {{ $inactiveJobs }}</span>
+                        <span class="org-chip org-chip-active"><i class="fas fa-circle"></i>Active · {{ $activeJobs }}</span>
+                        <span class="org-chip org-chip-inactive"><i class="fas fa-circle"></i>Inactive · {{ $inactiveJobs }}</span>
                     </div>
                 </div>
 
@@ -407,10 +451,10 @@ new class extends Component {
         <div class="org-stat-grid org-fade-up org-fade-1">
 
             {{-- Total Alumni --}}
-            <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+            <button type="button" wire:click="goToEmployment('', '')"
                class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
-                      active:scale-[.985] cursor-pointer block">
+                      active:scale-[.985] cursor-pointer block text-left w-full">
                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Total Alumni</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow"
@@ -428,7 +472,7 @@ new class extends Component {
                         <span class="text-amber-600 font-normal">· {{ $pendingAlumni }} pending</span>
                     @endif
                 </p>
-            </a>
+            </button>
 
             {{-- Total Events --}}
             <a href="{{ route('organizer.event/organizer') }}" wire:navigate
@@ -480,10 +524,10 @@ new class extends Component {
             </a>
 
             {{-- Employment --}}
-            <a href="{{ route('organizer.alumni/employment') }}" wire:navigate
+            <button type="button" wire:click="goToEmployment('', '')"
                class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200
-                      active:scale-[.985] cursor-pointer block">
+                      active:scale-[.985] cursor-pointer block text-left w-full">
                 <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employment</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
@@ -501,7 +545,7 @@ new class extends Component {
                         <span class="text-[#333333] font-normal">· {{ $empNotFilled }} not filled</span>
                     @endif
                 </p>
-            </a>
+            </button>
 
         </div>
 
@@ -510,7 +554,7 @@ new class extends Component {
              one row instead of stacked, so the page fits without scrolling) --}}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 org-fade-up org-fade-2">
 
-        {{-- Course Breakdown Panel --}}
+        {{-- Program Breakdown Panel --}}
         <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
             <div class="px-4 py-2 border-b border-[#E8E0F0] flex items-center gap-2"
                  style="background:linear-gradient(to right,#F9F7FC,#ffffff);">
@@ -518,7 +562,7 @@ new class extends Component {
                      style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                     <i class="fas fa-ranking-star text-white text-[10px]"></i>
                 </div>
-                <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Alumni per Course</p>
+                <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Alumni per Program</p>
             </div>
 
             <div class="p-3 flex-1">
@@ -534,8 +578,15 @@ new class extends Component {
                         $pct   = round(($cs->alumni_count / $maxCount) * 100);
                         $color = $palette[$idx % count($palette)];
                     @endphp
-                    <a href="{{ route('organizer.alumni/employment', ['course' => $cs->code]) }}" wire:navigate
-                       class="org-mini-card org-course-row">
+                    {{-- Clicking a program row stashes the program code into
+                         the session and redirects to the plain employment
+                         URL (no ?course= query string). The employment
+                         page's mount() applies it immediately, and its
+                         "All Programs" dropdown reflects the selected
+                         program on load instead of staying unset. --}}
+                    <button type="button"
+                            wire:click="goToEmployment('', '{{ $cs->code }}')"
+                            class="org-mini-card org-course-row w-full text-left">
                         <span class="org-mini-tip"><i class="fas fa-eye mr-1"></i>View {{ $cs->code }}</span>
                         <div class="flex items-center justify-between mb-1">
                             <div class="flex items-center gap-2 min-w-0">
@@ -552,13 +603,13 @@ new class extends Component {
                         <div class="w-full h-2 rounded-full overflow-hidden" style="background:#F0E8F8;">
                             <div class="h-full rounded-full transition-all duration-700" style="width:{{ $pct }}%; background:{{ $color }};"></div>
                         </div>
-                    </a>
+                    </button>
                     @endforeach
                 </div>
 
                 <div class="mt-3 pt-2 border-t border-[#E8E0F0] flex items-center justify-between">
                     <p class="text-[.72rem] font-semibold text-[#7A3F91]">
-                        {{ count($courseStats) }} course{{ count($courseStats) !== 1 ? 's' : '' }} total
+                        {{ count($courseStats) }} program{{ count($courseStats) !== 1 ? 's' : '' }} total
                     </p>
                     <p class="text-[.68rem] text-[#333333] font-normal">
                         Total alumni: {{ number_format($totalAlumni) }}
@@ -593,12 +644,16 @@ new class extends Component {
                     ['label' => 'Unemployed',    'count' => $empUnemployed, 'color' => 'text-amber-700',   'bg' => 'bg-amber-50 border-amber-200',     'filter' => 'unemployed'],
                     ['label' => 'Not Filled',    'count' => $empNotFilled,  'color' => 'text-[#333333]',   'bg' => 'bg-gray-50 border-gray-200',       'filter' => 'not_filled'],
                 ] as $tile)
-                <a href="{{ route('organizer.alumni/employment', ['status' => $tile['filter']]) }}" wire:navigate
-                   class="org-mini-card org-emp-tile rounded-xl border {{ $tile['bg'] }} block">
+                {{-- Same session-handoff pattern as the program rows above:
+                     stash the status filter, redirect to the clean
+                     employment URL, filter auto-applies on load. --}}
+                <button type="button"
+                        wire:click="goToEmployment('{{ $tile['filter'] }}', '')"
+                        class="org-mini-card org-emp-tile rounded-xl border {{ $tile['bg'] }} block w-full text-left">
                     <span class="org-mini-tip"><i class="fas fa-eye mr-1"></i>View {{ $tile['label'] }}</span>
                     <p class="org-emp-num font-extrabold leading-none {{ $tile['color'] }}">{{ number_format($tile['count']) }}</p>
                     <p class="org-emp-label font-bold text-[#333333] uppercase tracking-wide">{{ $tile['label'] }}</p>
-                </a>
+                </button>
                 @endforeach
             </div>
         </div>
