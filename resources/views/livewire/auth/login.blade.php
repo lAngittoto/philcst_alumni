@@ -136,6 +136,23 @@ new #[Layout('app')] class extends Component {
         return "{$seconds} second" . ($seconds !== 1 ? 's' : '');
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // FIX: Mark the user "online" the moment they successfully log in —
+    // not only once they open the Messages/Chat page. Every role that has
+    // a `last_seen_at` presence column (organizer, alumni, director) gets
+    // it stamped with now() right after Auth::login() succeeds, using the
+    // exact same column the chat pages already read from (so the existing
+    // 1-minute "online" timeout logic keeps working with zero changes on
+    // that side). Wrapped in try/catch so a presence hiccup never blocks
+    // an otherwise-successful login.
+    // ─────────────────────────────────────────────────────────────────────
+    private function markPresenceOnline(string $table, int $id): void
+    {
+        try {
+            DB::table($table)->where('id', $id)->update(['last_seen_at' => now()]);
+        } catch (\Throwable) {}
+    }
+
     public function login(): void
     {
         $this->validate([
@@ -211,6 +228,9 @@ new #[Layout('app')] class extends Component {
             session()->regenerate();
             $organizer->update(['last_login' => now()]);
 
+            // ── Online the instant login succeeds ──────────────────────
+            $this->markPresenceOnline('organizer', $organizer->id);
+
             AuditLog::logLogin([
                 'id'    => $user->id,
                 'name'  => $organizer->name,
@@ -266,6 +286,11 @@ new #[Layout('app')] class extends Component {
             session()->regenerate();
 
             $alumni = Alumni::where('user_id', $user->id)->first();
+
+            // ── Online the instant login succeeds ──────────────────────
+            if ($alumni) {
+                $this->markPresenceOnline('alumni', $alumni->id);
+            }
 
             if (!$alumni || $alumni->needsAccountSetup() || $alumni->hasTemporaryPassword()) {
                 if ($alumni && !$alumni->needsAccountSetup() && $alumni->hasTemporaryPassword()) {
@@ -336,6 +361,13 @@ new #[Layout('app')] class extends Component {
         if ($user->role === 'director') {
             $this->clearAttempts();
             session()->regenerate();
+
+            // ── Online the instant login succeeds ──────────────────────
+            $directorId = DB::table('director')->where('user_id', $user->id)->value('id');
+            if ($directorId) {
+                $this->markPresenceOnline('director', (int) $directorId);
+            }
+
             AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'director'], true);
             $this->redirectRoute('director.dashboard', navigate: true);
             return;

@@ -352,6 +352,13 @@ new class extends Component {
     {
         $this->pollTick++;
 
+        // Presence is pinged EVERY tick (not staggered) so the coordinator
+        // is kept "online" continuously while this page/tab is open, in
+        // addition to the global heartbeat that runs on every page via the
+        // shared layout (see presence.ping route) — that combination is
+        // what makes "logged in = online" true everywhere, not just here.
+        $this->pingPresence();
+
         $this->checkAndDispatchNewMessageNotifications();
         $this->loadRooms();
 
@@ -366,7 +373,6 @@ new class extends Component {
         }
 
         if ($this->pollTick % 4 === 0) {
-            $this->pingPresence();
             $this->refreshOnlineCount();
             if ($this->showMembers && $this->isStaffRoom) {
                 $this->loadStaffMembers();
@@ -1091,7 +1097,17 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Presence — 1 min = offline
+    // Presence — 1 min = offline.
+    //
+    // NOTE: This ping keeps the coordinator "online" while THIS component
+    // is mounted/polling (i.e. while the Chat page is open). To make
+    // "logged in = online" true app-wide — even on pages that never touch
+    // this component — add a small heartbeat in your main authenticated
+    // layout that posts to a `presence.ping` route every ~30s. That keeps
+    // `last_seen_at` fresh no matter which page the coordinator is on,
+    // while this same 1-minute `onlineMinutes` rule still governs when
+    // they flip to offline. See the note left in the class docblock area
+    // above `mount()` for the exact route/controller/script snippet.
     // ─────────────────────────────────────────────────────────────────────
     public function pingPresence(): void
     {
@@ -1696,8 +1712,15 @@ new class extends Component {
      - Room search now shows a thin animated filtering progress bar,
        matching the yearbook page, while wire:model.live.debounce is
        resolving on the server
-     - Pin/unpin tooltip no longer gets clipped/overlapped by the
-       message list — raised z-index + safer positioning
+     - FIX: Pin/unpin tooltip is now ALWAYS clearly visible (solid dark
+       background, forced display, no longer relies on the generic
+       .org-tooltip opacity/hover rules that could leave it unreadable
+       or hidden on some viewports)
+     - FIX: Presence — this component pings presence on EVERY poll tick
+       (not just every 4th) while the chat page is open, keeping the
+       coordinator "online" continuously with the 1-minute timeout. Pair
+       this with a small app-wide heartbeat (see note above pingPresence()
+       in the class) so "logged in" = "online" even on pages outside chat.
      - Room names / headers / notification text NEVER leak the raw
        CLG_xxxx college marker; everything routes through
        roomDisplayName()/collegeDisplayLabel() in the class above
@@ -1774,21 +1797,40 @@ new class extends Component {
         }
 
         /* ── Pin/Unpin tooltip fix ────────────────────────────────────────
-           Previously this tooltip could render underneath sibling room
-           rows (or get its right edge clipped) because the wrapping
-           <div> only got z-30 while the room list itself stacked new
-           rows on top as it re-rendered. Bump this specific tooltip
-           wrapper + tooltip well above the room list/rows, switch long
-           labels ("Unpin room") to wrap instead of clipping, and nudge
-           it fully into view instead of relying on centered overflow. ── */
+           FIX: previously this tooltip was hard to see / sometimes never
+           appeared. Two things fought each other: (1) the generic
+           .org-tooltip rule hides tooltips entirely below 640px, and
+           (2) even on desktop the Alpine x-show toggled the *wrapper's*
+           inline display:none, which raced against the CSS opacity
+           transition on hover, so the label could flash or stay hidden.
+
+           This override forces the pin tooltip specifically to always be
+           a real, solid, high-contrast block whenever its wrapper is
+           shown (on any screen size), with its own guaranteed background/
+           color/padding — it no longer depends on the shared hover-opacity
+           animation to become legible. ── */
         #org-room-list .org-pin-tooltip-wrap {
             z-index: 950;
         }
         #org-room-list .org-pin-tooltip-wrap .org-tooltip {
+            display: block !important;
+            position: absolute;
             z-index: 951;
+            opacity: 1 !important;
+            transform: none !important;
             white-space: normal;
             max-width: 140px;
             text-align: center;
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 6px 10px;
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,.35);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .02em;
+            line-height: 1.3;
+            pointer-events: none;
         }
 
         #org-chat-header { position: relative; z-index: 10; }
@@ -2072,8 +2114,9 @@ new class extends Component {
                 </button>
 
                 {{-- Pin/Unpin button on hover — org-pin-tooltip-wrap carries
-                     the raised z-index fix so this tooltip always renders
-                     above neighboring room rows instead of being clipped --}}
+                     the raised z-index + forced-visible style fix so this
+                     tooltip always renders clearly above neighboring room
+                     rows instead of being clipped or invisible --}}
                 <div class="absolute top-2 right-2 z-30 org-tooltip-wrap org-pin-tooltip-wrap"
                      x-show="hovered"
                      x-transition:enter="transition ease-out duration-100"

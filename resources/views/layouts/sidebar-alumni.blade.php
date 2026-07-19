@@ -1047,7 +1047,7 @@
                     [
                         'route'   => 'alumni.messenger',
                         'icon'    => 'comments',
-                        'label'   => 'Messages',
+                        'label'   => 'Batch Chat',
                         'pattern' => 'alumni/messenger*',
                     ],
                     [

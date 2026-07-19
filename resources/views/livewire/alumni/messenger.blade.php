@@ -691,8 +691,16 @@ new class extends \Livewire\Volt\Component {
             $this->dispatch('chat-scroll-bottom');
         }
 
-        if ($this->pollTick % 4 === 0) {
-            $this->pingPresence();
+        // ── Presence: ping EVERY tick (every 1.5s) instead of every 4th ──
+        // tick. As long as this Messenger page is mounted — whether or not
+        // a specific room is open — the alumnus keeps refreshing their own
+        // `last_seen_at`, so the 1-minute "Online" threshold above never
+        // goes stale while they're sitting here. `refreshOnlineCount()` for
+        // the header pill still runs on a slightly lighter cadence since it
+        // does a couple of extra count() queries.
+        $this->pingPresence();
+
+        if ($this->pollTick % 2 === 0) {
             $this->refreshOnlineCount();
         }
     }
@@ -1269,6 +1277,16 @@ new class extends \Livewire\Volt\Component {
         before Livewire ever saw it. On confirm, the message flips to the
         existing "This message was deleted" placeholder bubble, same as
         before.
+     3) Room-list PIN tooltip now opens UPWARD (bottom-full) instead of
+        downward. Each room row uses `isolation: isolate` to keep its own
+        pin button/tooltip above its OWN content, but that isolation also
+        means normal DOM paint order still applies between sibling rows —
+        the next room down (later in the DOM) was painting on top of the
+        previous room's downward-facing tooltip, hiding it completely.
+        Flipping the tooltip to open upward instead means it now overlaps
+        the row ABOVE it (earlier in the DOM, painted first), so the
+        current row's own tooltip correctly paints on top and stays
+        visible.
 ════════════════════════════════════════════════════════════════════════════ --}}
 {{-- wire:poll is paused while the delete-confirm modal is open
      ($confirmDeleteId set). That poll firing mid-confirm was the most
@@ -1759,7 +1777,14 @@ new class extends \Livewire\Volt\Component {
                                        : 'bg-white border-[#E8E0F0] text-[#aaaaaa] hover:bg-amber-50 hover:text-amber-500 hover:border-amber-300' }}">
                         <i class="fa-solid fa-thumbtack" style="font-size: 10px;"></i>
                     </button>
-                    <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">
+                    {{-- Opens UPWARD (bottom-full) instead of downward, so it
+                         paints over the PREVIOUS room row (earlier in the DOM)
+                         instead of getting hidden behind the NEXT room row
+                         (later in the DOM always paints on top of an earlier
+                         sibling's overflow content, regardless of z-index,
+                         once `isolation: isolate` scopes each row into its
+                         own stacking context). --}}
+                    <span class="msgr-tooltip bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-lg">
                         {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
                     </span>
                 </div>
