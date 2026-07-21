@@ -20,7 +20,7 @@ new class extends Component {
     public string $search         = '';
     public string $filterType     = '';
     public string $filterLevel    = '';
-    public string $filterSort     = 'deadline_asc';
+    public string $filterSort     = 'recent';
 
     public bool $showDetail    = false;
     public ?int $viewingJobId  = null;
@@ -138,7 +138,7 @@ new class extends Component {
                 $this->search      = '';
                 $this->filterType  = '';
                 $this->filterLevel = '';
-                $this->filterSort  = 'deadline_asc';
+                $this->filterSort  = 'recent';
 
                 $this->viewingJobId = (int) $jobParam;
                 $this->showDetail   = true;
@@ -154,7 +154,7 @@ new class extends Component {
     public function resetFilters(): void
     {
         $this->search = $this->filterType = $this->filterLevel = '';
-        $this->filterSort = 'deadline_asc';
+        $this->filterSort = 'recent';
         $this->resetPage();
     }
 
@@ -190,10 +190,12 @@ new class extends Component {
         if ($this->filterType  !== '') $q->where('employment_type',  $this->filterType);
         if ($this->filterLevel !== '') $q->where('experience_level', $this->filterLevel);
 
+        // Latest-posted job always leads unless the alumni explicitly
+        // picks "Deadline (Soonest)" from the sort filter.
         match ($this->filterSort) {
             'deadline_asc'  => $q->orderBy('deadline', 'asc'),
             'recent'        => $q->orderBy('created_at', 'desc'),
-            default         => $q->orderBy('deadline', 'asc'),
+            default         => $q->orderBy('created_at', 'desc'),
         };
 
         return $q->paginate(20);

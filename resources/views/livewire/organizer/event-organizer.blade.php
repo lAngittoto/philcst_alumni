@@ -58,32 +58,28 @@ new class extends Component {
     public string $resubmitEventTitle       = '';
     public string $resubmitEventRemarks     = '';
 
-    public bool   $isRestoring        = false;
-    public string $restoreEventTitle  = '';
+    // ── Pre-submit confirm modal (create only) ──
+    public bool   $showSubmitConfirmModal = false;
 
     // ── Confirm modals ──
     public bool   $showDeleteModal   = false;
     public ?int   $pendingDeleteId   = null;
     public string $pendingDeleteTitle = '';
 
-    // ── Restore confirm modal (unified — future & past date) ──
-    public bool   $showRestoreModal   = false;
-    public ?int   $pendingRestoreId   = null;
-    public string $pendingRestoreTitle = '';
-    public bool   $restoreDateIsPast  = false;   // true = past date → YES opens view details
-
     public bool   $showShareModal        = false;
     public ?int   $shareEventId          = null;
+    public string $shareEventType        = 'ORGANIZER';
     public string $shareEventTitle       = '';
+    public string $shareEventVenue       = '';
     public string $shareEventDate        = '';
     public string $shareEventTime        = '';
     public string $shareEventEndTime     = '';
-    public string $shareEventVenue       = '';
-    public string $shareEventVenueAddr   = '';
     public string $shareEventDescription = '';
+    public string $shareEventNotes       = '';
+    public string $shareEventOrganizer   = '';
+    public string $shareEventTargetParts = '';
     public string $shareEventPhotoUrl    = '';
-    public string $shareEventTarget      = '';
-    public string $shareEventStatus      = '';
+    public bool   $shareEventIsCompleted = false;
 
     public function mount(): void
     {
@@ -231,8 +227,10 @@ new class extends Component {
         $orgId = $this->organizerId;
         if (!$orgId) abort(403);
 
+        // ORGANIZER_DELETED events are excluded entirely — they no longer
+        // appear in this list under any filter.
         $q = OrganizerEvent::where('organizer_id', $orgId)
-            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED', 'ORGANIZER_DELETED']);
+            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED']);
 
         if ($this->search !== '') {
             $s = trim($this->search);
@@ -242,12 +240,12 @@ new class extends Component {
             );
         }
 
-        if ($this->filterStatus !== '' && in_array($this->filterStatus, ['PENDING','APPROVED','REJECTED','COMPLETED','ORGANIZER_DELETED'], true)) {
+        if ($this->filterStatus !== '' && in_array($this->filterStatus, ['PENDING','APPROVED','REJECTED','COMPLETED'], true)) {
             $q->where('status', $this->filterStatus);
         }
 
         $q->orderBy('created_at', 'desc');
-        return $q->paginate(15);
+        return $q->paginate(20);
     }
 
     #[Computed]
@@ -297,8 +295,9 @@ new class extends Component {
         $this->end_time         = $event->event_end_date?->setTimezone('Asia/Manila')->format('H:i') ?? '';
         $this->venue            = $event->venue;
         $this->venue_address    = $event->venue_address ?? '';
-        $this->contact_person   = $event->contact_person ?? $this->organizerName;
-        $this->contact_email    = $event->contact_email  ?? $this->organizerEmail;
+        // Contact person name/email always reflect the organizer account (read-only)
+        $this->contact_person   = $this->organizerName;
+        $this->contact_email    = $this->organizerEmail;
         $this->contact_phone    = $event->contact_phone  ?? '';
         $this->notes            = $event->notes ?? '';
         $this->existingPhotoUrl = $event->photo_url;
@@ -330,17 +329,7 @@ new class extends Component {
             return;
         }
 
-        if ($event->status === 'ORGANIZER_DELETED') {
-            $this->isRestoring       = true;
-            $this->restoreEventTitle = $event->title;
-            $this->populateEditForm($event);
-            $this->showFormModal = true;
-            $this->showViewModal = false;
-            return;
-        }
-
         $this->isResubmitting = false;
-        $this->isRestoring    = false;
         $this->populateEditForm($event);
         $this->showFormModal = true;
         $this->showViewModal = false;
@@ -352,7 +341,6 @@ new class extends Component {
 
         if ($event->status === 'PENDING') {
             $this->isResubmitting = false;
-            $this->isRestoring    = false;
             $this->populateEditForm($event);
             $this->showFormModal = true;
             $this->showViewModal = false;
@@ -363,15 +351,6 @@ new class extends Component {
             $this->isResubmitting = true;
             $this->resubmitEventTitle   = $event->title;
             $this->resubmitEventRemarks = $event->review_remarks ?? '';
-            $this->populateEditForm($event);
-            $this->showFormModal = true;
-            $this->showViewModal = false;
-            return;
-        }
-
-        if ($event->status === 'ORGANIZER_DELETED') {
-            $this->isRestoring       = true;
-            $this->restoreEventTitle = $event->title;
             $this->populateEditForm($event);
             $this->showFormModal = true;
             $this->showViewModal = false;
@@ -437,92 +416,11 @@ new class extends Component {
         } catch (\Throwable) {}
 
         // NO event-management-updated dispatch for delete
-        $this->dispatch('flash-message', type: 'success', message: 'Event deleted. You can restore it anytime from the events list.');
+        $this->dispatch('flash-message', type: 'success', message: 'Event deleted.');
 
         $this->showDeleteModal    = false;
         $this->pendingDeleteId    = null;
         $this->pendingDeleteTitle = '';
-    }
-
-    // ── Restore: unified confirm modal ──
-    //    Future date → YES = auto-restore to PENDING
-    //    Past date   → YES = open view details (so they can edit date)
-    public function confirmRestore(int $id): void
-    {
-        $event = OrganizerEvent::where('id', $id)
-            ->where('organizer_id', $this->organizerId)
-            ->where('status', 'ORGANIZER_DELETED')
-            ->firstOrFail();
-
-        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
-
-        $this->pendingRestoreId    = $id;
-        $this->pendingRestoreTitle = $event->title;
-        $this->restoreDateIsPast   = ! $eventDatePH->isFuture();
-        $this->showRestoreModal    = true;
-    }
-
-    public function cancelRestore(): void
-    {
-        $this->showRestoreModal    = false;
-        $this->pendingRestoreId    = null;
-        $this->pendingRestoreTitle = '';
-        $this->restoreDateIsPast   = false;
-    }
-
-    public function proceedRestore(): void
-    {
-        if (!$this->pendingRestoreId) return;
-
-        if ($this->restoreDateIsPast) {
-            // Past date → open view details so coordinator can edit date
-            $id = $this->pendingRestoreId;
-            $this->showRestoreModal    = false;
-            $this->pendingRestoreId    = null;
-            $this->pendingRestoreTitle = '';
-            $this->restoreDateIsPast   = false;
-            // Open view details (not edit form)
-            $this->viewingEventId = $id;
-            $this->showViewModal  = true;
-            return;
-        }
-
-        // Future date → auto-restore directly to PENDING
-        $event = OrganizerEvent::where('id', $this->pendingRestoreId)
-            ->where('organizer_id', $this->organizerId)
-            ->where('status', 'ORGANIZER_DELETED')
-            ->firstOrFail();
-
-        $event->update([
-            'status'         => 'PENDING',
-            'review_remarks' => null,
-            'reviewed_at'    => null,
-        ]);
-
-        try {
-            AuditLog::create([
-                'user_id'       => Auth::id(),
-                'user_name'     => Auth::user()?->name ?? 'Organizer',
-                'user_email'    => Auth::user()?->email,
-                'user_role'     => 'organizer',
-                'action'        => 'restored',
-                'module'        => 'event',
-                'subject_id'    => $this->pendingRestoreId,
-                'subject_label' => $event->title,
-                'description'   => "Organizer restored deleted event: '{$event->title}' — resubmitted for Alumni Director review.",
-                'ip_address'    => request()->ip(),
-                'user_agent'    => request()->userAgent(),
-                'severity'      => 'info',
-            ]);
-        } catch (\Throwable) {}
-
-        // NO event-management-updated dispatch for restore
-        $this->dispatch('flash-message', type: 'success', message: 'Event restored and resubmitted for Alumni Director review!');
-
-        $this->showRestoreModal    = false;
-        $this->pendingRestoreId    = null;
-        $this->pendingRestoreTitle = '';
-        $this->restoreDateIsPast   = false;
     }
 
     public function resetForm(): void
@@ -530,7 +428,6 @@ new class extends Component {
         $savedId         = $this->editingEventId;
         $savedIsEditing  = $this->isEditing;
         $savedIsResubmit = $this->isResubmitting;
-        $savedIsRestore  = $this->isRestoring;
 
         $this->resetFormFields();
 
@@ -540,7 +437,6 @@ new class extends Component {
         $this->editingEventId = $savedId;
         $this->isEditing      = $savedIsEditing;
         $this->isResubmitting = $savedIsResubmit;
-        $this->isRestoring    = $savedIsRestore;
 
         $this->contact_person = $this->organizerName;
         $this->contact_email  = $this->organizerEmail;
@@ -554,17 +450,51 @@ new class extends Component {
         $this->resetFormFields();
     }
 
-    public function saveEvent(): void
+    // ── Runs full validation. If clean AND this is a brand-new (non-edit,
+    //    non-resubmit) submission, opens the confirm modal instead of
+    //    saving immediately. Editing/resubmitting saves straight away
+    //    (no extra confirm — the "can't edit once approved" warning is
+    //    only relevant the first time an event is submitted). ──
+    public function requestSaveEvent(): void
+    {
+        if ($this->isEditing || $this->isResubmitting) {
+            $this->saveEvent();
+            return;
+        }
+
+        if (!$this->validateEventForm()) {
+            return;
+        }
+
+        $this->showSubmitConfirmModal = true;
+    }
+
+    public function cancelSubmitConfirm(): void
+    {
+        $this->showSubmitConfirmModal = false;
+    }
+
+    public function confirmSubmitEvent(): void
+    {
+        $this->showSubmitConfirmModal = false;
+        $this->saveEvent();
+    }
+
+    // ── Extracted validation so it can be called before showing the
+    //    pre-submit confirm modal without duplicating saveEvent(). ──
+    private function validateEventForm(): bool
     {
         $key = 'save_event_' . Auth::id();
         if (RateLimiter::tooManyAttempts($key, 10)) {
             $this->formErrors = ['rate_limit' => 'Too many attempts. Please wait a moment before trying again.'];
-            return;
+            return false;
         }
-        RateLimiter::hit($key, 60);
 
         $this->formErrors = [];
         $errors = [];
+
+        $this->contact_person = $this->organizerName;
+        $this->contact_email  = $this->organizerEmail;
 
         $this->title          = strip_tags(trim($this->title));
         $this->description    = strip_tags(trim($this->description));
@@ -634,9 +564,7 @@ new class extends Component {
                     'Asia/Manila'
                 );
                 if ($proposedStart->isPast()) {
-                    $errors['event_date'] = $this->isRestoring
-                        ? 'Please set a future date to restore this event.'
-                        : 'Event date and start time cannot be in the past. Please choose a future date and time.';
+                    $errors['event_date'] = 'Event date and start time cannot be in the past. Please choose a future date and time.';
                 }
             } catch (\Exception $e) {}
         }
@@ -695,7 +623,23 @@ new class extends Component {
             }
         }
 
-        if (!empty($errors)) { $this->formErrors = $errors; return; }
+        if (!empty($errors)) { $this->formErrors = $errors; return false; }
+
+        return true;
+    }
+
+    public function saveEvent(): void
+    {
+        $key = 'save_event_' . Auth::id();
+        if (RateLimiter::tooManyAttempts($key, 10)) {
+            $this->formErrors = ['rate_limit' => 'Too many attempts. Please wait a moment before trying again.'];
+            return;
+        }
+        RateLimiter::hit($key, 60);
+
+        if (!$this->validateEventForm()) {
+            return;
+        }
 
         $courseStr  = !empty($this->selectedCourses) ? implode(', ', $this->selectedCourses) : 'All Courses';
         $yearSuffix = trim($this->batchYear) ? ' · Batch ' . trim($this->batchYear) : '';
@@ -727,23 +671,14 @@ new class extends Component {
             $data['reviewed_at']    = null;
         }
 
-        if ($this->isRestoring) {
-            $data['status']         = 'PENDING';
-            $data['review_remarks'] = null;
-            $data['reviewed_at']    = null;
-        }
-
         $ctrl  = app(OrganizerEventController::class);
         $photo = $this->photo;
 
         // ── Determine which actions dispatch a notif ──
-        // ONLY 'updated' and 'resubmitted' dispatch — NOT 'created' or 'restored'
-        $notifAction = $this->isRestoring
-            ? null                                      // restored → no notif
-            : ($this->isResubmitting
-                ? 'resubmitted'                         // resubmitted → notif (optional)
-                : ($this->isEditing ? 'updated' : null) // updated → notif, created → NO notif
-            );
+        // ONLY 'updated' and 'resubmitted' dispatch — NOT 'created'
+        $notifAction = $this->isResubmitting
+            ? 'resubmitted'                         // resubmitted → notif (optional)
+            : ($this->isEditing ? 'updated' : null); // updated → notif, created → NO notif
 
         if ($this->isEditing) {
             $event = OrganizerEvent::where('id', $this->editingEventId)
@@ -778,21 +713,10 @@ new class extends Component {
                     ]);
                     unset($data['status'], $data['review_remarks'], $data['reviewed_at']);
                 }
-                if ($this->isRestoring) {
-                    $event->update([
-                        'status'         => 'PENDING',
-                        'review_remarks' => null,
-                        'reviewed_at'    => null,
-                    ]);
-                    unset($data['status'], $data['review_remarks'], $data['reviewed_at']);
-                }
                 $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
             }
 
-            if ($this->isRestoring) {
-                $action      = 'restored';
-                $description = "Organizer restored deleted event: '" . trim($this->title) . "' — resubmitted for Alumni Director review.";
-            } elseif ($this->isResubmitting) {
+            if ($this->isResubmitting) {
                 $action      = 'resubmitted';
                 $description = "Organizer resubmitted rejected event: '" . trim($this->title) . "' for Alumni Director review.";
             } else {
@@ -825,13 +749,9 @@ new class extends Component {
                 ]);
             } catch (\Throwable) {}
 
-            if ($this->isRestoring) {
-                $msg = 'Event restored and resubmitted for Alumni Director review!';
-            } elseif ($this->isResubmitting) {
-                $msg = 'Event resubmitted for Alumni Director review!';
-            } else {
-                $msg = 'Event updated successfully!';
-            }
+            $msg = $this->isResubmitting
+                ? 'Event resubmitted for Alumni Director review!'
+                : 'Event updated successfully!';
 
             $this->dispatch('flash-message', type: 'success', message: $msg);
         } else {
@@ -865,7 +785,7 @@ new class extends Component {
         }
 
         // Only dispatch event-management-updated for UPDATED action
-        // NOT for created, deleted, restored
+        // NOT for created
         $savedEventId = $this->isEditing ? $this->editingEventId : null;
         if ($notifAction !== null) {
             $this->dispatch('event-management-updated', id: $savedEventId, title: trim($this->title), action: $notifAction);
@@ -889,17 +809,25 @@ new class extends Component {
             return;
         }
 
+        $isCompleted = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
+                       (!$event->event_end_date && $event->event_date <= now('UTC'));
+
+        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
+        $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
+
         $this->shareEventId          = $id;
+        $this->shareEventType        = 'ORGANIZER';
         $this->shareEventTitle       = $event->title;
-        $this->shareEventDate        = $event->event_date->setTimezone('Asia/Manila')->format('F d, Y');
-        $this->shareEventTime        = $event->event_date->setTimezone('Asia/Manila')->format('g:i A');
-        $this->shareEventEndTime     = $event->event_end_date?->setTimezone('Asia/Manila')->format('g:i A') ?? '';
-        $this->shareEventVenue       = $event->venue;
-        $this->shareEventVenueAddr   = $event->venue_address ?? '';
+        $this->shareEventVenue       = $event->venue ?? '';
+        $this->shareEventDate        = $eventDatePH->format('F d, Y');
+        $this->shareEventTime        = $eventDatePH->format('g:i A');
+        $this->shareEventEndTime     = $eventEndPH ? $eventEndPH->format('g:i A') : '';
         $this->shareEventDescription = $event->description ?? '';
-        $this->shareEventPhotoUrl    = $event->photo_url;
-        $this->shareEventTarget      = $event->target_participants ?? '';
-        $this->shareEventStatus      = $event->status;
+        $this->shareEventNotes       = $event->notes ?? '';
+        $this->shareEventTargetParts = $event->target_participants ?? '';
+        $this->shareEventPhotoUrl    = $event->photo_url ?? '';
+        $this->shareEventOrganizer   = $this->organizerName ?: 'Organizer';
+        $this->shareEventIsCompleted = $isCompleted;
 
         $this->showShareModal = true;
         $this->showViewModal  = false;
@@ -910,15 +838,24 @@ new class extends Component {
         $this->showShareModal        = false;
         $this->shareEventId          = null;
         $this->shareEventTitle       = '';
+        $this->shareEventVenue       = '';
         $this->shareEventDate        = '';
         $this->shareEventTime        = '';
         $this->shareEventEndTime     = '';
-        $this->shareEventVenue       = '';
-        $this->shareEventVenueAddr   = '';
         $this->shareEventDescription = '';
+        $this->shareEventNotes       = '';
+        $this->shareEventOrganizer   = '';
+        $this->shareEventTargetParts = '';
         $this->shareEventPhotoUrl    = '';
-        $this->shareEventTarget      = '';
-        $this->shareEventStatus      = '';
+        $this->shareEventIsCompleted = false;
+    }
+
+    // ── "Share to Organizer Updates" — UI/button only for now (per request).
+    //    No chat backend wiring yet; this is a placeholder hook for a
+    //    future implementation. ──
+    public function shareToOrganizerUpdates(): void
+    {
+        $this->dispatch('flash-message', type: 'info', message: 'Share to Organizer Updates is coming soon.');
     }
 
     public function eventsBaseUrl(): string
@@ -943,10 +880,9 @@ new class extends Component {
         $this->editingEventId = null;
         $this->isEditing      = false;
         $this->isResubmitting = false;
-        $this->isRestoring    = false;
         $this->resubmitEventTitle   = '';
         $this->resubmitEventRemarks = '';
-        $this->restoreEventTitle    = '';
+        $this->showSubmitConfirmModal = false;
     }
 };
 ?>
@@ -1043,13 +979,104 @@ select.tw-select-arrow {
         max-height: 100vh !important;
     }
 }
+
+/* ── Share modal close button (mirrors upcoming-events share-close-btn,
+     with the SVG X + hover tooltip instead of a plain "X" text glyph) ── */
+.eo-share-close-btn {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
+    flex-shrink: 0;
+}
+.eo-share-close-btn:hover  { background: #e5e7eb; border-color: #d1d5db; }
+.eo-share-close-btn:active { transform: scale(.93); }
+.eo-share-close-btn svg    { width: 14px; height: 14px; stroke: #4b5563; stroke-width: 2.25; stroke-linecap: round; }
+.eo-share-close-btn .tip {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.eo-share-close-btn .tip::before {
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
+}
+.eo-share-close-btn:hover .tip { opacity: 1; }
+
+/* ── Simplified share option row — icon + label only (mirrors upcoming-events) ── */
+.eo-share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
+}
+.eo-share-option-btn:hover  { filter: brightness(0.94); }
+.eo-share-option-btn:active { transform: scale(.98); }
+.eo-share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.eo-share-option-btn .label-text { flex: 1; text-align: left; }
+
+.eo-share-photo-preview {
+    width: 100%;
+    height: 140px;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+}
+.eo-share-photo-preview img {
+    width: 100%; height: 100%; object-fit: contain;
+}
+.eo-share-photo-preview .dl-badge {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(17,24,39,.75); color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    padding: 3px 8px; border-radius: 999px;
+    display: flex; align-items: center; gap: 4px;
+    pointer-events: none;
+}
+
+.eo-dl-confirm-icon {
+    width: 3rem; height: 3rem; border-radius: 0.9rem;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; flex-shrink: 0;
+}
+.eo-dl-confirm-btn {
+    flex: 1; padding: 0.65rem 1rem; border-radius: 0.75rem;
+    font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+    transition: filter .15s, transform .1s; border: none;
+}
+.eo-dl-confirm-btn:active { transform: scale(.97); }
+.eo-dl-confirm-btn.primary { background: #7a3f91; color: #fff; }
+.eo-dl-confirm-btn.primary:hover { filter: brightness(0.95); }
+.eo-dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
+.eo-dl-confirm-btn.secondary:hover { background: #e5e7eb; }
+
+/* ── Pagination bar: purple gradient style mirroring upcoming-events ── */
+.eo-pagination-bar {
+    background: linear-gradient(to right, #7a3f91, #9b59b6);
+    border-top: 1px solid rgba(122,63,145,.3);
+}
 </style>
 
 {{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
 <div id="eo-hover-tip"
      class="fixed bg-[#1a1a1a] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)]"
      style="transform: translate(12px, -110%);">
-    <i class="fas fa-eye mr-1.5"></i>View Details
+    <i class="fas fa-eye mr-1.5" id="eo-hover-tip-icon"></i><span id="eo-hover-tip-text">View Details</span>
     <span class="absolute top-full left-3.5 border-[5px] border-transparent border-t-[#1a1a1a]"></span>
 </div>
 
@@ -1131,7 +1158,7 @@ select.tw-select-arrow {
     <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
@@ -1198,9 +1225,9 @@ select.tw-select-arrow {
         </div>
 
         {{-- ── TABLE WRAPPER (fixed-height card, scrolls internally — same pattern as Alumni Records) ── --}}
-        <div class="relative flex-1 min-h-0">
+        <div class="relative flex-1 min-h-0 bg-white">
             <div id="eo-table-scroll"
-                 class="scroll-c h-full overflow-y-auto transition-opacity duration-200"
+                 class="scroll-c h-full overflow-y-auto transition-opacity duration-200 bg-white"
                  wire:loading.class="opacity-60" wire:target="search,filterStatus">
 
             @if($this->events->count() > 0)
@@ -1209,22 +1236,22 @@ select.tw-select-arrow {
                 <table class="w-full bg-white border-collapse">
                     <thead class="bg-white sticky top-0 z-10" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Date &amp; Time</th>
-                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden xl:table-cell text-[#555555]">Course</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Program</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden xl:table-cell text-[#555555]">Batch</th>
                             <th class="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
                             <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
-                        @foreach($this->events as $index => $event)
+                        @foreach($this->events as $event)
                         @php
                             $isCompleted = $event->status === 'COMPLETED';
                             $isApproved  = $event->status === 'APPROVED';
                             $isPending   = $event->status === 'PENDING';
                             $isRejected  = $event->status === 'REJECTED';
-                            $isDeleted   = $event->status === 'ORGANIZER_DELETED';
+                            $isEditable  = $isPending || $isRejected;
 
                             $tp          = $event->target_participants ?? '';
                             $tpParts     = explode(' · Batch ', $tp, 2);
@@ -1232,23 +1259,19 @@ select.tw-select-arrow {
                             $batchDisplay   = !empty($tpParts[1]) ? trim($tpParts[1]) : null;
 
                             $eventDate  = $event->event_date->setTimezone('Asia/Manila');
-                            $rowNum     = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
                             $isUpcoming = $isApproved && $eventDate->isFuture();
                         @endphp
 
-                        <tr class="transition-colors duration-100 cursor-pointer {{ $isDeleted ? 'bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60' : 'bg-white hover:bg-[#f5f0fa]' }}"
+                        <tr class="transition-colors duration-100 cursor-pointer bg-white hover:bg-[#f5f0fa]"
                             wire:click="viewEvent({{ $event->id }})"
                             wire:key="event-row-{{ $event->id }}"
-                            data-eo-row>
-
-                            <td class="px-4 py-2.5 text-xs font-semibold text-purple-400 text-center">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
-                            </td>
+                            data-eo-row
+                            data-eo-row-editable="{{ $isEditable ? '1' : '0' }}">
 
                             <td class="px-4 py-2.5">
                                 <div class="max-w-[240px]">
                                     <div class="flex items-center gap-1.5 flex-wrap">
-                                        <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isDeleted ? 'text-red-400 line-through' : 'text-[#333333]' }}">{{ $event->title }}</p>
+                                        <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
                                         @if($isUpcoming)
                                             <span class="eo-upcoming-badge"><i class="fas fa-circle text-[6px]"></i>Upcoming</span>
                                         @endif
@@ -1258,7 +1281,7 @@ select.tw-select-arrow {
                             </td>
 
                             <td class="px-4 py-2.5 hidden md:table-cell whitespace-nowrap">
-                                <p class="text-sm font-semibold {{ $isDeleted ? 'text-red-300' : 'text-[#333333]' }}">{{ $eventDate->format('M d, Y') }}</p>
+                                <p class="text-sm font-semibold text-[#333333]">{{ $eventDate->format('M d, Y') }}</p>
                                 <p class="text-xs mt-0.5 text-[#555555]">
                                     {{ $eventDate->format('g:i A') }}
                                     @if($event->event_end_date)
@@ -1267,17 +1290,20 @@ select.tw-select-arrow {
                                 </p>
                             </td>
 
+                            <td class="px-4 py-2.5 hidden lg:table-cell">
+                                <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-100 w-fit max-w-[160px] truncate block">
+                                    {{ Str::limit($displayCourses, 24) }}
+                                </span>
+                            </td>
+
                             <td class="px-4 py-2.5 hidden xl:table-cell">
-                                <div class="flex flex-col gap-1">
-                                    <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-100 w-fit max-w-[160px] truncate block">
-                                        {{ Str::limit($displayCourses, 20) }}
+                                @if($batchDisplay)
+                                    <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-gray-100 border border-gray-200 w-fit text-[#333333] inline-block">
+                                        Batch {{ $batchDisplay }}
                                     </span>
-                                    @if($batchDisplay)
-                                        <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-gray-100 border border-gray-200 w-fit text-[#333333]">
-                                            Batch {{ $batchDisplay }}
-                                        </span>
-                                    @endif
-                                </div>
+                                @else
+                                    <span class="text-xs text-[#999999]">All Batches</span>
+                                @endif
                             </td>
 
                             <td class="px-4 py-2.5 text-center">
@@ -1292,10 +1318,6 @@ select.tw-select-arrow {
                                 @elseif($isPending)
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-yellow-200 bg-yellow-50 text-yellow-700 whitespace-nowrap">
                                         <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
-                                    </span>
-                                @elseif($isDeleted)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-600 whitespace-nowrap">
-                                        <i class="fas fa-trash-can text-[9px] mr-1"></i>Deleted
                                     </span>
                                 @else
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
@@ -1332,21 +1354,6 @@ select.tw-select-arrow {
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                 Delete
-                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                            </div>
-                                        </div>
-                                    @endif
-
-                                    @if($isDeleted)
-                                        <div class="relative inline-flex group" data-eo-share>
-                                            <button type="button"
-                                                    wire:click.stop="confirmRestore({{ $event->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
-                                                <i class="fas fa-rotate-left"></i>
-                                            </button>
-                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                Restore
                                                 <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                             </div>
                                         </div>
@@ -1389,7 +1396,7 @@ select.tw-select-arrow {
             </div>
         </div>
 
-        {{-- ── PAGINATION ── --}}
+        {{-- ── PAGINATION (purple gradient bar style, mirrors upcoming-events) ── --}}
         @php
             $total    = $this->events->total();
             $pp       = $this->events->perPage();
@@ -1400,14 +1407,13 @@ select.tw-select-arrow {
             $pgStart  = max(1, $cp - 2);
             $pgEnd    = min($lp, $cp + 2);
         @endphp
-        <div class="flex-shrink-0 border-t border-purple-800/30 px-4 flex items-center justify-between gap-2 flex-wrap min-h-[48px] py-1"
-             style="background: linear-gradient(to right, #7a3f91, #9b59b6);">
+        <div class="eo-pagination-bar flex-shrink-0 px-4 flex items-center justify-between gap-2 flex-wrap min-h-[48px] py-1">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                 of <strong class="text-white font-bold">{{ $total }}</strong>
                 event{{ $total !== 1 ? 's' : '' }}
                 @if($filterStatus || $search)
-                    <span class="text-white/50 text-xs ml-1">(filtered)</span>
+                    <span class="text-white/60 text-xs ml-1">(filtered)</span>
                 @endif
             </p>
 
@@ -1486,7 +1492,7 @@ select.tw-select-arrow {
             </p>
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-800">The event will be moved to <strong>Deleted</strong> status. You can restore it anytime from the events list.</span>
+                <span class="text-xs text-amber-800">This action cannot be undone. The event will be permanently marked as deleted.</span>
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelDelete"
@@ -1500,73 +1506,6 @@ select.tw-select-arrow {
                     <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
                     <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-xs"></i></span>
                     Yes, Delete
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-@endif
-
-
-{{-- ══ RESTORE CONFIRM MODAL ══
-     Future date → YES = auto-restore to PENDING
-     Past date   → YES = open view details (edit date from there)
-══ --}}
-@if($showRestoreModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-     wire:keydown.escape.window="cancelRestore">
-    <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
-
-        <div class="px-6 py-4 border-b {{ $restoreDateIsPast ? 'border-amber-100 bg-amber-50' : 'border-emerald-100 bg-emerald-50' }}">
-            <h2 class="text-base font-semibold {{ $restoreDateIsPast ? 'text-amber-800' : 'text-emerald-800' }} flex items-center gap-2.5">
-                <div class="w-8 h-8 {{ $restoreDateIsPast ? 'bg-amber-100' : 'bg-emerald-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-rotate-left {{ $restoreDateIsPast ? 'text-amber-600' : 'text-emerald-600' }} text-sm"></i>
-                </div>
-                {{ $restoreDateIsPast ? 'Restore Event — Update Required' : 'Restore Event' }}
-            </h2>
-        </div>
-
-        <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">
-                {{ $restoreDateIsPast ? 'The event date has already passed for:' : 'Are you sure you want to restore:' }}
-            </p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
-                {{ $pendingRestoreTitle }}
-            </p>
-
-            @if($restoreDateIsPast)
-            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-800">
-                    The event date has already passed. Click <strong>View Details</strong> to open the event — you can update the date there and save to resubmit for Alumni Director review.
-                </span>
-            </div>
-            @else
-            <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-emerald-800">
-                    The event will be restored to <strong>Pending</strong> status and resubmitted for Alumni Director review.
-                </span>
-            </div>
-            @endif
-
-            <div class="flex gap-2">
-                <button wire:click="cancelRestore"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
-                </button>
-                <button wire:click="proceedRestore"
-                        wire:loading.attr="disabled"
-                        wire:target="proceedRestore"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-60
-                               {{ $restoreDateIsPast ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-500 hover:bg-emerald-600' }}">
-                    <span wire:loading wire:target="proceedRestore">
-                        <i class="fas fa-spinner animate-spin mr-1 text-xs"></i>
-                    </span>
-                    <span wire:loading.remove wire:target="proceedRestore">
-                        <i class="fas {{ $restoreDateIsPast ? 'fa-eye' : 'fa-rotate-left' }} mr-1 text-xs"></i>
-                    </span>
-                    {{ $restoreDateIsPast ? 'View Details' : 'Yes, Restore' }}
                 </button>
             </div>
         </div>
@@ -1605,18 +1544,59 @@ select.tw-select-arrow {
 @endif
 
 
-{{-- ══ CREATE / EDIT / RESUBMIT / RESTORE — FULL SCREEN ══ --}}
+{{-- ══ PRE-SUBMIT CONFIRM MODAL (create only) — warns that the event
+     can no longer be edited once it is approved by the Alumni Director. ══ --}}
+@if($showSubmitConfirmModal)
+<div class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+     wire:keydown.escape.window="cancelSubmitConfirm">
+    <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
+        <div class="px-6 py-4 border-b border-amber-100 bg-amber-50">
+            <h2 class="text-base font-semibold text-amber-800 flex items-center gap-2.5">
+                <div class="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-triangle-exclamation text-amber-500 text-sm"></i>
+                </div>
+                Confirm Submission
+            </h2>
+        </div>
+        <div class="p-5 bg-white">
+            <p class="text-sm text-[#555555] mb-1">You are about to submit:</p>
+            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+                {{ $title }}
+            </p>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-lock text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
+                <span class="text-xs text-amber-800">Once this event is approved by the Alumni Director, it can no longer be edited. Please review all details carefully before proceeding.</span>
+            </div>
+            <div class="flex gap-2">
+                <button wire:click="cancelSubmitConfirm"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                    <i class="fas fa-xmark mr-1 text-xs"></i>Review Again
+                </button>
+                <button wire:click="confirmSubmitEvent"
+                        wire:loading.attr="disabled"
+                        wire:target="confirmSubmitEvent"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#7a3f91] hover:bg-[#5e2f72] transition cursor-pointer disabled:opacity-60">
+                    <span wire:loading wire:target="confirmSubmitEvent"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
+                    <span wire:loading.remove wire:target="confirmSubmitEvent"><i class="fas fa-paper-plane mr-1 text-xs"></i></span>
+                    Yes, Submit
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+@endif
+
+
+{{-- ══ CREATE / EDIT / RESUBMIT — FULL SCREEN ══ --}}
 @if($showFormModal)
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeFormModal()">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 flex-shrink-0 shadow-lg"
-         style="background: {{ $isRestoring ? '#d97706' : '#7a3f91' }};">
+         style="background: {{ $isResubmitting ? '#d97706' : '#7a3f91' }};">
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                @if($isRestoring)
-                    <i class="fas fa-rotate-left text-white text-sm"></i>
-                @elseif($isResubmitting)
+                @if($isResubmitting)
                     <i class="fas fa-rotate-right text-white text-sm"></i>
                 @elseif($isEditing)
                     <i class="fas fa-pen-to-square text-white text-sm"></i>
@@ -1626,15 +1606,13 @@ select.tw-select-arrow {
             </div>
             <div>
                 <h2 class="text-white font-semibold text-lg leading-tight">
-                    @if($isRestoring) Restore Event — Update Date
-                    @elseif($isResubmitting) Edit &amp; Resubmit Event
+                    @if($isResubmitting) Edit &amp; Resubmit Event
                     @elseif($isEditing) Edit Event
                     @else Submit a New Event
                     @endif
                 </h2>
                 <p class="text-white/60 text-xs mt-0.5">
-                    @if($isRestoring) Set a future date and save to resubmit for Alumni Director review
-                    @elseif($isResubmitting) Make changes — saving will resubmit for Alumni Director review
+                    @if($isResubmitting) Make changes — saving will resubmit for Alumni Director review
                     @elseif($isEditing) Update event details below
                     @else Fill in details — will be sent for Alumni Director review
                     @endif
@@ -1643,7 +1621,7 @@ select.tw-select-arrow {
         </div>
 
         <div class="flex items-center gap-1.5">
-            @if(!$isEditing && !$isResubmitting && !$isRestoring)
+            @if(!$isEditing && !$isResubmitting)
             <div class="relative inline-flex group">
                 <button wire:click="resetForm" type="button"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
@@ -1669,21 +1647,6 @@ select.tw-select-arrow {
             </div>
         </div>
     </div>
-
-    @if($isRestoring)
-    <div class="bg-amber-50 border-b border-amber-200 px-6 lg:px-10 py-2 flex-shrink-0 flex items-start gap-3">
-        <i class="fas fa-rotate-left text-amber-600 flex-shrink-0 text-xs mt-1"></i>
-        <div class="flex-1 min-w-0">
-            <p class="text-sm text-[#333333]">
-                <strong>Restoring:</strong> Update the <strong>date &amp; time</strong> to a future date, then click <strong>Save &amp; Restore</strong> to resubmit for Alumni Director approval.
-            </p>
-            <p class="text-xs mt-1 text-amber-700 flex items-center gap-1.5">
-                <i class="fas fa-circle-info text-amber-500 text-[10px] flex-shrink-0"></i>
-                A future date is required — the event will go back to <strong>Pending</strong> status after saving.
-            </p>
-        </div>
-    </div>
-    @endif
 
     @if($isResubmitting)
     <div class="bg-amber-50 border-b border-amber-200 px-6 lg:px-10 py-2 flex-shrink-0 flex items-start gap-3">
@@ -1713,33 +1676,70 @@ select.tw-select-arrow {
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
-                {{-- Event Photo --}}
+                {{-- Event Photo — with live preview, fully white background.
+                     Default state shows the actual default event photo from
+                     public/storage/event/default-photo-event.jpg, verified
+                     server-side with file_exists() so it only renders the
+                     <img> when the file is truly there — falling back to an
+                     inline SVG placeholder (not a separate image file) if
+                     it's ever missing, so something always displays. ── --}}
+                @php
+                    $defaultPhotoRelPath = 'storage/event/default-photo-event.jpg';
+                    $defaultPhotoExists  = file_exists(public_path($defaultPhotoRelPath));
+                @endphp
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Event Photo
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
+                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— Preview</span>
                     </div>
-                    <div class="p-2.5">
+                    <div class="p-2.5 bg-white">
                         <div x-data="{isDragging:false}"
                              @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false"
-                             class="border-2 rounded-xl text-center cursor-pointer transition-all"
-                             :class="isDragging?'border-[#7a3f91] bg-[#f5eef9]':'{{ ($photo||($existingPhotoUrl&&!$removePhoto))?'border-[#7a3f91] border-solid bg-[#f5eef9]/40':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-gray-50' }}'">
+                             class="border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
+                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':'{{ ($photo||($existingPhotoUrl&&!$removePhoto))?'border-[#7a3f91] border-solid bg-white':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-white' }}'">
                             <label class="cursor-pointer block p-2.5">
                                 <input type="file" wire:model="photo" accept="image/*" class="hidden">
                                 @if($photo)
+                                    {{-- User just selected a new photo — always visible immediately via temporaryUrl() --}}
                                     <div class="flex flex-col items-center gap-1">
-                                        <img src="{{ $photo->temporaryUrl() }}" class="w-full h-20 object-contain rounded-lg shadow border border-purple-200">
-                                        <p class="text-xs font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-[10px]"></i>New photo selected</p>
+                                        <div class="w-full rounded-lg overflow-hidden border border-purple-200 bg-white flex items-center justify-center" style="height:150px;">
+                                            <img src="{{ $photo->temporaryUrl() }}" class="w-full h-full object-contain">
+                                        </div>
+                                        <p class="text-xs font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-[10px]"></i>New photo selected — click to change</p>
                                     </div>
                                 @elseif($existingPhotoUrl&&!$removePhoto)
+                                    {{-- Editing an event that already has a saved photo — always visible --}}
                                     <div class="flex flex-col items-center gap-1">
-                                        <img src="{{ $existingPhotoUrl }}" class="w-full h-20 object-contain rounded-lg shadow border border-gray-200">
+                                        <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:150px;">
+                                            <img src="{{ $existingPhotoUrl }}" class="w-full h-full object-contain">
+                                        </div>
                                         <p class="text-xs font-semibold text-[#555555]">Current photo — click to change</p>
                                     </div>
+                                @elseif($defaultPhotoExists)
+                                    {{-- New event, no upload yet — show the real default event photo
+                                         from public/storage/event/default-photo-event.jpg (confirmed
+                                         to exist server-side, so it renders reliably) --}}
+                                    <div class="flex flex-col items-center gap-1.5 py-2">
+                                        <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:120px;">
+                                            <img src="{{ asset($defaultPhotoRelPath) }}" alt="Default event photo" class="w-full h-full object-contain">
+                                        </div>
+                                        <p class="font-semibold text-xs text-[#555555] mt-1">Click to upload or drag &amp; drop</p>
+                                        <p class="text-[10px] text-[#777777]">JPG, PNG, WEBP — max 5 MB</p>
+                                    </div>
                                 @else
-                                    <div class="flex flex-col items-center gap-1 py-3">
-                                        <i class="fas fa-cloud-arrow-up text-2xl text-gray-300"></i>
-                                        <p class="font-semibold text-xs text-[#555555]">Click to upload or drag &amp; drop</p>
+                                    {{-- New event, no upload yet, AND default-photo-event.jpg is
+                                         missing — inline SVG placeholder, always renders regardless
+                                         of any file on the server --}}
+                                    <div class="flex flex-col items-center gap-1.5 py-2">
+                                        <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-gradient-to-br from-purple-50 to-white flex items-center justify-center" style="height:120px;">
+                                            <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <rect x="6" y="14" width="60" height="46" rx="6" fill="#F3EAF8" stroke="#D9C3E6" stroke-width="1.5"/>
+                                                <circle cx="24" cy="30" r="6" fill="#C9A6DC"/>
+                                                <path d="M10 52L26 38C27.1 37.05 28.75 37.05 29.85 38L40 47" stroke="#7A3F91" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                                <path d="M34 52L46 41C47.1 40.05 48.75 40.05 49.85 41L62 52" stroke="#9B59B6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </div>
+                                        <p class="font-semibold text-xs text-[#555555] mt-1">Click to upload or drag &amp; drop</p>
                                         <p class="text-[10px] text-[#777777]">JPG, PNG, WEBP — max 5 MB</p>
                                     </div>
                                 @endif
@@ -1764,7 +1764,7 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Courses
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
@@ -1777,7 +1777,7 @@ select.tw-select-arrow {
                             </span>
                         @endif
                     </div>
-                    <div class="p-2.5 space-y-2.5">
+                    <div class="p-2.5 space-y-2.5 bg-white">
 
                         <div class="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1.5">
                             <i class="fas fa-building-columns text-purple-500 text-xs flex-shrink-0"></i>
@@ -1897,10 +1897,10 @@ select.tw-select-arrow {
             <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
                 <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Event Details
                     </div>
-                    <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3">
+                    <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3 bg-white">
 
                         <div class="flex-shrink-0">
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
@@ -1928,11 +1928,10 @@ select.tw-select-arrow {
                             <div>
                                 <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Date <span class="text-red-500">*</span>
-                                    @if($isRestoring)<span class="font-normal normal-case tracking-normal text-amber-600 ml-1">— must be future</span>@endif
                                 </label>
                                 <input wire:model="event_date" type="date"
                                        min="{{ now('Asia/Manila')->format('Y-m-d') }}"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : ($isRestoring ? 'border-amber-400' : 'border-gray-300') }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($formErrors['event_date']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['event_date'] }}</p>@endif
                             </div>
 
@@ -2064,11 +2063,11 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Notes / Requirements
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
-                    <div class="p-2.5">
+                    <div class="p-2.5 bg-white">
                         <textarea wire:model.defer="notes"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
                                   class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
@@ -2087,22 +2086,30 @@ select.tw-select-arrow {
         <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-visible lg:overflow-y-auto" style="scrollbar-width:thin;">
             <div class="p-3 space-y-3 flex-1">
 
+                {{-- Contact Person — Name & Email are always the organizer's own
+                     account details and are NOT editable (read-only display).
+                     Only Phone remains an actual input. ── --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Contact Person
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— pre-filled</span>
+                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— from your account</span>
                     </div>
-                    <div class="p-2.5 space-y-2.5">
+                    <div class="p-2.5 space-y-2.5 bg-white">
                         <div>
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Name</label>
-                            <input wire:model.defer="contact_person" type="text" placeholder="Full name"
-                                   class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                            <div class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-sm bg-white text-[#333333] flex items-center gap-2">
+                                <i class="fas fa-user text-[11px] text-[#999999]"></i>
+                                <span class="truncate">{{ $contact_person ?: $this->organizerName }}</span>
+                                <i class="fas fa-lock text-[10px] text-[#bbbbbb] ml-auto flex-shrink-0"></i>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Email</label>
-                            <input wire:model.defer="contact_email" type="email" placeholder="contact@example.com"
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_email']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                            @if(isset($formErrors['contact_email']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['contact_email'] }}</p>@endif
+                            <div class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-sm bg-white text-[#333333] flex items-center gap-2">
+                                <i class="fas fa-envelope text-[11px] text-[#999999]"></i>
+                                <span class="truncate">{{ $contact_email ?: $this->organizerEmail }}</span>
+                                <i class="fas fa-lock text-[10px] text-[#bbbbbb] ml-auto flex-shrink-0"></i>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
@@ -2117,10 +2124,10 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Submission Tips
                     </div>
-                    <div class="p-2.5">
+                    <div class="p-2.5 bg-white">
                         <ul class="space-y-2">
                             <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
                                 <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
@@ -2145,17 +2152,15 @@ select.tw-select-arrow {
             </div>
 
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
-                <button type="button" wire:click="saveEvent"
-                        wire:loading.attr="disabled" wire:target="saveEvent"
+                <button type="button" wire:click="requestSaveEvent"
+                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent"
                         class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
-                               {{ $isRestoring ? 'bg-amber-500 hover:bg-amber-600' : ($isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]') }}">
-                    <span wire:loading wire:target="saveEvent">
+                               {{ $isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]' }}">
+                    <span wire:loading wire:target="requestSaveEvent,saveEvent">
                         <i class="fas fa-spinner animate-spin text-xs"></i>
                     </span>
-                    <span wire:loading.remove wire:target="saveEvent">
-                        @if($isRestoring)
-                            <i class="fas fa-rotate-left text-xs"></i>
-                        @elseif($isResubmitting)
+                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
+                        @if($isResubmitting)
                             <i class="fas fa-rotate-right text-xs"></i>
                         @elseif($isEditing)
                             <i class="fas fa-floppy-disk text-xs"></i>
@@ -2163,9 +2168,8 @@ select.tw-select-arrow {
                             <i class="fas fa-paper-plane text-xs"></i>
                         @endif
                     </span>
-                    <span wire:loading.remove wire:target="saveEvent">
-                        @if($isRestoring) Save &amp; Restore
-                        @elseif($isResubmitting) Save &amp; Resubmit
+                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
+                        @if($isResubmitting) Save &amp; Resubmit
                         @elseif($isEditing) Save Changes
                         @else Submit Event
                         @endif
@@ -2195,7 +2199,6 @@ select.tw-select-arrow {
     $timeDisplay = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
     $createdPH   = \Carbon\Carbon::parse($ev->created_at)->setTimezone('Asia/Manila');
     $hasPhoto    = !empty($ev->photo_url);
-    $isDeleted   = $ev->status === 'ORGANIZER_DELETED';
 @endphp
 
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in"
@@ -2219,21 +2222,6 @@ select.tw-select-arrow {
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Share
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
-            @endif
-
-            {{-- If deleted and past date: show Edit Date button to open edit form --}}
-            @if($isDeleted)
-                <div class="relative inline-flex group">
-                    <button type="button" wire:click="openEditModal({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-amber-400/30 border border-amber-300/40 hover:bg-amber-400/50"
-                            aria-label="Edit to restore">
-                        <i class="fas fa-pen-to-square text-white text-sm"></i>
-                    </button>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Edit &amp; Restore
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                     </div>
                 </div>
@@ -2267,8 +2255,6 @@ select.tw-select-arrow {
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Completed</span>
                         @elseif($isApproved)
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Approved</span>
-                        @elseif($isDeleted)
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Deleted</span>
                         @endif
                     </div>
                 </div>
@@ -2281,8 +2267,6 @@ select.tw-select-arrow {
                         <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 text-white text-xs font-bold">Completed</span>
                     @elseif($isApproved)
                         <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-600/90 text-white text-xs font-bold">Approved</span>
-                    @elseif($isDeleted)
-                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/90 text-white text-xs font-bold">Deleted</span>
                     @endif
                 </div>
             </div>
@@ -2333,18 +2317,7 @@ select.tw-select-arrow {
                 </div>
                 @endif
 
-                @if($isDeleted)
-                <div class="p-4 rounded-xl border bg-red-50 border-red-200">
-                    <p class="text-base font-bold text-[#333333]">Deleted</p>
-                    <p class="text-sm font-medium mt-0.5 text-[#555555]">
-                        @if($eventDatePH->isFuture())
-                            This event was deleted but the date is still in the future. You can restore it.
-                        @else
-                            This event was deleted and its date has passed. Update the date to restore it.
-                        @endif
-                    </p>
-                </div>
-                @elseif($isCompleted)
+                @if($isCompleted)
                 <div class="p-4 rounded-xl border bg-green-50 border-green-200">
                     <p class="text-base font-bold text-[#333333]">Completed</p>
                     <p class="text-sm font-medium mt-0.5 text-[#333333]">This event has already taken place.</p>
@@ -2428,51 +2401,38 @@ select.tw-select-arrow {
 @endif
 
 
-{{-- ══ SHARE MODAL — same design & layout as Alumni "Upcoming Events" share modal ══
-     Post to Batch Chats is intentionally DISABLED for now ("Soon" badge) —
-     functionality will be wired up later. Native share / Facebook / Messenger /
-     Copy Caption all work the same way as the alumni version.
-     Full screen on mobile (eo-share-backdrop / eo-share-sheet handle this via
-     the media query in the top <style> block). ══ --}}
+{{-- ══ SHARE MODAL — mirrors the alumni "Upcoming Events" share modal design:
+     SVG X close button with hover tooltip, simplified icon+label option
+     rows, pre-share "Download the photo?" confirm modal, and clipboard-
+     before-focus caption copy. Adds a "Share to Organizer Updates" chat
+     option (UI only for now — no backend wiring yet, per request). ══ --}}
 @if($showShareModal)
 @php
     $shTimeStr        = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
-    $isCompleted      = $shareEventStatus === 'COMPLETED';
+    $isCompleted      = $shareEventIsCompleted;
 
-    $descLimit        = 160;
-    $shareDescPreview = mb_strlen($shareEventDescription) > $descLimit
-        ? mb_substr($shareEventDescription, 0, $descLimit) . '…'
-        : $shareEventDescription;
+    $fbLines   = [];
+    $fbLines[] = $isCompleted ? "EVENT HIGHLIGHTS: " . strtoupper($shareEventTitle) : strtoupper($shareEventTitle);
 
-    // Same approach as the alumni share modal: this text is meant to be
-    // posted directly (native share sheet / pasted into Facebook) as the
-    // post's own caption — no events page link included, since a raw
-    // link would just show up as a dead link box in the post composer
-    // while the portal isn't publicly deployed yet.
-    $fbLines = [];
-    if ($isCompleted) {
-        $fbLines[] = "🏆 Event Highlights: {$shareEventTitle}";
-        if ($shareEventDate)   $fbLines[] = "🗓️  {$shareEventDate}" . ($shTimeStr ? " · {$shTimeStr}" : '');
-        if ($shareEventVenue)  $fbLines[] = "📍 {$shareEventVenue}";
-        $fbLines[] = "🏫 Organized by: {$this->organizerName}";
-        if ($shareEventTarget) $fbLines[] = "👥 {$shareEventTarget}";
+    if (trim($shareEventDescription) !== '') {
         $fbLines[] = '';
-        $fbLines[] = "🎉 Thank you to everyone who attended!";
-    } else {
-        $fbLines[] = "📅 Event: {$shareEventTitle}";
-        if ($shareEventDate)   $fbLines[] = "🗓️  {$shareEventDate}" . ($shTimeStr ? " · {$shTimeStr}" : '');
-        if ($shareEventVenue)  $fbLines[] = "📍 {$shareEventVenue}";
-        $fbLines[] = "🏫 Organized by: {$this->organizerName}";
-        if ($shareEventTarget) $fbLines[] = "👥 Open for: {$shareEventTarget}";
-        $fbLines[] = '';
-        $fbLines[] = "See you there! 🎉";
+        $fbLines[] = 'About This Event:';
+        $fbLines[] = trim($shareEventDescription);
     }
+
+    if (trim($shareEventNotes) !== '') {
+        $fbLines[] = '';
+        $fbLines[] = 'Additional Notes:';
+        $fbLines[] = trim($shareEventNotes);
+    }
+
+    $fbLines[] = '';
+    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
 <style>
-/* ── Share modal — shared visual language with the alumni Upcoming Events
-     share modal, so both roles use the exact same design. ── */
 @keyframes eoPanelIn {
     from { opacity: 0; transform: scale(.97) translateY(8px); }
     to   { opacity: 1; transform: none; }
@@ -2485,51 +2445,21 @@ select.tw-select-arrow {
     flex-direction: column;
     overflow: hidden;
 }
-
-.eo-share-close-btn {
-    position: relative;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 2rem; height: 2rem; border-radius: 0.5rem;
-    background: #f3f4f6; border: 1px solid #e5e7eb;
-    cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
-    flex-shrink: 0;
-}
-.eo-share-close-btn:hover  { background: #e5e7eb; border-color: #d1d5db; }
-.eo-share-close-btn:active { transform: scale(.93); }
-.eo-share-close-btn svg    { width: 14px; height: 14px; stroke: #4b5563; stroke-width: 2.25; stroke-linecap: round; }
-
-.eo-share-option-btn {
-    width: 100%; display: flex; align-items: center; gap: 0.75rem;
-    padding: 0.75rem 1rem; border-radius: 0.75rem;
-    font-weight: 600; font-size: 0.8125rem; color: #fff;
-    cursor: pointer; transition: filter .15s, transform .1s; border: none;
-}
-.eo-share-option-btn:hover  { filter: brightness(0.94); }
-.eo-share-option-btn:active { transform: scale(.98); }
-.eo-share-option-btn:disabled { cursor: not-allowed; opacity: .68; }
-.eo-share-option-btn:disabled:hover { filter: none; }
-.eo-share-option-btn:disabled:active { transform: none; }
-.eo-share-option-btn .icon-wrap {
-    width: 2rem; height: 2rem; border-radius: 0.5rem;
-    background: rgba(255,255,255,.92);
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.eo-soon-badge {
-    display: inline-flex; align-items: center; gap: 3px;
-    font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
-    padding: 2px 7px; border-radius: 999px;
-    background: rgba(255,255,255,.24); color: #fff;
-    flex-shrink: 0;
-}
 </style>
 
-<div class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/45 eo-share-backdrop"
+<div id="eo-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 eo-share-backdrop"
      x-data="{
          copied:false,
          nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         downloading:false,
+         downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
          eventTitle: {{ json_encode($shareEventTitle) }},
          imageUrl:  {{ json_encode($shareEventPhotoUrl) }},
+
+         showDlConfirm: false,
+         pendingTarget: null,
+
          async buildImageFile() {
              if (!this.imageUrl) return null;
              try {
@@ -2539,6 +2469,47 @@ select.tw-select-arrow {
                  return new File([blob], 'event-photo.' + ext, { type: blob.type });
              } catch (e) { return null; }
          },
+
+         async autoCopyCaption() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) {
+                     await navigator.clipboard.writeText(this.shareText);
+                 } else {
+                     const ta = document.createElement('textarea');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
+                 }
+                 return true;
+             } catch (e) { return false; }
+         },
+
+         async downloadImage() {
+             if (!this.imageUrl) return false;
+             this.downloading = true;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url  = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'event-photo.' + ext;
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloading = false;
+                 this.downloaded  = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) {
+                 this.downloading = false;
+                 return false;
+             }
+         },
+
          async nativeShare() {
              try {
                  const shareData = { title: this.eventTitle, text: this.shareText };
@@ -2549,16 +2520,61 @@ select.tw-select-arrow {
                  await navigator.share(shareData);
              } catch (e) { /* cancelled by user — nothing to do */ }
          },
-         async shareOnFacebook() {
-             if (this.nativeShareSupported) { await this.nativeShare(); return; }
-             const w=620,h=520,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+
+         askShare(target) {
+             if (this.nativeShareSupported) { this.nativeShare(); return; }
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
+         },
+
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             this.proceedToTarget();
+         },
+
+         proceedToTarget() {
+             this.showDlConfirm = false;
+             const target = this.pendingTarget;
+             this.pendingTarget = null;
+             if (target === 'facebook') this.openFacebook();
+             else if (target === 'messenger') this.openMessenger();
+         },
+
+         cancelDlConfirm() {
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
+         },
+
+         // Copy the caption FIRST while this page still has focus, then
+         // open/focus the target window. Copying after focus has already
+         // moved elsewhere can silently fail in some browsers, leaving
+         // stale clipboard content behind instead of the caption.
+         async openFacebook() {
+             const copyOk = await this.autoCopyCaption();
+             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
              const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             window.open(url,'fb_share','width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             const win = window.open(url, 'philcst_eo_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
+             });
          },
-         async shareOnMessenger() {
-             if (this.nativeShareSupported) { await this.nativeShare(); return; }
-             window.open('https://www.messenger.com/new','_blank','noopener,noreferrer');
+
+         async openMessenger() {
+             const copyOk = await this.autoCopyCaption();
+             const win = window.open('https://www.messenger.com/new', 'philcst_eo_messenger_share', 'noopener,noreferrer');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+             });
          },
+
          async copyLinkFn() {
              try {
                  if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(this.shareText); }
@@ -2576,7 +2592,7 @@ select.tw-select-arrow {
      x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
-     @keydown.escape.window="$wire.closeShareModal()">
+     @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareModal()}">
 
     <div class="eo-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 eo-share-modal-wrapper">
 
@@ -2584,117 +2600,81 @@ select.tw-select-arrow {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <div class="relative inline-flex group">
-                <button wire:click="closeShareModal" type="button" class="eo-share-close-btn" aria-label="Close">
-                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2 2L12 12M12 2L2 12"/>
-                    </svg>
-                </button>
-                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                    Close
-                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                </div>
-            </div>
+            <button wire:click="closeShareModal" type="button" class="eo-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <span class="tip">Close</span>
+            </button>
         </div>
 
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            {{-- LEFT: Preview --}}
             <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
-                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0">
-                    @if($shareEventPhotoUrl)
-                    <div class="w-full bg-gray-100">
-                        <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}"
-                             class="w-full object-cover" style="max-height:160px;display:block;">
+                @if($shareEventPhotoUrl)
+                <div class="eo-share-photo-preview">
+                    <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}"
+                         onerror="this.style.display='none'">
+                    <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
+                        <i class="fas" :class="downloading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                        <span x-text="downloading ? 'Downloading…' : 'Downloaded'"></span>
+                    </span>
+                </div>
+                @endif
+
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
+                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
-                    @endif
-                    <div class="border-b border-gray-100 px-4 py-3 {{ $isCompleted ? 'bg-amber-50/50' : 'bg-gray-50' }}">
-                        <p class="font-semibold leading-tight" style="font-size:clamp(12px,1.2vw,14px);color:#333333;">{{ $shareEventTitle }}</p>
-                        <p class="font-medium mt-0.5" style="font-size:clamp(10px,1vw,12px);color:#333333;">{{ $this->organizerName }}</p>
-                        <div class="flex flex-wrap gap-1 mt-1.5">
-                            @if($shareEventDate)   <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareEventDate }}@if($shTimeStr) · {{ $shTimeStr }}@endif</span> @endif
-                            @if($shareEventVenue)  <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ $shareEventVenue }}</span> @endif
-                            @if($shareEventTarget) <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100" style="font-size:clamp(9px,0.85vw,11px);color:#333333;">{{ Str::limit($shareEventTarget, 30) }}</span> @endif
-                        </div>
-                    </div>
-                    @if($shareDescPreview)
-                    <div class="px-4 py-2">
-                        <p class="leading-relaxed" style="font-size:clamp(10px,0.9vw,12px);color:#333333;">{{ $shareDescPreview }}</p>
-                    </div>
-                    @endif
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
                 </div>
 
                 <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
                     <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
                     <p class="text-xs leading-relaxed" style="color:#333333;">
-                        Sharing sends the event's photo and caption straight into the post —
-                        no link needed. Use <strong>Share</strong> to open your device's
-                        share sheet and pick Messenger, Facebook, or any app.
+                        The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                        into the Facebook or Messenger window that opens.
                     </p>
                 </div>
             </div>
 
-            {{-- RIGHT: Share buttons --}}
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                {{-- Native share sheet — sends title+text+photo directly to
-                     Messenger, Facebook, or any app the person picks. --}}
                 <template x-if="nativeShareSupported">
                     <button type="button" @click="nativeShare()" class="eo-share-option-btn" style="background:#7a3f91;">
                         <span class="icon-wrap">
                             <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
                         </span>
-                        <div class="text-left flex-1">
-                            <p class="text-xs font-semibold">Share</p>
-                            <p class="text-[10px] text-white/70 mt-0.5">Send photo + caption via Messenger, Facebook, or any app</p>
-                        </div>
+                        <span class="label-text text-xs font-semibold">Share</span>
                     </button>
                 </template>
 
-                {{-- Facebook — no link, just the caption; uses native share
-                     (photo + text) automatically when supported --}}
-                <button type="button" @click="shareOnFacebook()" class="eo-share-option-btn" style="background:#1877F2;">
+                <button type="button" @click="askShare('facebook')" class="eo-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <div class="text-left flex-1">
-                        <p class="text-xs font-semibold">Share on Facebook</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Posts the photo + caption directly</p>
-                    </div>
+                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
                 </button>
 
-                {{-- Messenger --}}
-                <button type="button" @click="shareOnMessenger()" class="eo-share-option-btn" style="background:#0084FF;">
+                <button type="button" @click="askShare('messenger')" class="eo-share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
                             <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
-                    <div class="text-left flex-1">
-                        <p class="text-xs font-semibold">Send via Messenger</p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Opens Messenger to pick a contact</p>
-                    </div>
-                    <i class="fas fa-arrow-right text-[10px] opacity-70"></i>
+                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
                 </button>
 
-                {{-- Post to Batch Chats — DISABLED for now, "Soon" badge.
-                     Functionality will be wired up later; the button is
-                     intentionally non-clickable in the meantime. --}}
-                <button type="button" disabled
+                <button type="button" wire:click="shareToOrganizerUpdates"
                         class="eo-share-option-btn" style="background:#7a3f91;">
                     <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
                         <i class="fas fa-comments text-white text-sm"></i>
                     </span>
-                    <div class="text-left flex-1">
-                        <p class="text-xs font-semibold flex items-center gap-1.5">
-                            Post to Batch Chats
-                            <span class="eo-soon-badge"><i class="fas fa-clock text-[8px]"></i>Soon</span>
-                        </p>
-                        <p class="text-[10px] text-white/70 mt-0.5">Coming soon — not available yet</p>
-                    </div>
+                    <span class="label-text text-xs font-semibold">Share to Organizer Updates</span>
                 </button>
 
                 <div class="relative my-0.5">
@@ -2720,6 +2700,42 @@ select.tw-select-arrow {
             </div>
         </div>
     </div>
+
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ── --}}
+    <div x-show="showDlConfirm" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
+         @click.self="cancelDlConfirm()">
+        <div class="eo-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+            <div class="flex items-start gap-3">
+                <span class="eo-dl-confirm-icon"><i class="fas fa-image"></i></span>
+                <div class="min-w-0 pt-0.5">
+                    <p class="text-sm font-semibold" style="color:#333333;">Download the event photo?</p>
+                    <p class="text-xs mt-1 leading-relaxed" style="color:#333333;">
+                        You'll need to attach a photo to your post. Download it now, or skip if you already have it saved.
+                    </p>
+                </div>
+            </div>
+
+            @if($shareEventPhotoUrl)
+            <div class="eo-share-photo-preview" style="height:110px;">
+                <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}" onerror="this.style.display='none'">
+            </div>
+            @endif
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="proceedToTarget()" class="eo-dl-confirm-btn secondary">
+                    Skip
+                </button>
+                <button type="button" @click="confirmDownloadThenGo()" class="eo-dl-confirm-btn primary" :disabled="downloading">
+                    <span x-show="!downloading"><i class="fas fa-download mr-1"></i>Download</span>
+                    <span x-show="downloading" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i>Downloading…</span>
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 @endif
 
@@ -2727,7 +2743,9 @@ select.tw-select-arrow {
 
 <script>
 (function () {
-    var tip = document.getElementById('eo-hover-tip');
+    var tip     = document.getElementById('eo-hover-tip');
+    var tipIcon = document.getElementById('eo-hover-tip-icon');
+    var tipText = document.getElementById('eo-hover-tip-text');
 
     function isHoverCapable() {
         return window.matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -2739,12 +2757,28 @@ select.tw-select-arrow {
             if (row._eoTipBound) return;
             row._eoTipBound = true;
 
+            // Editable rows (PENDING / REJECTED) open straight into the Edit
+            // form when clicked, so the tooltip should say "Edit" — not
+            // "View Details" — for those rows. Approved/Completed rows are
+            // read-only and open the View Details screen, so they keep the
+            // original "View Details" tooltip.
+            var isEditable = row.getAttribute('data-eo-row-editable') === '1';
+
             row.addEventListener('mousemove', function (e) {
                 if (!tip || !isHoverCapable()) return;
                 var shareWrap = e.target.closest('[data-eo-share]');
                 if (shareWrap) {
                     tip.style.opacity = '0';
                     return;
+                }
+                if (tipIcon && tipText) {
+                    if (isEditable) {
+                        tipIcon.className = 'fas fa-pen-to-square mr-1.5';
+                        tipText.textContent = 'Edit';
+                    } else {
+                        tipIcon.className = 'fas fa-eye mr-1.5';
+                        tipText.textContent = 'View Details';
+                    }
                 }
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';

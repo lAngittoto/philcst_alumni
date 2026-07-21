@@ -79,11 +79,6 @@ new class extends Component {
     public ?int   $deleteJobId     = null;
     public string $deleteJobTitle  = '';
 
-    public bool   $showRestoreModal  = false;
-    public ?int   $restoreJobId      = null;
-    public string $restoreJobTitle   = '';
-    public bool   $restoreWillActivate = false;
-
     public bool   $showShareModal   = false;
     public ?int   $shareJobId       = null;
     public string $shareJobTitle    = '';
@@ -95,6 +90,7 @@ new class extends Component {
     public string $shareDeadline    = '';
     public string $shareDescription = '';
     public string $shareCollege     = '';
+    public string $sharePhotoUrl    = '';
 
     private array $expLevelOrder = [
         'No Experience Required',
@@ -301,13 +297,16 @@ new class extends Component {
                 });
         });
 
-        if ($this->filterStatus === 'ORGANIZER_DELETED') {
-            $q->where('organizer_id', $org->id)->where('status', 'ORGANIZER_DELETED');
-        } elseif ($this->filterStatus !== '') {
+        // Deleted (permanently removed) job postings are never shown in this
+        // table, regardless of which status filter is selected. The row stays
+        // in the database (status = ORGANIZER_DELETED) for audit-trail
+        // purposes only — it is simply excluded from every query here.
+        if ($this->filterStatus !== '') {
             $q->where('status', $this->filterStatus);
         } else {
             $q->whereIn('status', ['ACTIVE', 'INACTIVE']);
         }
+        $q->where('status', '!=', 'ORGANIZER_DELETED');
 
         if ($this->search !== '') {
             $s = $this->search;
@@ -323,7 +322,7 @@ new class extends Component {
 
         $q->orderBy('created_at', 'desc');
 
-        $paginated = $q->paginate(15);
+        $paginated = $q->paginate(20);
 
         $nowDate = now('Asia/Manila')->startOfDay();
         $paginated->getCollection()->transform(function ($job) use ($nowDate) {
@@ -373,6 +372,17 @@ new class extends Component {
         );
     }
 
+    // ── Live-refreshed copy of the job currently open in the Edit modal.
+    //    Used so that after Activate/Deactivate (which happens while the
+    //    modal stays open) the "editMode" state and header controls update
+    //    immediately without needing to close/reopen the modal. ──
+    #[Computed]
+    public function editingJobFresh(): ?JobPosting
+    {
+        if (!$this->editingJobId) return null;
+        return JobPosting::find($this->editingJobId);
+    }
+
     public function resetFilters(): void
     {
         $this->search = $this->filterStatus = $this->filterType = '';
@@ -403,16 +413,16 @@ new class extends Component {
         $errors = [];
 
         if (!trim($this->postJobTitle))    $errors['postJobTitle']    = 'Job title is required.';
-        if (!trim($this->postOrgCategory)) $errors['postOrgCategory'] = 'Please select an organization category.';
+        if (!trim($this->postOrgCategory)) $errors['postOrgCategory'] = 'Please select an employer category.';
 
         if ($this->postOrgCategory === 'partner') {
-            if (!trim($this->postPartnerName)) $errors['postPartnerName'] = 'Organization name is required.';
-            if (!trim($this->postPartnerType)) $errors['postPartnerType'] = 'Organization type is required.';
+            if (!trim($this->postPartnerName)) $errors['postPartnerName'] = 'Company name is required.';
+            if (!trim($this->postPartnerType)) $errors['postPartnerType'] = 'Industry is required.';
             if (!trim($this->postLocation))    $errors['postLocation']    = 'Location is required.';
         }
         if ($this->postOrgCategory === 'custom') {
-            if (!trim($this->postCustomName)) $errors['postCustomName'] = 'Organization name is required.';
-            if (!trim($this->postCustomType)) $errors['postCustomType'] = 'Organization type is required.';
+            if (!trim($this->postCustomName)) $errors['postCustomName'] = 'Company name is required.';
+            if (!trim($this->postCustomType)) $errors['postCustomType'] = 'Industry is required.';
             if (!trim($this->postLocation))   $errors['postLocation']   = 'Location is required.';
         }
 
@@ -471,7 +481,7 @@ new class extends Component {
             ->exists();
 
         if ($duplicate) {
-            $this->postErrors['postJobTitle'] = 'A job posting with this title, organization, and employment type already exists.';
+            $this->postErrors['postJobTitle'] = 'A job posting with this title, company, and employment type already exists.';
             return;
         }
 
@@ -525,19 +535,6 @@ new class extends Component {
         );
 
         // ── NOTIFY ALUMNI (server-side, direct DB insert) ───────────────────
-        // Was previously $this->dispatch('job-posted', [...]) — a client-side
-        // `window` CustomEvent that only ever fired inside THIS organizer's
-        // own browser tab. The alumni layout's `job-posted` listener lives in
-        // a completely different person's session, so it could never receive
-        // it — there is no realtime transport (no broadcast/Pusher/Echo)
-        // wiring the two tabs together. That's why "New Job Posting" never
-        // showed up for alumni no matter how many jobs got posted.
-        //
-        // Fix: call the controller method directly, here on the server,
-        // right after the JobPosting row exists. This inserts one
-        // alumni_notifications row per targeted alumni immediately —
-        // no client-side event, no dependency on anyone's browser tab
-        // being open.
         app(AlumniNotificationController::class)->notifyAlumniOfNewJob($job);
 
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
@@ -564,10 +561,6 @@ new class extends Component {
         $job = app(JobController::class)->getJob($id);
 
         if ($job->status === 'ORGANIZER_DELETED') {
-            $org = auth()->user()?->organizer;
-            if ($org && $job->organizer_id === $org->id) {
-                $this->openEditModal($id);
-            }
             return;
         }
 
@@ -642,9 +635,15 @@ new class extends Component {
         $this->editErrors = [];
         $errors = [];
 
+        $jobForGuard = JobPosting::find($this->editingJobId);
+        if ($jobForGuard && $jobForGuard->status === 'ACTIVE') {
+            $this->dispatch('flash-message', type: 'warning', message: 'Deactivate this job posting before editing it.');
+            return;
+        }
+
         if (!trim($this->editJobTitle))    $errors['editJobTitle']    = 'Job title is required.';
-        if (!trim($this->editCompany))     $errors['editCompany']     = 'Organization name is required.';
-        if (!trim($this->editCompanyType)) $errors['editCompanyType'] = 'Organization type is required.';
+        if (!trim($this->editCompany))     $errors['editCompany']     = 'Company name is required.';
+        if (!trim($this->editCompanyType)) $errors['editCompanyType'] = 'Industry is required.';
         if (!trim($this->editLocation))    $errors['editLocation']    = 'Location is required.';
         if (!trim($this->editEmpType))     $errors['editEmpType']     = 'Employment type is required.';
         if (!trim($this->editExpLevel))    $errors['editExpLevel']    = 'Experience level is required.';
@@ -694,7 +693,7 @@ new class extends Component {
             ->exists();
 
         if ($duplicate) {
-            $this->editErrors['editJobTitle'] = 'A job posting with this title, organization, and employment type already exists.';
+            $this->editErrors['editJobTitle'] = 'A job posting with this title, company, and employment type already exists.';
             return;
         }
 
@@ -798,7 +797,6 @@ new class extends Component {
         $this->toggleJobTitle = $job->job_title;
         $this->toggleAction   = $job->status === 'ACTIVE' ? 'deactivate' : 'activate';
         $this->showToggleModal = true;
-        // NOTE: we do NOT close showViewModal or showEditModal here — they stay open behind the confirm modal
     }
 
     public function executeToggleStatus(): void
@@ -846,13 +844,6 @@ new class extends Component {
                 severity:  'info'
             );
 
-            // ── NOTIFY ALUMNI: job just turned ACTIVE (server-side) ─────────
-            // Same reasoning as savePost() above — a client-side window
-            // event can't cross browser sessions, so this has to be a direct
-            // server call. Only fires when the job is actually going
-            // INACTIVE → ACTIVE (not on deactivate). Reuses the same
-            // "New Job Posting" notification shape/dedup_key as a brand-new
-            // post, per instruction — it's still just one job either way.
             if ($newStatus === 'ACTIVE') {
                 app(AlumniNotificationController::class)->notifyAlumniOfActivatedJob($job);
             }
@@ -867,7 +858,6 @@ new class extends Component {
         }
 
         $this->cancelToggleStatus();
-        // Modal stays open — no closing of showViewModal or showEditModal
     }
 
     public function cancelToggleStatus(): void
@@ -892,7 +882,6 @@ new class extends Component {
         $this->deleteJobId    = $id;
         $this->deleteJobTitle = $job->job_title;
         $this->showDeleteModal = true;
-        // NOTE: do NOT close showViewModal or showEditModal
     }
 
     public function executeDeleteJob(): void
@@ -922,16 +911,15 @@ new class extends Component {
         $this->logAudit(
             action:       'deleted',
             subjectLabel: $job->job_title,
-            description:  sprintf('Organizer soft-deleted job posting "%s" (ID #%d).', $job->job_title, $job->id),
+            description:  sprintf('Organizer permanently deleted job posting "%s" (ID #%d).', $job->job_title, $job->id),
             oldValues:    ['status' => 'INACTIVE'],
             newValues:    ['status' => 'ORGANIZER_DELETED'],
             severity:     'warning'
         );
 
-        $this->dispatch('flash-message', type: 'success', message: 'Job posting deleted. You can restore it anytime from the Deleted filter.');
+        $this->dispatch('flash-message', type: 'success', message: 'Job posting permanently deleted.');
         $this->cancelDeleteJob();
 
-        // Close modals after delete (job is now deleted, modals should close)
         if ($this->showEditModal) {
             $this->showEditModal = false;
             $this->resetEditFields();
@@ -947,100 +935,6 @@ new class extends Component {
         $this->showDeleteModal = false;
         $this->deleteJobId    = null;
         $this->deleteJobTitle = '';
-    }
-
-    public function confirmRestoreJob(int $id): void
-    {
-        $this->guardAuth();
-        $job = JobPosting::findOrFail($id);
-        $this->guardOwnership($job);
-
-        if ($job->status !== 'ORGANIZER_DELETED') {
-            $this->dispatch('flash-message', type: 'warning', message: 'Only deleted job postings can be restored.');
-            return;
-        }
-
-        $deadlinePassed = \Carbon\Carbon::parse($job->deadline)
-            ->setTimezone('Asia/Manila')->startOfDay()
-            ->lt(now('Asia/Manila')->startOfDay());
-
-        $this->restoreJobId       = $id;
-        $this->restoreJobTitle    = $job->job_title;
-        $this->restoreWillActivate = !$deadlinePassed;
-        $this->showRestoreModal   = true;
-        // NOTE: do NOT close showViewModal or showEditModal
-    }
-
-    public function executeRestoreJob(): void
-    {
-        $this->guardAuth();
-        if (! $this->throttleAction('restore_job', 10, 60)) return;
-
-        if (! $this->restoreJobId) { $this->cancelRestoreJob(); return; }
-
-        $job = JobPosting::findOrFail($this->restoreJobId);
-        $this->guardOwnership($job);
-
-        if ($job->status !== 'ORGANIZER_DELETED') {
-            $this->dispatch('flash-message', type: 'warning', message: 'This job posting cannot be restored.');
-            $this->cancelRestoreJob();
-            return;
-        }
-
-        $deadlinePassed = \Carbon\Carbon::parse($job->deadline)
-            ->setTimezone('Asia/Manila')->startOfDay()
-            ->lt(now('Asia/Manila')->startOfDay());
-
-        $newStatus = $deadlinePassed ? 'INACTIVE' : 'ACTIVE';
-
-        $job->update([
-            'status'          => $newStatus,
-            'deleted_by'      => null,
-            'deleted_by_role' => null,
-            'updated_by'      => auth()->user()->name,
-            'updated_by_role' => 'organizer',
-        ]);
-
-        $this->logAudit(
-            action:       'restored',
-            subjectLabel: $job->job_title,
-            description:  sprintf(
-                'Organizer restored deleted job posting "%s" (ID #%d). Restored as %s.',
-                $job->job_title, $job->id, $newStatus
-            ),
-            oldValues: ['status' => 'ORGANIZER_DELETED'],
-            newValues: ['status' => $newStatus],
-            severity:  'info'
-        );
-
-        // ── NOTIFY ALUMNI: restored job landed back on ACTIVE (server-side) ─
-        // Only fires when the restore actually put the job back to ACTIVE
-        // (not when it comes back INACTIVE due to a passed deadline).
-        if ($newStatus === 'ACTIVE') {
-            app(AlumniNotificationController::class)->notifyAlumniOfActivatedJob($job);
-        }
-
-        $this->dispatch('job-management-updated', [
-            'id'     => $job->id,
-            'title'  => $job->job_title,
-            'action' => 'restored',
-        ]);
-
-        $msg = $newStatus === 'ACTIVE'
-            ? 'Job posting restored and is now Active!'
-            : 'Job posting restored as Inactive — deadline has passed. Update the deadline to activate it.';
-
-        $this->dispatch('flash-message', type: $newStatus === 'ACTIVE' ? 'success' : 'warning', message: $msg);
-        $this->cancelRestoreJob();
-        // Modal stays open after restore
-    }
-
-    public function cancelRestoreJob(): void
-    {
-        $this->showRestoreModal  = false;
-        $this->restoreJobId      = null;
-        $this->restoreJobTitle   = '';
-        $this->restoreWillActivate = false;
     }
 
     public function openShareModal(int $id): void
@@ -1067,8 +961,8 @@ new class extends Component {
         $this->shareDeadline    = $job->deadline ?? '';
         $this->shareDescription = $job->description ?? '';
         $this->shareCollege     = $job->target_college ?? '';
+        $this->sharePhotoUrl    = $this::jobImageUrl($job->job_image ?? null);
         $this->showShareModal   = true;
-        // NOTE: do NOT close showViewModal or showEditModal — they stay open behind share modal
     }
 
     public function closeShareModal(): void
@@ -1084,6 +978,7 @@ new class extends Component {
         $this->shareDeadline    = '';
         $this->shareDescription = '';
         $this->shareCollege     = '';
+        $this->sharePhotoUrl    = '';
     }
 
     public function shareToAlumniChats(): void
@@ -1172,7 +1067,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
 
 <style>
 @keyframes modalIn {
@@ -1187,12 +1082,12 @@ new class extends Component {
 .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
 
 .scroll-c::-webkit-scrollbar { width: 5px; }
-.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-track { background: transparent; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
 .fs-modal-body-col::-webkit-scrollbar { width: 4px; }
-.fs-modal-body-col::-webkit-scrollbar-track { background: #f3f4f6; }
+.fs-modal-body-col::-webkit-scrollbar-track { background: transparent; }
 .fs-modal-body-col::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .fs-modal-body-col::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
@@ -1209,6 +1104,17 @@ select.form-input {
     appearance: none;
     cursor: pointer;
 }
+
+/* ── Modal top-right icon buttons: fully transparent, no white fill ── */
+.modal-top-btn {
+    background: transparent !important;
+    border: 1px solid rgba(255,255,255,.35) !important;
+}
+.modal-top-btn:hover {
+    background: rgba(255,255,255,.12) !important;
+    border-color: rgba(255,255,255,.55) !important;
+}
+.modal-top-btn:active { transform: scale(.93); }
 
 .modal-top-btn .mtip {
     position: absolute;
@@ -1257,8 +1163,12 @@ select.form-input {
 }
 .activate-disabled-wrap:hover .adtip { opacity: 1; }
 
-tr.row-deleted td { opacity: 0.65; }
-tr.row-deleted:hover td { opacity: 1; }
+@media (max-width: 768px), (hover: none), (pointer: coarse) {
+    #eo-hover-tip { display: none !important; }
+    .modal-top-btn .mtip { display: none !important; }
+    .activate-disabled-wrap .adtip { display: none !important; }
+    [class*="group-hover:opacity-100"] { display: none !important; }
+}
 
 .img-upload-zone {
     border: 2px dashed #d1d5db;
@@ -1291,11 +1201,9 @@ tr.row-deleted:hover td { opacity: 1; }
     display: block;
 }
 
-/* Change 4: taller textareas that fill to bottom */
 .edit-textarea-xl  { flex: 1; min-height: 180px; }
 .edit-textarea-lg  { flex: 1; min-height: 140px; }
 
-/* View/Edit mode toggle styles */
 .view-field-display {
     padding: 0.5rem 0.75rem;
     background: #fafafa;
@@ -1313,6 +1221,123 @@ tr.row-deleted:hover td { opacity: 1; }
 .view-field-display.empty {
     color: #aaa;
     font-style: italic;
+}
+
+.jm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
+.jm-filter-progress-bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
+    animation: jmFilterProgress 1s ease-in-out infinite;
+}
+@keyframes jmFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
+
+@media (max-width: 767px) {
+    .jm-share-backdrop {
+        padding: 0 !important;
+        align-items: stretch !important;
+        justify-content: stretch !important;
+    }
+    .jm-share-backdrop .jm-share-sheet {
+        border-radius: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+    }
+}
+
+.jm-share-close-btn {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
+    flex-shrink: 0;
+}
+.jm-share-close-btn:hover  { background: #e5e7eb; border-color: #d1d5db; }
+.jm-share-close-btn:active { transform: scale(.93); }
+.jm-share-close-btn svg    { width: 14px; height: 14px; stroke: #4b5563; stroke-width: 2.25; stroke-linecap: round; }
+.jm-share-close-btn .tip {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.jm-share-close-btn .tip::before {
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
+}
+.jm-share-close-btn:hover .tip { opacity: 1; }
+
+.jm-share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
+}
+.jm-share-option-btn:hover  { filter: brightness(0.94); }
+.jm-share-option-btn:active { transform: scale(.98); }
+.jm-share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.jm-share-option-btn .label-text { flex: 1; text-align: left; }
+
+.jm-share-photo-preview {
+    width: 100%;
+    height: 140px;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+}
+.jm-share-photo-preview img {
+    width: 100%; height: 100%; object-fit: contain;
+}
+.jm-share-photo-preview .dl-badge {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(17,24,39,.75); color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    padding: 3px 8px; border-radius: 999px;
+    display: flex; align-items: center; gap: 4px;
+    pointer-events: none;
+}
+
+.jm-dl-confirm-icon {
+    width: 3rem; height: 3rem; border-radius: 0.9rem;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; flex-shrink: 0;
+}
+.jm-dl-confirm-btn {
+    flex: 1; padding: 0.65rem 1rem; border-radius: 0.75rem;
+    font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+    transition: filter .15s, transform .1s; border: none;
+}
+.jm-dl-confirm-btn:active { transform: scale(.97); }
+.jm-dl-confirm-btn.primary { background: #7a3f91; color: #fff; }
+.jm-dl-confirm-btn.primary:hover { filter: brightness(0.95); }
+.jm-dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
+.jm-dl-confirm-btn.secondary:hover { background: #e5e7eb; }
+
+@keyframes jmPanelIn {
+    from { opacity: 0; transform: scale(.97) translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+.jm-share-sheet { animation: jmPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
+.jm-share-modal-wrapper {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 </style>
 
@@ -1379,19 +1404,20 @@ tr.row-deleted:hover td { opacity: 1; }
                         class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                     <i class="fas fa-plus text-sm"></i>
                 </button>
-                <div class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
+                <div class="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
                     <i class="fas fa-plus text-[9px] mr-1"></i>Post a Job
-                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#1a1a1a]"></span>
                 </div>
             </div>
         </div>
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 75vh; max-height: 75vh; overflow: hidden;">
+    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType">
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
             </div>
@@ -1409,7 +1435,6 @@ tr.row-deleted:hover td { opacity: 1; }
                 <option value="">All Statuses</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
-                <option value="ORGANIZER_DELETED">Deleted</option>
             </select>
             <select wire:model.live="filterType"
                     class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
@@ -1422,9 +1447,8 @@ tr.row-deleted:hover td { opacity: 1; }
             @if($filterStatus)
             @php
                 $statusPillMap = [
-                    'ACTIVE'            => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'INACTIVE'          => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
-                    'ORGANIZER_DELETED' => ['label' => 'Deleted',  'cls' => 'bg-red-50 border-red-300 text-red-800'],
+                    'ACTIVE'   => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
+                    'INACTIVE' => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
                 ];
                 $sPill = $statusPillMap[$filterStatus] ?? null;
             @endphp
@@ -1453,13 +1477,21 @@ tr.row-deleted:hover td { opacity: 1; }
             </button>
         </div>
 
+        {{-- Filtering / searching progress bar --}}
+        <div class="jm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterType">
+            <div class="jm-filter-progress-bar"></div>
+        </div>
+
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div class="relative flex-1 min-h-0 bg-transparent">
+            <div id="jm-table-scroll"
+                 class="scroll-c h-full overflow-y-auto bg-transparent transition-opacity duration-200"
+                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType">
 
             @if($this->jobPostings->count() > 0)
 
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
-                <table class="w-full bg-white border-collapse">
+            <div class="overflow-x-auto bg-transparent">
+                <table class="w-full bg-transparent border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
@@ -1476,11 +1508,10 @@ tr.row-deleted:hover td { opacity: 1; }
                             $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
                             $isAlumniDirector = is_null($job->organizer_id);
                             $isActive         = $job->status === 'ACTIVE';
-                            $isDeleted        = $job->status === 'ORGANIZER_DELETED';
                             $canShare         = !$isDeadlinePassed && $isActive;
                             $rowNum           = ($this->jobPostings->currentPage() - 1) * $this->jobPostings->perPage() + $index + 1;
                         @endphp
-                        <tr class="transition-colors duration-100 cursor-pointer {{ $isDeleted ? 'bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60' : 'bg-white hover:bg-[#f5f0fa]' }}"
+                        <tr class="transition-colors duration-100 cursor-pointer bg-transparent hover:bg-[#f5f0fa]"
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="job-row-{{ $job->id }}"
                             data-eo-row>
@@ -1491,19 +1522,15 @@ tr.row-deleted:hover td { opacity: 1; }
 
                             <td class="px-4 py-3.5">
                                 <div class="max-w-[240px]">
-                                    <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isDeleted ? 'text-red-400 line-through' : 'text-[#333333]' }}">{{ $job->job_title }}</p>
-                                    <p class="text-xs mt-0.5 {{ $isDeleted ? 'text-red-400' : 'text-[#666666]' }}">
-                                        @if($isDeleted)
-                                            Deleted {{ $job->updated_at->diffForHumans() }}
-                                        @else
-                                            {{ $job->created_at->diffForHumans() }}
-                                        @endif
+                                    <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $job->job_title }}</p>
+                                    <p class="text-xs mt-0.5 text-[#666666]">
+                                        {{ $job->created_at->diffForHumans() }}
                                     </p>
                                 </div>
                             </td>
 
                             <td class="px-4 py-3.5 hidden md:table-cell whitespace-nowrap">
-                                <p class="text-sm font-semibold {{ $isDeleted ? 'text-red-300' : 'text-[#333333]' }}">{{ $job->employment_type }}</p>
+                                <p class="text-sm font-semibold text-[#333333]">{{ $job->employment_type }}</p>
                             </td>
 
                             <td class="px-4 py-3.5 hidden lg:table-cell">
@@ -1511,11 +1538,7 @@ tr.row-deleted:hover td { opacity: 1; }
                             </td>
 
                             <td class="px-4 py-3.5 text-center">
-                                @if($isDeleted)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-600 whitespace-nowrap">
-                                        <i class="fas fa-trash-can text-[9px] mr-1"></i>Deleted
-                                    </span>
-                                @elseif($isActive)
+                                @if($isActive)
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
                                         <i class="fas fa-circle-check text-[9px] mr-1"></i>Active
                                     </span>
@@ -1529,116 +1552,102 @@ tr.row-deleted:hover td { opacity: 1; }
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
 
-                                    @if($isDeleted)
+                                    @if($canShare)
                                         <div class="relative inline-flex group" data-eo-share>
-                                            <button type="button" wire:click.stop="confirmRestoreJob({{ $job->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400">
-                                                <i class="fas fa-rotate-left"></i>
+                                            <button type="button" wire:click.stop="openShareModal({{ $job->id }})"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
+                                                <i class="fas fa-share-nodes"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                Restore
+                                                Share
                                                 <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                             </div>
                                         </div>
                                     @else
-                                        {{-- Share button --}}
-                                        @if($canShare)
+                                        <div class="relative inline-flex group" data-eo-share>
+                                            <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                <i class="fas fa-share-nodes"></i>
+                                            </span>
+                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                                {{ $isDeadlinePassed ? 'Deadline Passed' : 'Inactive' }}
+                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                                            </div>
+                                        </div>
+                                    @endif
+
+                                    @if(!$isAlumniDirector)
+                                        @if($isActive)
                                             <div class="relative inline-flex group" data-eo-share>
-                                                <button type="button" wire:click.stop="openShareModal({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
-                                                    <i class="fas fa-share-nodes"></i>
+                                                <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400">
+                                                    <i class="fas fa-circle-pause"></i>
                                                 </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Share
+                                                    Deactivate
+                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                                                </div>
+                                            </div>
+                                            <div class="relative inline-flex group" data-eo-share>
+                                                <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-gray-50 text-gray-300 border border-gray-200 cursor-not-allowed">
+                                                    <i class="fas fa-trash text-[10px]"></i>
+                                                </span>
+                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                                    Deactivate first to delete
+                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                                                </div>
+                                            </div>
+                                        @elseif(!$isDeadlinePassed)
+                                            <div class="relative inline-flex group" data-eo-share>
+                                                <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400">
+                                                    <i class="fas fa-circle-play"></i>
+                                                </button>
+                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                                    Activate
+                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                                                </div>
+                                            </div>
+                                            <div class="relative inline-flex group" data-eo-share>
+                                                <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400">
+                                                    <i class="fas fa-trash text-[10px]"></i>
+                                                </button>
+                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                                    Delete
                                                     <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                                 </div>
                                             </div>
                                         @else
                                             <div class="relative inline-flex group" data-eo-share>
-                                                <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
-                                                    <i class="fas fa-share-nodes"></i>
+                                                <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-red-50 text-red-400 border border-red-200 cursor-not-allowed">
+                                                    <i class="fas fa-calendar-xmark"></i>
                                                 </span>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    {{ $isDeadlinePassed ? 'Deadline Passed' : 'Inactive' }}
+                                                    Update deadline to activate
                                                     <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                                 </div>
                                             </div>
-                                        @endif
-
-                                        @if(!$isAlumniDirector)
-                                            @if($isActive)
-                                                <div class="relative inline-flex group" data-eo-share>
-                                                    <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400">
-                                                        <i class="fas fa-circle-pause"></i>
-                                                    </button>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                        Deactivate
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                                <div class="relative inline-flex group" data-eo-share>
-                                                    <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-gray-50 text-gray-300 border border-gray-200 cursor-not-allowed">
-                                                        <i class="fas fa-trash text-[10px]"></i>
-                                                    </span>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                        Deactivate first to delete
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                            @elseif(!$isDeadlinePassed)
-                                                <div class="relative inline-flex group" data-eo-share>
-                                                    <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400">
-                                                        <i class="fas fa-circle-play"></i>
-                                                    </button>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                        Activate
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                                <div class="relative inline-flex group" data-eo-share>
-                                                    <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400">
-                                                        <i class="fas fa-trash text-[10px]"></i>
-                                                    </button>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                        Delete
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                            @else
-                                                <div class="relative inline-flex group" data-eo-share>
-                                                    <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-red-50 text-red-400 border border-red-200 cursor-not-allowed">
-                                                        <i class="fas fa-calendar-xmark"></i>
-                                                    </span>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                        Update deadline to activate
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                                <div class="relative inline-flex group" data-eo-share>
-                                                    <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400">
-                                                        <i class="fas fa-trash text-[10px]"></i>
-                                                    </button>
-                                                    <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                        Delete
-                                                        <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                    </div>
-                                                </div>
-                                            @endif
-                                        @else
                                             <div class="relative inline-flex group" data-eo-share>
-                                                <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-purple-50 text-purple-400 border border-purple-200 cursor-not-allowed">
-                                                    <i class="fas fa-lock text-[10px]"></i>
-                                                </span>
+                                                <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400">
+                                                    <i class="fas fa-trash text-[10px]"></i>
+                                                </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Posted by Alumni Director
+                                                    Delete
                                                     <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                                 </div>
                                             </div>
                                         @endif
+                                    @else
+                                        <div class="relative inline-flex group" data-eo-share>
+                                            <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-purple-50 text-purple-400 border border-purple-200 cursor-not-allowed">
+                                                <i class="fas fa-lock text-[10px]"></i>
+                                            </span>
+                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                                Posted by Alumni Director
+                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                                            </div>
+                                        </div>
                                     @endif
 
                                 </div>
@@ -1650,20 +1659,18 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
 
             @else
-            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
-                <div class="w-14 h-14 rounded-2xl flex items-center justify-center {{ $filterStatus === 'ORGANIZER_DELETED' ? 'bg-red-50' : 'bg-gray-100' }}">
-                    <i class="fas {{ $filterStatus === 'ORGANIZER_DELETED' ? 'fa-trash text-red-400' : 'fa-briefcase text-gray-400' }} text-xl"></i>
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-transparent">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
+                    <i class="fas fa-briefcase text-gray-400 text-xl"></i>
                 </div>
                 <div>
                     <p class="font-semibold text-base text-[#333333]">
-                        @if($filterStatus === 'ORGANIZER_DELETED') No deleted job postings
-                        @elseif($search || $filterStatus || $filterType) No jobs match your filters
+                        @if($search || $filterStatus || $filterType) No jobs match your filters
                         @else No job postings yet
                         @endif
                     </p>
                     <p class="text-sm mt-1 text-[#555555]">
-                        @if($filterStatus === 'ORGANIZER_DELETED') Deleted jobs will appear here. You can restore them at any time.
-                        @elseif($search || $filterStatus || $filterType) Try clearing your filters to see all postings.
+                        @if($search || $filterStatus || $filterType) Try clearing your filters to see all postings.
                         @else Click the <strong>+</strong> button to post your first job listing.
                         @endif
                     </p>
@@ -1677,6 +1684,7 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
             @endif
 
+            </div>
         </div>
 
         {{-- ── PAGINATION ── --}}
@@ -1756,96 +1764,28 @@ tr.row-deleted:hover td { opacity: 1; }
                 <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-trash-can text-red-500 text-sm"></i>
                 </div>
-                Delete Job Posting
+                Permanently Delete Job Posting
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">Are you sure you want to delete:</p>
+            <p class="text-sm text-[#555555] mb-1">Are you sure you want to permanently delete:</p>
             <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $deleteJobTitle }}
             </p>
-            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-800">The job will be moved to <strong>Deleted</strong> status. You can restore it anytime from the Deleted filter.</span>
+            <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
+                <span class="text-xs text-red-800"><strong>This action cannot be undone.</strong> The job posting will be permanently removed and will no longer appear anywhere in this table. There is no restore option.</span>
             </div>
             <div class="flex gap-2">
-                {{-- CHANGE 1: Cancel button has loading spinner --}}
                 <button wire:click="cancelDeleteJob"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="cancelDeleteJob,executeDeleteJob"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:pointer-events-none">
-                    <span wire:loading wire:target="cancelDeleteJob"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="cancelDeleteJob"><i class="fas fa-xmark mr-1 text-xs"></i></span>
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                    <i class="fas fa-xmark mr-1 text-xs"></i>
                     Cancel
                 </button>
                 <button wire:click="executeDeleteJob"
-                        wire:loading.attr="disabled"
-                        wire:target="executeDeleteJob"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60">
-                    <span wire:loading wire:target="executeDeleteJob"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="executeDeleteJob"><i class="fas fa-trash-can mr-1 text-xs"></i></span>
-                    Yes, Delete
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-@endif
-
-
-{{-- ══ RESTORE CONFIRM MODAL ══ --}}
-@if($showRestoreModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-     wire:keydown.escape.window="cancelRestoreJob">
-    <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
-        <div class="px-6 py-4 border-b {{ $restoreWillActivate ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50' }}">
-            <h2 class="text-base font-semibold {{ $restoreWillActivate ? 'text-emerald-800' : 'text-amber-800' }} flex items-center gap-2.5">
-                <div class="w-8 h-8 {{ $restoreWillActivate ? 'bg-emerald-100' : 'bg-amber-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-rotate-left {{ $restoreWillActivate ? 'text-emerald-600' : 'text-amber-600' }} text-sm"></i>
-                </div>
-                Restore Job Posting
-            </h2>
-        </div>
-        <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to restore:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
-                {{ $restoreJobTitle }}
-            </p>
-            @if($restoreWillActivate)
-            <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-emerald-800">The deadline is still valid. This job will be restored and set to <strong>Active</strong> — alumni will see it immediately.</span>
-            </div>
-            @else
-            <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-800">The deadline has already passed. This job will be restored as <strong>Inactive</strong>. Update the deadline, then activate it manually.</span>
-            </div>
-            @endif
-            <div class="flex gap-2">
-                {{-- CHANGE 1: Cancel button has loading spinner --}}
-                <button wire:click="cancelRestoreJob"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="cancelRestoreJob,executeRestoreJob"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:pointer-events-none">
-                    <span wire:loading wire:target="cancelRestoreJob"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="cancelRestoreJob"><i class="fas fa-xmark mr-1 text-xs"></i></span>
-                    Cancel
-                </button>
-                <button wire:click="executeRestoreJob"
-                        wire:loading.attr="disabled"
-                        wire:target="executeRestoreJob"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-60
-                               {{ $restoreWillActivate ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600' }}">
-                    <span wire:loading wire:target="executeRestoreJob">
-                        <i class="fas fa-spinner animate-spin mr-1 text-xs"></i>
-                    </span>
-                    <span wire:loading.remove wire:target="executeRestoreJob">
-                        <i class="fas fa-rotate-left mr-1 text-xs"></i>
-                    </span>
-                    Yes, Restore
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer">
+                    <i class="fas fa-trash-can mr-1 text-xs"></i>
+                    Yes, Delete Permanently
                 </button>
             </div>
         </div>
@@ -1880,31 +1820,19 @@ tr.row-deleted:hover td { opacity: 1; }
             @else
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. No data will be lost.</span>
+                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. No data will be lost, and editing becomes available while inactive.</span>
             </div>
             @endif
             <div class="flex gap-2">
-                {{-- CHANGE 1: Cancel button has loading spinner --}}
                 <button wire:click="cancelToggleStatus"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="cancelToggleStatus,executeToggleStatus"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:pointer-events-none">
-                    <span wire:loading wire:target="cancelToggleStatus"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="cancelToggleStatus"><i class="fas fa-xmark mr-1 text-xs"></i></span>
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                    <i class="fas fa-xmark mr-1 text-xs"></i>
                     Cancel
                 </button>
                 <button wire:click="executeToggleStatus"
-                        wire:loading.attr="disabled"
-                        wire:target="executeToggleStatus"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-60
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer
                                {{ $toggleAction === 'activate' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600' }}">
-                    <span wire:loading wire:target="executeToggleStatus">
-                        <i class="fas fa-spinner animate-spin mr-1 text-xs"></i>
-                    </span>
-                    <span wire:loading.remove wire:target="executeToggleStatus">
-                        <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-xs"></i>
-                    </span>
+                    <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-xs"></i>
                     Yes, {{ $toggleAction === 'activate' ? 'Activate' : 'Deactivate' }}
                 </button>
             </div>
@@ -1930,17 +1858,13 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
         </div>
         <div class="flex items-center gap-1.5">
-            {{-- CHANGE 1: Close (Cancel) button has loading; CHANGE 2: pure X has no loading --}}
             <button wire:click="closePostModal" type="button"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60"
-                    wire:target="closePostModal,savePost"
-                    class="modal-top-btn relative inline-flex items-center gap-1.5 px-3 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none text-white text-xs font-semibold"
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
                     aria-label="Close">
-                <span wire:loading wire:target="closePostModal,savePost"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                <span wire:loading.remove wire:target="closePostModal,savePost"><i class="fas fa-xmark text-xs"></i></span>
-                <span wire:loading.remove wire:target="closePostModal,savePost">Cancel</span>
-                <span wire:loading wire:target="closePostModal,savePost">Closing…</span>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
+                </svg>
+                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
@@ -1961,18 +1885,79 @@ tr.row-deleted:hover td { opacity: 1; }
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
-        {{-- LEFT: Organization + Target College + Image + Tips --}}
+        {{-- LEFT: Photo first, then Company + Target College + Tips --}}
         <div class="w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-3 space-y-3">
 
-                {{-- Organization Category --}}
+                {{-- Job Photo — shown first so the default photo is visible immediately at the top --}}
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
+                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
+                    </div>
+                    <div class="p-3.5">
+                        <div wire:ignore
+                             x-data="{
+                                 preview: null,
+                                 defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
+                                 handleFile(e) {
+                                     const f = e.target.files[0];
+                                     if (!f) return;
+                                     const r = new FileReader();
+                                     r.onload = ev => { this.preview = ev.target.result; };
+                                     r.readAsDataURL(f);
+                                 },
+                                 clear() {
+                                     this.preview = null;
+                                     this.$refs.fileInput.value = '';
+                                     $wire.set('postJobImage', null);
+                                 }
+                             }">
+                            <div class="img-upload-zone" :class="preview ? 'has-image' : ''">
+                                <template x-if="preview">
+                                    <div class="relative">
+                                        <img :src="preview" class="img-preview-thumb" alt="Preview">
+                                        <button type="button" @click="clear()"
+                                                class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
+                                            <i class="fas fa-xmark text-[10px]"></i>
+                                        </button>
+                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">PREVIEW</span>
+                                    </div>
+                                </template>
+                                <template x-if="!preview">
+                                    <div class="relative">
+                                        <img :src="defaultUrl" class="img-preview-thumb opacity-60" alt="Default job photo"
+                                             onerror="this.style.display='none'">
+                                        <label class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 cursor-pointer w-full bg-white/70 hover:bg-white/85 transition">
+                                            <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
+                                            <p class="font-semibold text-xs text-[#333333]">Click to upload a photo</p>
+                                            <p class="text-[10px] text-[#555555]">JPG, PNG, WebP — max 2MB</p>
+                                            <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                                   wire:model="postJobImage" @change="handleFile($event)">
+                                        </label>
+                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
+                                    </div>
+                                </template>
+                            </div>
+                            <p class="text-[10px] text-[#777777] mt-1.5 text-center">The default photo above is used automatically if you don't upload one.</p>
+                            <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
+                                <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                            </div>
+                            @if(isset($postErrors['postJobImage']))
+                                <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Employer Category --}}
                 <div class="bg-white border-[1.5px] {{ isset($postErrors['postOrgCategory']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Organization <span class="text-red-400 font-semibold ml-0.5">*</span>
+                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Employer <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 space-y-2">
                         <div class="grid grid-cols-1 gap-1.5">
-                            @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner organization','fa-handshake'],['custom','Other / Custom','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
+                            @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner company','fa-handshake'],['custom','Other Company','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
                             <button type="button" wire:click="$set('postOrgCategory','{{ $val }}')"
                                     class="px-2.5 py-2 border-2 rounded-xl bg-white cursor-pointer transition text-left font-semibold flex items-center gap-2.5 text-sm
                                            {{ $postOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 text-[#333333] hover:border-[#7a3f91] hover:bg-purple-50' }}"
@@ -1999,13 +1984,13 @@ tr.row-deleted:hover td { opacity: 1; }
                         <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v,false)},syncT(v){$wire.set('postPartnerType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Org Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
                                     <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Acme Corp" maxlength="150"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postPartnerName']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Org Type <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
                                     <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postPartnerType']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
@@ -2024,13 +2009,13 @@ tr.row-deleted:hover td { opacity: 1; }
                         <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v,false)},syncT(v){$wire.set('postCustomType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Org Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
                                     <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postCustomName']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Org Type <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
                                     <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postCustomType']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomType'] }}</p>@endif
@@ -2046,7 +2031,7 @@ tr.row-deleted:hover td { opacity: 1; }
                         @endif
 
                         @if(!$postOrgCategory)
-                        <div class="text-center py-3 text-[#777777]"><p class="text-xs">Select a category above to continue.</p></div>
+                        <div class="text-center py-3 text-[#777777]"><p class="text-xs">Select an option above to continue.</p></div>
                         @endif
                     </div>
                 </div>
@@ -2063,60 +2048,6 @@ tr.row-deleted:hover td { opacity: 1; }
                                 <div class="font-semibold text-blue-900 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
                                 <div class="text-blue-700 mt-0.5 text-xs">Auto-selected · your alumni only</div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Job Image — CHANGE 5: preview in post modal --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
-                    </div>
-                    <div class="p-3.5">
-                        <div wire:ignore
-                             x-data="{
-                                 preview: null,
-                                 handleFile(e) {
-                                     const f = e.target.files[0];
-                                     if (!f) return;
-                                     const r = new FileReader();
-                                     r.onload = ev => { this.preview = ev.target.result; };
-                                     r.readAsDataURL(f);
-                                 },
-                                 clear() {
-                                     this.preview = null;
-                                     this.$refs.fileInput.value = '';
-                                     $wire.set('postJobImage', null);
-                                 }
-                             }">
-                            <div class="img-upload-zone" :class="preview ? 'has-image' : ''">
-                                <template x-if="preview">
-                                    <div class="relative">
-                                        <img :src="preview" class="img-preview-thumb" alt="Preview">
-                                        <button type="button" @click="clear()"
-                                                class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
-                                            <i class="fas fa-xmark text-[10px]"></i>
-                                        </button>
-                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">PREVIEW</span>
-                                    </div>
-                                </template>
-                                <template x-if="!preview">
-                                    <label class="flex flex-col items-center justify-center gap-1.5 py-5 cursor-pointer w-full">
-                                        <i class="fas fa-cloud-arrow-up text-2xl text-gray-300"></i>
-                                        <p class="font-semibold text-xs text-[#555555]">Click to upload or drag &amp; drop</p>
-                                        <p class="text-[10px] text-[#777777]">JPG, PNG, WebP — max 2MB</p>
-                                        <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                               wire:model="postJobImage" @change="handleFile($event)">
-                                    </label>
-                                </template>
-                            </div>
-                            <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
-                                <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
-                            </div>
-                            @if(isset($postErrors['postJobImage']))
-                                <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
-                            @endif
                         </div>
                     </div>
                 </div>
@@ -2138,7 +2069,7 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
         </div>
 
-        {{-- MIDDLE: Job Info + Textareas — CHANGE 4: textareas fill available height --}}
+        {{-- MIDDLE: Job Info + Textareas --}}
         <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
@@ -2196,7 +2127,6 @@ tr.row-deleted:hover td { opacity: 1; }
                     </div>
                 </div>
 
-                {{-- CHANGE 4: Description with flex-1 so it stretches --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Description <span class="text-red-400 font-semibold ml-0.5">*</span>
@@ -2242,20 +2172,6 @@ tr.row-deleted:hover td { opacity: 1; }
         {{-- RIGHT: Visibility + Actions --}}
         <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
             <div class="p-3 space-y-3 flex-1">
-                {{-- CHANGE 5: post modal shows existing image preview too (from server) --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Default Photo Preview
-                    </div>
-                    <div class="p-3.5">
-                        <div class="rounded-xl overflow-hidden" style="height:100px;">
-                            <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="Default job photo"
-                                 class="w-full h-full object-cover"
-                                 onerror="this.parentElement.style.display='none'">
-                        </div>
-                        <p class="text-[10px] text-[#777777] mt-1.5 text-center">Default photo shown if none uploaded</p>
-                    </div>
-                </div>
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Visibility
@@ -2278,28 +2194,14 @@ tr.row-deleted:hover td { opacity: 1; }
 
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
                 <button type="button" wire:click="savePost"
-                        wire:loading.attr="disabled"
-                        wire:target="savePost"
-                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    <span wire:loading wire:target="savePost">
-                        <i class="fas fa-spinner animate-spin text-xs"></i>
-                    </span>
-                    <span wire:loading.remove wire:target="savePost">
-                        <i class="fas fa-paper-plane text-xs"></i>
-                    </span>
-                    <span wire:loading wire:target="savePost">Posting…</span>
-                    <span wire:loading.remove wire:target="savePost">Post Job</span>
+                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
+                    <i class="fas fa-paper-plane text-xs"></i>
+                    Post Job
                 </button>
-                {{-- CHANGE 1 & 2: Cancel button (labeled) has loading spinner --}}
                 <button type="button" wire:click="closePostModal"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="closePostModal,savePost"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:pointer-events-none flex items-center justify-center gap-1.5">
-                    <span wire:loading wire:target="closePostModal,savePost"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                    <span wire:loading.remove wire:target="closePostModal,savePost"><i class="fas fa-xmark text-[10px]"></i></span>
-                    <span wire:loading wire:target="closePostModal,savePost">Closing…</span>
-                    <span wire:loading.remove wire:target="closePostModal,savePost">Cancel</span>
+                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5">
+                    <i class="fas fa-xmark text-[10px]"></i>
+                    Cancel
                 </button>
             </div>
         </div>
@@ -2309,12 +2211,18 @@ tr.row-deleted:hover td { opacity: 1; }
 @endif
 
 
-{{-- ══ EDIT JOB — FULL SCREEN 3-COLUMN (CHANGE 6: view/edit mode) ══ --}}
+{{--
+    ══ VIEW / EDIT JOB — FULL SCREEN 3-COLUMN ══
+--}}
 @if($showEditModal)
-@php $editingJob = $editingJobId ? \App\Models\JobPosting::find($editingJobId) : null; @endphp
+@php
+    $editingJob = $this->editingJobFresh;
+    $editJobIsActive = $editingJob && $editingJob->status === 'ACTIVE';
+@endphp
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
-     x-data="{ editMode: false }">
+     x-data="{ editMode: {{ $editJobIsActive ? 'false' : 'true' }} }"
+     x-effect="editMode = {{ $editJobIsActive ? 'false' : 'true' }}">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg">
         <div class="flex items-center gap-3 min-w-0">
@@ -2332,112 +2240,83 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
         </div>
         <div class="flex items-center gap-1.5">
-            {{-- CHANGE 6: View/Edit mode toggle button --}}
-            @if($editingJob && $editingJob->status !== 'ORGANIZER_DELETED')
-            <button type="button"
-                    @click="editMode = !editMode"
-                    class="modal-top-btn relative inline-flex items-center gap-1.5 px-3 h-8 rounded-lg cursor-pointer transition active:scale-95 border text-xs font-semibold"
-                    :class="editMode ? 'bg-white/20 border-white/40 text-white' : 'bg-white text-[#7a3f91] border-white/80 hover:bg-white/90'">
-                <i class="fas" :class="editMode ? 'fa-eye' : 'fa-pen'"></i>
-                <span x-text="editMode ? 'View Mode' : 'Edit Mode'"></span>
-            </button>
-            @endif
-
             @if($editingJob)
                 @php
-                    $editJobIsActive       = $editingJob->status === 'ACTIVE';
-                    $editJobIsDeleted      = $editingJob->status === 'ORGANIZER_DELETED';
                     $editJobDeadlinePassed = \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay());
                 @endphp
-                @if(!$editJobIsDeleted)
-                    @if(!$editJobIsActive)
-                        @if($editJobDeadlinePassed)
-                            <div class="activate-disabled-wrap">
-                                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed opacity-40 bg-emerald-500/10 border border-emerald-500/25">
-                                    <i class="fas fa-circle-play text-emerald-300 text-sm"></i>
-                                </span>
-                                <span class="adtip">Update deadline to activate</span>
-                            </div>
-                        @else
-                            <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
-                                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20">
-                                <i class="fas fa-circle-play text-emerald-300 text-sm"></i>
-                                <span class="mtip">Activate</span>
-                            </button>
-                        @endif
+                @if(!$editJobIsActive)
+                    @if($editJobDeadlinePassed)
+                        <div class="activate-disabled-wrap">
+                            <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed opacity-40 border border-white/35">
+                                <i class="fas fa-circle-play text-white text-sm"></i>
+                            </span>
+                            <span class="adtip">Update deadline to activate</span>
+                        </div>
                     @else
                         <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
-                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-amber-400/12 border border-amber-400/25 hover:bg-amber-400/22">
-                            <i class="fas fa-circle-pause text-amber-300 text-sm"></i>
-                            <span class="mtip">Deactivate</span>
-                        </button>
-                    @endif
-                    @php $editJobCanShare = !$editJobDeadlinePassed && $editJobIsActive; @endphp
-                    @if($editJobCanShare)
-                        <button wire:click="openShareModal({{ $editingJobId }})" type="button"
-                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24">
-                            <i class="fas fa-share-nodes text-white text-sm"></i>
-                            <span class="mtip">Share</span>
-                        </button>
-                    @endif
-                    @if(!$editJobIsActive)
-                        <button wire:click="confirmDeleteJob({{ $editingJobId }})" type="button"
-                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-red-500/10 border border-red-400/25 hover:bg-red-500/20">
-                            <i class="fas fa-trash text-red-300 text-sm"></i>
-                            <span class="mtip">Delete</span>
+                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                            <i class="fas fa-circle-play text-white text-sm"></i>
+                            <span class="mtip">Activate</span>
                         </button>
                     @endif
                 @else
-                    <button wire:click="confirmRestoreJob({{ $editingJobId }})" type="button"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20">
-                        <i class="fas fa-rotate-left text-emerald-300 text-sm"></i>
-                        <span class="mtip">Restore</span>
+                    <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                        <i class="fas fa-circle-pause text-white text-sm"></i>
+                        <span class="mtip">Deactivate</span>
+                    </button>
+                @endif
+                @php $editJobCanShare = !$editJobDeadlinePassed && $editJobIsActive; @endphp
+                @if($editJobCanShare)
+                    <button wire:click="openShareModal({{ $editingJobId }})" type="button"
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <span class="mtip">Share</span>
+                    </button>
+                @endif
+                @if(!$editJobIsActive)
+                    <button wire:click="confirmDeleteJob({{ $editingJobId }})" type="button"
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                        <i class="fas fa-trash text-white text-sm"></i>
+                        <span class="mtip">Delete</span>
                     </button>
                 @endif
             @endif
-            {{-- CHANGE 1 & 2: Close (labeled Cancel) has loading spinner --}}
             <button wire:click="closeEditModal" type="button"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60"
-                    wire:target="closeEditModal,saveEditJob"
-                    class="modal-top-btn relative inline-flex items-center gap-1.5 px-3 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none text-white text-xs font-semibold">
-                <span wire:loading wire:target="closeEditModal,saveEditJob"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                <span wire:loading.remove wire:target="closeEditModal,saveEditJob"><i class="fas fa-xmark text-xs"></i></span>
-                <span wire:loading.remove wire:target="closeEditModal,saveEditJob">Close</span>
-                <span wire:loading wire:target="closeEditModal,saveEditJob">Closing…</span>
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
+                </svg>
+                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
 
-    @if($editingJob && $editingJob->status === 'ORGANIZER_DELETED')
-    <div class="bg-red-50 border-b border-red-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-trash text-red-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-red-800"><strong>This job has been deleted.</strong> Use the <strong>Restore</strong> button (top-right) to recover it.</p>
-    </div>
-    @endif
     @if($editingJob && $editingJob->status === 'INACTIVE')
     <div class="bg-amber-50 border-b border-amber-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
         <i class="fas fa-circle-pause text-amber-500 flex-shrink-0 text-xs"></i>
         <p class="text-xs text-amber-800">
             <strong>This job is currently Inactive.</strong>
-            @if($editingJob && \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay()))
+            @if($editJobDeadlinePassed)
                 The deadline has passed — update it, save, then use <strong>Activate</strong>.
             @else
-                Edit details and use <strong>Activate</strong> (top-right) to go live.
+                Edit details below and use <strong>Activate</strong> (top-right) to go live.
             @endif
         </p>
     </div>
     @endif
 
-    {{-- CHANGE 6: Edit mode banner --}}
-    <div x-show="editMode" x-cloak class="bg-blue-50 border-b border-blue-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-blue-800"><strong>Edit Mode:</strong> Fields are now editable. Click <strong>Save Changes</strong> when done, or switch back to View Mode.</p>
-    </div>
-    <div x-show="!editMode" class="bg-purple-50 border-b border-purple-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+    @if($editJobIsActive)
+    <div class="bg-purple-50 border-b border-purple-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
         <i class="fas fa-eye text-purple-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-purple-800"><strong>View Mode:</strong> Reading job details. Click <strong>Edit Mode</strong> (top-right) to make changes.</p>
+        <p class="text-xs text-purple-800"><strong>View Mode:</strong> This job is currently Active. Deactivate it (top-right) first to make changes.</p>
     </div>
+    @else
+    <div class="bg-blue-50 border-b border-blue-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
+        <p class="text-xs text-blue-800"><strong>Edit Mode:</strong> Fields below are editable. Review your changes carefully before clicking <strong>Save Changes</strong> — this will update the live job posting.</p>
+    </div>
+    @endif
 
     @if(count($editErrors))
     <div class="bg-red-50 border-b border-red-200 px-6 py-2 flex-shrink-0 flex items-start gap-3">
@@ -2455,45 +2334,137 @@ tr.row-deleted:hover td { opacity: 1; }
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
-        {{-- LEFT: Org Details + Job Info + Target College + Status --}}
+        {{-- LEFT: Company Details + Job Info + Target College + Status --}}
         <div class="w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-2.5 space-y-2.5">
 
-                {{-- CHANGE 5: Job image preview on the left --}}
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
+                        <span x-show="editMode" x-cloak class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-3">
-                        @php $viewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null); @endphp
-                        <div class="rounded-xl overflow-hidden" style="height:110px;">
-                            <img src="{{ $viewImgUrl }}" alt="{{ $editingJob->job_title }}"
-                                 class="w-full h-full object-cover"
-                                 onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                        <div x-show="!editMode">
+                            @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null); @endphp
+                            <div class="rounded-xl overflow-hidden" style="height:110px;">
+                                <img src="{{ $editViewImgUrl }}" alt="{{ $editingJob->job_title }}"
+                                     class="w-full h-full object-cover"
+                                     onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                            </div>
+                            <p class="text-[10px] text-[#777777] mt-1 text-center">
+                                {{ $editingJob->job_image ? 'Custom photo uploaded' : 'Default photo' }}
+                            </p>
                         </div>
-                        <p class="text-[10px] text-[#777777] mt-1 text-center">
-                            {{ $editingJob->job_image ? 'Custom photo uploaded' : 'Default photo' }}
-                        </p>
+
+                        <div x-show="editMode" x-cloak>
+                        <div wire:ignore
+                             x-data="{
+                                 preview: null,
+                                 existing: @js($editCurrentImage ? Storage::url($editCurrentImage) : ''),
+                                 defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
+                                 removed: false,
+                                 handleFile(e) {
+                                     const f = e.target.files[0];
+                                     if (!f) return;
+                                     this.removed = false;
+                                     const r = new FileReader();
+                                     r.onload = ev => { this.preview = ev.target.result; };
+                                     r.readAsDataURL(f);
+                                 },
+                                 clearNew() {
+                                     this.preview = null;
+                                     this.$refs.fileInput.value = '';
+                                     $wire.set('editJobImage', null);
+                                 },
+                                 removeExisting() {
+                                     this.existing = '';
+                                     this.preview  = null;
+                                     this.removed  = true;
+                                     $wire.set('editRemoveImage', true);
+                                     if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+                                     $wire.set('editJobImage', null);
+                                 }
+                             }">
+
+                            <template x-if="preview">
+                                <div class="relative mb-2">
+                                    <img :src="preview" class="img-preview-thumb-sm" alt="New Preview">
+                                    <button type="button" @click="clearNew()"
+                                            class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
+                                        <i class="fas fa-xmark text-[10px]"></i>
+                                    </button>
+                                    <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">NEW</span>
+                                </div>
+                            </template>
+
+                            <template x-if="!preview && existing && !removed">
+                                <div class="relative mb-2">
+                                    <img :src="existing" class="img-preview-thumb-sm" alt="Current"
+                                         onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                                    <button type="button" @click="removeExisting()"
+                                            class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
+                                        <i class="fas fa-xmark text-[10px]"></i>
+                                    </button>
+                                    <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-[#7a3f91] text-white px-1.5 py-0.5 rounded-full">CURRENT</span>
+                                </div>
+                            </template>
+
+                            <template x-if="!preview && (!existing || removed)">
+                                <div>
+                                    <div class="img-upload-zone relative">
+                                        <img :src="defaultUrl" class="img-preview-thumb-sm opacity-60" alt="Default job photo"
+                                             onerror="this.style.display='none'">
+                                        <label class="absolute inset-0 flex flex-col items-center justify-center gap-1 cursor-pointer w-full bg-white/70 hover:bg-white/85 transition">
+                                            <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
+                                            <p class="font-semibold text-xs text-[#333333]">Upload photo</p>
+                                            <p class="text-[10px] text-[#555555]">JPG, PNG, WebP · max 2MB</p>
+                                            <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                                   wire:model="editJobImage" @change="handleFile($event)">
+                                        </label>
+                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
+                                    </div>
+                                    <template x-if="removed">
+                                        <p class="text-[10px] text-amber-600 mt-1 flex items-center gap-1">
+                                            <i class="fas fa-triangle-exclamation text-[9px]"></i>
+                                            Image removed — will use default on save.
+                                        </p>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <template x-if="!preview && existing && !removed">
+                                <label class="flex items-center gap-1.5 mt-1.5 cursor-pointer text-[10px] text-[#7a3f91] font-semibold hover:underline">
+                                    <i class="fas fa-arrow-up-from-bracket text-[9px]"></i>
+                                    Replace photo
+                                    <input type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                           wire:model="editJobImage" @change="handleFile($event)">
+                                </label>
+                            </template>
+
+                            @if(isset($editErrors['editJobImage']))
+                                <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editJobImage'] }}</p>
+                            @endif
+                        </div>
+                        </div>
                     </div>
                 </div>
                 @endif
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Organization Details
+                        Company Details
                     </div>
                     <div class="p-2.5 space-y-2">
                         @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
 
-                        {{-- CHANGE 6: View mode shows text, edit mode shows inputs --}}
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Organization Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Industry <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompanyType ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
                                 <select wire:model.live="editCompanyType"
                                         class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    <option value="">Select Organization</option>
+                                    <option value="">Select Industry</option>
                                     @foreach($this->jobOptions->get('company_type', collect()) as $opt)
                                         <option value="{{ $opt->label }}" @selected($editCompanyType === $opt->label)>{{ $opt->label }}</option>
                                     @endforeach
@@ -2612,10 +2583,9 @@ tr.row-deleted:hover td { opacity: 1; }
                 @if($editingJob)
                 @php
                     $statusColor = match($editingJob->status) {
-                        'ACTIVE'            => ['bg-emerald-50 border-emerald-200', 'text-emerald-900', 'fa-circle-check text-emerald-500', 'text-emerald-700', 'Currently Active'],
-                        'INACTIVE'          => ['bg-amber-50 border-amber-200',   'text-amber-900',   'fa-circle-pause text-amber-500',   'text-amber-700',   'Currently Inactive'],
-                        'ORGANIZER_DELETED' => ['bg-red-50 border-red-200',       'text-red-900',     'fa-trash text-red-500',            'text-red-700',     'Deleted'],
-                        default             => ['bg-gray-50 border-gray-200',     'text-gray-900',    'fa-circle text-gray-500',          'text-gray-700',    $editingJob->status],
+                        'ACTIVE'   => ['bg-emerald-50 border-emerald-200', 'text-emerald-900', 'fa-circle-check text-emerald-500', 'text-emerald-700', 'Currently Active'],
+                        'INACTIVE' => ['bg-amber-50 border-amber-200',   'text-amber-900',   'fa-circle-pause text-amber-500',   'text-amber-700',   'Currently Inactive'],
+                        default    => ['bg-gray-50 border-gray-200',     'text-gray-900',    'fa-circle text-gray-500',          'text-gray-700',    $editingJob->status],
                     };
                 @endphp
                 <div class="rounded-xl px-3 py-2 border {{ $statusColor[0] }}">
@@ -2623,8 +2593,7 @@ tr.row-deleted:hover td { opacity: 1; }
                         <i class="fas {{ $statusColor[2] }} text-sm"></i> {{ $statusColor[4] }}
                     </p>
                     <p class="text-xs mt-0.5 {{ $statusColor[3] }}">
-                        @if($editingJob->status === 'ORGANIZER_DELETED') Use <strong>Restore</strong> in the top-right to recover this job.
-                        @elseif($editingJob->status === 'INACTIVE' && $editJobDeadlinePassed) Update the deadline above first, save, then use <strong>Activate</strong>.
+                        @if($editingJob->status === 'INACTIVE' && $editJobDeadlinePassed) Update the deadline above first, save, then use <strong>Activate</strong>.
                         @else Use the {{ $editingJob->status === 'ACTIVE' ? 'Deactivate' : 'Activate' }} button in the top-right to toggle.
                         @endif
                     </p>
@@ -2634,21 +2603,18 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
         </div>
 
-        {{-- MIDDLE: Textareas — CHANGE 4 & 6: tall + view/edit mode --}}
+        {{-- MIDDLE: Textareas --}}
         <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
-                {{-- Description --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Description <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
-                        {{-- View mode: formatted text display --}}
                         <div x-show="!editMode"
                              class="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
                              style="min-height:160px;">{{ $editDescription ?: 'No description provided.' }}</div>
-                        {{-- Edit mode: textarea --}}
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editDescription"
                                   class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
@@ -2658,7 +2624,6 @@ tr.row-deleted:hover td { opacity: 1; }
                     </div>
                 </div>
 
-                {{-- Qualifications --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Qualifications <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
@@ -2676,7 +2641,6 @@ tr.row-deleted:hover td { opacity: 1; }
                     </div>
                 </div>
 
-                {{-- How to Apply --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         How to Apply <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
@@ -2697,119 +2661,9 @@ tr.row-deleted:hover td { opacity: 1; }
             </div>
         </div>
 
-        {{-- RIGHT: Photo + History + Tips + Actions --}}
+        {{-- RIGHT: History + Tips + Actions --}}
         <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
             <div class="p-3 space-y-3 flex-1">
-
-                {{-- CHANGE 6 + CHANGE 5: Photo uploader shown only in edit mode; view mode shows preview only --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Job Photo
-                        <span x-show="editMode" x-cloak class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
-                    </div>
-                    <div class="p-3">
-                        {{-- View mode: just show the current image --}}
-                        <div x-show="!editMode">
-                            @php $editViewImgUrl = $editingJob ? $this::jobImageUrl($editingJob->job_image ?? null) : asset('storage/job/default-photo-job.jpg'); @endphp
-                            <div class="rounded-xl overflow-hidden" style="height:110px;">
-                                <img src="{{ $editViewImgUrl }}" alt="Job photo"
-                                     class="w-full h-full object-cover"
-                                     onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
-                            </div>
-                            <p class="text-[10px] text-[#777777] mt-1.5 text-center">
-                                {{ ($editingJob && $editingJob->job_image) ? 'Custom photo uploaded' : 'Default photo' }}
-                            </p>
-                        </div>
-
-                        {{-- Edit mode: uploader --}}
-                        <div x-show="editMode" x-cloak>
-                        <div wire:ignore
-                             x-data="{
-                                 preview: null,
-                                 existing: @js($editCurrentImage ? Storage::url($editCurrentImage) : ''),
-                                 removed: false,
-                                 handleFile(e) {
-                                     const f = e.target.files[0];
-                                     if (!f) return;
-                                     this.removed = false;
-                                     const r = new FileReader();
-                                     r.onload = ev => { this.preview = ev.target.result; };
-                                     r.readAsDataURL(f);
-                                 },
-                                 clearNew() {
-                                     this.preview = null;
-                                     this.$refs.fileInput.value = '';
-                                     $wire.set('editJobImage', null);
-                                 },
-                                 removeExisting() {
-                                     this.existing = '';
-                                     this.preview  = null;
-                                     this.removed  = true;
-                                     $wire.set('editRemoveImage', true);
-                                     if (this.$refs.fileInput) this.$refs.fileInput.value = '';
-                                     $wire.set('editJobImage', null);
-                                 }
-                             }">
-
-                            <template x-if="preview">
-                                <div class="relative mb-2">
-                                    <img :src="preview" class="img-preview-thumb-sm" alt="New Preview">
-                                    <button type="button" @click="clearNew()"
-                                            class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
-                                        <i class="fas fa-xmark text-[10px]"></i>
-                                    </button>
-                                    <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">NEW</span>
-                                </div>
-                            </template>
-
-                            <template x-if="!preview && existing && !removed">
-                                <div class="relative mb-2">
-                                    <img :src="existing" class="img-preview-thumb-sm" alt="Current"
-                                         onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
-                                    <button type="button" @click="removeExisting()"
-                                            class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
-                                        <i class="fas fa-xmark text-[10px]"></i>
-                                    </button>
-                                    <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-[#7a3f91] text-white px-1.5 py-0.5 rounded-full">CURRENT</span>
-                                </div>
-                            </template>
-
-                            <template x-if="!preview && (!existing || removed)">
-                                <div>
-                                    <div class="img-upload-zone">
-                                        <label class="flex flex-col items-center justify-center gap-1 py-4 cursor-pointer w-full">
-                                            <i class="fas fa-cloud-arrow-up text-2xl text-gray-300"></i>
-                                            <p class="font-semibold text-xs text-[#555555]">Upload photo</p>
-                                            <p class="text-[10px] text-[#777777]">JPG, PNG, WebP · max 2MB</p>
-                                            <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                                   wire:model="editJobImage" @change="handleFile($event)">
-                                        </label>
-                                    </div>
-                                    <template x-if="removed">
-                                        <p class="text-[10px] text-amber-600 mt-1 flex items-center gap-1">
-                                            <i class="fas fa-triangle-exclamation text-[9px]"></i>
-                                            Image removed — will use default on save.
-                                        </p>
-                                    </template>
-                                </div>
-                            </template>
-
-                            <template x-if="!preview && existing && !removed">
-                                <label class="flex items-center gap-1.5 mt-1.5 cursor-pointer text-[10px] text-[#7a3f91] font-semibold hover:underline">
-                                    <i class="fas fa-arrow-up-from-bracket text-[9px]"></i>
-                                    Replace photo
-                                    <input type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                           wire:model="editJobImage" @change="handleFile($event)">
-                                </label>
-                            </template>
-
-                            @if(isset($editErrors['editJobImage']))
-                                <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editJobImage'] }}</p>
-                            @endif
-                        </div>
-                        </div>
-                    </div>
-                </div>
 
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -2825,12 +2679,6 @@ tr.row-deleted:hover td { opacity: 1; }
                         <div>
                             <p class="text-[10px] font-semibold uppercase tracking-wider text-[#555555]">Last Updated By</p>
                             <p class="text-sm text-[#333333]">{{ $editingJob->updated_by }}</p>
-                        </div>
-                        @endif
-                        @if($editingJob->deleted_by)
-                        <div>
-                            <p class="text-[10px] font-semibold uppercase tracking-wider text-red-500">Deleted By</p>
-                            <p class="text-sm text-red-700">{{ $editingJob->deleted_by }}</p>
                         </div>
                         @endif
                         <div>
@@ -2849,50 +2697,30 @@ tr.row-deleted:hover td { opacity: 1; }
                         <ul class="space-y-2">
                             <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Changes are saved immediately — no approval required.</span></li>
                             <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>If inactive with past deadline, update deadline first then activate.</span></li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Deleted jobs can be restored anytime from the Deleted filter.</span></li>
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Deleting a job is permanent — there is no restore.</span></li>
                         </ul>
                     </div>
                 </div>
 
             </div>
 
-            {{-- CHANGE 6: Save Changes only visible in edit mode --}}
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
-                @if($editingJob && $editingJob->status !== 'ORGANIZER_DELETED')
+                @if($editingJob && !$editJobIsActive)
                 <div x-show="editMode" x-cloak>
                     <button type="button" wire:click="saveEditJob"
-                            wire:loading.attr="disabled"
-                            wire:target="saveEditJob"
-                            class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                        <span wire:loading wire:target="saveEditJob">
-                            <i class="fas fa-spinner animate-spin text-xs"></i>
-                        </span>
-                        <span wire:loading.remove wire:target="saveEditJob">
-                            <i class="fas fa-floppy-disk text-xs"></i>
-                        </span>
-                        <span wire:loading wire:target="saveEditJob">Saving…</span>
-                        <span wire:loading.remove wire:target="saveEditJob">Save Changes</span>
+                            class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
+                        <i class="fas fa-floppy-disk text-xs"></i>
+                        Save Changes
                     </button>
                 </div>
-                <div x-show="!editMode" class="pb-1">
-                    <p class="text-center text-xs text-[#777777]">Switch to <strong>Edit Mode</strong> to make changes.</p>
-                </div>
                 @else
-                <button type="button" wire:click="confirmRestoreJob({{ $editingJobId }})"
-                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-emerald-600 hover:bg-emerald-700">
-                    <i class="fas fa-rotate-left text-xs"></i> Restore Job
-                </button>
+                <div class="pb-1">
+                    <p class="text-center text-xs text-[#777777]">Deactivate this job to enable editing.</p>
+                </div>
                 @endif
-                {{-- CHANGE 1 & 2: labeled Close has loading --}}
                 <button type="button" wire:click="closeEditModal"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="closeEditModal,saveEditJob"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:pointer-events-none flex items-center justify-center gap-1.5">
-                    <span wire:loading wire:target="closeEditModal,saveEditJob"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                    <span wire:loading.remove wire:target="closeEditModal,saveEditJob"><i class="fas fa-xmark text-[10px]"></i></span>
-                    <span wire:loading wire:target="closeEditModal,saveEditJob">Closing…</span>
-                    <span wire:loading.remove wire:target="closeEditModal,saveEditJob">Close</span>
+                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center">
+                    <i class="fas fa-xmark text-xs"></i>
                 </button>
             </div>
         </div>
@@ -2934,15 +2762,16 @@ tr.row-deleted:hover td { opacity: 1; }
         <div class="flex items-center gap-1.5 flex-shrink-0 ml-3">
             @if($viewCanShare)
                 <button type="button" wire:click="openShareModal({{ $job->id }})"
-                        class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24">
+                        class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
                     <i class="fas fa-share-nodes text-white text-sm"></i>
                     <span class="mtip">Share</span>
                 </button>
             @endif
-            {{-- CHANGE 2: pure icon-only close has NO loading --}}
             <button wire:click="closeViewModal" type="button"
-                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22">
-                <i class="fas fa-xmark text-white text-sm"></i>
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
+                </svg>
                 <span class="mtip">Close</span>
             </button>
         </div>
@@ -2957,7 +2786,6 @@ tr.row-deleted:hover td { opacity: 1; }
 
         <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c">
 
-            {{-- CHANGE 5: Job image shown prominently in view modal --}}
             <div class="mx-3 mt-3 mb-0 flex-shrink-0 rounded-xl overflow-hidden" style="height:160px;">
                 <img src="{{ $viewJobImgUrl }}" alt="{{ $job->job_title }}" class="w-full h-full object-cover"
                      onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
@@ -3088,28 +2916,327 @@ tr.row-deleted:hover td { opacity: 1; }
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->jobsBaseUrl();
-    $shareHost        = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
     $shareDlFormatted = $shareDeadline ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y') : '';
-    $shareDescPreview = mb_strlen($shareDescription) > 160 ? mb_substr($shareDescription, 0, 160) . '…' : $shareDescription;
-    $fbLines   = [];
-    $fbLines[] = "🎯 Job Opening: {$shareJobTitle}";
-    $fbLines[] = "🏢 {$shareCompany}";
-    if ($shareLocation)    $fbLines[] = "📍 {$shareLocation}";
-    if ($shareEmpType)     $fbLines[] = "💼 {$shareEmpType}";
-    if ($shareExpLevel)    $fbLines[] = "📊 {$shareExpLevel}";
-    if ($shareSalary)      $fbLines[] = "💰 {$shareSalary}";
-    if ($shareDlFormatted) $fbLines[] = "📅 Deadline: {$shareDlFormatted}";
-    if ($shareCollege)     $fbLines[] = "🏫 For: {$shareCollege}";
-    $fbLines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-    $fbLines[] = "👀 Check it out on the Alumni Portal → " . $this->jobsBaseUrl();
 
-    $body = implode("\n", $fbLines);
+    $fbLines   = [];
+    $fbLines[] = strtoupper($shareJobTitle);
+    $fbLines[] = '';
+    $fbLines[] = "Company: {$shareCompany}";
+    if ($shareLocation)  $fbLines[] = "Location: {$shareLocation}";
+    if ($shareEmpType)   $fbLines[] = "Employment Type: {$shareEmpType}";
+    if ($shareExpLevel)  $fbLines[] = "Experience Level: {$shareExpLevel}";
+    if ($shareSalary)    $fbLines[] = "Salary: {$shareSalary}";
+    if ($shareDlFormatted) $fbLines[] = "Deadline: {$shareDlFormatted}";
+    if ($shareCollege)   $fbLines[] = "Open For: {$shareCollege}";
+
+    if (trim($shareDescription) !== '') {
+        $fbLines[] = '';
+        $fbLines[] = 'About This Job:';
+        $fbLines[] = mb_strlen(trim($shareDescription)) > 300 ? mb_substr(trim($shareDescription), 0, 300) . '…' : trim($shareDescription);
+    }
+
+    $fbLines[] = '';
+    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = '#YourFutureStarsHere';
+    $fbPostText = implode("\n", $fbLines);
 @endphp
+
+<div id="jm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 jm-share-backdrop"
+     x-data="{
+         copied:false,
+         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         downloading:false,
+         downloaded:false,
+         shareText: {{ json_encode($fbPostText) }},
+         jobTitle: {{ json_encode($shareJobTitle) }},
+         imageUrl:  {{ json_encode($sharePhotoUrl) }},
+
+         showDlConfirm: false,
+         pendingTarget: null,
+
+         async buildImageFile() {
+             if (!this.imageUrl) return null;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 return new File([blob], 'job-photo.' + ext, { type: blob.type });
+             } catch (e) { return null; }
+         },
+
+         async autoCopyCaption() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) {
+                     await navigator.clipboard.writeText(this.shareText);
+                 } else {
+                     const ta = document.createElement('textarea');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
+                 }
+                 return true;
+             } catch (e) { return false; }
+         },
+
+         async downloadImage() {
+             if (!this.imageUrl) return false;
+             this.downloading = true;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url  = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'job-photo.' + ext;
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloading = false;
+                 this.downloaded  = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) {
+                 this.downloading = false;
+                 return false;
+             }
+         },
+
+         async nativeShare() {
+             try {
+                 const shareData = { title: this.jobTitle, text: this.shareText };
+                 const file = await this.buildImageFile();
+                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                     shareData.files = [file];
+                 }
+                 await navigator.share(shareData);
+             } catch (e) { /* cancelled by user — nothing to do */ }
+         },
+
+         askShare(target) {
+             if (this.nativeShareSupported) { this.nativeShare(); return; }
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
+         },
+
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             this.proceedToTarget();
+         },
+
+         proceedToTarget() {
+             this.showDlConfirm = false;
+             const target = this.pendingTarget;
+             this.pendingTarget = null;
+             if (target === 'facebook') this.openFacebook();
+             else if (target === 'messenger') this.openMessenger();
+         },
+
+         cancelDlConfirm() {
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
+         },
+
+         async openFacebook() {
+             const copyOk = await this.autoCopyCaption();
+             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
+             const win = window.open(url, 'philcst_jm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
+             });
+         },
+
+         async openMessenger() {
+             const copyOk = await this.autoCopyCaption();
+             const win = window.open('https://www.messenger.com/new', 'philcst_jm_messenger_share', 'noopener,noreferrer');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+             });
+         },
+
+         async copyLinkFn() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(this.shareText); }
+                 else {
+                     const ta = document.createElement('textarea');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
+                 }
+                 this.copied = true; setTimeout(() => this.copied = false, 2500);
+             } catch(e) { console.warn('Copy failed', e); }
+         }
+     }"
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareModal()}">
+
+    <div class="jm-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 jm-share-modal-wrapper">
+
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
+                <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Job Posting
+            </h2>
+            <button wire:click="closeShareModal" type="button" class="jm-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <span class="tip">Close</span>
+            </button>
+        </div>
+
+        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
+                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+
+                @if($sharePhotoUrl)
+                <div class="jm-share-photo-preview">
+                    <img src="{{ $sharePhotoUrl }}" alt="{{ $shareJobTitle }}"
+                         onerror="this.style.display='none'">
+                    <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
+                        <i class="fas" :class="downloading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                        <span x-text="downloading ? 'Downloading…' : 'Downloaded'"></span>
+                    </span>
+                </div>
+                @endif
+
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
+                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
+                    </div>
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
+                </div>
+
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                        into the Facebook or Messenger window that opens.
+                    </p>
+                </div>
+            </div>
+
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
+                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
+
+                <template x-if="nativeShareSupported">
+                    <button type="button" @click="nativeShare()" class="jm-share-option-btn" style="background:#7a3f91;">
+                        <span class="icon-wrap">
+                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
+                        </span>
+                        <span class="label-text text-xs font-semibold">Share</span>
+                    </button>
+                </template>
+
+                <button type="button" @click="askShare('facebook')" class="jm-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
+                    </span>
+                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
+                </button>
+
+                <button type="button" @click="askShare('messenger')" class="jm-share-option-btn" style="background:#0084FF;">
+                    <span class="icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
+                    </span>
+                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
+                </button>
+
+                <button type="button" wire:click="shareToAlumniChats"
+                        class="jm-share-option-btn" style="background:#7a3f91;">
+                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
+                        <i class="fas fa-comments text-white text-sm"></i>
+                    </span>
+                    <span class="label-text text-xs font-semibold">Share to Alumni Batch Chats</span>
+                </button>
+
+                <div class="relative my-0.5">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
+                    </div>
+                </div>
+
+                <button type="button" @click="copyLinkFn()"
+                        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
+                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
+                    </span>
+                    <div class="flex-1 text-left min-w-0">
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
+                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
+                    </div>
+                </button>
+
+                <p class="text-[10px] text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
+            </div>
+        </div>
+    </div>
+
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ── --}}
+    <div x-show="showDlConfirm" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
+         @click.self="cancelDlConfirm()">
+        <div class="jm-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+            <div class="flex items-start gap-3">
+                <span class="jm-dl-confirm-icon"><i class="fas fa-image"></i></span>
+                <div class="min-w-0 pt-0.5">
+                    <p class="text-sm font-semibold" style="color:#333333;">Download the job photo?</p>
+                    <p class="text-xs mt-1 leading-relaxed" style="color:#333333;">
+                        You'll need to attach a photo to your post. Download it now, or skip if you already have it saved.
+                    </p>
+                </div>
+            </div>
+
+            @if($sharePhotoUrl)
+            <div class="jm-share-photo-preview" style="height:110px;">
+                <img src="{{ $sharePhotoUrl }}" alt="{{ $shareJobTitle }}" onerror="this.style.display='none'">
+            </div>
+            @endif
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="proceedToTarget()" class="jm-dl-confirm-btn secondary">
+                    Skip
+                </button>
+                <button type="button" @click="confirmDownloadThenGo()" class="jm-dl-confirm-btn primary" :disabled="downloading">
+                    <span x-show="!downloading"><i class="fas fa-download mr-1"></i>Download</span>
+                    <span x-show="downloading" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i>Downloading…</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 @endif
 
 <script>
 (function () {
     var tip = document.getElementById('eo-hover-tip');
+
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
+    }
 
     function bindRows() {
         document.querySelectorAll('[data-eo-row]').forEach(function (row) {
@@ -3117,7 +3244,7 @@ tr.row-deleted:hover td { opacity: 1; }
             row._eoTipBound = true;
 
             row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
+                if (!tip || !isHoverCapable()) return;
                 var shareWrap = e.target.closest('[data-eo-share]');
                 if (shareWrap) {
                     tip.style.opacity = '0';
