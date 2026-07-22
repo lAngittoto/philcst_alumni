@@ -453,7 +453,7 @@ new class extends Component {
     }
 
     /**
-     * Detects whether a job title is related to the alumni's course.
+     * Detects whether a job title is related to the alumni's program.
      *
      * Smarter handling for teaching / training roles: an alumnus who becomes
      * an instructor, professor, trainer, or teacher of a subject that matches
@@ -513,7 +513,7 @@ new class extends Component {
 
         // ── Cross-field teaching detection ──────────────────────────
         // Catches titles like "College Instructor" or "IT Trainer" for an
-        // alumnus whose course group's own $yes/$partial lists above didn't
+        // alumnus whose program group's own $yes/$partial lists above didn't
         // already match (e.g. a BSIT grad using a generic "Instructor" title
         // instead of "IT Instructor"). If the role is clearly an educator
         // role, check whether the subject matches their field; if the subject
@@ -585,7 +585,7 @@ new class extends Component {
         $workLocLabels= ['local'=>'Local / PH','abroad'=>'OFW / Abroad'];
         $careerLabels = ['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional'];
         $eduLabels    = ['none'=>'None','pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate'];
-        $relLabels    = ['yes'=>'Related to Course','no'=>'Not Related','partially'=>'Partially Related'];
+        $relLabels    = ['yes'=>'Related to Program','no'=>'Not Related','partially'=>'Partially Related'];
         $unLabels     = ['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'];
         $statusLabels = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'];
 
@@ -1536,7 +1536,7 @@ function phAddress(initial) {
                             </div>
                         </div>
                         <div class="flex flex-col gap-1 field-block">
-                            <p class="field-label">Course</p>
+                            <p class="field-label">Program</p>
                             @if($course_code)<p class="field-value">{{ strtoupper($course_code) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                         </div>
                     </div>
@@ -2043,7 +2043,7 @@ function phAddress(initial) {
                                 </select>
                                 @error('job_title') <p class="text-[11px] text-red-400 mt-1">{{ $message }}</p> @enderror
                                 @if($job_title && $job_title !== 'Other')
-                                    <p class="text-[11px] text-[#333333] mt-1 font-medium">Auto-detected: Related to your course.</p>
+                                    <p class="text-[11px] text-[#333333] mt-1 font-medium">Auto-detected: Related to your program.</p>
                                 @endif
                                 @if($job_title === 'Other')
                                 <div class="mt-2 space-y-2">
@@ -2056,7 +2056,7 @@ function phAddress(initial) {
                                     @if($custom_job_title)
                                     @php
                                         $relText = match($course_relevance) {
-                                            'yes'       => 'Related to Course',
+                                            'yes'       => 'Related to Program',
                                             'partially' => 'Partially Related',
                                             'no'        => 'Not Related',
                                             default     => 'Detecting…',

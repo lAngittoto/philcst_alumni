@@ -490,6 +490,10 @@ new class extends Component {
 /* ── Mobile responsiveness ──────────────────────────────── */
 @media (max-width: 640px) {
     .yb-filter-bar { gap: 8px; }
+          background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
+      padding: 0.6rem 0.875rem; flex-shrink: 0;
+   position: relative; z-index: 50; overflow: visible;
+    position: relative; z-index: 5; overflow: visible;
 }
 
 /*

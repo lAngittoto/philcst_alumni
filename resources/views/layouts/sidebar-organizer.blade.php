@@ -114,6 +114,31 @@
             transition: width 0.2s ease, min-width 0.2s ease;
         }
 
+        /* ── Modal-hidden state ──────────────────────────────────────
+           Pag may open modal (e.g. alumni detail modal), itinatago natin
+           ang sidebar nang PURELY VISUAL (opacity/transform) at inaalis
+           siya sa flex flow gamit `position: fixed` sa desktop, para
+           HINDI kailanman gumalaw/lumaki yung table/content sa tabi
+           niya. Ang mobile naman ay naka-fixed na talaga by default kaya
+           opacity + translate lang ang kailangan doon. ── */
+        @media (min-width: 1024px) {
+            .coord-sidebar.coord-sidebar-modal-hidden {
+                position: fixed !important;
+                opacity: 0;
+                transform: translateX(-16px);
+                pointer-events: none;
+                transition: opacity 0.22s ease, transform 0.22s ease;
+            }
+        }
+        @media (max-width: 1023px) {
+            #coord-sidebar-aside.coord-sidebar-modal-hidden {
+                opacity: 0;
+                transform: translateX(-100%);
+                pointer-events: none;
+                transition: opacity 0.22s ease, transform 0.22s ease;
+            }
+        }
+
         .coord-sidebar-header {
             background: #7A3F91;
             position: relative;
@@ -872,6 +897,7 @@
     x-data="{
         open: false,
         sidebarCollapsed: false,
+        sidebarHiddenByModal: false,
         loggingOut: false,
         toggleSidebar() {
             // Plain in-memory boolean — no localStorage, no pre-boot script.
@@ -880,11 +906,16 @@
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
-    @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()">
+    @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()"
+    @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
+    @open-sidebar.window="sidebarHiddenByModal = false;">
 
 <div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile overlay --}}
+    {{-- Mobile overlay — raised to z-50 so it always sits above in-page
+         content (like the yearbook filter bar, which needs its own
+         z-index for dropdown panels) instead of blending/overlapping
+         with it when the drawer is open. --}}
     <div
         x-show="open"
         x-transition:enter="transition opacity-ease-out duration-300"
@@ -894,18 +925,30 @@
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
         @click="open = false"
-        class="fixed inset-0 z-40 bg-black/50 lg:hidden">
+        class="fixed inset-0 z-50 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR — white, collapsible (Alumni-style) ══ --}}
+    {{-- ══ SIDEBAR — white, collapsible (Alumni-style) ══
+         z-[60]: must stay above the mobile overlay (z-50) AND above any
+         in-page component that sets its own stacking context (e.g. the
+         yearbook filter bar), so the drawer never gets visually "cut into"
+         by page content while it's open on tablet/mobile.
+
+         NOTE: hiding this sidebar when a modal opens is done PURELY via
+         the `coord-sidebar-modal-hidden` CSS class (opacity/transform +
+         `position: fixed` on desktop) instead of `x-show`/`x-if`. This
+         keeps the element out of Alpine's DOM add/remove cycle and out
+         of the flex flow without ever changing the width `<main>` sees,
+         so the table/content next to it never resizes or jumps. --}}
     <aside
         id="coord-sidebar-aside"
         :class="{
             'translate-x-0': open,
             '-translate-x-full': !open,
-            'is-collapsed': sidebarCollapsed
+            'is-collapsed': sidebarCollapsed,
+            'coord-sidebar-modal-hidden': sidebarHiddenByModal
         }"
-        class="coord-sidebar fixed inset-y-0 left-0 z-50 transform
+        class="coord-sidebar fixed inset-y-0 left-0 z-[60] transform
                lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0">
 

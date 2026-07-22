@@ -830,7 +830,11 @@ new class extends Component {
         $this->shareEventIsCompleted = $isCompleted;
 
         $this->showShareModal = true;
-        $this->showViewModal  = false;
+        // NOTE: intentionally NOT closing showViewModal here — opening the
+        // Share modal from within View Details should keep the View Details
+        // screen mounted underneath (per request #5). Previously this line
+        // set showViewModal = false, which caused the view to "go back"
+        // as soon as Share was clicked.
     }
 
     public function closeShareModal(): void
@@ -1070,6 +1074,38 @@ select.tw-select-arrow {
     background: linear-gradient(to right, #7a3f91, #9b59b6);
     border-top: 1px solid rgba(122,63,145,.3);
 }
+
+/* ── Event Details / Additional Notes tables (View Details screen) ──
+     Used when the About/Notes content is long: renders as a bordered
+     table with a capped, vertically scrollable body instead of an
+     unbounded block of text. ── */
+.eo-detail-table-wrap {
+    max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+}
+.eo-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.eo-detail-table td {
+    padding: 14px 18px;
+    font-size: 0.95rem;
+    line-height: 1.8;
+    color: #333333;
+    font-weight: 500;
+    white-space: pre-wrap;
+    vertical-align: top;
+    border: none;
+}
+
+/* ── "All Batches" pill — gray border added per request ── */
+.eo-all-batches-pill {
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    display: inline-block;
+}
 </style>
 
 {{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
@@ -1301,9 +1337,9 @@ select.tw-select-arrow {
                                     <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-gray-100 border border-gray-200 w-fit text-[#333333] inline-block">
                                         Batch {{ $batchDisplay }}
                                     </span>
-                                @else
-                                    <span class="text-xs text-[#999999]">All Batches</span>
-                                @endif
+@else
+    <span class="text-xs text-[#333333] font-bold eo-all-batches-pill">All Batches</span>
+@endif
                             </td>
 
                             <td class="px-4 py-2.5 text-center">
@@ -2362,37 +2398,37 @@ select.tw-select-arrow {
                 @endif
             </div>
 
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
+<div class="flex-1 min-h-0 overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
 
-                @if($ev->description)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-[#333333]">About This Event</p>
-                    </div>
-                    <div class="px-5 py-4">
-                        <p class="text-base leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->description) }}</p>
-                    </div>
-                </div>
-                @endif
+@if($ev->description)
+<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
+        <p class="text-[12px] font-bold uppercase tracking-widest text-[#333333]">About This Event</p>
+    </div>
+    <div class="eo-detail-table-wrap px-5 py-4 flex-1">
+      <p class="text-sm leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->description) }}</p>
+    </div>
+</div>
+@endif
 
-                @if($ev->notes)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-amber-50">
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-[#333333]">Additional Notes</p>
-                    </div>
-                    <div class="px-5 py-4">
-                        <p class="text-base leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->notes) }}</p>
-                    </div>
-                </div>
-                @endif
+@if($ev->notes)
+<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+    <div class="px-5 py-3 border-b border-gray-100 bg-amber-50 flex-shrink-0">
+        <p class="text-[12px] font-bold uppercase tracking-widest text-[#333333]">Additional Notes</p>
+    </div>
+    <div class="eo-detail-table-wrap px-5 py-4 flex-1">
+        <p class="text-sm leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->notes) }}</p>
+    </div>
+</div>
+@endif
 
-                @if(!$ev->description && !$ev->notes)
-                <div class="flex-1 flex items-center justify-center py-10">
-                    <p class="text-base font-medium text-[#333333]">No additional details provided.</p>
-                </div>
-                @endif
+    @if(!$ev->description && !$ev->notes)
+    <div class="flex-1 flex items-center justify-center py-10">
+        <p class="text-base font-medium text-[#333333]">No additional details provided.</p>
+    </div>
+    @endif
 
-            </div>
+</div>
         </div>
 
     </div>

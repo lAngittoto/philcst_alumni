@@ -344,9 +344,21 @@ new class extends Component {
             ? (json_decode($this->modalData['career_path'], true) ?? []) : [];
 
         $this->showModal = true;
+
+        // Close any open mobile sidebar the moment the modal opens, so the
+        // modal is never fighting with an overlay drawer for the screen.
+        // The layout's sidebar component/Alpine store should listen for
+        // this browser event (e.g. `x-on:close-sidebar.window="open = false"`
+        // or `@close-sidebar.window="sidebarOpen = false"`).
+        $this->dispatch('close-sidebar');
     }
 
-    public function closeModal(): void { $this->showModal = false; $this->modalData = []; }
+    public function closeModal(): void
+{
+    $this->showModal = false;
+    $this->modalData = [];
+    $this->dispatch('open-sidebar');
+}
 
 }; ?>
 
@@ -387,6 +399,21 @@ new class extends Component {
 }
 .ae-tbl-row:hover { background-color: #f5f0fa !important; }
 
+/* ── Mobile card rows (no horizontal scroll, nothing hidden) ── */
+.ae-mrow {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #fff;
+    border-bottom: 1px solid #F5F5F5;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background-color .12s ease;
+}
+.ae-mrow:active { background-color: #f5f0fa; }
+
 .ae-filter-input {
     border: 1px solid #E8E0F0;
     transition: border-color .15s, box-shadow .15s;
@@ -419,6 +446,29 @@ select.ae-filter-input.ae-active {
     font-weight: 600;
 }
 
+/* ── Filter bar loading progress bar (same effect as Alumni Records) ── */
+.ae-filter-progress-track {
+    height: 2px;
+    width: 100%;
+    overflow: hidden;
+    background: transparent;
+    position: relative;
+    flex-shrink: 0;
+}
+.ae-filter-progress-bar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 40%;
+    border-radius: 99px;
+    background: linear-gradient(135deg, #7a3f91, #9b59b6);
+    animation: aeFilterProgress 1s ease-in-out infinite;
+}
+@keyframes aeFilterProgress {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+}
+
 /* ── Stat cards live in a side column, ordered after the table ── */
 .ae-cards-side {
     scrollbar-width: thin;
@@ -448,6 +498,22 @@ select.ae-filter-input.ae-active {
     overflow: hidden;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    transition: all .3s ease;
+}
+
+/* ── Mobile/tablet fullscreen mode — toggled via Alpine (fullscreen flag).
+     Takes the table block out of the normal flow and covers the entire
+     viewport so the alumni list is easier to browse on small screens. ── */
+.ae-tb-fullscreen {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 999 !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-height: 100dvh !important;
+    width: 100vw !important;
+    border-radius: 0 !important;
+    border: none !important;
 }
 .ae-table-block-filter {
     background: #F5F5F5;
@@ -507,6 +573,71 @@ select.ae-filter-input.ae-active {
 }
 .ae-close-tooltip:hover::after,
 .ae-close-tooltip:hover::before { opacity: 1; }
+
+/* ── Column visibility uses CONTAINER queries, not viewport queries.
+     This matters because the sidebar can collapse/expand independently of
+     the browser window — that changes how much room the table actually
+     has without changing the viewport at all. Viewport-based (sm:/md:/lg:)
+     classes would keep a column "on" even when there's no longer enough
+     room for it, so it renders half cut off at the edge. Container queries
+     fix this properly: each column only switches on once the table itself
+     (not the window) is wide enough to fit it.
+
+     UPDATED TIERS (Job Title and Email no longer both fight for space at
+     the same width — Job Title now has its own container-query toggle
+     instead of always being on). On narrow/tablet widths only Alumni +
+     Program show in the table; Job Title and Status surface as compact
+     inline info inside the Alumni cell instead, so nothing overlaps or
+     gets squeezed. ── */
+.ae-table-block { container-type: inline-size; container-name: ae-tbl; }
+
+.ae-col-studentid,
+.ae-col-batch,
+.ae-col-status,
+.ae-col-jobtitle,
+.ae-col-email { display: none; }
+
+.ae-inline-studentid { display: block; }
+.ae-inline-status    { display: inline-flex; }
+.ae-inline-jobtitle   { display: block; }
+
+@container ae-tbl (min-width: 540px) {
+    .ae-col-studentid    { display: table-cell; }
+    .ae-inline-studentid { display: none; }
+}
+@container ae-tbl (min-width: 660px) {
+    .ae-col-batch { display: table-cell; }
+}
+@container ae-tbl (min-width: 860px) {
+    .ae-col-jobtitle    { display: table-cell; }
+    .ae-inline-jobtitle { display: none; }
+}
+@container ae-tbl (min-width: 980px) {
+    .ae-col-status    { display: table-cell; }
+    .ae-inline-status { display: none; }
+}
+@container ae-tbl (min-width: 1120px) {
+    .ae-col-email { display: table-cell; }
+}
+
+/* ── Responsive height: the alumni table always keeps this capped,
+     independently scrollable height on tablet/mobile — filtered/empty
+     results no longer shrink the block, so switching filters in and out
+     never causes the table to resize or jump around. ── */
+@media (max-width: 1023px) {
+    .ae-table-block {
+        height: calc(100dvh - 360px);
+        max-height: calc(100dvh - 360px);
+        min-height: 380px;
+    }
+}
+@media (max-width: 640px) {
+    .ae-table-block {
+        height: calc(100dvh - 380px);
+        max-height: calc(100dvh - 380px);
+        min-height: 360px;
+    }
+}
 </style>
 
 <div id="ae-hover-tip" class="ae-hover-tip">
@@ -539,7 +670,7 @@ select.ae-filter-input.ae-active {
 </div>
 
 {{-- MAIN LAYOUT --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full">
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full transition-all duration-300 ease-in-out">
 
     {{-- PAGE HEADER --}}
     <div class="flex items-center gap-4 flex-shrink-0">
@@ -566,19 +697,22 @@ select.ae-filter-input.ae-active {
     </div>
 
     {{-- BODY: stat cards visually moved to the RIGHT side of the table via
-         CSS `order`. Both columns fill the SAME height, sized the way the
-         Alumni Records page does it — calc(100vh - page chrome), trimmed a
-         touch shorter than before — so the cards column has a hard bottom
-         boundary lined up with the table's pagination bar and scrolls
-         internally if the cards don't fit. --}}
-    <div class="flex flex-col lg:flex-row gap-4 w-full lg:h-[calc(100vh-280px)]">
+         CSS `order`. Both columns always fill the same fixed height
+         (calc(100vh - page chrome)) regardless of whether the table has
+         results or not, so switching / clearing filters never resizes or
+         shifts the layout. The cards column scrolls on its own on desktop.
+         On tablet/mobile, the cards are shown in full (no scroll — they
+         just wrap in the grid) and ONLY the table block below gets a
+         capped height so it scrolls on its own instead of the whole page
+         growing tall. --}}
+    <div class="flex flex-col lg:flex-row gap-4 w-full lg:h-[calc(100vh-280px)] transition-all duration-300 ease-in-out">
 
         {{-- STAT CARDS — side column, ordered AFTER the table (right side)
              on large screens via lg:order-2. Always visible, no toggle.
-             Height fills the row above (lg:h-full), so it scrolls on its
-             own instead of growing past the pagination bar. --}}
+             On tablet/mobile it is NOT independently scrollable (shows in
+             full). On desktop it scrolls on its own (lg:h-full lg:overflow-y-auto). --}}
         <div class="ae-cards-side w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
-                    grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-3 lg:content-start
+                    grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-3 content-start
                     lg:h-full lg:overflow-y-auto lg:pr-1">
 
             {{-- Total Alumni --}}
@@ -749,11 +883,19 @@ select.ae-filter-input.ae-active {
         </div>
         {{-- /STAT CARDS --}}
 
-        {{-- UNIFIED BLOCK (narrower now that the cards sit beside it) --}}
-        <div class="ae-table-block flex-1 min-w-0 w-full lg:order-1 lg:h-full">
+        {{-- UNIFIED BLOCK (narrower now that the cards sit beside it). Always
+             keeps its fixed height (lg:h-full) whether the table has rows
+             or is showing the "no results" empty state — this stops the
+             block from resizing / collapsing every time a filter changes. --}}
+        <div class="ae-table-block flex-1 min-w-0 w-full lg:order-1 lg:h-full"
+             x-data="{ fullscreen: false }"
+             :class="fullscreen ? 'ae-tb-fullscreen' : ''"
+             @keydown.escape.window="fullscreen = false">
 
             {{-- FILTER BAR --}}
-            <div class="ae-table-block-filter flex flex-wrap gap-2 items-center">
+            <div class="ae-table-block-filter flex flex-wrap gap-2 items-center transition-opacity duration-200"
+                 wire:loading.class="opacity-60"
+                 wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters">
 
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                      style="color:#7a3f91;">
@@ -786,7 +928,7 @@ select.ae-filter-input.ae-active {
                 <select wire:model.live="filterRelevance"
                         class="ae-filter-input {{ $filterRelevance ? 'ae-active' : '' }}">
                     <option value="">All Relevance</option>
-                    <option value="yes">Related to Course</option>
+                    <option value="yes">Related to Program</option>
                     <option value="partially">Partially Related</option>
                     <option value="no">Not Related</option>
                 </select>
@@ -856,30 +998,53 @@ select.ae-filter-input.ae-active {
                     <i class="fas fa-rotate-left text-sm"></i>
                     <span class="hidden sm:inline">Reset</span>
                 </button>
+
+                {{-- Fullscreen toggle — mobile & tablet only. Expands the
+                     alumni table to cover the whole screen so it's easier
+                     to browse the list on smaller devices. Hidden on
+                     desktop (lg+) since the table already has plenty of
+                     room there. --}}
+                <button type="button"
+                        @click="fullscreen = !fullscreen"
+                        class="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                               bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer ml-auto"
+                        style="color:#7a3f91;">
+                    <i class="fas" :class="fullscreen ? 'fa-compress' : 'fa-expand'"></i>
+                    <span x-text="fullscreen ? 'Exit' : 'Full Screen'"></span>
+                </button>
             </div>
 
-            {{-- TABLE WRAPPER --}}
+            {{-- LOADING PROGRESS BAR (same effect as Alumni Records) --}}
+            <div class="ae-filter-progress-track" wire:loading wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters,previousPage,nextPage">
+                <div class="ae-filter-progress-bar"></div>
+            </div>
+
+            {{-- TABLE WRAPPER — always flex-1 so the empty state fills the
+                 same fixed height as when rows are present; the block never
+                 shrinks or resizes when a filter returns zero results. --}}
             <div class="relative flex flex-col flex-1 min-h-0">
 
                 @if($rows->count() > 0)
                 <div class="overflow-x-hidden overflow-y-auto scroll-c flex-1 min-h-0" style="background:#fff;"
                      wire:loading.class="opacity-40 pointer-events-none"
                      wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
-                    <table class="w-full bg-white border-collapse">
+
+                    {{-- ── DESKTOP / TABLET: table view ── --}}
+                    <table class="w-full bg-white border-collapse hidden md:table">
                         <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Alumni</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden sm:table-cell" style="color:#555555;">Student ID</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-studentid" style="color:#555555;">Student ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Program</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#555555;">Batch</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Job Title</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#555555;">Email Address</th>
-                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Status</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-batch" style="color:#555555;">Batch</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-jobtitle" style="color:#555555;">Job Title</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-email" style="color:#555555;">Email Address</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest ae-col-status" style="color:#555555;">Status</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-[#F5F5F5]">
 
-                            @foreach($rows as $index => $row)
+                            @foreach($rows as $row)
                             @php
                                 $statusClass = match($row->employment_status) {
                                     'employed'      => 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -923,12 +1088,32 @@ select.ae-filter-input.ae-active {
                                              class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                         <div class="min-w-0">
                                             <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#333333;">{{ $row->full_name }}</p>
-                                            <p class="text-xs font-mono mt-0.5 sm:hidden" style="color:#999999;">{{ $row->student_id }}</p>
+                                            <p class="text-xs font-mono mt-0.5 ae-inline-studentid" style="color:#999999;">{{ $row->student_id }}</p>
+
+                                            {{-- Compact inline row for info hidden at this container width.
+                                                 Status badge and job title/unemployment note both collapse
+                                                 into this line instead of fighting for their own columns,
+                                                 so nothing overlaps on tablet widths. --}}
+                                            <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border ae-inline-status {{ $statusClass }}">
+                                                    <i class="fa-solid {{ $statusIcon }} text-[8px]"></i>
+                                                    {{ $statusLabel }}
+                                                </span>
+                                                <span class="ae-inline-jobtitle text-xs font-medium truncate max-w-[220px]" style="color:#555555;">
+                                                    @if($row->job_title)
+                                                        {{ $row->job_title }}
+                                                    @elseif($row->employment_status === 'unemployed')
+                                                        <span class="italic" style="color:#999999;">
+                                                            {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '' }}
+                                                        </span>
+                                                    @endif
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </td>
 
-                                <td class="px-4 py-3.5 hidden sm:table-cell">
+                                <td class="px-4 py-3.5 ae-col-studentid">
                                     <span class="text-sm font-mono font-semibold" style="color:#333333;">{{ $row->student_id }}</span>
                                 </td>
 
@@ -938,11 +1123,11 @@ select.ae-filter-input.ae-active {
                                     </span>
                                 </td>
 
-                                <td class="px-4 py-3.5 text-sm font-semibold hidden md:table-cell" style="color:#333333;">
+                                <td class="px-4 py-3.5 text-sm font-semibold ae-col-batch" style="color:#333333;">
                                     {{ $row->batch ?? '—' }}
                                 </td>
 
-                                <td class="px-4 py-3.5">
+                                <td class="px-4 py-3.5 ae-col-jobtitle">
                                     @if($row->job_title)
                                         <p class="font-semibold text-sm leading-snug uppercase" style="color:#333333;">{{ $row->job_title }}</p>
                                     @elseif($row->employment_status === 'unemployed')
@@ -954,7 +1139,7 @@ select.ae-filter-input.ae-active {
                                     @endif
                                 </td>
 
-                                <td class="px-4 py-3.5 hidden lg:table-cell">
+                                <td class="px-4 py-3.5 ae-col-email">
                                     @if($row->email ?? null)
                                         <p class="text-sm font-medium truncate max-w-[200px]" style="color:#333333;" title="{{ $row->email }}">
                                             {{ $row->email }}
@@ -964,7 +1149,7 @@ select.ae-filter-input.ae-active {
                                     @endif
                                 </td>
 
-                                <td class="px-4 py-3.5 text-center">
+                                <td class="px-4 py-3.5 text-center ae-col-status">
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border {{ $statusClass }} whitespace-nowrap">
                                         <i class="fa-solid {{ $statusIcon }} text-[9px]"></i>
                                         {{ $statusLabel }}
@@ -976,10 +1161,86 @@ select.ae-filter-input.ae-active {
 
                         </tbody>
                     </table>
+
+                    {{-- ── MOBILE: stacked card list (no horizontal scroll, nothing hidden) ── --}}
+                    <div class="block md:hidden">
+                        @foreach($rows as $row)
+                        @php
+                            $statusClass = match($row->employment_status) {
+                                'employed'      => 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                                'self_employed' => 'border-blue-200 bg-blue-50 text-blue-700',
+                                'unemployed'    => 'border-amber-200 bg-amber-50 text-amber-700',
+                                default         => 'border-[#E8E0F0] bg-[#F9F7FC] text-[#999999]',
+                            };
+                            $statusLabel = match($row->employment_status) {
+                                'employed'      => 'Employed',
+                                'self_employed' => 'Self-Employed',
+                                'unemployed'    => 'Unemployed',
+                                default         => 'Not Filled',
+                            };
+                            $statusIcon = match($row->employment_status) {
+                                'employed'      => 'fa-briefcase',
+                                'self_employed' => 'fa-store',
+                                'unemployed'    => 'fa-circle-pause',
+                                default         => 'fa-circle-question',
+                            };
+
+                            $photoPath = $row->profile_photo ?? null;
+                            $photoUrl  = (!$photoPath || str_contains($photoPath, 'default.png'))
+                                ? asset('storage/alumni-photos/default.png')
+                                : (
+                                    (str_starts_with($photoPath, 'alumni-photos/') || str_starts_with($photoPath, 'organizers/'))
+                                    ? asset('storage/' . $photoPath)
+                                    : asset('storage/alumni-photos/default.png')
+                                );
+                        @endphp
+
+                        <div class="ae-mrow"
+                             wire:click="viewDetail({{ $row->id }})"
+                             wire:key="ae-mrow-{{ $row->id }}"
+                             data-ae-row>
+
+                            <img src="{{ $photoUrl }}"
+                                 alt="{{ $row->full_name }}"
+                                 class="w-10 h-10 rounded-lg object-cover flex-shrink-0 ring-1 ring-[#E8E0F0]">
+
+                            <div class="flex-1 min-w-0">
+                                <p class="font-semibold text-sm uppercase truncate" style="color:#333333;">{{ $row->full_name }}</p>
+
+                                <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                                    <span class="font-mono text-xs font-semibold" style="color:#666666;">{{ $row->student_id }}</span>
+                                    <span class="text-[#CCCCCC] text-xs">&bull;</span>
+                                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase" style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
+                                        {{ $row->course_code ?? '—' }}
+                                    </span>
+                                    <span class="text-[#CCCCCC] text-xs">&bull;</span>
+                                    <span class="font-mono text-xs font-semibold" style="color:#666666;">Batch {{ $row->batch ?? '—' }}</span>
+                                </div>
+
+                                <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border {{ $statusClass }}">
+                                        <i class="fa-solid {{ $statusIcon }} text-[8px]"></i>
+                                        {{ $statusLabel }}
+                                    </span>
+                                    @if($row->job_title)
+                                        <span class="text-xs font-medium truncate" style="color:#555555;">{{ $row->job_title }}</span>
+                                    @elseif($row->employment_status === 'unemployed')
+                                        <span class="text-xs italic" style="color:#999999;">
+                                            {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '' }}
+                                        </span>
+                                    @endif
+                                </div>
+                            </div>
+
+                            <i class="fas fa-chevron-right text-[#CCCCCC] text-xs shrink-0"></i>
+                        </div>
+                        @endforeach
+                    </div>
+
                 </div>
 
                 @else
-                <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+                <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 text-center px-6 bg-white">
                     <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                         <i class="fas fa-users-slash text-xl text-gray-400"></i>
                     </div>
@@ -1118,11 +1379,12 @@ select.ae-filter-input.ae-active {
         'industry_professional' => ['fa-user-tie',        'Industry Professional'],
     ];
     $relModalMap = [
-        'yes'       => ['Related to Course', 'fa-check-circle', 'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
+        'yes'       => ['Related to Program', 'fa-check-circle', 'text-emerald-700', 'bg-emerald-50 border-emerald-200'],
         'no'        => ['Not Related',        'fa-times-circle', 'text-red-600',     'bg-red-50 border-red-200'],
         'partially' => ['Partially Related',  'fa-adjust',       'text-amber-700',   'bg-amber-50 border-amber-200'],
     ];
     $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
+
     $addressParts = array_filter([
         $md['address_street']       ?? '',
         $md['address_barangay']     ?? '',
@@ -1144,15 +1406,19 @@ select.ae-filter-input.ae-active {
      backdrop close the modal too. @click.stop on the inner card stops that
      backdrop handler from firing when you click inside the card itself, so
      it never intercepts clicks meant for the X button. --}}
-<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4"
+<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
      x-data
      wire:click.self="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl w-full max-w-lg max-h-[95vh] sm:max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]"
+    {{-- On mobile (below sm) this is a full-screen sheet, not a floating
+         modal: no rounded corners, no border, fills the entire viewport.
+         From sm and up it goes back to being a centered, rounded modal
+         card capped at max-w-lg / 90vh. --}}
+    <div class="bg-white rounded-none sm:rounded-2xl w-full h-full sm:h-auto sm:max-w-lg max-h-[100dvh] sm:max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border-0 sm:border sm:border-[#E8E0F0]"
          @click.stop
          x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
-         x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+         x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
+         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0">
 
         <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0"
              style="background:#7A3F91;">
@@ -1182,11 +1448,10 @@ select.ae-filter-input.ae-active {
 
             <div>
                 <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                <div class="grid grid-cols-3 gap-2 mb-2">
                     @foreach([
                         'Program' => $md['course_code']    ?? '—',
                         'Batch'   => $md['batch']          ?? '—',
-                        'Gender'  => $md['gender']         ?? '—',
                         'Contact' => $md['contact_number'] ?? '—',
                     ] as $label => $value)
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
@@ -1290,14 +1555,22 @@ select.ae-filter-input.ae-active {
 
 <script>
 (function () {
-    // ── Row hover tooltip ──────────────────────────────────────────────────
+    // ── Row hover tooltip (desktop only) ────────────────────────────────────
+    // isHoverCapable() requires BOTH a real hover-capable pointer (mouse)
+    // AND a wider viewport, so on phones/tablets (touch input) this tip
+    // never becomes visible — touch taps don't fire mousemove at all, so
+    // there's no tooltip text shown on mobile.
     var tip = document.getElementById('ae-hover-tip');
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
+    }
     function bindRows() {
         document.querySelectorAll('[data-ae-row]').forEach(function (row) {
             if (row._aeTipBound) return;
             row._aeTipBound = true;
             row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
+                if (!tip || !isHoverCapable()) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
                 tip.classList.add('visible');
