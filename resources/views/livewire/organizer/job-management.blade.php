@@ -389,21 +389,22 @@ new class extends Component {
         $this->resetPage();
     }
 
-    public function openPostModal(): void
-    {
-        $this->guardAuth();
-        $this->resetPostFields();
-        $this->postDeadline       = now()->setTimezone('Asia/Manila')->addMonth()->format('Y-m-d');
-        $this->postTargetColleges = !empty($this->organizerCollege) ? [$this->organizerCollege] : [];
-        $this->showPostModal      = true;
-    }
+public function openPostModal(): void
+{
+    $this->guardAuth();
+    $this->resetPostFields();
+    $this->postDeadline       = now()->setTimezone('Asia/Manila')->addMonth()->format('Y-m-d');
+    $this->postTargetColleges = !empty($this->organizerCollege) ? [$this->organizerCollege] : [];
+    $this->showPostModal      = true;
+    $this->dispatch('close-sidebar');
+}
 
-    public function closePostModal(): void
-    {
-        $this->showPostModal = false;
-        $this->resetPostFields();
-    }
-
+public function closePostModal(): void
+{
+    $this->showPostModal = false;
+    $this->resetPostFields();
+    $this->dispatch('open-sidebar');
+}
     public function savePost(): void
     {
         $this->guardAuth();
@@ -537,11 +538,11 @@ new class extends Component {
         // ── NOTIFY ALUMNI (server-side, direct DB insert) ───────────────────
         app(AlumniNotificationController::class)->notifyAlumniOfNewJob($job);
 
-        $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
+    $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
         $this->resetPostFields();
+        $this->dispatch('open-sidebar');
     }
-
     private function resetPostFields(): void
     {
         $this->postJobTitle = $this->postOrgCategory = '';
@@ -555,23 +556,16 @@ new class extends Component {
         $this->postRemoveImage = false;
     }
 
-    public function viewJob(int $id): void
-    {
-        $this->guardAuth();
-        $job = app(JobController::class)->getJob($id);
+public function viewJob(int $id): void
+{
+    $this->guardAuth();
+    $job = app(JobController::class)->getJob($id);
 
-        if ($job->status === 'ORGANIZER_DELETED') {
-            return;
-        }
+    if ($job->status === 'ORGANIZER_DELETED') {
+        return;
+    }
 
-        if (is_null($job->organizer_id)) {
-            $this->viewingJobId = $id;
-            $this->showViewModal = true;
-            return;
-        }
-
-        $this->guardOwnership($job);
-
+    if (is_null($job->organizer_id)) {
         $this->editingJobId                = $id;
         $this->editJobTitle                = $job->job_title;
         $this->editCompany                 = $job->company_name;
@@ -592,40 +586,76 @@ new class extends Component {
         $this->editRemoveImage  = false;
         $this->editErrors       = [];
         $this->showEditModal    = true;
+        $this->dispatch('close-sidebar');
+        return;
     }
 
-    public function closeViewModal(): void  { $this->showViewModal = false; $this->viewingJobId = null; }
+    $this->guardOwnership($job);
 
-    public function openEditModal(int $id): void
-    {
-        $this->guardAuth();
-        $job = app(JobController::class)->getJob($id);
-        $this->guardOwnership($job);
+    $this->editingJobId                = $id;
+    $this->editJobTitle                = $job->job_title;
+    $this->editCompany                 = $job->company_name;
+    $this->editCompanyType             = $job->company_type;
+    $this->editLocation                = $job->location ?? '';
+    $this->editEmpType                 = $job->employment_type;
+    $this->editExpLevel                = $job->experience_level;
+    $this->editSalary                  = $job->salary ?? '';
+    $this->editDeadline                = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
+    $this->editDescription             = $job->description;
+    $this->editQualifications          = $job->qualifications ?? '';
+    $this->editApplicationInstructions = $job->application_instructions ?? '';
+    $this->editTargetColleges          = !empty($job->target_college)
+        ? explode(',', $job->target_college)
+        : [$this->organizerCollege];
+    $this->editCurrentImage = $job->job_image ?? '';
+    $this->editJobImage     = null;
+    $this->editRemoveImage  = false;
+    $this->editErrors       = [];
+    $this->showEditModal    = true;
+    $this->dispatch('close-sidebar');
+}
+   public function closeViewModal(): void
+{
+    $this->showViewModal = false;
+    $this->viewingJobId  = null;
+    $this->dispatch('open-sidebar');
+}
+public function openEditModal(int $id): void
+{
+    $this->guardAuth();
+    $job = app(JobController::class)->getJob($id);
+    $this->guardOwnership($job);
 
-        $this->editingJobId                = $id;
-        $this->editJobTitle                = $job->job_title;
-        $this->editCompany                 = $job->company_name;
-        $this->editCompanyType             = $job->company_type;
-        $this->editLocation                = $job->location ?? '';
-        $this->editEmpType                 = $job->employment_type;
-        $this->editExpLevel                = $job->experience_level;
-        $this->editSalary                  = $job->salary ?? '';
-        $this->editDeadline                = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
-        $this->editDescription             = $job->description;
-        $this->editQualifications          = $job->qualifications ?? '';
-        $this->editApplicationInstructions = $job->application_instructions ?? '';
-        $this->editTargetColleges          = !empty($job->target_college)
-            ? explode(',', $job->target_college)
-            : [$this->organizerCollege];
-        $this->editCurrentImage = $job->job_image ?? '';
-        $this->editJobImage     = null;
-        $this->editRemoveImage  = false;
-        $this->editErrors       = [];
-        $this->showViewModal    = false;
-        $this->showEditModal    = true;
-    }
+    $this->editingJobId                = $id;
+    $this->editJobTitle                = $job->job_title;
+    $this->editCompany                 = $job->company_name;
+    $this->editCompanyType             = $job->company_type;
+    $this->editLocation                = $job->location ?? '';
+    $this->editEmpType                 = $job->employment_type;
+    $this->editExpLevel                = $job->experience_level;
+    $this->editSalary                  = $job->salary ?? '';
+    $this->editDeadline                = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
+    $this->editDescription             = $job->description;
+    $this->editQualifications          = $job->qualifications ?? '';
+    $this->editApplicationInstructions = $job->application_instructions ?? '';
+    $this->editTargetColleges          = !empty($job->target_college)
+        ? explode(',', $job->target_college)
+        : [$this->organizerCollege];
+    $this->editCurrentImage = $job->job_image ?? '';
+    $this->editJobImage     = null;
+    $this->editRemoveImage  = false;
+    $this->editErrors       = [];
+    $this->showViewModal    = false;
+    $this->showEditModal    = true;
+    $this->dispatch('close-sidebar');
+}
 
-    public function closeEditModal(): void { $this->showEditModal = false; $this->resetEditFields(); }
+  public function closeEditModal(): void
+{
+    $this->showEditModal = false;
+    $this->resetEditFields();
+    $this->dispatch('open-sidebar');
+}
 
     public function saveEditJob(): void
     {
@@ -1105,6 +1135,14 @@ select.form-input {
     cursor: pointer;
 }
 
+/* ── Disabled select styling (used for locked "Industry" field when PHILCST) ── */
+select:disabled {
+    background-color: #f3f4f6 !important;
+    color: #999999 !important;
+    cursor: not-allowed !important;
+    opacity: 1;
+}
+
 /* ── Modal top-right icon buttons: fully transparent, no white fill ── */
 .modal-top-btn {
     background: transparent !important;
@@ -1339,6 +1377,66 @@ select.form-input {
     flex-direction: column;
     overflow: hidden;
 }
+
+/* ══ FIX 1: table rows white (not gray), and no inner horizontal scrollbar ══ */
+#jm-table-scroll,
+#jm-table-scroll table,
+#jm-table-scroll tbody,
+#jm-table-scroll tr {
+    background: #ffffff !important;
+}
+#jm-table-scroll .overflow-x-auto {
+    overflow-x: visible !important;
+}
+
+/* ══ FIX 3: default photo fully visible (no dimming) in Post modal ══ */
+.img-upload-zone img.job-default-photo-img {
+    opacity: 1 !important;
+}
+
+/* ══ FIX 4: description / qualifications / how-to-apply view containers white, not gray ══ */
+.view-content-box {
+    background: #ffffff !important;
+    border: 1.5px solid #e8e0f0 !important;
+}
+
+/* ══ Alumni Director badge (jobs table + modals) ══ */
+.jm-director-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #f5eef9;
+    border: 1px solid #d4aaeb;
+    color: #7a3f91;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    white-space: nowrap;
+}
+
+/* ══ MOBILE: View/Edit Job full-screen header — title & badge sizing ══ */
+@media (max-width: 640px) {
+    .jm-modal-header-title {
+        font-size: 0.9375rem !important;
+        line-height: 1.3 !important;
+    }
+    .jm-modal-header-sub {
+        font-size: 0.6875rem !important;
+        max-width: 170px !important;
+    }
+    .jm-modal-header-row {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        gap: 0.5rem !important;
+    }
+    .jm-director-badge {
+        font-size: 9px;
+        padding: 2px 7px;
+    }
+}
 </style>
 
 {{-- Hover tooltip --}}
@@ -1483,15 +1581,15 @@ select.form-input {
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="relative flex-1 min-h-0 bg-transparent">
+        <div class="relative flex-1 min-h-0 bg-white">
             <div id="jm-table-scroll"
-                 class="scroll-c h-full overflow-y-auto bg-transparent transition-opacity duration-200"
+                 class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
                  wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType">
 
             @if($this->jobPostings->count() > 0)
 
-            <div class="overflow-x-auto bg-transparent">
-                <table class="w-full bg-transparent border-collapse">
+            <div class="bg-white">
+                <table class="w-full bg-white border-collapse table-fixed">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
@@ -1511,7 +1609,7 @@ select.form-input {
                             $canShare         = !$isDeadlinePassed && $isActive;
                             $rowNum           = ($this->jobPostings->currentPage() - 1) * $this->jobPostings->perPage() + $index + 1;
                         @endphp
-                        <tr class="transition-colors duration-100 cursor-pointer bg-transparent hover:bg-[#f5f0fa]"
+                        <tr class="transition-colors duration-100 cursor-pointer bg-white hover:bg-[#f5f0fa]"
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="job-row-{{ $job->id }}"
                             data-eo-row>
@@ -1522,7 +1620,12 @@ select.form-input {
 
                             <td class="px-4 py-3.5">
                                 <div class="max-w-[240px]">
-                                    <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $job->job_title }}</p>
+                                    <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333] flex items-center gap-1.5 flex-wrap">
+                                        {{ $job->job_title }}
+                                        @if($isAlumniDirector)
+                                            <span class="jm-director-badge"><i class="fas fa-shield-halved text-[8px]"></i>Alumni Director</span>
+                                        @endif
+                                    </p>
                                     <p class="text-xs mt-0.5 text-[#666666]">
                                         {{ $job->created_at->diffForHumans() }}
                                     </p>
@@ -1659,7 +1762,7 @@ select.form-input {
             </div>
 
             @else
-            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-transparent">
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-briefcase text-gray-400 text-xl"></i>
                 </div>
@@ -1820,7 +1923,7 @@ select.form-input {
             @else
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. No data will be lost, and editing becomes available while inactive.</span>
+                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. All fields become editable while inactive.</span>
             </div>
             @endif
             <div class="flex gap-2">
@@ -1885,7 +1988,7 @@ select.form-input {
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
-        {{-- LEFT: Photo first, then Company + Target College + Tips --}}
+        {{-- LEFT: Photo first, then Company --}}
         <div class="w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-3 space-y-3">
 
@@ -1926,12 +2029,14 @@ select.form-input {
                                 </template>
                                 <template x-if="!preview">
                                     <div class="relative">
-                                        <img :src="defaultUrl" class="img-preview-thumb opacity-60" alt="Default job photo"
+                                        <img :src="defaultUrl" class="img-preview-thumb job-default-photo-img" alt="Default job photo"
                                              onerror="this.style.display='none'">
-                                        <label class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 cursor-pointer w-full bg-white/70 hover:bg-white/85 transition">
-                                            <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
-                                            <p class="font-semibold text-xs text-[#333333]">Click to upload a photo</p>
-                                            <p class="text-[10px] text-[#555555]">JPG, PNG, WebP — max 2MB</p>
+                                        <label class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 cursor-pointer w-full bg-black/0 hover:bg-black/35 transition group/uploadlbl">
+                                            <span class="opacity-0 group-hover/uploadlbl:opacity-100 transition flex flex-col items-center gap-1.5 bg-white/90 rounded-xl px-4 py-3">
+                                                <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
+                                                <p class="font-semibold text-xs text-[#333333]">Click to upload a photo</p>
+                                                <p class="text-[10px] text-[#555555]">JPG, PNG, WebP — max 2MB</p>
+                                            </span>
                                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
                                                    wire:model="postJobImage" @change="handleFile($event)">
                                         </label>
@@ -2033,36 +2138,6 @@ select.form-input {
                         @if(!$postOrgCategory)
                         <div class="text-center py-3 text-[#777777]"><p class="text-xs">Select an option above to continue.</p></div>
                         @endif
-                    </div>
-                </div>
-
-                {{-- Target College --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-building-columns text-[9px] text-[#555555]"></i> Target College
-                    </div>
-                    <div class="p-3.5">
-                        <div class="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-2.5 py-2">
-                            <i class="fas fa-lock text-blue-500 flex-shrink-0 text-sm"></i>
-                            <div class="flex-1 min-w-0">
-                                <div class="font-semibold text-blue-900 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
-                                <div class="text-blue-700 mt-0.5 text-xs">Auto-selected · your alumni only</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Tips --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Submission Tips
-                    </div>
-                    <div class="p-3.5">
-                        <ul class="space-y-2">
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Set a future deadline — past deadlines auto-deactivate.</span></li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Include salary — listings with salary attract more applicants.</span></li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Job goes live immediately — no approval required.</span></li>
-                        </ul>
                     </div>
                 </div>
 
@@ -2169,9 +2244,41 @@ select.form-input {
             </div>
         </div>
 
-        {{-- RIGHT: Visibility + Actions --}}
+        {{-- RIGHT: Target College + Submission Tips (moved here, above Visibility) + Actions --}}
         <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
             <div class="p-3 space-y-3 flex-1">
+
+                {{-- Target College --}}
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        <i class="fas fa-building-columns text-[9px] text-[#555555]"></i> Target College
+                    </div>
+                    <div class="p-3.5">
+                        <div class="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-2.5 py-2">
+                            <i class="fas fa-lock text-blue-500 flex-shrink-0 text-sm"></i>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-semibold text-blue-900 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
+                                <div class="text-blue-700 mt-0.5 text-xs">Auto-selected · your alumni only</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Submission Tips --}}
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        Submission Tips
+                    </div>
+                    <div class="p-3.5">
+                        <ul class="space-y-2">
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Set a future deadline — past deadlines auto-deactivate.</span></li>
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Include salary — listings with salary attract more applicants.</span></li>
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Job goes live immediately — no approval required.</span></li>
+                        </ul>
+                    </div>
+                </div>
+
+                {{-- Visibility --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Visibility
@@ -2213,34 +2320,71 @@ select.form-input {
 
 {{--
     ══ VIEW / EDIT JOB — FULL SCREEN 3-COLUMN ══
+    Fix #5: this same modal now also serves Alumni-Director-posted jobs.
+    A "Alumni Director" badge is shown, and edit/delete/deactivate
+    controls are simply hidden (organizer cannot manage it) while everything
+    else (layout, colors, sections) stays identical.
+
+    Fix #3: whenever a job is INACTIVE (and NOT an Alumni-Director job), ALL
+    fields are automatically editable — no manual "Edit Mode" toggle needed.
+    Alumni-Director jobs always stay read-only, regardless of status.
+
+    Fix (this round):
+      - Header title/subtitle sized down for mobile (jm-modal-header-* classes).
+      - The pen-to-square "Edit"/"View Job" header icon logic: it's purely a
+        label icon (not a clickable control) but conceptually should only
+        ever imply "editable" when it truly is — i.e. NOT when the job is
+        ACTIVE and NOT when it's an Alumni Director job. It now switches to
+        an eye icon in those two read-only cases, matching the "View Job"
+        label already shown next to it.
+      - Industry (`editCompanyType`) select now carries a real `disabled`
+        attribute when the company is PHILCST (not just "readonly"-styled
+        via classes, which does nothing on a <select>), matching the
+        Company Name / Location fields beside it.
 --}}
 @if($showEditModal)
 @php
     $editingJob = $this->editingJobFresh;
     $editJobIsActive = $editingJob && $editingJob->status === 'ACTIVE';
+    $editIsAlumniDirectorJob = $editingJob && is_null($editingJob->organizer_id);
+    // Auto-editable the moment the job is INACTIVE — unless it's an Alumni Director job, which is always read-only.
+    $editModeAllowed = (!$editJobIsActive && !$editIsAlumniDirectorJob);
+    // Header icon should only ever *look* editable (pen icon) when editing is
+    // actually possible. Active jobs and Alumni Director jobs are always
+    // read-only, so the header shows an eye icon for those instead.
+    $editHeaderIsReadOnly = $editJobIsActive || $editIsAlumniDirectorJob;
 @endphp
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
-     x-data="{ editMode: {{ $editJobIsActive ? 'false' : 'true' }} }"
-     x-effect="editMode = {{ $editJobIsActive ? 'false' : 'true' }}">
+     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }"
+     x-effect="editMode = {{ $editModeAllowed ? 'true' : 'false' }}">
 
-    <div class="flex items-center justify-between px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg">
+    <div class="flex items-center justify-between px-4 sm:px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg jm-modal-header-row">
         <div class="flex items-center gap-3 min-w-0">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-pen-to-square text-white text-sm"></i>
+                @if($editHeaderIsReadOnly)
+                    <i class="fas fa-eye text-white text-sm"></i>
+                @else
+                    <i class="fas fa-pen-to-square text-white text-sm"></i>
+                @endif
             </div>
-            <div>
-                <h2 class="text-white font-semibold text-lg leading-tight">
+            <div class="min-w-0">
+                <h2 class="text-white font-semibold text-lg leading-tight flex items-center gap-2 flex-wrap jm-modal-header-title">
                     <span x-show="!editMode">View Job</span>
                     <span x-show="editMode" x-cloak>Edit Job</span>
+                    @if($editIsAlumniDirectorJob)
+                        <span class="jm-director-badge" style="background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.35);color:#ffffff;">
+                            <i class="fas fa-shield-halved text-[8px]"></i>Alumni Director
+                        </span>
+                    @endif
                 </h2>
                 @if($editingJob)
-                <p class="text-white/60 text-xs mt-0.5 truncate max-w-[260px]">{{ $editingJob->job_title }}</p>
+                <p class="text-white/60 text-xs mt-0.5 truncate max-w-[260px] jm-modal-header-sub">{{ $editingJob->job_title }}</p>
                 @endif
             </div>
         </div>
-        <div class="flex items-center gap-1.5">
-            @if($editingJob)
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+            @if($editingJob && !$editIsAlumniDirectorJob)
                 @php
                     $editJobDeadlinePassed = \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay());
                 @endphp
@@ -2281,6 +2425,18 @@ select.form-input {
                         <span class="mtip">Delete</span>
                     </button>
                 @endif
+            @elseif($editingJob && $editIsAlumniDirectorJob)
+                @php
+                    $editJobDeadlinePassed = \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay());
+                    $editJobCanShare = !$editJobDeadlinePassed && $editJobIsActive;
+                @endphp
+                @if($editJobCanShare)
+                    <button wire:click="openShareModal({{ $editingJobId }})" type="button"
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <span class="mtip">Share</span>
+                    </button>
+                @endif
             @endif
             <button wire:click="closeEditModal" type="button"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
@@ -2292,34 +2448,39 @@ select.form-input {
         </div>
     </div>
 
-    @if($editingJob && $editingJob->status === 'INACTIVE')
-    <div class="bg-amber-50 border-b border-amber-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-circle-pause text-amber-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-amber-800">
-            <strong>This job is currently Inactive.</strong>
+    @if($editingJob && $editIsAlumniDirectorJob)
+    <div class="bg-purple-50 border-b border-purple-200 px-4 sm:px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+        <i class="fas fa-shield-halved text-purple-500 flex-shrink-0 text-xs"></i>
+        <p class="text-xs text-purple-800 font-semibold">
+            <span class="jm-director-badge mr-1.5">
+                <i class="fas fa-shield-halved text-[8px]"></i> Alumni Director
+            </span>
+            View only — editing is not available for this job posting.
+        </p>
+    </div>
+    @elseif($editingJob && $editingJob->status === 'INACTIVE')
+    <div class="bg-blue-50 border-b border-blue-200 px-4 sm:px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
+        <p class="text-xs text-blue-800">
+            <strong>This job is currently Inactive — all fields below are editable.</strong>
             @if($editJobDeadlinePassed)
                 The deadline has passed — update it, save, then use <strong>Activate</strong>.
             @else
-                Edit details below and use <strong>Activate</strong> (top-right) to go live.
+                Review your changes carefully before clicking <strong>Save Changes</strong>, then use <strong>Activate</strong> (top-right) to go live.
             @endif
         </p>
     </div>
     @endif
 
-    @if($editJobIsActive)
-    <div class="bg-purple-50 border-b border-purple-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+    @if(!$editIsAlumniDirectorJob && $editJobIsActive)
+    <div class="bg-purple-50 border-b border-purple-200 px-4 sm:px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
         <i class="fas fa-eye text-purple-500 flex-shrink-0 text-xs"></i>
         <p class="text-xs text-purple-800"><strong>View Mode:</strong> This job is currently Active. Deactivate it (top-right) first to make changes.</p>
-    </div>
-    @else
-    <div class="bg-blue-50 border-b border-blue-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-blue-800"><strong>Edit Mode:</strong> Fields below are editable. Review your changes carefully before clicking <strong>Save Changes</strong> — this will update the live job posting.</p>
     </div>
     @endif
 
     @if(count($editErrors))
-    <div class="bg-red-50 border-b border-red-200 px-6 py-2 flex-shrink-0 flex items-start gap-3">
+    <div class="bg-red-50 border-b border-red-200 px-4 sm:px-6 py-2 flex-shrink-0 flex items-start gap-3">
         <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
         <div class="flex-1 min-w-0">
             <p class="font-semibold text-red-800 text-xs mb-0.5">Please fix the following:</p>
@@ -2334,7 +2495,7 @@ select.form-input {
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
-        {{-- LEFT: Company Details + Job Info + Target College + Status --}}
+        {{-- LEFT: Company Details + Job Info --}}
         <div class="w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-2.5 space-y-2.5">
 
@@ -2413,12 +2574,14 @@ select.form-input {
                             <template x-if="!preview && (!existing || removed)">
                                 <div>
                                     <div class="img-upload-zone relative">
-                                        <img :src="defaultUrl" class="img-preview-thumb-sm opacity-60" alt="Default job photo"
+                                        <img :src="defaultUrl" class="img-preview-thumb-sm job-default-photo-img" alt="Default job photo"
                                              onerror="this.style.display='none'">
-                                        <label class="absolute inset-0 flex flex-col items-center justify-center gap-1 cursor-pointer w-full bg-white/70 hover:bg-white/85 transition">
-                                            <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
-                                            <p class="font-semibold text-xs text-[#333333]">Upload photo</p>
-                                            <p class="text-[10px] text-[#555555]">JPG, PNG, WebP · max 2MB</p>
+                                        <label class="absolute inset-0 flex flex-col items-center justify-center gap-1 cursor-pointer w-full bg-black/0 hover:bg-black/35 transition group/uploadlbl2">
+                                            <span class="opacity-0 group-hover/uploadlbl2:opacity-100 transition flex flex-col items-center gap-1 bg-white/90 rounded-xl px-3 py-2">
+                                                <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
+                                                <p class="font-semibold text-xs text-[#333333]">Upload photo</p>
+                                                <p class="text-[10px] text-[#555555]">JPG, PNG, WebP · max 2MB</p>
+                                            </span>
                                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
                                                    wire:model="editJobImage" @change="handleFile($event)">
                                         </label>
@@ -2459,16 +2622,25 @@ select.form-input {
                         @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
 
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Industry <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                Industry
+                                <span x-show="editMode" x-cloak class="text-red-500">*</span>
+                                @if($editIsPhilcst)
+                                <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— locked (PHILCST)</span>
+                                @endif
+                            </label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompanyType ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
-                                <select wire:model.live="editCompanyType"
-                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                <select wire:model.live="editCompanyType" @if($editIsPhilcst) disabled @endif
+                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
                                     <option value="">Select Industry</option>
                                     @foreach($this->jobOptions->get('company_type', collect()) as $opt)
                                         <option value="{{ $opt->label }}" @selected($editCompanyType === $opt->label)>{{ $opt->label }}</option>
                                     @endforeach
                                 </select>
+                                @if($editIsPhilcst)
+                                    <p class="text-[10px] mt-0.5 flex items-center gap-1 text-[#777777]"><i class="fas fa-lock text-[9px]"></i>Industry is locked because the company is PHILCST.</p>
+                                @endif
                                 @if(isset($editErrors['editCompanyType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
                             </div>
                         </div>
@@ -2565,41 +2737,6 @@ select.form-input {
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Target College
-                    </div>
-                    <div class="p-2.5">
-                        <div class="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-2.5 py-2">
-                            <i class="fas fa-lock text-blue-500 flex-shrink-0 text-sm"></i>
-                            <div class="flex-1 min-w-0">
-                                <div class="font-semibold text-blue-900 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
-                                <div class="text-blue-700 mt-0.5 text-xs">Auto-selected · your alumni only</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                @if($editingJob)
-                @php
-                    $statusColor = match($editingJob->status) {
-                        'ACTIVE'   => ['bg-emerald-50 border-emerald-200', 'text-emerald-900', 'fa-circle-check text-emerald-500', 'text-emerald-700', 'Currently Active'],
-                        'INACTIVE' => ['bg-amber-50 border-amber-200',   'text-amber-900',   'fa-circle-pause text-amber-500',   'text-amber-700',   'Currently Inactive'],
-                        default    => ['bg-gray-50 border-gray-200',     'text-gray-900',    'fa-circle text-gray-500',          'text-gray-700',    $editingJob->status],
-                    };
-                @endphp
-                <div class="rounded-xl px-3 py-2 border {{ $statusColor[0] }}">
-                    <p class="font-semibold flex items-center gap-1.5 text-sm {{ $statusColor[1] }}">
-                        <i class="fas {{ $statusColor[2] }} text-sm"></i> {{ $statusColor[4] }}
-                    </p>
-                    <p class="text-xs mt-0.5 {{ $statusColor[3] }}">
-                        @if($editingJob->status === 'INACTIVE' && $editJobDeadlinePassed) Update the deadline above first, save, then use <strong>Activate</strong>.
-                        @else Use the {{ $editingJob->status === 'ACTIVE' ? 'Deactivate' : 'Activate' }} button in the top-right to toggle.
-                        @endif
-                    </p>
-                </div>
-                @endif
-
             </div>
         </div>
 
@@ -2613,7 +2750,7 @@ select.form-input {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
                              style="min-height:160px;">{{ $editDescription ?: 'No description provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editDescription"
@@ -2630,7 +2767,7 @@ select.form-input {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
                              style="min-height:120px;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editQualifications"
@@ -2647,7 +2784,7 @@ select.form-input {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="flex-1 px-3 py-2 bg-emerald-50/50 border border-emerald-100 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
                              style="min-height:120px;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editApplicationInstructions"
@@ -2661,9 +2798,50 @@ select.form-input {
             </div>
         </div>
 
-        {{-- RIGHT: History + Tips + Actions --}}
+        {{-- RIGHT: Target College + Status + History + Tips + Actions --}}
         <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
             <div class="p-3 space-y-3 flex-1">
+
+                {{-- Target College --}}
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                        Target College
+                    </div>
+                    <div class="p-2.5">
+                        <div class="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-2.5 py-2">
+                            <i class="fas fa-lock text-blue-500 flex-shrink-0 text-sm"></i>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-semibold text-blue-900 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
+                                <div class="text-blue-700 mt-0.5 text-xs">Auto-selected · your alumni only</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Status --}}
+                @if($editingJob)
+                @php
+                    $statusColor = match($editingJob->status) {
+                        'ACTIVE'   => ['bg-emerald-50 border-emerald-200', 'text-emerald-900', 'fa-circle-check text-emerald-500', 'text-emerald-700', 'Currently Active'],
+                        'INACTIVE' => ['bg-amber-50 border-amber-200',   'text-amber-900',   'fa-circle-pause text-amber-500',   'text-amber-700',   'Currently Inactive'],
+                        default    => ['bg-gray-50 border-gray-200',     'text-gray-900',    'fa-circle text-gray-500',          'text-gray-700',    $editingJob->status],
+                    };
+                @endphp
+                <div class="rounded-xl px-3 py-2 border {{ $statusColor[0] }}">
+                    <p class="font-semibold flex items-center gap-1.5 text-sm {{ $statusColor[1] }}">
+                        <i class="fas {{ $statusColor[2] }} text-sm"></i> {{ $statusColor[4] }}
+                    </p>
+                    <p class="text-xs mt-0.5 {{ $statusColor[3] }}">
+                        @if($editIsAlumniDirectorJob)
+                            Posted by Alumni Director — status is managed by them.
+                        @elseif($editingJob->status === 'INACTIVE' && $editJobDeadlinePassed)
+                            Update the deadline above first, save, then use <strong>Activate</strong>.
+                        @else
+                            Use the {{ $editingJob->status === 'ACTIVE' ? 'Deactivate' : 'Activate' }} button in the top-right to toggle.
+                        @endif
+                    </p>
+                </div>
+                @endif
 
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -2705,7 +2883,7 @@ select.form-input {
             </div>
 
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
-                @if($editingJob && !$editJobIsActive)
+                @if($editingJob && !$editJobIsActive && !$editIsAlumniDirectorJob)
                 <div x-show="editMode" x-cloak>
                     <button type="button" wire:click="saveEditJob"
                             class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
@@ -2713,201 +2891,15 @@ select.form-input {
                         Save Changes
                     </button>
                 </div>
-                @else
+                @elseif($editIsAlumniDirectorJob)
                 <div class="pb-1">
-                    <p class="text-center text-xs text-[#777777]">Deactivate this job to enable editing.</p>
+                    <p class="text-center text-xs text-[#777777]">Posted by Alumni Director — editing is not available.</p>
                 </div>
                 @endif
-                <button type="button" wire:click="closeEditModal"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center">
-                    <i class="fas fa-xmark text-xs"></i>
-                </button>
             </div>
         </div>
 
     </div>
-</div>
-@endif
-
-
-{{-- ══ VIEW JOB — FULL SCREEN 2-COLUMN (Alumni Director only) ══ --}}
-@if($showViewModal && $this->viewingJob)
-@php
-    $job              = $this->viewingJob;
-    $dl               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-    $daysLeft         = (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false);
-    $isExp            = now('Asia/Manila')->startOfDay()->gt($dl->copy()->startOfDay());
-    $isUrgentView     = $daysLeft <= 7 && !$isExp;
-    $createdPH        = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
-    $displayType      = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
-    $isAlumniDirector = is_null($job->organizer_id);
-    $isActiveView     = $job->status === 'ACTIVE';
-    $viewCanShare     = !$isExp && $isActiveView;
-    $viewJobImgUrl    = $this::jobImageUrl($job->job_image ?? null);
-@endphp
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-50 fs-in overflow-hidden"
-     @keydown.escape.window="$wire.closeViewModal()">
-
-    <div class="flex items-center justify-between px-6 py-3 flex-shrink-0 shadow-md"
-         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-        <div class="flex items-center gap-3 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-briefcase text-white text-sm"></i>
-            </div>
-            <div class="min-w-0">
-                <p class="text-white/60 text-xs font-semibold uppercase tracking-widest">Job Details — Alumni Director Post</p>
-                <h2 class="text-white font-semibold text-base leading-tight truncate">{{ $job->job_title }}</h2>
-            </div>
-        </div>
-        <div class="flex items-center gap-1.5 flex-shrink-0 ml-3">
-            @if($viewCanShare)
-                <button type="button" wire:click="openShareModal({{ $job->id }})"
-                        class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                    <i class="fas fa-share-nodes text-white text-sm"></i>
-                    <span class="mtip">Share</span>
-                </button>
-            @endif
-            <button wire:click="closeViewModal" type="button"
-                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
-                </svg>
-                <span class="mtip">Close</span>
-            </button>
-        </div>
-    </div>
-
-    <div class="bg-purple-50 border-b border-purple-200 px-6 py-2 flex-shrink-0 flex items-center gap-2.5">
-        <i class="fas fa-shield-halved text-purple-500 flex-shrink-0 text-xs"></i>
-        <p class="text-sm text-purple-800 font-semibold">This job was posted by an <strong>Alumni Director</strong>. View only — editing is not available.</p>
-    </div>
-
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c">
-
-            <div class="mx-3 mt-3 mb-0 flex-shrink-0 rounded-xl overflow-hidden" style="height:160px;">
-                <img src="{{ $viewJobImgUrl }}" alt="{{ $job->job_title }}" class="w-full h-full object-cover"
-                     onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
-            </div>
-
-            <div class="mx-3 mt-2 mb-2 flex-shrink-0 rounded-xl overflow-hidden flex items-center justify-between px-4 py-2"
-                 style="background: linear-gradient(135deg, #7A3F91 0%, #4a1f6a 100%);">
-                <div class="flex items-center gap-2">
-                    @if($isActiveView)
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/80 text-white text-xs font-semibold"><i class="fas fa-circle-check text-[9px]"></i> Active</span>
-                    @else
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/80 text-white text-xs font-semibold"><i class="fas fa-circle-pause text-[9px]"></i> Inactive</span>
-                    @endif
-                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-300/40 text-white text-xs font-semibold"><i class="fas fa-shield-halved text-[9px]"></i> Alumni Director</span>
-                </div>
-                <i class="fas fa-briefcase text-white/20 text-2xl"></i>
-            </div>
-
-            <div class="flex flex-col gap-2 px-3 pb-3">
-                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-100"><i class="fas fa-clock text-blue-600 text-base"></i></span>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-[#555555] mb-0.5">Employment Type</p>
-                        <p class="font-bold text-sm text-[#333333]">{{ $job->employment_type }}</p>
-                        <p class="text-sm text-[#333333] mt-0.5">{{ $job->experience_level }}</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-violet-100"><i class="fas fa-building text-violet-600 text-base"></i></span>
-                    <div class="min-w-0">
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-[#555555] mb-0.5">Company</p>
-                        <p class="font-bold text-sm text-[#333333] truncate">{{ $job->company_name }}</p>
-                        <p class="text-sm text-[#333333] truncate mt-0.5">{{ $displayType }}</p>
-                    </div>
-                </div>
-                @if($job->location)
-                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-rose-100"><i class="fas fa-location-dot text-rose-600 text-base"></i></span>
-                    <div class="min-w-0">
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-[#555555] mb-0.5">Location</p>
-                        <p class="font-bold text-sm text-[#333333] truncate">{{ $job->location }}</p>
-                    </div>
-                </div>
-                @endif
-                @if($job->salary)
-                <div class="flex items-center gap-3 p-3 rounded-xl bg-gray-50 border border-gray-100">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100"><i class="fas fa-money-bill-wave text-emerald-600 text-base"></i></span>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-wider text-[#555555] mb-0.5">Salary</p>
-                        <p class="font-bold text-sm text-[#333333]">{{ $job->salary }}</p>
-                    </div>
-                </div>
-                @endif
-                <div class="flex items-center gap-3 p-3 rounded-xl border {{ $isExp ? 'bg-red-50 border-red-200' : ($isUrgentView ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100') }}">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 {{ $isExp ? 'bg-red-100' : ($isUrgentView ? 'bg-amber-100' : 'bg-blue-100') }}">
-                        <i class="fas fa-calendar-xmark text-base {{ $isExp ? 'text-red-600' : ($isUrgentView ? 'text-amber-600' : 'text-blue-600') }}"></i>
-                    </span>
-                    <div>
-                        <p class="text-[10px] font-bold uppercase tracking-wider mb-0.5 {{ $isExp ? 'text-red-500' : ($isUrgentView ? 'text-amber-600' : 'text-[#555555]') }}">Deadline</p>
-                        <p class="font-bold text-sm {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : 'text-[#333333]') }}">{{ $dl->format('F d, Y') }}</p>
-                        <p class="text-xs mt-0.5 {{ $isExp ? 'text-red-600 font-semibold' : ($isUrgentView ? 'text-amber-600' : 'text-[#555555]') }}">
-                            @if($isExp) <i class="fas fa-ban text-[9px] mr-0.5"></i>No longer accepting
-                            @elseif($daysLeft === 0) Closing today!
-                            @elseif($daysLeft === 1) Closes tomorrow
-                            @else {{ $daysLeft }} days remaining
-                            @endif
-                        </p>
-                    </div>
-                </div>
-                @if($job->target_college)
-                <div class="p-3 rounded-xl bg-purple-50 border border-purple-100">
-                    <p class="text-[10px] font-bold uppercase tracking-wider text-purple-600 mb-1.5">Target College</p>
-                    <div class="flex flex-wrap gap-1.5">
-                        @foreach(explode(',', $job->target_college) as $col)
-                            <span class="inline-flex items-center font-semibold px-2 py-1 rounded-lg bg-white text-purple-700 border border-purple-200 text-xs">{{ trim($col) }}</span>
-                        @endforeach
-                    </div>
-                </div>
-                @endif
-                <p class="text-center text-xs text-[#777777]">Posted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}</p>
-            </div>
-        </div>
-
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
-            <div class="flex-shrink-0 px-4 py-2.5 bg-white border-b border-gray-200">
-                <div class="flex flex-wrap gap-2 items-center">
-                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-50 border border-blue-100 text-blue-700"><i class="fas fa-clock text-[10px]"></i> {{ $job->employment_type }}</span>
-                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 border border-gray-200 text-[#333333]"><i class="fas fa-layer-group text-[10px]"></i> {{ $job->experience_level }}</span>
-                    @if($isExp)
-                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-50 border border-red-200 text-red-600"><i class="fas fa-ban text-[10px]"></i> No longer accepting applications</span>
-                    @elseif($isUrgentView)
-                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 border border-amber-200 text-amber-700"><i class="fas fa-fire text-[10px]"></i> {{ $daysLeft === 0 ? 'Closing today!' : ($daysLeft === 1 ? 'Closes tomorrow' : $daysLeft.' days remaining') }}</span>
-                    @endif
-                </div>
-            </div>
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c px-4 py-3 flex flex-col gap-3">
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-                    <h3 class="font-bold mb-2 flex items-center gap-2 uppercase tracking-widest text-[10px] text-[#333333]">
-                        <span class="w-5 h-5 rounded-md flex items-center justify-center bg-blue-50"><i class="fas fa-file-lines text-blue-500 text-[10px]"></i></span> Job Description
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-lg p-3 border border-gray-100 text-sm text-[#333333]" style="line-height:1.7;">{{ trim($job->description) }}</div>
-                </div>
-                @if($job->qualifications)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-                    <h3 class="font-bold mb-2 flex items-center gap-2 uppercase tracking-widest text-[10px] text-[#333333]">
-                        <span class="w-5 h-5 rounded-md flex items-center justify-center bg-purple-50"><i class="fas fa-list-check text-purple-500 text-[10px]"></i></span> Qualifications
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-gray-50 rounded-lg p-3 border border-gray-100 text-sm text-[#333333]" style="line-height:1.7;">{{ trim($job->qualifications) }}</div>
-                </div>
-                @endif
-                @if($job->application_instructions)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-                    <h3 class="font-bold mb-2 flex items-center gap-2 uppercase tracking-widest text-[10px] text-[#333333]">
-                        <span class="w-5 h-5 rounded-md flex items-center justify-center bg-emerald-50"><i class="fas fa-paper-plane text-emerald-500 text-[10px]"></i></span> How to Apply
-                    </h3>
-                    <div class="leading-relaxed whitespace-pre-wrap bg-emerald-50/50 rounded-lg p-3 border border-emerald-100 text-sm text-[#333333]" style="line-height:1.7;">{{ trim($job->application_instructions) }}</div>
-                </div>
-                @endif
-            </div>
-        </div>
-    </div>
-
 </div>
 @endif
 

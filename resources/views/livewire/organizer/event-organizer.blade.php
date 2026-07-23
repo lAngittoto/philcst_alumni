@@ -267,20 +267,21 @@ new class extends Component {
         $this->resetPage();
     }
 
-    public function openCreateModal(): void
-    {
-        if (!$this->hasAlumni) {
-            $this->showNoAlumniModal = true;
-            return;
-        }
-        $this->resetFormFields();
-        $this->start_time     = '18:00'; // 6:00 PM default
-        $this->end_time       = '23:59'; // 11:59 PM default
-        $this->contact_person = $this->organizerName;
-        $this->contact_email  = $this->organizerEmail;
-        $this->isEditing      = false;
-        $this->showFormModal  = true;
+public function openCreateModal(): void
+{
+    if (!$this->hasAlumni) {
+        $this->showNoAlumniModal = true;
+        return;
     }
+    $this->resetFormFields();
+    $this->start_time     = '18:00'; // 6:00 PM default
+    $this->end_time       = '23:59'; // 11:59 PM default
+    $this->contact_person = $this->organizerName;
+    $this->contact_email  = $this->organizerEmail;
+    $this->isEditing      = false;
+    $this->showFormModal  = true;
+    $this->dispatch('close-sidebar');
+}
 
     public function closeNoAlumniModal(): void { $this->showNoAlumniModal = false; }
 
@@ -315,51 +316,56 @@ new class extends Component {
             : [];
     }
 
-    public function openEditModal(int $id): void
-    {
-        $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
+public function openEditModal(int $id): void
+{
+    $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
 
-        if ($event->status === 'REJECTED') {
-            $this->isResubmitting = true;
-            $this->resubmitEventTitle   = $event->title;
-            $this->resubmitEventRemarks = $event->review_remarks ?? '';
-            $this->populateEditForm($event);
-            $this->showFormModal = true;
-            $this->showViewModal = false;
-            return;
-        }
+    if ($event->status === 'REJECTED') {
+        $this->isResubmitting = true;
+        $this->resubmitEventTitle   = $event->title;
+        $this->resubmitEventRemarks = $event->review_remarks ?? '';
+        $this->populateEditForm($event);
+        $this->showFormModal = true;
+        $this->showViewModal = false;
+        $this->dispatch('close-sidebar');
+        return;
+    }
 
+    $this->isResubmitting = false;
+    $this->populateEditForm($event);
+    $this->showFormModal = true;
+    $this->showViewModal = false;
+    $this->dispatch('close-sidebar');
+}
+
+public function viewEvent(int $id): void
+{
+    $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
+
+    if ($event->status === 'PENDING') {
         $this->isResubmitting = false;
         $this->populateEditForm($event);
         $this->showFormModal = true;
         $this->showViewModal = false;
+        $this->dispatch('close-sidebar');
+        return;
     }
 
-    public function viewEvent(int $id): void
-    {
-        $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
-
-        if ($event->status === 'PENDING') {
-            $this->isResubmitting = false;
-            $this->populateEditForm($event);
-            $this->showFormModal = true;
-            $this->showViewModal = false;
-            return;
-        }
-
-        if ($event->status === 'REJECTED') {
-            $this->isResubmitting = true;
-            $this->resubmitEventTitle   = $event->title;
-            $this->resubmitEventRemarks = $event->review_remarks ?? '';
-            $this->populateEditForm($event);
-            $this->showFormModal = true;
-            $this->showViewModal = false;
-            return;
-        }
-
-        $this->viewingEventId = $id;
-        $this->showViewModal  = true;
+    if ($event->status === 'REJECTED') {
+        $this->isResubmitting = true;
+        $this->resubmitEventTitle   = $event->title;
+        $this->resubmitEventRemarks = $event->review_remarks ?? '';
+        $this->populateEditForm($event);
+        $this->showFormModal = true;
+        $this->showViewModal = false;
+        $this->dispatch('close-sidebar');
+        return;
     }
+
+    $this->viewingEventId = $id;
+    $this->showViewModal  = true;
+    $this->dispatch('close-sidebar');
+}
 
     // ── Delete: open confirm modal ── allowed for PENDING and REJECTED ──
     public function confirmDelete(int $id): void
@@ -444,12 +450,12 @@ new class extends Component {
         $this->dispatch('reset-time-selects');
     }
 
-    public function closeFormModal(): void
-    {
-        $this->showFormModal = false;
-        $this->resetFormFields();
-    }
-
+public function closeFormModal(): void
+{
+    $this->showFormModal = false;
+    $this->resetFormFields();
+    $this->dispatch('open-sidebar');
+}
     // ── Runs full validation. If clean AND this is a brand-new (non-edit,
     //    non-resubmit) submission, opens the confirm modal instead of
     //    saving immediately. Editing/resubmitting saves straight away
@@ -791,12 +797,18 @@ new class extends Component {
             $this->dispatch('event-management-updated', id: $savedEventId, title: trim($this->title), action: $notifAction);
         }
 
-        Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
+Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->showFormModal = false;
         $this->resetFormFields();
+        $this->dispatch('open-sidebar');
     }
 
-    public function closeViewModal(): void { $this->showViewModal = false; $this->viewingEventId = null; }
+   public function closeViewModal(): void
+{
+    $this->showViewModal = false;
+    $this->viewingEventId = null;
+    $this->dispatch('open-sidebar');
+}
 
     public function openShareModal(int $id): void
     {
@@ -1105,6 +1117,28 @@ select.tw-select-arrow {
     border-radius: 0.5rem;
     padding: 0.25rem 0.5rem;
     display: inline-block;
+}
+
+/* ── View Details: mobile scroll fix ──
+     On mobile the whole right-panel content area (Responses + About +
+     Notes) scrolls as ONE natural-height column instead of each card
+     fighting for its own flex-1/min-h-0 scroll region (which caused the
+     stuck/non-scrolling behaviour on phones). Desktop (lg:) keeps the
+     original independently-scrolling two-column layout. ── */
+@media (max-width: 1023px) {
+    .eo-view-right-scroll {
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .eo-view-detail-card {
+        flex: none !important;
+        min-height: 0 !important;
+    }
+    .eo-detail-table-wrap {
+        flex: none !important;
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
 }
 </style>
 
@@ -2240,14 +2274,14 @@ select.tw-select-arrow {
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in"
      @keydown.escape.window="$wire.closeViewModal()">
 
-    <div class="flex items-center justify-between px-6 py-3 flex-shrink-0 shadow-md"
-         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-        <div class="flex items-center gap-3 min-w-0">
-            <div>
-                <p class="text-white/60 text-xs font-semibold uppercase tracking-widest">Event Details</p>
-                <h2 class="text-white font-semibold text-base leading-tight truncate">{{ $ev->title }}</h2>
-            </div>
+<div class="flex items-center justify-between px-4 sm:px-6 py-3 flex-shrink-0 shadow-md"
+     style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+    <div class="flex items-center gap-3 min-w-0 flex-1">
+        <div class="min-w-0 flex-1">
+            <p class="text-white/60 text-[10px] sm:text-xs font-semibold uppercase tracking-widest">Event Details</p>
+            <h2 class="text-white font-semibold text-sm sm:text-base leading-tight line-clamp-2 sm:truncate">{{ $ev->title }}</h2>
         </div>
+    </div>
         <div class="flex items-center gap-1.5 flex-shrink-0 ml-3">
             @if($isApproved || $isCompleted)
                 <div class="relative inline-flex group">
@@ -2277,9 +2311,9 @@ select.tw-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c">
+        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white lg:overflow-y-auto scroll-c">
 
             @if($hasPhoto)
             <div class="w-full px-5 pt-5 pb-3 flex-shrink-0">
@@ -2374,7 +2408,7 @@ select.tw-select-arrow {
             </div>
         </div>
 
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
+        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden bg-gray-50">
 
             <div class="flex-shrink-0 px-6 py-4 bg-white border-b border-gray-200">
                 <p class="text-[10px] font-bold uppercase tracking-widest mb-2 text-[#333333]">Responses</p>
@@ -2398,25 +2432,25 @@ select.tw-select-arrow {
                 @endif
             </div>
 
-<div class="flex-1 min-h-0 overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
+<div class="flex-1 min-h-0 lg:overflow-y-auto scroll-c eo-view-right-scroll px-6 py-5 flex flex-col gap-5">
 
 @if($ev->description)
-<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+<div class="eo-view-detail-card bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
     <div class="px-5 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
         <p class="text-[12px] font-bold uppercase tracking-widest text-[#333333]">About This Event</p>
     </div>
-    <div class="eo-detail-table-wrap px-5 py-4 flex-1">
+    <div class="eo-detail-table-wrap px-5 py-4 lg:flex-1">
       <p class="text-sm leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->description) }}</p>
     </div>
 </div>
 @endif
 
 @if($ev->notes)
-<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+<div class="eo-view-detail-card bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
     <div class="px-5 py-3 border-b border-gray-100 bg-amber-50 flex-shrink-0">
         <p class="text-[12px] font-bold uppercase tracking-widest text-[#333333]">Additional Notes</p>
     </div>
-    <div class="eo-detail-table-wrap px-5 py-4 flex-1">
+    <div class="eo-detail-table-wrap px-5 py-4 lg:flex-1">
         <p class="text-sm leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->notes) }}</p>
     </div>
 </div>
