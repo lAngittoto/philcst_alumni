@@ -35,6 +35,18 @@ new class extends Component {
     public bool  $showModal = false;
     public array $modalData = [];
 
+    // ── Compare Tool state ────────────────────────────────────────────────
+    public bool   $showCompareModal = false;
+    public string $compareCourseA   = '';
+    public string $compareBatchA    = '';
+    public string $compareCourseB   = '';
+    public string $compareBatchB    = '';
+    public array  $compareResultA   = [];
+    public array  $compareResultB   = [];
+    public string $compareInsight   = '';
+    public bool   $compareRan       = false;
+    public string $compareError     = '';
+
     // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
 
@@ -354,293 +366,216 @@ new class extends Component {
     }
 
     public function closeModal(): void
-{
-    $this->showModal = false;
-    $this->modalData = [];
-    $this->dispatch('open-sidebar');
-}
+    {
+        $this->showModal = false;
+        $this->modalData = [];
+        $this->dispatch('open-sidebar');
+    }
+
+    // ── Compare Tool: opens the modal ─────────────────────────────────────
+    public function openCompareModal(): void
+    {
+        $this->showCompareModal = true;
+        $this->compareRan       = false;
+        $this->compareResultA   = [];
+        $this->compareResultB   = [];
+        $this->compareInsight   = '';
+        $this->compareError     = '';
+        $this->dispatch('close-sidebar');
+    }
+
+    // ── Compare Tool: when a Program is picked/changed, the Batch dropdown
+    // for that same group should only ever show batches that actually
+    // exist for that program (instead of every batch in the system). If
+    // the previously selected batch doesn't exist for the newly picked
+    // program, it gets cleared automatically so an invalid combo can't
+    // linger in the form.
+    public function updatedCompareCourseA(): void
+    {
+        if ($this->compareBatchA !== '' && !in_array($this->compareBatchA, $this->batchesForCourse($this->compareCourseA))) {
+            $this->compareBatchA = '';
+        }
+        $this->compareError = '';
+    }
+
+    public function updatedCompareCourseB(): void
+    {
+        if ($this->compareBatchB !== '' && !in_array($this->compareBatchB, $this->batchesForCourse($this->compareCourseB))) {
+            $this->compareBatchB = '';
+        }
+        $this->compareError = '';
+    }
+
+    public function updatedCompareBatchA(): void { $this->compareError = ''; }
+    public function updatedCompareBatchB(): void { $this->compareError = ''; }
+
+    // ── Returns the batches that actually have alumni records for the
+    // given program (or all organizer-scoped batches if no program is
+    // selected), so the Batch dropdown never offers a combination with
+    // zero possible results.
+    public function batchesForCourse(string $course): array
+    {
+        return DB::table('alumni')
+            ->whereNull('alumni.deleted_at')
+            ->when($course !== '', fn($q) => $q->where('alumni.course_code', $course))
+            ->when($this->organizerBatch !== '', fn($q) => $q->where('alumni.batch', $this->organizerBatch))
+            ->when(!empty($this->allowedCourseCodes), fn($q) => $q->whereIn('alumni.course_code', $this->allowedCourseCodes))
+            ->distinct()
+            ->orderBy('alumni.batch', 'desc')
+            ->pluck('alumni.batch')
+            ->filter(fn($b) => $b !== null && $b !== '')
+            ->values()
+            ->toArray();
+    }
+
+    public function closeCompareModal(): void
+    {
+        $this->showCompareModal = false;
+        $this->dispatch('open-sidebar');
+    }
+
+    // ── FIXED: fully-qualified every column so nothing is ambiguous once
+    // the query joins `alumni` with `employment_trackings` (both tables
+    // have a `deleted_at` column, and both `alumni` and `courses` can have
+    // a `course_code`-like column depending on schema, so every reference
+    // below is explicitly prefixed with `alumni.`). This is what caused:
+    // "Column 'deleted_at' in where clause is ambiguous".
+    private function computeGroupStats(string $course, string $batch): array
+    {
+        $base = DB::table('alumni')->whereNull('alumni.deleted_at');
+
+        if ($course) $base->where('alumni.course_code', $course);
+        if ($batch)  $base->where('alumni.batch', $batch);
+
+        // still respect organizer scoping so an organizer can't peek outside
+        // their assigned department/batch
+        if ($this->organizerBatch) {
+            $base->where('alumni.batch', $this->organizerBatch);
+        }
+        if (!empty($this->allowedCourseCodes)) {
+            $base->whereIn('alumni.course_code', $this->allowedCourseCodes);
+        }
+
+        $total = (clone $base)->count();
+
+        $withEmp = (clone $base)
+            ->join('employment_trackings as et', 'alumni.id', '=', 'et.alumni_id')
+            ->whereNull('et.deleted_at');
+
+        $employed   = (clone $withEmp)->where('et.employment_status', 'employed')->count();
+        $self       = (clone $withEmp)->where('et.employment_status', 'self_employed')->count();
+        $unemployed = (clone $withEmp)->where('et.employment_status', 'unemployed')->count();
+        $working    = $employed + $self;
+
+        $rate = $total > 0 ? round(($working / $total) * 100, 1) : 0.0;
+
+        return [
+            'course'     => $course ?: 'All Programs',
+            'batch'      => $batch ?: 'All Batches',
+            'total'      => $total,
+            'employed'   => $employed,
+            'self'       => $self,
+            'unemployed' => $unemployed,
+            'working'    => $working,
+            'rate'       => $rate,
+        ];
+    }
+
+    // ── Compare Tool: runs the comparison + builds the simple insight text ─
+    public function runCompare(): void
+    {
+        $this->compareError   = '';
+        $this->compareRan     = false;
+        $this->compareResultA = [];
+        $this->compareResultB = [];
+        $this->compareInsight = '';
+
+        // Require each group to be narrowed down by at least a Program or
+        // a Batch — comparing "All Programs · All Batches" against itself
+        // is not a meaningful comparison and would just show 2 identical
+        // whole-college totals.
+        if ($this->compareCourseA === '' && $this->compareBatchA === '') {
+            $this->compareError = 'Please select a Program or Batch for Group A.';
+            return;
+        }
+        if ($this->compareCourseB === '' && $this->compareBatchB === '') {
+            $this->compareError = 'Please select a Program or Batch for Group B.';
+            return;
+        }
+
+        // Block comparing a group against itself (identical Program + Batch).
+        if ($this->compareCourseA === $this->compareCourseB && $this->compareBatchA === $this->compareBatchB) {
+            $this->compareError = 'Group A and Group B are identical. Please choose a different Program or Batch to compare.';
+            return;
+        }
+
+        // Guard against a Batch that doesn't actually belong to the chosen
+        // Program (can only happen if the client posts a stale value).
+        if ($this->compareBatchA !== '' && !in_array($this->compareBatchA, $this->batchesForCourse($this->compareCourseA))) {
+            $this->compareError = 'The selected Batch for Group A is not available for that Program.';
+            return;
+        }
+        if ($this->compareBatchB !== '' && !in_array($this->compareBatchB, $this->batchesForCourse($this->compareCourseB))) {
+            $this->compareError = 'The selected Batch for Group B is not available for that Program.';
+            return;
+        }
+
+        $this->compareResultA = $this->computeGroupStats($this->compareCourseA, $this->compareBatchA);
+        $this->compareResultB = $this->computeGroupStats($this->compareCourseB, $this->compareBatchB);
+        $this->compareRan     = true;
+
+        $a = $this->compareResultA;
+        $b = $this->compareResultB;
+
+        $labelA = $a['course'] . ' · ' . $a['batch'];
+        $labelB = $b['course'] . ' · ' . $b['batch'];
+
+        if ($a['total'] === 0 && $b['total'] === 0) {
+            $this->compareInsight = "No alumni records found for either group yet, so a comparison can't be made.";
+            return;
+        }
+
+        if ($a['total'] === 0) {
+            $this->compareInsight = "{$labelA} has no alumni records yet, so only {$labelB} can be evaluated ({$b['rate']}% employment rate).";
+            return;
+        }
+
+        if ($b['total'] === 0) {
+            $this->compareInsight = "{$labelB} has no alumni records yet, so only {$labelA} can be evaluated ({$a['rate']}% employment rate).";
+            return;
+        }
+
+        $diff = round(abs($a['rate'] - $b['rate']), 1);
+
+        if ($diff < 0.5) {
+            $this->compareInsight = "Based on the results, {$labelA} and {$labelB} have almost the same employment rate ({$a['rate']}% vs {$b['rate']}%) — growth is basically even between the two.";
+            return;
+        }
+
+        if ($a['rate'] > $b['rate']) {
+            $this->compareInsight = "Based on the results, mas mataas ang growth ng employment ng {$labelA} ({$a['rate']}%) kumpara sa {$labelB} ({$b['rate']}%) — that's a {$diff} point difference.";
+        } else {
+            $this->compareInsight = "Based on the results, mas mataas ang growth ng employment ng {$labelB} ({$b['rate']}%) kumpara sa {$labelA} ({$a['rate']}%) — that's a {$diff} point difference.";
+        }
+    }
+
+    public function resetCompare(): void
+    {
+        $this->compareCourseA = $this->compareBatchA = '';
+        $this->compareCourseB = $this->compareBatchB = '';
+        $this->compareResultA = $this->compareResultB = [];
+        $this->compareInsight = '';
+        $this->compareRan     = false;
+        $this->compareError   = '';
+    }
 
 }; ?>
 
 <div class="flex flex-col">
 
-<style>
-.ae-hover-tip {
-    position: fixed;
-    background: #1a1a1a;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: .05em;
-    padding: 6px 12px;
-    border-radius: 7px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s ease;
-    z-index: 99999;
-    box-shadow: 0 4px 14px rgba(0,0,0,.30);
-    transform: translate(12px, -110%);
-}
-.ae-hover-tip.visible { opacity: 1; }
-.ae-hover-tip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 14px;
-    border: 5px solid transparent;
-    border-top-color: #1a1a1a;
-}
-
-.ae-tbl-row {
-    background-color: #ffffff;
-    cursor: pointer;
-    transition: background-color .15s ease;
-}
-.ae-tbl-row:hover { background-color: #f5f0fa !important; }
-
-/* ── Mobile card rows (no horizontal scroll, nothing hidden) ── */
-.ae-mrow {
-    cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-    background: #fff;
-    border-bottom: 1px solid #F5F5F5;
-    padding: 12px 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    transition: background-color .12s ease;
-}
-.ae-mrow:active { background-color: #f5f0fa; }
-
-.ae-filter-input {
-    border: 1px solid #E8E0F0;
-    transition: border-color .15s, box-shadow .15s;
-    color: #333333;
-    background: #ffffff;
-    font-size: 0.875rem;
-    padding: 0.5rem 0.75rem;
-    border-radius: 0.5rem;
-    font-weight: 500;
-}
-.ae-filter-input::placeholder { color: #999999; font-weight: 400; }
-.ae-filter-input:hover  { border-color: #c4b5d4; }
-.ae-filter-input:focus  { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
-select.ae-filter-input {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
-    background-position: right 0.6rem center;
-    background-repeat: no-repeat;
-    background-size: 1.25em 1.25em;
-    padding-right: 2.25rem;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    cursor: pointer;
-}
-select.ae-filter-input option { color: #333333; font-weight: 500; }
-select.ae-filter-input.ae-active {
-    border-color: #7a3f91;
-    background-color: #f5f0fa;
-    color: #7a3f91;
-    font-weight: 600;
-}
-
-/* ── Filter bar loading progress bar (same effect as Alumni Records) ── */
-.ae-filter-progress-track {
-    height: 2px;
-    width: 100%;
-    overflow: hidden;
-    background: transparent;
-    position: relative;
-    flex-shrink: 0;
-}
-.ae-filter-progress-bar {
-    position: absolute;
-    top: 0; left: 0;
-    height: 100%;
-    width: 40%;
-    border-radius: 99px;
-    background: linear-gradient(135deg, #7a3f91, #9b59b6);
-    animation: aeFilterProgress 1s ease-in-out infinite;
-}
-@keyframes aeFilterProgress {
-    0%   { left: -40%; }
-    100% { left: 100%; }
-}
-
-/* ── Stat cards live in a side column, ordered after the table ── */
-.ae-cards-side {
-    scrollbar-width: thin;
-    scrollbar-color: #d1d5db #f3f4f6;
-}
-.ae-cards-side::-webkit-scrollbar { width: 5px; }
-.ae-cards-side::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-.ae-cards-side::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-.ae-cards-side::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-
-.ae-stat-card {
-    background: #fff;
-    border-radius: 1rem;
-    border: 1px solid #E8E0F0;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
-    padding: 1rem;
-    text-align: left;
-    width: 100%;
-    cursor: default;
-    user-select: none;
-}
-
-.ae-table-block {
-    display: flex;
-    flex-direction: column;
-    border-radius: 1rem;
-    overflow: hidden;
-    border: 1px solid #E8E0F0;
-    box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    transition: all .3s ease;
-}
-
-/* ── Mobile/tablet fullscreen mode — toggled via Alpine (fullscreen flag).
-     Takes the table block out of the normal flow and covers the entire
-     viewport so the alumni list is easier to browse on small screens. ── */
-.ae-tb-fullscreen {
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 999 !important;
-    height: 100dvh !important;
-    max-height: 100dvh !important;
-    min-height: 100dvh !important;
-    width: 100vw !important;
-    border-radius: 0 !important;
-    border: none !important;
-}
-.ae-table-block-filter {
-    background: #F5F5F5;
-    border-bottom: 1px solid #E8E0F0;
-    padding: 0.6rem 0.875rem;
-    flex-shrink: 0;
-}
-.ae-table-block-pagination {
-    flex-shrink: 0;
-    background: linear-gradient(to right, #7a3f91, #9b59b6);
-    padding: 0 1rem;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    border-top: 1px solid rgba(122,63,145,.3);
-}
-.scroll-c::-webkit-scrollbar { width: 5px; }
-.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-.scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-.scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-
-.ae-close-tooltip { position: relative; }
-.ae-close-tooltip::after {
-    content: 'Close';
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: #1a1a1a;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: .04em;
-    padding: 4px 8px;
-    border-radius: 5px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s ease;
-    z-index: 99999;
-}
-.ae-close-tooltip::before {
-    content: '';
-    position: absolute;
-    top: calc(100% + 1px);
-    left: 50%;
-    transform: translateX(-50%);
-    border: 4px solid transparent;
-    border-bottom-color: #1a1a1a;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s ease;
-    z-index: 99999;
-}
-.ae-close-tooltip:hover::after,
-.ae-close-tooltip:hover::before { opacity: 1; }
-
-/* ── Column visibility uses CONTAINER queries, not viewport queries.
-     This matters because the sidebar can collapse/expand independently of
-     the browser window — that changes how much room the table actually
-     has without changing the viewport at all. Viewport-based (sm:/md:/lg:)
-     classes would keep a column "on" even when there's no longer enough
-     room for it, so it renders half cut off at the edge. Container queries
-     fix this properly: each column only switches on once the table itself
-     (not the window) is wide enough to fit it.
-
-     UPDATED TIERS (Job Title and Email no longer both fight for space at
-     the same width — Job Title now has its own container-query toggle
-     instead of always being on). On narrow/tablet widths only Alumni +
-     Program show in the table; Job Title and Status surface as compact
-     inline info inside the Alumni cell instead, so nothing overlaps or
-     gets squeezed. ── */
-.ae-table-block { container-type: inline-size; container-name: ae-tbl; }
-
-.ae-col-studentid,
-.ae-col-batch,
-.ae-col-status,
-.ae-col-jobtitle,
-.ae-col-email { display: none; }
-
-.ae-inline-studentid { display: block; }
-.ae-inline-status    { display: inline-flex; }
-.ae-inline-jobtitle   { display: block; }
-
-@container ae-tbl (min-width: 540px) {
-    .ae-col-studentid    { display: table-cell; }
-    .ae-inline-studentid { display: none; }
-}
-@container ae-tbl (min-width: 660px) {
-    .ae-col-batch { display: table-cell; }
-}
-@container ae-tbl (min-width: 860px) {
-    .ae-col-jobtitle    { display: table-cell; }
-    .ae-inline-jobtitle { display: none; }
-}
-@container ae-tbl (min-width: 980px) {
-    .ae-col-status    { display: table-cell; }
-    .ae-inline-status { display: none; }
-}
-@container ae-tbl (min-width: 1120px) {
-    .ae-col-email { display: table-cell; }
-}
-
-/* ── Responsive height: the alumni table always keeps this capped,
-     independently scrollable height on tablet/mobile — filtered/empty
-     results no longer shrink the block, so switching filters in and out
-     never causes the table to resize or jump around. ── */
-@media (max-width: 1023px) {
-    .ae-table-block {
-        height: calc(100dvh - 360px);
-        max-height: calc(100dvh - 360px);
-        min-height: 380px;
-    }
-}
-@media (max-width: 640px) {
-    .ae-table-block {
-        height: calc(100dvh - 380px);
-        max-height: calc(100dvh - 380px);
-        min-height: 360px;
-    }
-}
-</style>
-
-<div id="ae-hover-tip" class="ae-hover-tip">
+<div id="ae-hover-tip"
+     class="fixed bg-neutral-900 text-white text-[11px] font-semibold tracking-wide px-3 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-lg -translate-x-0"
+     style="transform:translate(12px,-110%)">
     <i class="fas fa-eye mr-1.5"></i>View Details
 </div>
 
@@ -673,26 +608,46 @@ select.ae-filter-input.ae-active {
 <div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full transition-all duration-300 ease-in-out">
 
     {{-- PAGE HEADER --}}
-    <div class="flex items-center gap-4 flex-shrink-0">
-        <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-             style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-            <i class="fas fa-chart-line text-white text-lg"></i>
+    <div class="flex items-center justify-between gap-4 flex-shrink-0 flex-wrap">
+        <div class="flex items-center gap-4">
+            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
+                <i class="fas fa-chart-line text-white text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Tracking</h1>
+                <p class="text-xs leading-relaxed mt-0.5 flex flex-wrap items-center gap-1.5 text-[#555555]">
+                    Track employment status of your assigned alumni.
+                    @if($organizerDepartment)
+                        <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                            <i class="fas fa-building-columns text-[9px]"></i>{{ $organizerDepartment }}
+                        </span>
+                    @endif
+                    @if($organizerBatch)
+                        <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                            <i class="fas fa-calendar text-[9px]"></i>Batch {{ $organizerBatch }}
+                        </span>
+                    @endif
+                </p>
+            </div>
         </div>
-        <div>
-            <h1 class="text-xl font-semibold tracking-tight" style="color:#333333;">Employment Tracking</h1>
-            <p class="text-xs leading-relaxed mt-0.5 flex flex-wrap items-center gap-1.5" style="color:#555555;">
-                Track employment status of your assigned alumni.
-                @if($organizerDepartment)
-                    <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                        <i class="fas fa-building-columns text-[9px]"></i>{{ $organizerDepartment }}
-                    </span>
-                @endif
-                @if($organizerBatch)
-                    <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                        <i class="fas fa-calendar text-[9px]"></i>Batch {{ $organizerBatch }}
-                    </span>
-                @endif
-            </p>
+
+        {{-- COMPARE TOOL BUTTON — icon-only now. Hover shows a small
+             tooltip that just says "Compare Tool", no extra description
+             text underneath it anymore. --}}
+        <div class="relative group shrink-0">
+            <button type="button"
+                    wire:click="openCompareModal"
+                    aria-label="Compare Tool"
+                    class="inline-flex items-center justify-center w-11 h-11 rounded-xl text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110">
+                <i class="fa-solid fa-code-compare text-base"></i>
+            </button>
+            {{-- Tooltip: icon-only trigger, text-only tooltip. Hidden on
+                 mobile (hidden sm:block) since touch devices don't have a
+                 real hover state — the tooltip would otherwise get stuck
+                 visible after a tap. --}}
+            <div class="hidden sm:block pointer-events-none absolute right-0 top-full mt-2 rounded-lg bg-neutral-900 text-white text-xs font-semibold px-3 py-1.5 shadow-xl opacity-0 scale-95 origin-top-right transition-all duration-150 group-hover:opacity-100 group-hover:scale-100 z-50 whitespace-nowrap">
+                Compare Tool
+            </div>
         </div>
     </div>
 
@@ -711,14 +666,19 @@ select.ae-filter-input.ae-active {
              on large screens via lg:order-2. Always visible, no toggle.
              On tablet/mobile it is NOT independently scrollable (shows in
              full). On desktop it scrolls on its own (lg:h-full lg:overflow-y-auto). --}}
-        <div class="ae-cards-side w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
+        <div class="w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
                     grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-3 content-start
-                    lg:h-full lg:overflow-y-auto lg:pr-1">
+                    lg:h-full lg:overflow-y-auto lg:pr-1
+                    [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f3f4f6]
+                    [&::-webkit-scrollbar]:w-[5px]
+                    [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
+                    [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
+                    hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]">
 
             {{-- Total Alumni --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow" style="background:#7A3F91;">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-[#7A3F91]">
                         <i class="fa-solid fa-users text-white text-base"></i>
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">All</span>
@@ -728,7 +688,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Employed --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-briefcase text-white text-base"></i>
@@ -745,7 +705,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Self-Employed --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-store text-white text-base"></i>
@@ -762,7 +722,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Unemployed --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
                         <i class="fa-solid fa-circle-pause text-white text-base"></i>
@@ -779,7 +739,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Not Filled --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
                         <i class="fa-solid fa-circle-question text-white text-base"></i>
@@ -796,7 +756,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Local --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-house text-white text-base"></i>
@@ -813,7 +773,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- OFW --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-plane-departure text-white text-base"></i>
@@ -830,7 +790,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Course Relevant --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow">
                         <i class="fa-solid fa-check-circle text-white text-base"></i>
@@ -847,7 +807,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Partially Relevant --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-adjust text-white text-base"></i>
@@ -864,7 +824,7 @@ select.ae-filter-input.ae-active {
             </div>
 
             {{-- Not Relevant --}}
-            <div class="ae-stat-card">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
                 <div class="flex items-start justify-between mb-3">
                     <div class="w-10 h-10 rounded-xl bg-red-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-times-circle text-white text-base"></i>
@@ -886,19 +846,25 @@ select.ae-filter-input.ae-active {
         {{-- UNIFIED BLOCK (narrower now that the cards sit beside it). Always
              keeps its fixed height (lg:h-full) whether the table has rows
              or is showing the "no results" empty state — this stops the
-             block from resizing / collapsing every time a filter changes. --}}
-        <div class="ae-table-block flex-1 min-w-0 w-full lg:order-1 lg:h-full"
+             block from resizing / collapsing every time a filter changes.
+             Uses CSS container queries via arbitrary Tailwind classes so
+             column visibility reacts to the TABLE's own width, not the
+             viewport (matters because the sidebar can collapse/expand
+             independently of the window). --}}
+        <div class="flex-1 min-w-0 w-full lg:order-1 lg:h-full flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm transition-all duration-300
+                    [container-type:inline-size] [container-name:ae-tbl]
+                    max-lg:h-[calc(100dvh-360px)] max-lg:max-h-[calc(100dvh-360px)] max-lg:min-h-[380px]
+                    max-sm:h-[calc(100dvh-380px)] max-sm:max-h-[calc(100dvh-380px)] max-sm:min-h-[360px]"
              x-data="{ fullscreen: false }"
-             :class="fullscreen ? 'ae-tb-fullscreen' : ''"
+             :class="fullscreen ? 'fixed! inset-0! z-[999]! h-dvh! max-h-dvh! min-h-dvh! w-screen! rounded-none! border-none!' : ''"
              @keydown.escape.window="fullscreen = false">
 
             {{-- FILTER BAR --}}
-            <div class="ae-table-block-filter flex flex-wrap gap-2 items-center transition-opacity duration-200"
+            <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
                  wire:loading.class="opacity-60"
                  wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters">
 
-                <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                     style="color:#7a3f91;">
+                <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                     Filters
                 </div>
 
@@ -906,17 +872,18 @@ select.ae-filter-input.ae-active {
                 <div class="relative flex-1 min-w-[160px] max-w-xs"
                      wire:ignore
                      x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#555555; z-index:1;"></i>
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
                     <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
                            placeholder="Search name, ID, email or job…"
-                           class="ae-filter-input w-full"
-                           style="padding-left: 2.25rem; padding-right: 1rem;"
+                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-[#333333] bg-white text-sm py-2 pr-4 pl-9 rounded-lg font-medium placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
                            autocomplete="off" maxlength="100" spellcheck="false">
                 </div>
 
                 {{-- Status --}}
                 <select wire:model.live="filterStatus"
-                        class="ae-filter-input {{ $filterStatus ? 'ae-active' : '' }}">
+                        class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium appearance-none cursor-pointer bg-no-repeat pr-9 hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10
+                               {{ $filterStatus ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}"
+                        style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
                     <option value="">All Statuses</option>
                     <option value="employed">Employed</option>
                     <option value="self_employed">Self-Employed</option>
@@ -926,7 +893,9 @@ select.ae-filter-input.ae-active {
 
                 {{-- Relevance --}}
                 <select wire:model.live="filterRelevance"
-                        class="ae-filter-input {{ $filterRelevance ? 'ae-active' : '' }}">
+                        class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium appearance-none cursor-pointer bg-no-repeat pr-9 hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10
+                               {{ $filterRelevance ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}"
+                        style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
                     <option value="">All Relevance</option>
                     <option value="yes">Related to Program</option>
                     <option value="partially">Partially Related</option>
@@ -936,7 +905,9 @@ select.ae-filter-input.ae-active {
                 {{-- Programs (formerly "Courses") --}}
                 @if($courses->isNotEmpty())
                     <select wire:model.live="filterCourse"
-                            class="ae-filter-input {{ $filterCourse ? 'ae-active' : '' }}">
+                            class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium appearance-none cursor-pointer bg-no-repeat pr-9 hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10
+                                   {{ $filterCourse ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}"
+                            style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
                         <option value="">All Programs</option>
                         @foreach($courses as $c)
                             <option value="{{ $c->code }}">{{ $c->code }}</option>
@@ -949,8 +920,8 @@ select.ae-filter-input.ae-active {
                     <div class="relative" x-data="{ open: false }" @click.outside="open = false">
                         <button type="button"
                                 @click="open = !open"
-                                class="ae-filter-input inline-flex items-center gap-2 min-w-[130px] justify-between
-                                       {{ $filterBatch ? 'ae-active' : '' }}">
+                                class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
+                                       {{ $filterBatch ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
                             <span class="truncate text-sm">
                                 {{ $filterBatch ? 'Batch ' . $filterBatch : 'All Batches' }}
                             </span>
@@ -964,9 +935,7 @@ select.ae-filter-input.ae-active {
                              x-transition:leave="transition ease-in duration-75"
                              x-transition:leave-start="opacity-100"
                              x-transition:leave-end="opacity-0 scale-95"
-                             class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden"
-                             style="min-width:150px; max-height:180px; overflow-y:auto;
-                                    scrollbar-width:thin; scrollbar-color:#c4b5d4 #f5f0fa;">
+                             class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[150px] max-h-[180px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]">
                             <div class="py-1">
                                 <button type="button"
                                         @click="$wire.set('filterBatch', ''); open = false"
@@ -993,8 +962,7 @@ select.ae-filter-input.ae-active {
                         wire:loading.class="opacity-60 cursor-wait"
                         wire:target="clearFilters"
                         class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                               bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
-                        style="color:#333333;">
+                               bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer text-[#333333]">
                     <i class="fas fa-rotate-left text-sm"></i>
                     <span class="hidden sm:inline">Reset</span>
                 </button>
@@ -1007,16 +975,15 @@ select.ae-filter-input.ae-active {
                 <button type="button"
                         @click="fullscreen = !fullscreen"
                         class="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                               bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer ml-auto"
-                        style="color:#7a3f91;">
+                               bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer ml-auto text-[#7a3f91]">
                     <i class="fas" :class="fullscreen ? 'fa-compress' : 'fa-expand'"></i>
                     <span x-text="fullscreen ? 'Exit' : 'Full Screen'"></span>
                 </button>
             </div>
 
             {{-- LOADING PROGRESS BAR (same effect as Alumni Records) --}}
-            <div class="ae-filter-progress-track" wire:loading wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters,previousPage,nextPage">
-                <div class="ae-filter-progress-bar"></div>
+            <div class="h-0.5 w-full overflow-hidden bg-transparent relative flex-shrink-0" wire:loading wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters,previousPage,nextPage">
+                <div class="absolute top-0 left-[-40%] h-full w-2/5 rounded-full bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] animate-[aeFilterProgress_1s_ease-in-out_infinite]"></div>
             </div>
 
             {{-- TABLE WRAPPER — always flex-1 so the empty state fills the
@@ -1025,21 +992,27 @@ select.ae-filter-input.ae-active {
             <div class="relative flex flex-col flex-1 min-h-0">
 
                 @if($rows->count() > 0)
-                <div class="overflow-x-hidden overflow-y-auto scroll-c flex-1 min-h-0" style="background:#fff;"
+                <div class="overflow-x-hidden overflow-y-auto flex-1 min-h-0 bg-white
+                            [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f3f4f6]
+                            [&::-webkit-scrollbar]:w-[5px]
+                            [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
+                            [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
+                            hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]"
                      wire:loading.class="opacity-40 pointer-events-none"
                      wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
 
                     {{-- ── DESKTOP / TABLET: table view ── --}}
                     <table class="w-full bg-white border-collapse hidden md:table">
-                        <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
+                        <thead class="sticky top-0 z-10 bg-white shadow-[0_1px_0_#E8E0F0]">
                             <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Alumni</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-studentid" style="color:#555555;">Student ID</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#555555;">Program</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-batch" style="color:#555555;">Batch</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-jobtitle" style="color:#555555;">Job Title</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest ae-col-email" style="color:#555555;">Email Address</th>
-                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest ae-col-status" style="color:#555555;">Status</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Alumni</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[540px]:table-cell [container-type:normal]"
+                                    style="container-name:ae-tbl;">Student ID</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Program</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[660px]:table-cell">Batch</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[860px]:table-cell">Job Title</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[1120px]:table-cell">Email Address</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[980px]:table-cell">Status</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-[#F5F5F5]">
@@ -1076,7 +1049,7 @@ select.ae-filter-input.ae-active {
 
                             @endphp
 
-                            <tr class="ae-tbl-row"
+                            <tr class="bg-white cursor-pointer transition-colors duration-150 hover:bg-[#f5f0fa]"
                                 wire:click="viewDetail({{ $row->id }})"
                                 wire:key="ae-row-{{ $row->id }}"
                                 data-ae-row>
@@ -1087,23 +1060,23 @@ select.ae-filter-input.ae-active {
                                              alt="{{ $row->full_name }}"
                                              class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                         <div class="min-w-0">
-                                            <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#333333;">{{ $row->full_name }}</p>
-                                            <p class="text-xs font-mono mt-0.5 ae-inline-studentid" style="color:#999999;">{{ $row->student_id }}</p>
+                                            <p class="font-semibold text-sm leading-snug truncate uppercase text-[#333333]">{{ $row->full_name }}</p>
+                                            <p class="text-xs font-mono mt-0.5 text-[#999999] block @[540px]:hidden">{{ $row->student_id }}</p>
 
                                             {{-- Compact inline row for info hidden at this container width.
                                                  Status badge and job title/unemployment note both collapse
                                                  into this line instead of fighting for their own columns,
                                                  so nothing overlaps on tablet widths. --}}
                                             <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border ae-inline-status {{ $statusClass }}">
+                                                <span class="inline-flex @[980px]:hidden items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border {{ $statusClass }}">
                                                     <i class="fa-solid {{ $statusIcon }} text-[8px]"></i>
                                                     {{ $statusLabel }}
                                                 </span>
-                                                <span class="ae-inline-jobtitle text-xs font-medium truncate max-w-[220px]" style="color:#555555;">
+                                                <span class="block @[860px]:hidden text-xs font-medium truncate max-w-[220px] text-[#555555]">
                                                     @if($row->job_title)
                                                         {{ $row->job_title }}
                                                     @elseif($row->employment_status === 'unemployed')
-                                                        <span class="italic" style="color:#999999;">
+                                                        <span class="italic text-[#999999]">
                                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '' }}
                                                         </span>
                                                     @endif
@@ -1113,8 +1086,8 @@ select.ae-filter-input.ae-active {
                                     </div>
                                 </td>
 
-                                <td class="px-4 py-3.5 ae-col-studentid">
-                                    <span class="text-sm font-mono font-semibold" style="color:#333333;">{{ $row->student_id }}</span>
+                                <td class="px-4 py-3.5 hidden @[540px]:table-cell">
+                                    <span class="text-sm font-mono font-semibold text-[#333333]">{{ $row->student_id }}</span>
                                 </td>
 
                                 <td class="px-4 py-3.5">
@@ -1123,33 +1096,33 @@ select.ae-filter-input.ae-active {
                                     </span>
                                 </td>
 
-                                <td class="px-4 py-3.5 text-sm font-semibold ae-col-batch" style="color:#333333;">
+                                <td class="px-4 py-3.5 text-sm font-semibold hidden @[660px]:table-cell text-[#333333]">
                                     {{ $row->batch ?? '—' }}
                                 </td>
 
-                                <td class="px-4 py-3.5 ae-col-jobtitle">
+                                <td class="px-4 py-3.5 hidden @[860px]:table-cell">
                                     @if($row->job_title)
-                                        <p class="font-semibold text-sm leading-snug uppercase" style="color:#333333;">{{ $row->job_title }}</p>
+                                        <p class="font-semibold text-sm leading-snug uppercase text-[#333333]">{{ $row->job_title }}</p>
                                     @elseif($row->employment_status === 'unemployed')
-                                        <span class="text-sm italic" style="color:#999999;">
+                                        <span class="text-sm italic text-[#999999]">
                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
                                         </span>
                                     @else
-                                        <span class="text-sm italic" style="color:#cccccc;">No data yet</span>
+                                        <span class="text-sm italic text-[#cccccc]">No data yet</span>
                                     @endif
                                 </td>
 
-                                <td class="px-4 py-3.5 ae-col-email">
+                                <td class="px-4 py-3.5 hidden @[1120px]:table-cell">
                                     @if($row->email ?? null)
-                                        <p class="text-sm font-medium truncate max-w-[200px]" style="color:#333333;" title="{{ $row->email }}">
+                                        <p class="text-sm font-medium truncate max-w-[200px] text-[#333333]" title="{{ $row->email }}">
                                             {{ $row->email }}
                                         </p>
                                     @else
-                                        <span class="text-sm" style="color:#cccccc;">—</span>
+                                        <span class="text-sm text-[#cccccc]">—</span>
                                     @endif
                                 </td>
 
-                                <td class="px-4 py-3.5 text-center ae-col-status">
+                                <td class="px-4 py-3.5 text-center hidden @[980px]:table-cell">
                                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border {{ $statusClass }} whitespace-nowrap">
                                         <i class="fa-solid {{ $statusIcon }} text-[9px]"></i>
                                         {{ $statusLabel }}
@@ -1195,7 +1168,7 @@ select.ae-filter-input.ae-active {
                                 );
                         @endphp
 
-                        <div class="ae-mrow"
+                        <div class="cursor-pointer select-none bg-white border-b border-[#F5F5F5] px-3.5 py-3 flex items-center gap-2.5 transition-colors duration-100 active:bg-[#f5f0fa]"
                              wire:click="viewDetail({{ $row->id }})"
                              wire:key="ae-mrow-{{ $row->id }}"
                              data-ae-row>
@@ -1205,16 +1178,16 @@ select.ae-filter-input.ae-active {
                                  class="w-10 h-10 rounded-lg object-cover flex-shrink-0 ring-1 ring-[#E8E0F0]">
 
                             <div class="flex-1 min-w-0">
-                                <p class="font-semibold text-sm uppercase truncate" style="color:#333333;">{{ $row->full_name }}</p>
+                                <p class="font-semibold text-sm uppercase truncate text-[#333333]">{{ $row->full_name }}</p>
 
                                 <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                                    <span class="font-mono text-xs font-semibold" style="color:#666666;">{{ $row->student_id }}</span>
+                                    <span class="font-mono text-xs font-semibold text-[#666666]">{{ $row->student_id }}</span>
                                     <span class="text-[#CCCCCC] text-xs">&bull;</span>
-                                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase" style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
+                                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
                                         {{ $row->course_code ?? '—' }}
                                     </span>
                                     <span class="text-[#CCCCCC] text-xs">&bull;</span>
-                                    <span class="font-mono text-xs font-semibold" style="color:#666666;">Batch {{ $row->batch ?? '—' }}</span>
+                                    <span class="font-mono text-xs font-semibold text-[#666666]">Batch {{ $row->batch ?? '—' }}</span>
                                 </div>
 
                                 <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -1223,9 +1196,9 @@ select.ae-filter-input.ae-active {
                                         {{ $statusLabel }}
                                     </span>
                                     @if($row->job_title)
-                                        <span class="text-xs font-medium truncate" style="color:#555555;">{{ $row->job_title }}</span>
+                                        <span class="text-xs font-medium truncate text-[#555555]">{{ $row->job_title }}</span>
                                     @elseif($row->employment_status === 'unemployed')
-                                        <span class="text-xs italic" style="color:#999999;">
+                                        <span class="text-xs italic text-[#999999]">
                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '' }}
                                         </span>
                                     @endif
@@ -1245,14 +1218,14 @@ select.ae-filter-input.ae-active {
                         <i class="fas fa-users-slash text-xl text-gray-400"></i>
                     </div>
                     <div>
-                        <p class="font-semibold text-base" style="color:#333333;">
+                        <p class="font-semibold text-base text-[#333333]">
                             @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
                                 No alumni match your filters
                             @else
                                 No alumni found
                             @endif
                         </p>
-                        <p class="text-sm mt-1" style="color:#555555;">
+                        <p class="text-sm mt-1 text-[#555555]">
                             @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
                                 Try clearing your filters to see all alumni.
                             @else
@@ -1262,8 +1235,7 @@ select.ae-filter-input.ae-active {
                     </div>
                     @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
                         <button wire:click="clearFilters"
-                                class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer"
-                                style="background-color:#7a3f91;">
+                                class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91]">
                             <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
                         </button>
                     @endif
@@ -1282,7 +1254,7 @@ select.ae-filter-input.ae-active {
                 $pgStart = max(1, $cp - 2);
                 $pgEnd   = min($lp, $cp + 2);
             @endphp
-            <div class="ae-table-block-pagination">
+            <div class="flex-shrink-0 bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] px-4 min-h-[48px] flex items-center justify-between gap-2 flex-wrap border-t border-[#7a3f91]/30">
                 <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                     Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                     of <strong class="text-white font-bold">{{ $total }}</strong>
@@ -1340,7 +1312,7 @@ select.ae-filter-input.ae-active {
                 </div>
             </div>
 
-        </div>{{-- /ae-table-block --}}
+        </div>{{-- /table block --}}
 
     </div>{{-- /BODY: side cards + table --}}
 
@@ -1420,8 +1392,7 @@ select.ae-filter-input.ae-active {
          x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
          x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0">
 
-        <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0"
-             style="background:#7A3F91;">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-[#7A3F91]">
             <div class="flex items-center gap-3">
                 <img src="{{ $modalPhotoUrl }}"
                      alt="{{ $modalData['full_name'] ?? '' }}"
@@ -1438,13 +1409,13 @@ select.ae-filter-input.ae-active {
                     wire:click="closeModal"
                     wire:loading.attr="disabled"
                     wire:target="closeModal"
-                    class="ae-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                    class="relative group/close w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
                 <i class="fa-solid fa-xmark text-base"></i>
+                <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close:opacity-100 transition-opacity duration-150">Close</span>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-5"
-             style="scrollbar-width:thin;scrollbar-color:#d9c9e8 #F9F7FC;">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-5 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
 
             <div>
                 <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
@@ -1548,10 +1519,222 @@ select.ae-filter-input.ae-active {
             </div>
 
         </div>
-        <div class="flex-shrink-0" style="height:0;"></div>
+        <div class="flex-shrink-0 h-0"></div>
     </div>
 </div>
 @endif
+
+
+{{-- COMPARE TOOL MODAL — bigger fixed height on desktop so everything
+     (form + results + insight) fits without needing to scroll, full
+     screen on mobile. --}}
+@if($showCompareModal)
+<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
+     x-data
+     wire:click.self="closeCompareModal"
+     @keydown.escape.window="$wire.closeCompareModal()">
+    <div class="bg-white rounded-none sm:rounded-2xl w-full h-full sm:h-[760px] sm:max-w-3xl sm:max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border-0 sm:border sm:border-[#E8E0F0]"
+         @click.stop
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
+         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0">
+
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-gradient-to-r from-[#7a3f91] to-[#9b59b6]">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                    <i class="fa-solid fa-code-compare text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="font-semibold text-white text-sm leading-snug">Employment Compare Tool</p>
+                    <p class="text-xs text-white/70 mt-0.5">Compare programs or batches side by side</p>
+                </div>
+            </div>
+            <button type="button"
+                    wire:click="closeCompareModal"
+                    class="relative group/close2 w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                <i class="fa-solid fa-xmark text-base"></i>
+                <span class="hidden sm:block pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close2:opacity-100 transition-opacity duration-150">Close</span>
+            </button>
+        </div>
+
+        {{-- Body — the modal itself is now tall enough (h-[760px]) that
+             the form + results + insight all fit without scrolling in
+             the common case; overflow-y-auto stays only as a safety net
+             for smaller screens or extra-long content. --}}
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+
+            {{-- Validation error banner --}}
+            @if($compareError)
+                <div class="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
+                    <i class="fa-solid fa-triangle-exclamation text-red-500 text-sm mt-0.5 flex-shrink-0"></i>
+                    <p class="text-sm font-medium text-red-700 leading-snug">{{ $compareError }}</p>
+                </div>
+            @endif
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                {{-- GROUP A --}}
+                <div class="bg-[#F9F7FC] rounded-xl border border-[#E8E0F0] p-4">
+                    <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-3 flex items-center gap-1.5">
+                        <span class="w-5 h-5 rounded-full bg-[#7a3f91] text-white flex items-center justify-center text-[10px]">A</span>
+                        Group A
+                    </p>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Program</label>
+                    <select wire:model.live="compareCourseA"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                        <option value="">All Programs</option>
+                        @foreach($courses as $c)
+                            <option value="{{ $c->code }}">{{ $c->code }}</option>
+                        @endforeach
+                    </select>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
+                    <select wire:model.live="compareBatchA"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                        <option value="">All Batches</option>
+                        @foreach($this->batchesForCourse($compareCourseA) as $b)
+                            <option value="{{ $b }}">Batch {{ $b }}</option>
+                        @endforeach
+                    </select>
+                    @if(empty($this->batchesForCourse($compareCourseA)))
+                        <p class="text-xs text-[#999999] mt-1.5 italic">No batches available for this program yet.</p>
+                    @endif
+                </div>
+
+                {{-- GROUP B --}}
+                <div class="bg-[#F9F7FC] rounded-xl border border-[#E8E0F0] p-4">
+                    <p class="text-xs font-bold uppercase tracking-widest text-[#9b59b6] mb-3 flex items-center gap-1.5">
+                        <span class="w-5 h-5 rounded-full bg-[#9b59b6] text-white flex items-center justify-center text-[10px]">B</span>
+                        Group B
+                    </p>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Program</label>
+                    <select wire:model.live="compareCourseB"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
+                        <option value="">All Programs</option>
+                        @foreach($courses as $c)
+                            <option value="{{ $c->code }}">{{ $c->code }}</option>
+                        @endforeach
+                    </select>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
+                    <select wire:model.live="compareBatchB"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
+                        <option value="">All Batches</option>
+                        @foreach($this->batchesForCourse($compareCourseB) as $b)
+                            <option value="{{ $b }}">Batch {{ $b }}</option>
+                        @endforeach
+                    </select>
+                    @if(empty($this->batchesForCourse($compareCourseB)))
+                        <p class="text-xs text-[#999999] mt-1.5 italic">No batches available for this program yet.</p>
+                    @endif
+                </div>
+            </div>
+
+            {{-- Results --}}
+            @if($compareRan)
+                <div class="border-t border-[#E8E0F0] pt-4 space-y-4">
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {{-- Result A --}}
+                        <div class="rounded-xl border border-[#E8E0F0] p-4 {{ ($compareResultA['rate'] ?? 0) >= ($compareResultB['rate'] ?? 0) && ($compareResultA['total'] ?? 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-white' }}">
+                            <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-1">{{ $compareResultA['course'] ?? '—' }} · {{ $compareResultA['batch'] ?? '—' }}</p>
+                            <p class="text-3xl font-bold text-[#333333] leading-none">{{ $compareResultA['rate'] ?? 0 }}%</p>
+                            <p class="text-xs text-[#666666] mt-1">Employment Rate</p>
+                            <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Total Alumni</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['total'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Working</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['working'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Employed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['employed'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Unemployed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['unemployed'] ?? 0 }}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Result B --}}
+                        <div class="rounded-xl border border-[#E8E0F0] p-4 {{ ($compareResultB['rate'] ?? 0) > ($compareResultA['rate'] ?? 0) && ($compareResultB['total'] ?? 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-white' }}">
+                            <p class="text-xs font-bold uppercase tracking-widest text-[#9b59b6] mb-1">{{ $compareResultB['course'] ?? '—' }} · {{ $compareResultB['batch'] ?? '—' }}</p>
+                            <p class="text-3xl font-bold text-[#333333] leading-none">{{ $compareResultB['rate'] ?? 0 }}%</p>
+                            <p class="text-xs text-[#666666] mt-1">Employment Rate</p>
+                            <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Total Alumni</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['total'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Working</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['working'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Employed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['employed'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Unemployed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['unemployed'] ?? 0 }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- AI-style simple insight, with highlighted text --}}
+                    @if($compareInsight)
+                        <div class="rounded-xl border border-purple-200 bg-gradient-to-br from-[#F9F7FC] to-purple-50 p-4 flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
+                                <i class="fa-solid fa-wand-magic-sparkles text-white text-xs"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#7a3f91] mb-1">Insight</p>
+                                <p class="text-sm leading-relaxed text-[#333333]">
+                                    <mark class="bg-yellow-200/70 text-[#333333] px-1 rounded font-semibold">{{ $compareInsight }}</mark>
+                                </p>
+                            </div>
+                        </div>
+                    @endif
+
+                </div>
+            @endif
+
+        </div>
+
+        {{-- Actions — pinned at the very bottom of the modal, below the
+             form and results, so the flow reads top-to-bottom: pick
+             groups → see results → act (Compare again / Reset) last. --}}
+        <div class="flex-shrink-0 flex items-center gap-2 px-5 py-4 border-t border-[#E8E0F0] bg-white">
+            <button type="button"
+                    wire:click="runCompare"
+                    wire:loading.attr="disabled"
+                    wire:target="runCompare"
+                    class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110 disabled:opacity-60">
+                <i class="fa-solid fa-chart-simple text-sm" wire:loading.remove wire:target="runCompare"></i>
+                <i class="fa-solid fa-spinner fa-spin text-sm" wire:loading wire:target="runCompare"></i>
+                Compare Now
+            </button>
+            <button type="button"
+                    wire:click="resetCompare"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer text-[#333333]">
+                <i class="fas fa-rotate-left text-sm"></i>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
+        </div>
+    </div>
+</div>
+@endif
+
+<style>
+@keyframes aeFilterProgress {
+    0%   { left: -40%; }
+    100% { left: 100%; }
+}
+</style>
 
 <script>
 (function () {
@@ -1573,13 +1756,13 @@ select.ae-filter-input.ae-active {
                 if (!tip || !isHoverCapable()) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
-                tip.classList.add('visible');
+                tip.classList.add('opacity-100');
             });
             row.addEventListener('mouseleave', function () {
-                if (tip) tip.classList.remove('visible');
+                if (tip) tip.classList.remove('opacity-100');
             });
             row.addEventListener('click', function () {
-                if (tip) tip.classList.remove('visible');
+                if (tip) tip.classList.remove('opacity-100');
             });
         });
     }

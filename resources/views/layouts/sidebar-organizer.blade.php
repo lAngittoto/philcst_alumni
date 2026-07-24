@@ -102,10 +102,6 @@
            COORDINATOR SIDEBAR — WHITE + COLLAPSIBLE (Alumni-style)
         ════════════════════════════════════════════════════════ */
 
-        /* Same collapse approach as the Alumni portal: only `width`
-           transitions on the sidebar itself, and `opacity` + `max-width`
-           transition on the text labels, both at the same 0.2s duration
-           so everything settles together on the first click. */
         .coord-sidebar {
             width: 18rem;
             min-width: 18rem;
@@ -114,13 +110,6 @@
             transition: width 0.2s ease, min-width 0.2s ease;
         }
 
-        /* ── Modal-hidden state ──────────────────────────────────────
-           Pag may open modal (e.g. alumni detail modal), itinatago natin
-           ang sidebar nang PURELY VISUAL (opacity/transform) at inaalis
-           siya sa flex flow gamit `position: fixed` sa desktop, para
-           HINDI kailanman gumalaw/lumaki yung table/content sa tabi
-           niya. Ang mobile naman ay naka-fixed na talaga by default kaya
-           opacity + translate lang ang kailangan doon. ── */
         @media (min-width: 1024px) {
             .coord-sidebar.coord-sidebar-modal-hidden {
                 position: fixed !important;
@@ -181,7 +170,6 @@
         }
         .coord-nav-icon { transition: transform 0.2s ease; }
 
-        /* ── Fade/width-collapsible text (labels, brand text, etc.) ── */
         .coord-collapsible-text {
             opacity: 1;
             max-width: 220px;
@@ -190,7 +178,6 @@
             transition: opacity 0.2s ease, max-width 0.2s ease;
         }
 
-        /* ── MENU label row + inline collapse icon-button (desktop) ── */
         .coord-nav-section-row {
             display: flex;
             align-items: center;
@@ -223,7 +210,6 @@
         .coord-collapse-icon-btn:active { transform: scale(0.88); }
         .coord-collapse-icon-btn i { pointer-events: none; }
 
-        /* Logout button + spinner (white sidebar style) */
         .coord-logout-btn {
             position: relative;
             width: 100%;
@@ -258,7 +244,6 @@
         @keyframes coord-spin { to { transform: rotate(360deg); } }
         .coord-logout-text-swap { display: inline-flex; align-items: center; }
 
-        /* ── Collapsed state (desktop only, manual << >> toggle) ── */
         @media (min-width: 1024px) {
             .coord-sidebar.is-collapsed {
                 width: 5rem !important;
@@ -311,12 +296,10 @@
                 min-width: 5.5rem;
             }
 
-            /* Hide the purple header block on mobile */
             #coord-sidebar-aside .coord-sidebar-header {
                 display: none !important;
             }
 
-            /* Icon-only nav on mobile: hide labels + section title */
             #coord-sidebar-aside .coord-section-label,
             #coord-sidebar-aside .coord-nav-section-row,
             #coord-sidebar-aside .coord-nav-link span:not(.coord-nav-icon) {
@@ -330,7 +313,6 @@
                 margin-right: 0 !important;
             }
 
-            /* Icon-only logout button on mobile */
             #coord-sidebar-aside .coord-logout-btn {
                 gap: 0;
                 padding: 1rem;
@@ -370,6 +352,64 @@
                 max-height: calc(100vh - 190px) !important;
             }
         }
+
+        /* ════════════════════════════════════════════════════════
+           SESSION-EXPIRED SOFT MODAL (replaces raw "Page Expired" page)
+        ════════════════════════════════════════════════════════ */
+        #coord-session-expired-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 999999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.55);
+            backdrop-filter: blur(1px);
+        }
+        #coord-session-expired-modal.is-visible { display: flex; }
+        .coord-sem-card {
+            background: #fff;
+            border-radius: 18px;
+            width: 100%;
+            max-width: 360px;
+            margin: 16px;
+            padding: 28px 24px 24px;
+            text-align: center;
+            box-shadow: 0 30px 70px rgba(0,0,0,0.35);
+            animation: coordSemIn 0.22s cubic-bezier(.25,.8,.25,1) both;
+        }
+        @keyframes coordSemIn {
+            from { opacity: 0; transform: translateY(10px) scale(.97); }
+            to   { opacity: 1; transform: none; }
+        }
+        .coord-sem-icon {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: #F3EBFA;
+            color: #7A3F91;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
+            margin: 0 auto 14px;
+        }
+        .coord-sem-title { font-weight: 800; font-size: 16px; color: #1a1a1a; }
+        .coord-sem-sub { font-size: 13px; color: #666; margin-top: 6px; line-height: 1.5; }
+        .coord-sem-btn {
+            margin-top: 18px;
+            width: 100%;
+            padding: 11px 16px;
+            border-radius: 12px;
+            border: none;
+            background: #7A3F91;
+            color: #fff;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: .03em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background-color .15s ease, transform .1s ease;
+        }
+        .coord-sem-btn:hover { background: #6A3580; }
+        .coord-sem-btn:active { transform: scale(0.97); }
     </style>
 
     <script>
@@ -380,6 +420,40 @@
         if (event.persisted) {
             window.location.reload();
         }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SESSION / CSRF EXPIRED (419) — SOFT RECOVERY
+    //  Instead of letting Livewire swap in Laravel's raw "Page Expired" HTML
+    //  (which looks like the whole app broke), we intercept the failed
+    //  request, suppress the default full-page replace, and show a small
+    //  branded modal asking the user to refresh. Clicking refresh does a
+    //  normal location.reload(), which mints a fresh session + CSRF token.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__coordShowSessionExpired = function () {
+        var modal = document.getElementById('coord-session-expired-modal');
+        if (modal) modal.classList.add('is-visible');
+    };
+
+    document.addEventListener('livewire:init', function () {
+        if (!window.Livewire || typeof Livewire.hook !== 'function') return;
+
+        Livewire.hook('request', function ({ fail }) {
+            fail(({ status, preventDefault }) => {
+                if (status === 419) {
+                    // Stop Livewire from dumping the raw expired-page HTML
+                    // into the DOM — show our own modal instead.
+                    preventDefault();
+                    window.__coordShowSessionExpired();
+                }
+            });
+        });
+    });
+
+    // Fallback for older Livewire versions / plain fetch-based failures
+    // that don't go through the hook above (defensive double-cover).
+    window.addEventListener('livewire:navigate:failed', function () {
+        window.__coordShowSessionExpired();
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -405,9 +479,11 @@
         'rotate-left':     { bg: '#DBEAFE', color: '#0284C7' }, // job restored — blue
         'calendar-check':  { bg: '#D1FAE5', color: '#059669' }, // event approved — green
         'calendar':        { bg: '#FEE2E2', color: '#DC2626' }, // event rejected — red
-        'chart-line':      { bg: '#DBEAFE', color: '#0369A1' }, // employment — blue
+        'chart-line':      { bg: '#DBEAFE', color: '#0369A1' }, // employment — blue (kept for legacy rows, no longer emitted)
         'user-plus':       { bg: '#FFE8D1', color: '#B45309' }, // alumni registered — amber
         'user-group':      { bg: '#FFE8D1', color: '#B45309' }, // alumni — amber
+        'pen-to-square':   { bg: '#EDE9FE', color: '#6D28D9' }, // self job-update — violet
+        'trash':           { bg: '#FEE2E2', color: '#DC2626' }, // self job-delete — red
         'bell':            { bg: '#F3F4F6', color: '#6B7280' }, // default — gray
     };
     window.__coordIconBg = function (icon) {
@@ -442,6 +518,10 @@
                     var res = await window.fetch('/coordinator/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
                     });
+                    if (res.status === 419) {
+                        window.__coordShowSessionExpired();
+                        return;
+                    }
                     if (res.ok) {
                         var raw = await res.json();
                         this.items = this._processNotifs(raw);
@@ -451,14 +531,17 @@
 
             // ─────────────────────────────────────────────────────────────────
             //  PROCESS NOTIFS
-            //  - Chat/message notifs  : group by day
-            //  - Employment notifs    : group by day (×N badge, latest updater)
-            //  - Event notifs         : show individually (APPROVED, REJECTED, UPDATED only)
+            //  - Chat/message notifs   : group by day
+            //  - Employment notifs     : EXCLUDED — not shown to organizer/coordinator at all
+            //  - Self job-action notifs: group by day + action (created/updated/
+            //                            activated/deactivated/deleted), ×N badge
+            //  - Event notifs          : show individually (APPROVED, REJECTED, UPDATED only)
+            //  - Everything else       : show individually
             // ─────────────────────────────────────────────────────────────────
             _processNotifs(rows) {
                 var result = [];
                 var msgMap = new Map();
-                var empMap = new Map();
+                var selfJobMap = new Map();
 
                 Array.from(rows)
                     .sort(function (a, b) {
@@ -478,10 +561,17 @@
                             n.icon === 'calendar'
                         );
 
+                        // Employment notifs are intentionally excluded from the
+                        // organizer/coordinator notification list — skip entirely.
                         var isEmpNotif = (
                             rawDedup.startsWith('employment::') ||
                             n.icon === 'chart-line'
                         );
+                        if (isEmpNotif) return;
+
+                        // Self job-action notifs (organizer posting/editing/
+                        // activating/deactivating/deleting their OWN job).
+                        var isSelfJobNotif = rawDedup.startsWith('job-self::');
 
                         if (isEventNotif) {
                             var action = '';
@@ -491,9 +581,16 @@
                             if (allowedActions.indexOf(action) === -1) return;
                         }
 
-                        var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
-                            ? n.updated_at
-                            : n.created_at;
+                        // ── Timestamp used for display + sorting ──
+                        // IMPORTANT: this must ALWAYS be n.created_at — never
+                        // n.updated_at. updated_at changes the moment a
+                        // notification row is marked as read (Eloquent
+                        // "touch"), which previously caused an older
+                        // notification to jump to the top of the list (and
+                        // show a "just now" time) the instant it was opened,
+                        // making the whole list look out of order and several
+                        // unrelated items appear to share the same time.
+                        var nTimestamp = n.created_at;
 
                         if (isMsgEvent) {
                             var day      = nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown';
@@ -521,27 +618,50 @@
                                 }));
                             }
 
-                        } else if (isEmpNotif) {
-                            var empDay = nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown';
-                            var empKey = 'employment_day::' + empDay;
+                        } else if (isSelfJobNotif) {
+                            // dedup_key shape: job-self::{action}::{YYYY-MM-DD}::{jobId}
+                            var sjParts  = rawDedup.split('::');
+                            var sjAction = sjParts[1] || 'updated';
+                            var sjDay    = sjParts[2] || (nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown');
+                            var sjKey    = 'job-self_day::' + sjAction + '::' + sjDay;
 
-                            if (empMap.has(empKey)) {
-                                var eg = empMap.get(empKey);
-                                eg.count = (Number(eg.count) || 1) + 1;
-                                if (!n.read) eg.read = false;
-                                eg._ids.push(n.id);
-                                if (nTimestamp && new Date(nTimestamp) > new Date(eg.created_at)) {
-                                    eg.created_at = nTimestamp;
-                                    eg.message    = n.message;
+                            var sjTitleMap = {
+                                'created':      'Job Posted',
+                                'updated':      'Job Updated',
+                                'activated':    'Job Activated',
+                                'deactivated':  'Job Deactivated',
+                                'deleted':      'Job Deleted',
+                            };
+                            var sjIconMap = {
+                                'created':      'briefcase',
+                                'updated':      'pen-to-square',
+                                'activated':    'circle-check',
+                                'deactivated':  'circle-pause',
+                                'deleted':      'trash',
+                            };
+
+                            if (selfJobMap.has(sjKey)) {
+                                var sg = selfJobMap.get(sjKey);
+                                sg.count = (Number(sg.count) || 1) + 1;
+                                if (!n.read) sg.read = false;
+                                sg._ids.push(n.id);
+                                if (nTimestamp && new Date(nTimestamp) > new Date(sg.created_at)) {
+                                    sg.created_at   = nTimestamp;
+                                    sg._latestTitle = n.job_title || n.message || sg._latestTitle;
                                 }
-                                eg.title = eg.count + ' Employment Status Updated';
+                                var sLabel = sjTitleMap[sjAction] || 'Job Updated';
+                                sg.title   = sg.count + ' ' + sLabel + (sg.count > 1 ? 's' : '') + ' Today';
+                                sg.message = 'Latest: "' + (sg._latestTitle || 'a job posting') + '". ' + sg.count + ' total today.';
                             } else {
-                                empMap.set(empKey, Object.assign({}, n, {
-                                    count:      1,
-                                    _ids:       [n.id],
-                                    created_at: nTimestamp || n.created_at,
-                                    title:      '1 Employment Status Updated',
-                                    icon:       'chart-line',
+                                var sInitLabel = sjTitleMap[sjAction] || 'Job Updated';
+                                selfJobMap.set(sjKey, Object.assign({}, n, {
+                                    count:        1,
+                                    _ids:         [n.id],
+                                    created_at:   nTimestamp || n.created_at,
+                                    title:        '1 ' + sInitLabel + ' Today',
+                                    message:      n.message || (sInitLabel + '.'),
+                                    icon:         sjIconMap[sjAction] || 'briefcase',
+                                    _latestTitle: n.job_title || '',
                                 }));
                             }
 
@@ -555,7 +675,7 @@
                     });
 
                 msgMap.forEach(function (v) { result.push(v); });
-                empMap.forEach(function (v) { result.push(v); });
+                selfJobMap.forEach(function (v) { result.push(v); });
 
                 result.sort(function (a, b) {
                     return new Date(b.created_at) - new Date(a.created_at);
@@ -578,13 +698,14 @@
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 for (var i = 0; i < ids.length; i++) {
                     try {
-                        await window.fetch('/coordinator/notifications/' + ids[i] + '/read', {
+                        var r = await window.fetch('/coordinator/notifications/' + ids[i] + '/read', {
                             method: 'PATCH',
                             headers: {
                                 'X-CSRF-TOKEN':     csrf,
                                 'X-Requested-With': 'XMLHttpRequest',
                             }
                         });
+                        if (r.status === 419) { window.__coordShowSessionExpired(); return; }
                     } catch (e) { /* ignore */ }
                 }
             },
@@ -592,13 +713,14 @@
             async markAllRead() {
                 this.items.forEach(function (n) { n.read = true; });
                 try {
-                    await window.fetch('/coordinator/notifications/read-all', {
+                    var r = await window.fetch('/coordinator/notifications/read-all', {
                         method: 'PATCH',
                         headers: {
                             'X-CSRF-TOKEN':     document.querySelector('meta[name="csrf-token"]').content,
                             'X-Requested-With': 'XMLHttpRequest',
                         }
                     });
+                    if (r.status === 419) { window.__coordShowSessionExpired(); }
                 } catch (e) { /* ignore */ }
             },
 
@@ -613,13 +735,14 @@
                     var ids = matched[i]._ids || [matched[i].id];
                     for (var j = 0; j < ids.length; j++) {
                         try {
-                            await window.fetch('/coordinator/notifications/' + ids[j] + '/read', {
+                            var r = await window.fetch('/coordinator/notifications/' + ids[j] + '/read', {
                                 method: 'PATCH',
                                 headers: {
                                     'X-CSRF-TOKEN':     csrf,
                                     'X-Requested-With': 'XMLHttpRequest',
                                 }
                             });
+                            if (r.status === 419) { window.__coordShowSessionExpired(); return; }
                         } catch (e) { /* ignore */ }
                     }
                 }
@@ -742,9 +865,19 @@
             return d[0] || {};
         }
 
+        function _todayStr() {
+            // Local-date (not UTC) "today" bucket so the ×N grouping matches
+            // what the organizer actually perceives as "today".
+            var d = new Date();
+            var y = d.getFullYear();
+            var m = String(d.getMonth() + 1).padStart(2, '0');
+            var day = String(d.getDate()).padStart(2, '0');
+            return y + '-' + m + '-' + day;
+        }
+
         async function _saveCoordNotif(payload) {
             try {
-                await window.fetch('/coordinator/notifications', {
+                var res = await window.fetch('/coordinator/notifications', {
                     method: 'POST',
                     headers: {
                         'Content-Type':     'application/json',
@@ -753,6 +886,7 @@
                     },
                     body: JSON.stringify(payload),
                 });
+                if (res.status === 419) { window.__coordShowSessionExpired(); return; }
                 await new Promise(function (r) { setTimeout(r, 300); });
                 var s = window.__safeCoordNotifsStore();
                 if (s) await s._fetch();
@@ -797,53 +931,98 @@
             });
         });
 
+        // ── Job actions coming from the Alumni Director's Manage Job screen
+        //    (resources/views/livewire/director/manage-job.blade.php →
+        //    notifyOrganizers() → dispatch('job-management-updated', ...)).
+        //    Covers the full lifecycle: posted (created), updated, activated,
+        //    deactivated, deleted, restored — all clearly labeled as done
+        //    "by the Alumni Director" so organizers/coordinators know these
+        //    came from the director's side, not their own actions. ──
         window.addEventListener('job-management-updated', function (e) {
             var d = _coordDetail(e);
             var action = d.action || '';
 
-            var allowedJobActions = ['activated', 'deactivated', 'restored', 'director_posted'];
+            var allowedJobActions = ['director_posted', 'updated', 'activated', 'deactivated', 'deleted', 'restored'];
             if (allowedJobActions.indexOf(action) === -1) return;
 
             var titleMap = {
-                'activated':       'Job Posting Activated',
-                'deactivated':     'Job Posting Deactivated',
-                'restored':        'Job Posting Restored',
-                'director_posted': 'New Job Posted by Director',
+                'director_posted': 'Job Posted by Alumni Director',
+                'updated':         'Job Updated by Alumni Director',
+                'activated':       'Job Activated by Alumni Director',
+                'deactivated':     'Job Deactivated by Alumni Director',
+                'deleted':         'Job Deleted by Alumni Director',
+                'restored':        'Job Restored by Alumni Director',
             };
             var msgMap = {
-                'activated':       (d.title || 'A job posting') + ' is now active and visible to alumni.',
-                'deactivated':     (d.title || 'A job posting') + ' has been deactivated.',
-                'restored':        (d.title || 'A deleted job posting') + ' has been restored.',
                 'director_posted': 'Alumni Director posted a new job: "' + (d.title || 'Untitled') + '".',
+                'updated':         'Alumni Director updated the job posting "' + (d.title || 'a job posting') + '".',
+                'activated':       'Alumni Director activated "' + (d.title || 'a job posting') + '" — now visible to alumni.',
+                'deactivated':     'Alumni Director deactivated "' + (d.title || 'a job posting') + '".',
+                'deleted':         'Alumni Director deleted the job posting "' + (d.title || 'a job posting') + '".',
+                'restored':        'Alumni Director restored the job posting "' + (d.title || 'a job posting') + '".',
             };
             var iconMap = {
+                'director_posted': 'briefcase',
+                'updated':         'pen-to-square',
                 'activated':       'circle-check',
                 'deactivated':     'circle-pause',
+                'deleted':         'trash',
                 'restored':        'rotate-left',
-                'director_posted': 'briefcase',
             };
 
             _saveCoordNotif({
                 icon:       iconMap[action]  || 'briefcase',
-                title:      titleMap[action] || 'Job Update',
-                message:    msgMap[action]   || (d.title || 'A job posting') + ' was ' + action + '.',
+                title:      titleMap[action] || 'Job Update by Alumni Director',
+                message:    msgMap[action]   || (d.title || 'A job posting') + ' was ' + action + ' by the Alumni Director.',
                 link_route: 'organizer.job/management',
                 link_label: 'View Jobs',
                 dedup_key:  'job-management::' + action + '::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
 
-        window.addEventListener('employment-updated', function (e) {
+        // ── Self-notif: fires when the organizer creates/updates/activates/
+        //    deactivates/deletes THEIR OWN job posting. Grouped by day+action
+        //    on the frontend (job-self::{action}::{day}::{jobId} dedup key),
+        //    so 3 edits today collapse into one "3 Jobs Updated Today" row. ──
+        window.addEventListener('job-self-action', function (e) {
             var d = _coordDetail(e);
+            var action = d.action || 'updated';
+
+            var titleMap = {
+                'created':      'You Posted a Job',
+                'updated':      'You Updated a Job',
+                'activated':    'You Activated a Job',
+                'deactivated':  'You Deactivated a Job',
+                'deleted':      'You Deleted a Job',
+            };
+            var msgMap = {
+                'created':      'You posted "' + (d.title || 'a job') + '".',
+                'updated':      'You updated "' + (d.title || 'a job') + '".',
+                'activated':    'You activated "' + (d.title || 'a job') + '".',
+                'deactivated':  'You deactivated "' + (d.title || 'a job') + '".',
+                'deleted':      'You deleted "' + (d.title || 'a job') + '".',
+            };
+            var iconMap = {
+                'created':      'briefcase',
+                'updated':      'pen-to-square',
+                'activated':    'circle-check',
+                'deactivated':  'circle-pause',
+                'deleted':      'trash',
+            };
+
             _saveCoordNotif({
-                icon:       'chart-line',
-                title:      'Employment Status Updated',
-                message:    (d.alumni || 'An alumni') + ' updated their employment status.',
-                link_route: 'organizer.alumni/employment',
-                link_label: 'View Employment',
-                dedup_key:  'employment::' + (d.id || Math.floor(Date.now() / 60000)),
+                icon:       iconMap[action]  || 'briefcase',
+                title:      titleMap[action] || 'Job Update',
+                message:    msgMap[action]   || (d.title || 'A job posting') + ' was ' + action + '.',
+                job_title:  d.title || '',
+                link_route: 'organizer.job/management',
+                link_label: 'View Jobs',
+                dedup_key:  'job-self::' + action + '::' + _todayStr() + '::' + (d.id || 0),
             });
         });
+
+        // ── Employment notifs: listener intentionally removed. Organizer/
+        //    coordinator should NOT see employment-status-update notifs. ──
 
         window.addEventListener('coord-notif-refresh', function () {
             var s = window.__safeCoordNotifsStore();
@@ -900,9 +1079,6 @@
         sidebarHiddenByModal: false,
         loggingOut: false,
         toggleSidebar() {
-            // Plain in-memory boolean — no localStorage, no pre-boot script.
-            // Every visual consequence (icon direction, text fade, widths)
-            // is a pure :class/:title binding off this exact boolean.
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
@@ -912,10 +1088,6 @@
 
 <div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile overlay — raised to z-50 so it always sits above in-page
-         content (like the yearbook filter bar, which needs its own
-         z-index for dropdown panels) instead of blending/overlapping
-         with it when the drawer is open. --}}
     <div
         x-show="open"
         x-transition:enter="transition opacity-ease-out duration-300"
@@ -928,18 +1100,6 @@
         class="fixed inset-0 z-50 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR — white, collapsible (Alumni-style) ══
-         z-[60]: must stay above the mobile overlay (z-50) AND above any
-         in-page component that sets its own stacking context (e.g. the
-         yearbook filter bar), so the drawer never gets visually "cut into"
-         by page content while it's open on tablet/mobile.
-
-         NOTE: hiding this sidebar when a modal opens is done PURELY via
-         the `coord-sidebar-modal-hidden` CSS class (opacity/transform +
-         `position: fixed` on desktop) instead of `x-show`/`x-if`. This
-         keeps the element out of Alpine's DOM add/remove cycle and out
-         of the flex flow without ever changing the width `<main>` sees,
-         so the table/content next to it never resizes or jumps. --}}
     <aside
         id="coord-sidebar-aside"
         :class="{
@@ -975,10 +1135,6 @@
             <div class="coord-nav-section-row">
                 <p class="coord-section-label coord-collapsible-text">MENU</p>
 
-                {{-- Collapse/expand toggle button. Static default class
-                     `fa-angles-left` matches the default Alpine state
-                     (sidebarCollapsed: false) so there's no flash before
-                     Alpine hydrates. --}}
                 <button type="button"
                         @click.stop="toggleSidebar()"
                         :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
@@ -1091,8 +1247,6 @@
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 min-h-0">
 
-        {{-- Top bar — visible on ALL screen sizes. Hamburger only shows on mobile.
-             Bell always sits on the right, icon-only. --}}
         <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
                        shrink-0 z-30">
             <button @click="open = !open"
@@ -1108,7 +1262,6 @@
             </button>
             <span class="hidden lg:block"></span>
 
-            {{-- Notifications bell — right side, icon-only on every screen size --}}
             <button
                 id="coord-bell-btn"
                 type="button"
@@ -1287,55 +1440,75 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
-                                {{-- Count badge: grouped employment notifs --}}
+                                {{-- Count badge: grouped self job-action notifs --}}
                                 <span
-                                    x-show="Number(notif.count) > 1 && notif.icon === 'chart-line'"
+                                    x-show="Number(notif.count) > 1 && ['briefcase','pen-to-square','circle-check','circle-pause','trash'].includes(notif.icon)"
                                     x-cloak
                                     class="inline-flex items-center justify-center
                                            min-w-[22px] h-5 rounded-full px-1.5
                                            text-[10px] font-black text-white leading-none"
-                                    style="background:#0284c7;"
+                                    style="background:#6D28D9;"
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
-                                {{-- Job badge --}}
+                                {{-- Job badge — posted by Alumni Director --}}
                                 <span
                                     x-show="notif.icon === 'briefcase' && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:#B45309;">
-                                    JOB
+                                    POSTED BY ALUMNI DIRECTOR
                                 </span>
 
-                                {{-- Job activated badge --}}
+                                {{-- Job activated badge — by Alumni Director --}}
                                 <span
                                     x-show="notif.icon === 'circle-check' && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:#059669;">
-                                    JOB
+                                    ACTIVATED BY ALUMNI DIRECTOR
                                 </span>
 
-                                {{-- Job deactivated badge --}}
+                                {{-- Job deactivated badge — by Alumni Director --}}
                                 <span
                                     x-show="notif.icon === 'circle-pause' && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:#D97706;">
-                                    JOB
+                                    DEACTIVATED BY ALUMNI DIRECTOR
                                 </span>
 
-                                {{-- Job restored badge --}}
+                                {{-- Job restored badge — by Alumni Director --}}
                                 <span
                                     x-show="notif.icon === 'rotate-left' && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:#0284C7;">
-                                    JOB
+                                    RESTORED BY ALUMNI DIRECTOR
+                                </span>
+
+                                {{-- Job updated badge — by Alumni Director --}}
+                                <span
+                                    x-show="notif.icon === 'pen-to-square' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:#6D28D9;">
+                                    UPDATED BY ALUMNI DIRECTOR
+                                </span>
+
+                                {{-- Job deleted badge — by Alumni Director --}}
+                                <span
+                                    x-show="notif.icon === 'trash' && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:#DC2626;">
+                                    DELETED BY ALUMNI DIRECTOR
                                 </span>
 
                                 {{-- Event Approved badge --}}
@@ -1356,16 +1529,6 @@
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:#DC2626;">
                                     EVENT
-                                </span>
-
-                                {{-- Employment badge --}}
-                                <span
-                                    x-show="notif.icon === 'chart-line' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:#0369A1;">
-                                    EMPLOYMENT
                                 </span>
 
                                 {{-- Chat Message badge --}}
@@ -1408,7 +1571,7 @@
                                   x-text="notif.created_at
                                       ? new Date(notif.created_at).toLocaleString('en-PH',{
                                           month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit'
+                                          hour:'2-digit',minute:'2-digit',second:'2-digit'
                                         })
                                       : ''">
                             </span>
@@ -1425,6 +1588,21 @@
         <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
             Click a notification to view and mark as read
         </p>
+    </div>
+</div>
+
+{{-- ══ SESSION-EXPIRED SOFT MODAL — replaces raw "Page Expired" screen ══ --}}
+<div id="coord-session-expired-modal">
+    <div class="coord-sem-card">
+        <div class="coord-sem-icon"><i class="fas fa-clock-rotate-left"></i></div>
+        <p class="coord-sem-title">Your session has expired</p>
+        <p class="coord-sem-sub">
+            This tab was open for a while and your session timed out.
+            Refresh the page to continue where you left off.
+        </p>
+        <button type="button" class="coord-sem-btn" onclick="window.location.reload()">
+            <i class="fas fa-rotate-right mr-1.5"></i> Refresh Page
+        </button>
     </div>
 </div>
 

@@ -403,6 +403,151 @@ new class extends Component {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Notifies the Organizer/Coordinator side (bell in the organizer
+    // layout) whenever the Director acts on a director-posted job
+    // (create/update/activate/deactivate/delete/restore). The organizer
+    // layout's JS listens for the 'job-management-updated' browser event
+    // and groups these per-day + per-action into a single "×N" row.
+    //
+    // Only fired for director-posted jobs (organizer_id === null) since
+    // those are the ones visible to organizer/coordinator's target
+    // college/department — organizer's own jobs already notify themselves
+    // via their own component's 'job-self-action' event.
+    //
+    // ── FIX (this version) ──────────────────────────────────────────────
+    // Previously this used:
+    //     Organizer::query()->whereIn('department', $colleges)->pluck('user_id')
+    // which is an EXACT SQL string match against $job->target_college.
+    // Any whitespace or casing difference between organizer.department and
+    // the target_college label (very easy to happen since they're entered/
+    // selected in different places of the app) causes the whereIn() to
+    // silently match ZERO rows. That empties $targetUserIds, the method
+    // returns early, and NOTHING gets inserted — with no visible error,
+    // which is exactly why the Alumni-Director-posted job notification +
+    // "POSTED BY ALUMNI DIRECTOR" badge never showed up on the organizer
+    // side even though notifySelf()/audit log/etc. all worked fine.
+    //
+    // Now colleges are compared in PHP after normalizing both sides
+    // (trim + collapse internal whitespace + uppercase), so a stray space
+    // or case difference can no longer cause a silent, total match-miss.
+    // If $job->target_college is empty (meaning "All Colleges"), every
+    // active organizer/coordinator is notified instead of nobody.
+    // ─────────────────────────────────────────────────────────────────────
+    private function notifyOrganizers(string $action, JobPosting $job): void
+    {
+        \Log::info('notifyOrganizers CALLED', ['action' => $action, 'job_id' => $job->id, 'target_college' => $job->target_college]);
+
+        // Still fire the browser event too, in case a coordinator/organizer
+        // happens to be logged in on this same browser session right now.
+        $this->dispatch('job-management-updated', [
+            'id'     => $job->id,
+            'title'  => $job->job_title,
+            'action' => $action,
+        ]);
+
+        $titleMap = [
+            'director_posted' => 'Job Posted by Alumni Director',
+            'updated'          => 'Job Updated by Alumni Director',
+            'activated'        => 'Job Activated by Alumni Director',
+            'deactivated'      => 'Job Deactivated by Alumni Director',
+            'deleted'          => 'Job Deleted by Alumni Director',
+            'restored'         => 'Job Restored by Alumni Director',
+        ];
+        $msgMap = [
+            'director_posted' => 'Alumni Director posted a new job: "' . $job->job_title . '".',
+            'updated'          => 'Alumni Director updated the job posting "' . $job->job_title . '".',
+            'activated'        => 'Alumni Director activated "' . $job->job_title . '" — now visible to alumni.',
+            'deactivated'      => 'Alumni Director deactivated "' . $job->job_title . '".',
+            'deleted'          => 'Alumni Director deleted the job posting "' . $job->job_title . '".',
+            'restored'         => 'Alumni Director restored the job posting "' . $job->job_title . '".',
+        ];
+        $iconMap = [
+            'director_posted' => 'briefcase',
+            'updated'          => 'pen-to-square',
+            'activated'        => 'circle-check',
+            'deactivated'      => 'circle-pause',
+            'deleted'          => 'trash',
+            'restored'         => 'rotate-left',
+        ];
+
+        if (!isset($titleMap[$action])) return;
+
+        // Resolve target coordinator user_ids based on the job's target
+        // colleges, using normalized (trim + collapse-whitespace + upper)
+        // comparison instead of an exact SQL string match.
+        $targetUserIds = collect();
+
+        if ($job->target_college) {
+            $normalize = fn ($s) => mb_strtoupper(trim(preg_replace('/\s+/', ' ', (string) $s)));
+
+            $wantedColleges = collect(explode(',', $job->target_college))
+                ->map($normalize)
+                ->filter()
+                ->values();
+
+            \Log::info('notifyOrganizers WANTED COLLEGES (normalized)', ['wanted' => $wantedColleges->toArray()]);
+
+            $targetUserIds = \App\Models\Organizer::query()
+                ->whereNull('deleted_at')
+                ->get(['id', 'user_id', 'department'])
+                ->filter(function ($org) use ($wantedColleges, $normalize) {
+                    return $wantedColleges->contains($normalize($org->department ?? ''));
+                })
+                ->pluck('user_id')
+                ->filter()
+                ->unique();
+        } else {
+            // No target_college recorded on the job = "All Colleges" ->
+            // notify every active (non-deleted) organizer/coordinator.
+            $targetUserIds = \App\Models\Organizer::query()
+                ->whereNull('deleted_at')
+                ->pluck('user_id')
+                ->filter()
+                ->unique();
+        }
+
+        \Log::info('notifyOrganizers TARGET IDS', ['targetUserIds' => $targetUserIds->toArray()]);
+
+        if ($targetUserIds->isEmpty()) {
+            \Log::warning('notifyOrganizers EMPTY TARGETS - stopped here', [
+                'job_id'           => $job->id,
+                'target_college'   => $job->target_college,
+                'all_departments'  => \App\Models\Organizer::query()->whereNull('deleted_at')->pluck('department'),
+            ]);
+            return;
+        }
+
+        $dedupKey = 'job-management::' . $action . '::' . $job->id;
+        $now = now();
+
+        $rows = $targetUserIds->map(function ($uid) use ($dedupKey, $titleMap, $msgMap, $iconMap, $action, $now) {
+            return [
+                'user_id'    => $uid,
+                'icon'       => $iconMap[$action],
+                'title'      => $titleMap[$action],
+                'message'    => $msgMap[$action],
+                'link_route' => 'organizer.job/management',
+                'link_label' => 'View Jobs',
+                'dedup_key'  => $dedupKey,
+                'read'       => false,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        })->toArray();
+
+        try {
+            \App\Models\CoordinatorNotification::where('dedup_key', $dedupKey)
+                ->where('created_at', '>=', $now->copy()->subMinutes(5))
+                ->delete(); // clear stale dup from same action within window, if any
+
+            \App\Models\CoordinatorNotification::insert($rows);
+            \Log::info('notifyOrganizers INSERT SUCCESS', ['rows' => count($rows), 'user_ids' => $targetUserIds->toArray()]);
+        } catch (\Throwable $e) {
+            \Log::error('notifyOrganizers INSERT FAILED', ['error' => $e->getMessage()]);
+        }
+    }
+
     private function fetchJob(int $id): JobPosting
     {
         return JobPosting::with('organizer')->findOrFail($id);
@@ -738,12 +883,7 @@ new class extends Component {
         );
 
         $this->notifySelf('created', $job);
-
-        $this->dispatch('job-management-updated', [
-            'id'     => $job->id,
-            'title'  => $job->job_title,
-            'action' => 'director_posted',
-        ]);
+        $this->notifyOrganizers('director_posted', $job);
 
         Cache::forget('job_options_grouped');
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
@@ -972,6 +1112,7 @@ new class extends Component {
             'deadline_label'   => \Carbon\Carbon::parse($deadline)->format('M d, Y'),
             'reactivated'      => $shouldReactivate,
         ]);
+        $this->notifyOrganizers('updated', $job);
 
         $this->writeAuditLog(
             action:      'updated',
@@ -1065,7 +1206,10 @@ new class extends Component {
             'updated_by_role' => auth()->user()->role,
         ]);
 
-        $this->notifySelf($newStatus === 'ACTIVE' ? 'activated' : 'deactivated', $job);
+        $toggleAction = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
+
+        $this->notifySelf($toggleAction, $job);
+        $this->notifyOrganizers($toggleAction, $job);
 
         $label = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
 
@@ -1118,6 +1262,8 @@ new class extends Component {
 
         $job = JobPosting::findOrFail($this->deleteJobId);
 
+        $wasDirectorJob = is_null($job->organizer_id);
+
         $snapshot = [
             'job_title'       => $job->job_title,
             'company_name'    => $job->company_name,
@@ -1132,6 +1278,9 @@ new class extends Component {
         ]);
 
         $this->notifySelf('deleted', $job);
+        if ($wasDirectorJob) {
+            $this->notifyOrganizers('deleted', $job);
+        }
 
         $this->writeAuditLog(
             action:      'deleted',
@@ -1193,6 +1342,7 @@ new class extends Component {
         ]);
 
         $this->notifySelf('restored', $job);
+        $this->notifyOrganizers('restored', $job);
 
         $this->writeAuditLog(
             action:      'updated',

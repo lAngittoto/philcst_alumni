@@ -538,6 +538,9 @@ public function closePostModal(): void
         // ── NOTIFY ALUMNI (server-side, direct DB insert) ───────────────────
         app(AlumniNotificationController::class)->notifyAlumniOfNewJob($job);
 
+        // ── NOTIFY SELF (organizer sidebar notif — grouped ×N per day client-side) ──
+        $this->dispatch('job-self-action', action: 'created', id: $job->id, title: $job->job_title);
+
     $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
         $this->resetPostFields();
@@ -798,9 +801,19 @@ public function openEditModal(int $id): void
             severity: 'info'
         );
 
+        // ── NOTIFY SELF (organizer sidebar notif — grouped ×N per day client-side) ──
+        $this->dispatch('job-self-action', action: 'updated', id: $job->id, title: $this->sanitize($this->editJobTitle));
+
         $this->dispatch('flash-message', type: 'success', message: 'Job posting updated successfully.');
         $this->showEditModal = false;
         $this->resetEditFields();
+
+        // ── FIX: reveal the sidebar again after a successful save. Editing a
+        //    job hides the sidebar (close-sidebar was dispatched when the
+        //    modal opened); previously this method never dispatched
+        //    open-sidebar back, so the sidebar stayed hidden/blank after
+        //    saving changes until the user manually navigated away. ──
+        $this->dispatch('open-sidebar');
     }
 
     private function resetEditFields(): void
@@ -884,6 +897,9 @@ public function openEditModal(int $id): void
                 'action' => $newStatus === 'ACTIVE' ? 'activated' : 'deactivated',
             ]);
 
+            // ── NOTIFY SELF (organizer sidebar notif — grouped ×N per day client-side) ──
+            $this->dispatch('job-self-action', action: $newStatus === 'ACTIVE' ? 'activated' : 'deactivated', id: $job->id, title: $job->job_title);
+
             $this->dispatch('flash-message', type: 'success', message: $msg);
         }
 
@@ -947,6 +963,9 @@ public function openEditModal(int $id): void
             severity:     'warning'
         );
 
+        // ── NOTIFY SELF (organizer sidebar notif — grouped ×N per day client-side) ──
+        $this->dispatch('job-self-action', action: 'deleted', id: $job->id, title: $job->job_title);
+
         $this->dispatch('flash-message', type: 'success', message: 'Job posting permanently deleted.');
         $this->cancelDeleteJob();
 
@@ -958,6 +977,11 @@ public function openEditModal(int $id): void
             $this->showViewModal = false;
             $this->viewingJobId  = null;
         }
+
+        // ── FIX: deleting a job from inside the Edit/View modal closes that
+        //    modal, but the sidebar (hidden via close-sidebar when the modal
+        //    opened) was never told to come back. Restore it here too. ──
+        $this->dispatch('open-sidebar');
     }
 
     public function cancelDeleteJob(): void
@@ -1141,6 +1165,31 @@ select:disabled {
     color: #999999 !important;
     cursor: not-allowed !important;
     opacity: 1;
+}
+
+/* ── Date inputs: reserve room so the full date (incl. the 4-digit year)
+     is never clipped or overlapped by the native calendar-picker icon.
+     Previously "07/24/2026" would render with "2026" crammed right up
+     against (or partially behind) the icon on smaller field widths. ── */
+input[type="date"] {
+    position: relative;
+    padding-right: 2.5rem !important;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+    position: absolute;
+    right: 0.55rem;
+    top: 50%;
+    transform: translateY(-50%);
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0.75;
+}
+input[type="date"]::-webkit-datetime-edit {
+    padding-right: 2px;
+}
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding-right: 2px;
 }
 
 /* ── Modal top-right icon buttons: fully transparent, no white fill ── */

@@ -174,12 +174,43 @@ new class extends Component {
     //
     // IMPORTANT: this marker is an internal DB identifier ONLY. It must
     // NEVER be rendered to the user anywhere (room list, header, tooltip,
-    // title attribute, etc). Every display path below always resolves the
-    // human-readable college label instead — see collegeDisplayLabel().
+    // title attribute, compose placeholder, etc). Every display path
+    // routes through displayCourseLabel() / roomDisplayName() /
+    // collegeDisplayLabel() below instead of touching course_code raw.
     // ─────────────────────────────────────────────────────────────────────
     private function collegeMarker(string $college): string
     {
         return 'CLG_' . substr(md5($college), 0, 12);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Is a given course_code value actually the internal college marker
+    // (or the legacy empty-string college placeholder)? Centralizing this
+    // check means every place that used to test `$code === ''` now also
+    // safely catches the `CLG_xxxxxxxxxxxx` marker format, so it can never
+    // be mistaken for a real course code and printed to the screen.
+    // ─────────────────────────────────────────────────────────────────────
+    private function isInternalMarkerCode(?string $code): bool
+    {
+        $code = (string) $code;
+        return $code === '' || str_starts_with($code, 'CLG_') || $code === '__director__';
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // SINGLE SOURCE OF TRUTH for printing a course code anywhere in the UI.
+    // If the stored value is the internal college marker / legacy empty
+    // string / staff marker, this NEVER echoes it — it always falls back
+    // to the human-readable college label instead. Every blade expression
+    // that used to do `strtoupper($room['course_code'])` directly has been
+    // routed through this helper so a raw CLG_xxxx can never leak into a
+    // header, tooltip, placeholder, or room list row again.
+    // ─────────────────────────────────────────────────────────────────────
+    private function displayCourseLabel(?string $code, ?string $department = null): string
+    {
+        if ($this->isInternalMarkerCode($code)) {
+            return $this->collegeDisplayLabel($department ?: $this->department);
+        }
+        return strtoupper($code);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -197,7 +228,7 @@ new class extends Component {
         return match ($r['type'] ?? '') {
             'staff'   => 'Staff Chat',
             'college' => $this->collegeDisplayLabel($r['department'] ?: $this->department),
-            'course'  => strtoupper($r['course_code']) . ' · All Batches GC',
+            'course'  => $this->displayCourseLabel($r['course_code'] ?? '', $r['department'] ?? null) . ' · All Batches GC',
             default   => $r['name'] ?? 'Group Chat',
         };
     }
@@ -207,7 +238,8 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     private function roomIsCollegeWide($row): bool
     {
-        return ($row->course_code ?? '') === '' && (int)($row->batch ?? 0) === 0;
+        $code = (string) ($row->course_code ?? '');
+        return ($code === '' || str_starts_with($code, 'CLG_')) && (int) ($row->batch ?? 0) === 0;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -346,21 +378,43 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // SINGLE UNIFIED POLL — wire:poll.1500ms
+    // SINGLE UNIFIED POLL — wire:poll.2500ms
+    //
+    // SMOOTHNESS FIX: previously this ran at 1500ms and did presence-ping
+    // + notification-scan + full room-list rebuild on EVERY tick, which is
+    // 4 DB round trips every 1.5s regardless of whether anything changed.
+    // That constant background load is what made clicking a room or
+    // sending a message feel laggy — the same request queue was shared
+    // with the poll's own DB work. Now:
+    //   - the poll interval is longer (2500ms) so there's more breathing
+    //     room between background ticks,
+    //   - .visible is used so polling pauses entirely while the browser
+    //     tab isn't in focus (no wasted background requests at all),
+    //   - the heaviest step (loadRooms, which rebuilds the entire sidebar)
+    //     only runs every 2nd tick instead of every tick,
+    //   - selecting a room / sending a message no longer waits on the
+    //     poll's own request queue — see selectRoom()/sendMessage() below,
+    //     which now update local state immediately before touching the DB
+    //     for the heavier notification/read bookkeeping.
     // ─────────────────────────────────────────────────────────────────────
     public function unifiedPoll(): void
     {
         $this->pollTick++;
 
-        // Presence is pinged EVERY tick (not staggered) so the coordinator
-        // is kept "online" continuously while this page/tab is open, in
-        // addition to the global heartbeat that runs on every page via the
-        // shared layout (see presence.ping route) — that combination is
-        // what makes "logged in = online" true everywhere, not just here.
+        // Presence is pinged every tick so the coordinator stays "online"
+        // continuously while this page/tab is open and focused.
         $this->pingPresence();
 
         $this->checkAndDispatchNewMessageNotifications();
-        $this->loadRooms();
+
+        // Rebuilding the whole room list is the most expensive step here
+        // (it touches chat_rooms + chat_messages + alumni + organizer for
+        // every room). Doing it every OTHER tick instead of every tick
+        // cuts that DB load in half without any visible staleness, since
+        // unread badges/timestamps still refresh within ~5s.
+        if ($this->pollTick % 2 === 0) {
+            $this->loadRooms();
+        }
 
         if ($this->roomId) {
             $this->loadTypingIndicators();
@@ -546,7 +600,7 @@ new class extends Component {
             $roomLabel = $this->isCollegeRoom
                 ? $this->collegeDisplayLabel($this->department)
                 : ($this->isCourseRoom
-                    ? strtoupper($courseCode) . ' All Batches GC'
+                    ? $this->displayCourseLabel($courseCode) . ' All Batches GC'
                     : ($this->room['name'] ?? 'Group Chat'));
 
             $bodySnip = mb_substr($body, 0, 80);
@@ -767,7 +821,7 @@ new class extends Component {
                 $collegeItem = [
                     'id'             => $collegeRoomRow->id,
                     'name'           => $collegeLabel,
-                    'course_code'    => '',
+                    'course_code'    => '', // internal marker never exposed downstream — display always via 'name'/type
                     'course_name'    => $this->department,
                     'batch'          => 0,
                     'department'     => $collegeRoomRow->department,
@@ -806,6 +860,14 @@ new class extends Component {
             ->toArray();
 
         $courseGcRooms = collect($courseGcRows)->map(function ($r) use ($search, $self) {
+            // Extra safety net: even though the query above already excludes
+            // '' and 'CLG_%', double-check here too — if this ever somehow
+            // matches an internal marker, skip it from the course-GC list
+            // entirely rather than ever displaying a raw code.
+            if ($self->isInternalMarkerCodePublic($r->course_code)) {
+                return null;
+            }
+
             $latest = DB::table('chat_messages as m')
                 ->where('m.room_id', $r->id)
                 ->whereNull('m.deleted_at')
@@ -1025,10 +1087,29 @@ new class extends Component {
         $this->rooms = $pinnedSorted->merge($unpinnedSorted)->values()->toArray();
     }
 
+    // Public wrapper so it's callable from inside the collect()->map() closures
+    // above (closures bound to $this can call private methods fine already,
+    // but this keeps the check readable/explicit at each call site).
+    public function isInternalMarkerCodePublic(?string $code): bool
+    {
+        return $this->isInternalMarkerCode($code);
+    }
+
     public function updatedRoomSearch(): void { $this->loadRooms(); }
 
     // ─────────────────────────────────────────────────────────────────────
     // Select room
+    //
+    // SMOOTHNESS FIX: the heavy bookkeeping (advancing the notified-message
+    // pointer, marking the room read, refreshing the online count) now
+    // happens AFTER the essential state (roomId/room/messages) is already
+    // set and returned to the view. Practically this doesn't change wire
+    // latency (Livewire still finishes the request before re-rendering),
+    // but it removes redundant work: loadRooms() at the end of this method
+    // used to fully rebuild the sidebar synchronously on every single
+    // click — that's now skipped here since the unified poll rebuilds it
+    // on its own very next tick, so a click feels instant instead of
+    // waiting on a full room-list re-query first.
     // ─────────────────────────────────────────────────────────────────────
     public function selectRoom(int $id): void
     {
@@ -1067,6 +1148,12 @@ new class extends Component {
         $this->openToolbarMsgId    = null;
         $this->confirmDeleteId     = null;
 
+        // Load messages FIRST so the chat pane paints as fast as possible —
+        // everything below this is bookkeeping the user never visually
+        // waits on in a meaningful way, but ordering it after the message
+        // fetch keeps the "core" render-blocking query first.
+        $this->loadMessages();
+
         $maxId = (int) (DB::table('chat_messages')
             ->where('room_id', $id)
             ->whereNull('deleted_at')
@@ -1076,7 +1163,6 @@ new class extends Component {
         $this->markRoomAsRead($id);
 
         $this->refreshOnlineCount();
-        $this->loadMessages();
 
         if ($isStaff) {
             $this->loadStaffMembers();
@@ -1086,7 +1172,15 @@ new class extends Component {
         }
 
         $this->loadTypingIndicators();
-        $this->loadRooms();
+
+        // Update just THIS room's active/unread flags locally instead of
+        // re-querying the entire room list from scratch on every click.
+        $this->rooms = collect($this->rooms)->map(function ($r) use ($id) {
+            $r['is_active']  = ($r['id'] === $id);
+            if ($r['id'] === $id) $r['has_unread'] = false;
+            return $r;
+        })->toArray();
+
         $this->dispatch('chat-scroll-bottom-force');
         $this->dispatch('chat-open-mobile');
     }
@@ -1319,6 +1413,14 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Send
+    //
+    // SMOOTHNESS FIX: this used to call loadRooms() (a full sidebar rebuild
+    // touching 4+ tables) synchronously on every single send, which is why
+    // sending felt like it paused/lagged for a moment. That full reload
+    // isn't needed for the sender to see their own message appear — only
+    // loadMessages() (this room only) is. The sidebar's "latest message"
+    // preview for this room updates locally instead, and the next poll
+    // tick (≤2.5s later) reconciles it with the DB for everyone else.
     // ─────────────────────────────────────────────────────────────────────
     public function sendMessage(): void
     {
@@ -1378,8 +1480,26 @@ new class extends Component {
         $this->body = ''; $this->replyTo = null; $this->showMentions = false;
         $this->openToolbarMsgId = null;
         $this->stopTyping();
+
+        // Reload only this room's messages — instant feedback for the
+        // sender without waiting on a full sidebar rebuild.
         $this->loadMessages();
-        $this->loadRooms();
+
+        // Update this room's own preview/order locally so the sidebar
+        // still looks fresh immediately; the next poll tick reconciles
+        // it fully (unread flags for other rooms, live counts, etc).
+        $nowTs = now()->timestamp;
+        $this->rooms = collect($this->rooms)->map(function ($r) use ($body, $nowTs) {
+            if ($r['id'] === $this->roomId) {
+                $r['latest_body']   = $body;
+                $r['latest_sender'] = $this->coordinatorFirstName ?: $this->coordinatorName;
+                $r['latest_time']   = now()->setTimezone('Asia/Manila')->format('h:i A');
+                $r['latest_ts']     = $nowTs;
+                $r['has_unread']    = false;
+            }
+            return $r;
+        })->toArray();
+
         $this->dispatch('chat-scroll-bottom-force');
     }
 
@@ -1444,7 +1564,7 @@ new class extends Component {
         $this->openToolbarMsgId = null;
         $this->confirmDeleteId  = null;
         if ($this->editingId === $id) { $this->editingId = null; $this->editBody = ''; }
-        $this->loadMessages(); $this->loadRooms();
+        $this->loadMessages();
         if ($this->showPins) $this->loadPins();
     }
 
@@ -1716,14 +1836,20 @@ new class extends Component {
        background, forced display, no longer relies on the generic
        .org-tooltip opacity/hover rules that could leave it unreadable
        or hidden on some viewports)
-     - FIX: Presence — this component pings presence on EVERY poll tick
-       (not just every 4th) while the chat page is open, keeping the
-       coordinator "online" continuously with the 1-minute timeout. Pair
-       this with a small app-wide heartbeat (see note above pingPresence()
-       in the class) so "logged in" = "online" even on pages outside chat.
-     - Room names / headers / notification text NEVER leak the raw
-       CLG_xxxx college marker; everything routes through
-       roomDisplayName()/collegeDisplayLabel() in the class above
+     - FIX: Presence — this component pings presence on every poll tick
+       while the chat page is open, keeping the coordinator "online"
+       continuously with the 1-minute timeout.
+     - FIX: Raw internal room markers (e.g. "CLG_xxxxxxxxxxxx") can NEVER
+       be printed anywhere — header, room list, tooltip, or compose
+       placeholder all route through displayCourseLabel()/roomDisplayName()
+       in the class above, which detect the marker format and always
+       substitute the human-readable college label instead.
+     - PERF: poll interval relaxed to 2500ms and now uses wire:poll.visible
+       so it fully pauses while the tab is unfocused. Selecting a room and
+       sending a message no longer force a full sidebar rebuild on every
+       click/send — only the affected room's local state updates instantly,
+       and the next poll tick reconciles everything else. This removes the
+       lag/delay that used to happen on click.
 ══════════════════════════════════════════════════════════════════════════ --}}
 <div
     x-data="{ mobileChatOpen: false }"
@@ -1731,7 +1857,7 @@ new class extends Component {
     @chat-close-mobile.window="mobileChatOpen = false"
     class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
-    @if(! $confirmDeleteId) wire:poll.1500ms="unifiedPoll" @endif>
+    @if(! $confirmDeleteId) wire:poll.2500ms.visible="unifiedPoll" @endif>
 
     <style>
         #org-room-list button,
@@ -1769,6 +1895,15 @@ new class extends Component {
 
         #org-room-list { overflow-x: hidden; }
         .overflow-y-auto { scroll-behavior: smooth; }
+
+        /* ── Instant visual feedback on room click — removes the feeling
+           of "delay" while the Livewire request round-trips. The clicked
+           row dims/scales immediately via :active, before the server even
+           responds. ── */
+        #org-room-list button:active {
+            transform: scale(0.98);
+            transition: transform .08s ease;
+        }
 
         /* ── Tooltips: desktop/hover only ─────────────────────────────── */
         .org-tooltip {
@@ -2031,6 +2166,8 @@ new class extends Component {
             <div wire:key="org-room-{{ $r['id'] }}" class="relative org-room-fade" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
 
                 <button wire:click="selectRoom({{ $r['id'] }})"
+                        wire:loading.class="opacity-70"
+                        wire:target="selectRoom({{ $r['id'] }})"
                         class="w-full text-left rounded-xl px-3 py-3 transition-all border cursor-pointer
                                @if($isActive)      border-[#c49bdb] bg-[#f2e8f9]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
@@ -2180,10 +2317,15 @@ new class extends Component {
             </div>
             <div class="flex-1 min-w-0">
                 <p class="text-white font-semibold text-sm leading-tight truncate uppercase tracking-wide">
+                    {{-- FIX: was strtoupper($room['course_code']) directly — that
+                         could print the raw CLG_xxxxxxxxxxxx marker if a
+                         college room somehow still had isCourseRoom true.
+                         displayCourseLabel() below always substitutes the
+                         department label whenever the code is a marker. --}}
                     @if($isStaffRoom) Staff Chat
                     @elseif($isCollegeRoom) {{ $department }} · All Courses & Batches
-                    @elseif($isCourseRoom) {{ strtoupper($room['course_code']) }} · All Batches GC
-                    @else Batch {{ $room['batch'] }} · {{ strtoupper($room['course_code']) }}
+                    @elseif($isCourseRoom) {{ $this->displayCourseLabel($room['course_code'] ?? '') }} · All Batches GC
+                    @else Batch {{ $room['batch'] }} · {{ $this->displayCourseLabel($room['course_code'] ?? '') }}
                     @endif
                 </p>
                 <div class="flex items-center gap-2 flex-wrap mt-0.5">
@@ -2484,7 +2626,7 @@ new class extends Component {
                                 <p class="text-sm text-[#999999] mt-2 max-w-xs text-center leading-relaxed">
                                     @if($isStaffRoom) Start the internal staff conversation! 👋
                                     @elseif($isCollegeRoom) Start the {{ $department }} college-wide conversation! 👋
-                                    @elseif($isCourseRoom) Start the {{ strtoupper($room['course_code']) }} all-batches conversation! 👋
+                                    @elseif($isCourseRoom) Start the {{ $this->displayCourseLabel($room['course_code'] ?? '') }} all-batches conversation! 👋
                                     @else Be the first to message this batch! 👋
                                     @endif
                                 </p>
@@ -2587,7 +2729,7 @@ new class extends Component {
                             <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
-                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? strtoupper($room['course_code']).' All Batches GC' : ('Batch '.$room['batch'].' · '.strtoupper($room['course_code'])))) }}… (@ to mention)"
+                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? '')))) }}… (@ to mention)"
                                 rows="1"
                                 @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
                                 @focus-input.window="$el.focus()"
