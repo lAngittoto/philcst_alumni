@@ -98,6 +98,29 @@
             .notif-close-tip { display: none !important; }
         }
 
+        /* ── Read/Unread section divider ─────────────────────────── */
+        .coord-notif-divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px 6px;
+        }
+        .coord-notif-divider::before,
+        .coord-notif-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #ECE2F8;
+        }
+        .coord-notif-divider-label {
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #B9A6C7;
+            white-space: nowrap;
+        }
+
         /* ════════════════════════════════════════════════════════
            COORDINATOR SIDEBAR — WHITE + COLLAPSIBLE (Alumni-style)
         ════════════════════════════════════════════════════════ */
@@ -484,6 +507,10 @@
         'user-group':      { bg: '#FFE8D1', color: '#B45309' }, // alumni — amber
         'pen-to-square':   { bg: '#EDE9FE', color: '#6D28D9' }, // self job-update — violet
         'trash':           { bg: '#FEE2E2', color: '#DC2626' }, // self job-delete — red
+        'calendar-plus':   { bg: '#F3EBFA', color: '#7A3F91' }, // self event-created — purple
+        'pen':             { bg: '#EDE9FE', color: '#6D28D9' }, // self event-updated — violet
+        'calendar-xmark':  { bg: '#FEE2E2', color: '#DC2626' }, // self event-deleted — red
+        'rotate-right':    { bg: '#DBEAFE', color: '#0284C7' }, // self event-resubmitted — blue
         'bell':            { bg: '#F3F4F6', color: '#6B7280' }, // default — gray
     };
     window.__coordIconBg = function (icon) {
@@ -535,6 +562,8 @@
             //  - Employment notifs     : EXCLUDED — not shown to organizer/coordinator at all
             //  - Self job-action notifs: group by day + action (created/updated/
             //                            activated/deactivated/deleted), ×N badge
+            //  - Self event-action notifs: group by day + action (created/updated/
+            //                            resubmitted/deleted), ×N badge
             //  - Event notifs          : show individually (APPROVED, REJECTED, UPDATED only)
             //  - Everything else       : show individually
             // ─────────────────────────────────────────────────────────────────
@@ -542,6 +571,7 @@
                 var result = [];
                 var msgMap = new Map();
                 var selfJobMap = new Map();
+                var selfEventMap = new Map();
 
                 Array.from(rows)
                     .sort(function (a, b) {
@@ -573,11 +603,21 @@
                         // activating/deactivating/deleting their OWN job).
                         var isSelfJobNotif = rawDedup.startsWith('job-self::');
 
+                        // Self event-action notifs (organizer creating/editing/
+                        // resubmitting/deleting their OWN event).
+                        var isSelfEventNotif = rawDedup.startsWith('event-self::');
+
                         if (isEventNotif) {
                             var action = '';
                             var parts = rawDedup.split('::');
                             if (parts.length >= 2) action = parts[1];
-                            var allowedActions = ['approved', 'rejected', 'updated'];
+                            // 'updated' intentionally excluded here — it's
+                            // redundant with the event-self "You Updated an
+                            // Event" notif, which already covers the
+                            // organizer editing their own event. Only
+                            // approved/rejected (Alumni Director decisions)
+                            // are shown from this generic event channel.
+                            var allowedActions = ['approved', 'rejected'];
                             if (allowedActions.indexOf(action) === -1) return;
                         }
 
@@ -665,6 +705,51 @@
                                 }));
                             }
 
+                        } else if (isSelfEventNotif) {
+                            // dedup_key shape: event-self::{action}::{YYYY-MM-DD}::{eventId}
+                            var seParts  = rawDedup.split('::');
+                            var seAction = seParts[1] || 'updated';
+                            var seDay    = seParts[2] || (nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown');
+                            var seKey    = 'event-self_day::' + seAction + '::' + seDay;
+
+                            var seTitleMap = {
+                                'created':      'Event Submitted',
+                                'updated':      'Event Updated',
+                                'resubmitted':  'Event Resubmitted',
+                                'deleted':      'Event Deleted',
+                            };
+                            var seIconMap = {
+                                'created':      'calendar-plus',
+                                'updated':      'pen',
+                                'resubmitted':  'rotate-right',
+                                'deleted':      'calendar-xmark',
+                            };
+
+                            if (selfEventMap.has(seKey)) {
+                                var eg = selfEventMap.get(seKey);
+                                eg.count = (Number(eg.count) || 1) + 1;
+                                if (!n.read) eg.read = false;
+                                eg._ids.push(n.id);
+                                if (nTimestamp && new Date(nTimestamp) > new Date(eg.created_at)) {
+                                    eg.created_at   = nTimestamp;
+                                    eg._latestTitle = n.event_title || n.message || eg._latestTitle;
+                                }
+                                var eLabel = seTitleMap[seAction] || 'Event Updated';
+                                eg.title   = eg.count + ' ' + eLabel + (eg.count > 1 ? 's' : '') + ' Today';
+                                eg.message = 'Latest: "' + (eg._latestTitle || 'an event') + '". ' + eg.count + ' total today.';
+                            } else {
+                                var eInitLabel = seTitleMap[seAction] || 'Event Updated';
+                                selfEventMap.set(seKey, Object.assign({}, n, {
+                                    count:        1,
+                                    _ids:         [n.id],
+                                    created_at:   nTimestamp || n.created_at,
+                                    title:        '1 ' + eInitLabel + ' Today',
+                                    message:      n.message || (eInitLabel + '.'),
+                                    icon:         seIconMap[seAction] || 'calendar-plus',
+                                    _latestTitle: n.event_title || '',
+                                }));
+                            }
+
                         } else {
                             result.push(Object.assign({}, n, {
                                 count:      Number(n.count) || 1,
@@ -676,8 +761,14 @@
 
                 msgMap.forEach(function (v) { result.push(v); });
                 selfJobMap.forEach(function (v) { result.push(v); });
+                selfEventMap.forEach(function (v) { result.push(v); });
 
+                // Unread items float to the top (newest first), read items
+                // sit below (also newest first). This guarantees a single,
+                // clean "Already Read" divider point in the rendered list —
+                // no unread item can ever appear after a read one.
                 result.sort(function (a, b) {
+                    if (!!a.read !== !!b.read) return a.read ? 1 : -1;
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
 
@@ -901,24 +992,26 @@
             var d = _coordDetail(e);
             var action = d.action || '';
 
-            if (action !== 'approved' && action !== 'rejected' && action !== 'updated') {
+            // 'updated' intentionally excluded — it's redundant with the
+            // event-self "You Updated an Event" notif already fired by
+            // event-self-action when the organizer edits their own event.
+            // Only Alumni Director decisions (approved/rejected) go through
+            // this channel.
+            if (action !== 'approved' && action !== 'rejected') {
                 return;
             }
 
             var titleMap = {
                 'approved': 'Event Approved',
                 'rejected': 'Event Rejected',
-                'updated':  'Event Updated',
             };
             var msgMap = {
                 'approved': (d.title || 'Your event') + ' has been approved by the Alumni Director.',
                 'rejected': (d.title || 'Your event') + ' has been rejected by the Alumni Director.',
-                'updated':  (d.title || 'An event') + ' has been updated.',
             };
             var iconMap = {
                 'approved': 'calendar-check',
                 'rejected': 'calendar',
-                'updated':  'calendar-check',
             };
 
             _saveCoordNotif({
@@ -1018,6 +1111,44 @@
                 link_route: 'organizer.job/management',
                 link_label: 'View Jobs',
                 dedup_key:  'job-self::' + action + '::' + _todayStr() + '::' + (d.id || 0),
+            });
+        });
+
+        // ── Self-notif: fires when the organizer creates/updates/resubmits/
+        //    deletes THEIR OWN event. Grouped by day+action on the frontend
+        //    (event-self::{action}::{day}::{eventId} dedup key), so multiple
+        //    edits today collapse into one "3 Events Updated Today" row. ──
+        window.addEventListener('event-self-action', function (e) {
+            var d = _coordDetail(e);
+            var action = d.action || 'updated';
+
+            var titleMap = {
+                'created':      'You Submitted an Event',
+                'updated':      'You Updated an Event',
+                'resubmitted':  'You Resubmitted an Event',
+                'deleted':      'You Deleted an Event',
+            };
+            var msgMap = {
+                'created':      'You submitted "' + (d.title || 'an event') + '" for Alumni Director review.',
+                'updated':      'You updated "' + (d.title || 'an event') + '".',
+                'resubmitted':  'You resubmitted "' + (d.title || 'an event') + '" for Alumni Director review.',
+                'deleted':      'You deleted "' + (d.title || 'an event') + '".',
+            };
+            var iconMap = {
+                'created':      'calendar-plus',
+                'updated':      'pen',
+                'resubmitted':  'rotate-right',
+                'deleted':      'calendar-xmark',
+            };
+
+            _saveCoordNotif({
+                icon:        iconMap[action]  || 'calendar-plus',
+                title:       titleMap[action] || 'Event Update',
+                message:     msgMap[action]   || (d.title || 'An event') + ' was ' + action + '.',
+                event_title: d.title || '',
+                link_route:  'organizer.event/organizer',
+                link_label:  'View Events',
+                dedup_key:   'event-self::' + action + '::' + _todayStr() + '::' + (d.id || 0),
             });
         });
 
@@ -1398,7 +1529,13 @@
         </template>
 
         <template x-if="$store.coordNotifs">
-            <template x-for="notif in $store.coordNotifs.items" :key="notif.id">
+            <template x-for="(notif, notifIdx) in $store.coordNotifs.items" :key="notif.id">
+                <div>
+                    <div class="coord-notif-divider"
+                         x-show="notif.read && notifIdx > 0 && !$store.coordNotifs.items[notifIdx - 1].read"
+                         x-cloak>
+                        <span class="coord-notif-divider-label">Already Read</span>
+                    </div>
                 <div
                     class="notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
@@ -1440,9 +1577,9 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
-                                {{-- Count badge: grouped self job-action notifs --}}
+                                {{-- Count badge: grouped self job-action + self event-action notifs --}}
                                 <span
-                                    x-show="Number(notif.count) > 1 && ['briefcase','pen-to-square','circle-check','circle-pause','trash'].includes(notif.icon)"
+                                    x-show="Number(notif.count) > 1 && ['briefcase','pen-to-square','circle-check','circle-pause','trash','calendar-plus','pen','calendar-xmark','rotate-right'].includes(notif.icon)"
                                     x-cloak
                                     class="inline-flex items-center justify-center
                                            min-w-[22px] h-5 rounded-full px-1.5
@@ -1578,6 +1715,7 @@
                         </div>
                     </div>
 
+                </div>
                 </div>
             </template>
         </template>

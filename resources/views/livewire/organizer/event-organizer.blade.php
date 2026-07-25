@@ -421,7 +421,11 @@ public function viewEvent(int $id): void
             ]);
         } catch (\Throwable) {}
 
-        // NO event-management-updated dispatch for delete
+        // NO event-management-updated dispatch for delete — but DO fire the
+        // self-notification bubble (mirrors job-self-action) so the
+        // organizer sees "You Deleted an Event" in their own notif bell.
+        $this->dispatch('event-self-action', id: $event->id, title: $event->title, action: 'deleted');
+
         $this->dispatch('flash-message', type: 'success', message: 'Event deleted.');
 
         $this->showDeleteModal    = false;
@@ -796,6 +800,21 @@ public function closeFormModal(): void
         if ($notifAction !== null) {
             $this->dispatch('event-management-updated', id: $savedEventId, title: trim($this->title), action: $notifAction);
         }
+
+        // ── Self-notification bubble (organizer sees their own event
+        //    actions) — mirrors job-self-action so create/update/resubmit
+        //    all show up grouped in the organizer's own notif bell. ──
+        if ($this->isEditing) {
+            $selfAction  = $this->isResubmitting ? 'resubmitted' : 'updated';
+            $selfEventId = $this->editingEventId;
+        } else {
+            $selfAction  = 'created';
+            $selfEventId = OrganizerEvent::where('organizer_id', $this->organizerId)
+                ->where('title', trim($this->title))
+                ->orderByDesc('id')
+                ->value('id');
+        }
+        $this->dispatch('event-self-action', id: $selfEventId, title: trim($this->title), action: $selfAction);
 
 Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->showFormModal = false;
