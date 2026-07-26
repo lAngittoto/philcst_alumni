@@ -4,58 +4,60 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Alumni Director</title>
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-
     @livewireStyles
 
     <style>
         [x-cloak] { display: none !important; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            overscroll-behavior-y: contain;
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
-        #dir-bell-btn {
+        /* ── Mobile viewport height fix ── */
+        .dir-app-shell {
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        /* ── Topbar bell (all screen sizes) ── */
+        .dir-topbar-bell {
             background: transparent !important;
             border: none !important;
             outline: none !important;
             box-shadow: none !important;
-            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            appearance: none;
+            padding: 6px;
+            margin: 0;
             cursor: pointer;
             position: relative;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            align-self: flex-end;
-            margin-bottom: 10px;
+            line-height: 0;
         }
-        #dir-bell-btn:hover,
-        #dir-bell-btn:focus,
-        #dir-bell-btn:active {
+        .dir-topbar-bell:hover,
+        .dir-topbar-bell:focus,
+        .dir-topbar-bell:focus-visible,
+        .dir-topbar-bell:active {
             background: transparent !important;
             outline: none !important;
             box-shadow: none !important;
+            border: none !important;
         }
+
         .bell-badge { pointer-events: none; }
         .dir-notif-item { cursor: pointer; position: relative; }
-        .dir-notif-hover-label {
-            pointer-events: none;
-            position: fixed;
-            background: rgba(0,0,0,0.82);
-            color: #fff;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            padding: 4px 10px;
-            border-radius: 20px;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            white-space: nowrap;
-            z-index: 99999;
-        }
-        .dir-notif-item:hover .dir-notif-hover-label { opacity: 1; }
 
         .dir-notif-close-wrap {
             position: relative;
@@ -92,9 +94,384 @@
             border-bottom-color: #1a1a1a;
         }
         .dir-notif-close-wrap:hover .dir-notif-close-tip { opacity: 1; }
+        @media (max-width: 1023px) {
+            .dir-notif-close-tip { display: none !important; }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           DIRECTOR SIDEBAR — WHITE + COLLAPSIBLE (Coordinator-style)
+        ════════════════════════════════════════════════════════ */
+
+        .dir-sidebar {
+            width: 18rem;
+            min-width: 18rem;
+            background: #FFFFFF;
+            border-right: 1px solid #E8E0F0;
+            transition: width 0.2s ease, min-width 0.2s ease;
+        }
+
+        @media (min-width: 1024px) {
+            .dir-sidebar.dir-sidebar-modal-hidden {
+                position: fixed !important;
+                opacity: 0;
+                transform: translateX(-16px);
+                pointer-events: none;
+                transition: opacity 0.22s ease, transform 0.22s ease;
+            }
+        }
+        @media (max-width: 1023px) {
+            #dir-sidebar-aside.dir-sidebar-modal-hidden {
+                opacity: 0;
+                transform: translateX(-100%);
+                pointer-events: none;
+                transition: opacity 0.22s ease, transform 0.22s ease;
+            }
+        }
+
+        .dir-sidebar-header {
+            background: #7A3F91;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+        .dir-header-inner {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-width: 0;
+            flex: 1;
+            position: relative;
+            z-index: 10;
+        }
+        .dir-badge-icon {
+            width: 42px; height: 42px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.22);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            backdrop-filter: blur(2px);
+        }
+
+        .dir-nav-link {
+            position: relative;
+            transition: background-color 0.2s ease, transform 0.15s ease;
+        }
+        .dir-nav-link:not(.is-active):hover {
+            background: #FAF6FE;
+        }
+        .dir-nav-link:not(.is-active):hover .dir-nav-icon {
+            transform: scale(1.07);
+        }
+        .dir-nav-link.is-active {
+            background: #F3EBFA;
+            border: 1px solid #E0CFEE;
+        }
+        .dir-nav-icon { transition: transform 0.2s ease; }
+
+        .dir-collapsible-text {
+            opacity: 1;
+            max-width: 220px;
+            overflow: hidden;
+            white-space: nowrap;
+            transition: opacity 0.2s ease, max-width 0.2s ease;
+        }
+
+        .dir-nav-section-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1rem;
+            margin-bottom: 0.5rem;
+        }
+        .dir-section-label {
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: #9A8AA8;
+        }
+        .dir-collapse-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 7px;
+            background: #F3EBFA;
+            border: none;
+            color: #7A3F91;
+            cursor: pointer;
+            font-size: 10px;
+            flex-shrink: 0;
+            transition: background-color 0.15s ease, transform 0.15s ease;
+        }
+        .dir-collapse-icon-btn:hover { background: #E9D8F5; }
+        .dir-collapse-icon-btn:active { transform: scale(0.88); }
+        .dir-collapse-icon-btn i { pointer-events: none; }
+
+        .dir-logout-btn {
+            position: relative;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 0.9rem 1rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #fff;
+            background: #7A3F91;
+            border: none;
+            cursor: pointer;
+            overflow: hidden;
+            transition: background-color 0.2s ease, transform 0.15s ease;
+        }
+        .dir-logout-btn:hover   { background: #6A3580; }
+        .dir-logout-btn:active  { transform: scale(0.97); }
+        .dir-logout-btn:disabled { cursor: not-allowed; background: #8E5DA3; }
+        .dir-logout-spinner {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            animation: dir-spin 0.7s linear infinite;
+            display: inline-block;
+        }
+        @keyframes dir-spin { to { transform: rotate(360deg); } }
+        .dir-logout-text-swap { display: inline-flex; align-items: center; }
+
+        @media (min-width: 1024px) {
+            .dir-sidebar.is-collapsed {
+                width: 5rem !important;
+                min-width: 5rem !important;
+            }
+
+            .dir-sidebar.is-collapsed .dir-collapsible-text {
+                opacity: 0;
+                max-width: 0;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+                pointer-events: none;
+            }
+
+            .dir-sidebar.is-collapsed .dir-sidebar-header {
+                justify-content: center;
+                padding-left: 0;
+                padding-right: 0;
+            }
+            .dir-sidebar.is-collapsed .dir-header-inner {
+                flex: 0 0 auto;
+                justify-content: center;
+                gap: 0;
+            }
+            .dir-sidebar.is-collapsed .dir-nav-link {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            .dir-sidebar.is-collapsed .dir-nav-icon {
+                margin-right: 0 !important;
+            }
+            .dir-sidebar.is-collapsed .dir-nav-section-row {
+                justify-content: center;
+                padding: 0 0.5rem;
+            }
+            .dir-sidebar.is-collapsed .dir-logout-btn {
+                gap: 0;
+                padding: 0.9rem;
+            }
+            .dir-sidebar.is-collapsed .dir-logout-btn i.fa-right-from-bracket,
+            .dir-sidebar.is-collapsed .dir-logout-spinner {
+                margin-right: 0 !important;
+            }
+        }
+
+        @media (max-width: 1023px) {
+            #dir-sidebar-aside {
+                box-shadow: 0 0 60px rgba(0,0,0,0.18);
+                width: 5.5rem;
+                min-width: 5.5rem;
+            }
+
+            #dir-sidebar-aside .dir-sidebar-header {
+                display: none !important;
+            }
+
+            #dir-sidebar-aside .dir-section-label,
+            #dir-sidebar-aside .dir-nav-section-row,
+            #dir-sidebar-aside .dir-nav-link span:not(.dir-nav-icon) {
+                display: none !important;
+            }
+            #dir-sidebar-aside .dir-nav-link {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            #dir-sidebar-aside .dir-nav-icon {
+                margin-right: 0 !important;
+            }
+
+            #dir-sidebar-aside .dir-logout-btn {
+                gap: 0;
+                padding: 1rem;
+            }
+            #dir-sidebar-aside .dir-logout-text-swap span:not(.dir-logout-spinner) {
+                display: none;
+            }
+            #dir-sidebar-aside .dir-logout-btn i.fa-right-from-bracket,
+            #dir-sidebar-aside .dir-logout-spinner {
+                margin-right: 0 !important;
+            }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           NOTIFICATION PANEL — desktop dropdown, mobile FULL SCREEN
+        ════════════════════════════════════════════════════════ */
+        #dir-notif-panel {
+            max-width: calc(100vw - 16px);
+        }
+        @media (max-width: 1023px) {
+            #dir-notif-panel {
+                position: fixed !important;
+                inset: 0 !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 100% !important;
+                min-height: 100% !important;
+                max-height: 100% !important;
+                border-radius: 0 !important;
+                border: none !important;
+            }
+            #dir-notif-panel .dir-notif-list-scroll {
+                max-height: calc(100vh - 190px) !important;
+            }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           SESSION-EXPIRED SOFT MODAL (replaces raw "Page Expired" page)
+        ════════════════════════════════════════════════════════ */
+        #dir-session-expired-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 999999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.55);
+            backdrop-filter: blur(1px);
+        }
+        #dir-session-expired-modal.is-visible { display: flex; }
+        .dir-sem-card {
+            background: #fff;
+            border-radius: 18px;
+            width: 100%;
+            max-width: 360px;
+            margin: 16px;
+            padding: 28px 24px 24px;
+            text-align: center;
+            box-shadow: 0 30px 70px rgba(0,0,0,0.35);
+            animation: dirSemIn 0.22s cubic-bezier(.25,.8,.25,1) both;
+        }
+        @keyframes dirSemIn {
+            from { opacity: 0; transform: translateY(10px) scale(.97); }
+            to   { opacity: 1; transform: none; }
+        }
+        .dir-sem-icon {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: #F3EBFA;
+            color: #7A3F91;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
+            margin: 0 auto 14px;
+        }
+        .dir-sem-title { font-weight: 800; font-size: 16px; color: #1a1a1a; }
+        .dir-sem-sub { font-size: 13px; color: #666; margin-top: 6px; line-height: 1.5; }
+        .dir-sem-btn {
+            margin-top: 18px;
+            width: 100%;
+            padding: 11px 16px;
+            border-radius: 12px;
+            border: none;
+            background: #7A3F91;
+            color: #fff;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: .03em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background-color .15s ease, transform .1s ease;
+        }
+        .dir-sem-btn:hover { background: #6A3580; }
+        .dir-sem-btn:active { transform: scale(0.97); }
     </style>
 
     <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    //  LOGOUT-IN-PROGRESS FLAG
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__dirLoggingOut = false;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  BFCACHE FIX
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) {
+            window.location.reload();
+        }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SESSION / CSRF EXPIRED (419) — SOFT RECOVERY
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__dirShowSessionExpired = function () {
+        if (window.__dirLoggingOut) return;
+        var modal = document.getElementById('dir-session-expired-modal');
+        if (modal) modal.classList.add('is-visible');
+    };
+
+    document.addEventListener('livewire:init', function () {
+        if (!window.Livewire || typeof Livewire.hook !== 'function') return;
+
+        Livewire.hook('request', function ({ fail }) {
+            fail(({ status, preventDefault }) => {
+                if (status === 419) {
+                    preventDefault();
+                    window.__dirShowSessionExpired();
+                }
+            });
+        });
+    });
+
+    window.addEventListener('livewire:navigate:failed', function () {
+        window.__dirShowSessionExpired();
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  STOP ALL BACKGROUND POLLING ON LOGOUT
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('stop-dir-polling', function () {
+        window.__dirLoggingOut = true;
+
+        var s = window.__safeDirNotifsStore();
+        if (s && s._pollTimer) {
+            clearInterval(s._pollTimer);
+            s._pollTimer = null;
+        }
+        if (s) {
+            s.open = false;
+        }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  ROUTE MAP
+    // ─────────────────────────────────────────────────────────────────────────
     window.__dirRouteMap = {
         'director.dashboard':              '/director/dashboard',
         'director.coordinator/management': '/director/coordinator/management',
@@ -110,21 +487,35 @@
             _pollTimer: null,
 
             async init() {
+                if (window.__dirLoggingOut) return;
                 await this._fetch();
                 this._startPolling();
             },
 
             _startPolling() {
+                if (window.__dirLoggingOut) return;
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
-                this._pollTimer = setInterval(function () { self._fetch(); }, 10000);
+                this._pollTimer = setInterval(function () {
+                    if (window.__dirLoggingOut) {
+                        clearInterval(self._pollTimer);
+                        self._pollTimer = null;
+                        return;
+                    }
+                    self._fetch();
+                }, 10000);
             },
 
             async _fetch() {
+                if (window.__dirLoggingOut) return;
                 try {
                     var res = await window.fetch('/director/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
                     });
+                    if (res.status === 419) {
+                        window.__dirShowSessionExpired();
+                        return;
+                    }
                     if (res.ok) {
                         var raw = await res.json();
                         this.items = this._groupByDay(raw);
@@ -145,15 +536,12 @@
                             : 'unknown';
                         var rawDedup = n.dedup_key || '';
 
-                        // ── Self-action keys (never collapse) ──
                         var isJobSelfEvent      = rawDedup.indexOf('job-self::') === 0;
                         var isCoordSelfEvent    = rawDedup.indexOf('coordinator-self::') === 0;
 
-                        // ── Event submit/resubmit: each gets its OWN bucket ──
                         var isEventSubmit       = rawDedup.startsWith('event-submitted::');
                         var isEventResubmit     = rawDedup.startsWith('event-resubmitted::');
 
-                        // ── Group buckets ──
                         var isCoordEvent  = !isCoordSelfEvent && (rawDedup.startsWith('coordinator::') || n.icon === 'users-gear');
                         var isCalEvent    = !isEventSubmit && !isEventResubmit && (
                                                 rawDedup.startsWith('event-management::') ||
@@ -165,7 +553,6 @@
                         var isMsgEvent    = rawDedup.startsWith('message-received::') || n.icon === 'comments';
                         var isAlumniEvent = rawDedup.startsWith('alumni-registered::') || rawDedup.startsWith('profile-updated::') || n.icon === 'user-group' || n.icon === 'user-plus';
 
-                        // ── Determine group key ──
                         var groupKey;
                         if      (isJobSelfEvent)   { groupKey = rawDedup; }
                         else if (isCoordSelfEvent) { groupKey = rawDedup; }
@@ -193,9 +580,7 @@
                                 g._ids.push(n.id);
                             }
 
-                            // ── Update title & message per group type ──
                             if (isJobSelfEvent || isCoordSelfEvent || isEventSubmit || isEventResubmit) {
-                                // Never overwrite — each is its own independent notif
                                 g.title   = n.title   || g.title;
                                 g.message = n.message || g.message;
                             } else if (isCoordEvent) {
@@ -216,7 +601,6 @@
                             }
 
                         } else {
-                            // ── First occurrence — seed from DB row ──
                             var entry = Object.assign({}, n, {
                                 count: rowCount,
                                 _ids:  Array.isArray(n._ids) ? n._ids.slice() : [n.id],
@@ -256,37 +640,42 @@
             close()  { this.open = false; },
 
             async markRead(item) {
+                if (window.__dirLoggingOut) return;
                 if (item.read) return;
                 item.read = true;
                 var ids  = Array.isArray(item._ids) ? item._ids : [item.id];
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 for (var i = 0; i < ids.length; i++) {
                     try {
-                        await window.fetch('/director/notifications/' + ids[i] + '/read', {
+                        var r = await window.fetch('/director/notifications/' + ids[i] + '/read', {
                             method: 'PATCH',
                             headers: {
                                 'X-CSRF-TOKEN':     csrf,
                                 'X-Requested-With': 'XMLHttpRequest',
                             }
                         });
+                        if (r.status === 419) { window.__dirShowSessionExpired(); return; }
                     } catch (e) {}
                 }
             },
 
             async markAllRead() {
+                if (window.__dirLoggingOut) return;
                 this.items.forEach(function (n) { n.read = true; });
                 try {
-                    await window.fetch('/director/notifications/read-all', {
+                    var r = await window.fetch('/director/notifications/read-all', {
                         method: 'PATCH',
                         headers: {
                             'X-CSRF-TOKEN':     document.querySelector('meta[name="csrf-token"]').content,
                             'X-Requested-With': 'XMLHttpRequest',
                         }
                     });
+                    if (r.status === 419) { window.__dirShowSessionExpired(); }
                 } catch (e) {}
             },
 
             async markReadByRoute(routeName) {
+                if (window.__dirLoggingOut) return;
                 var matched = this.items.filter(function (n) {
                     return n.link_route === routeName && !n.read;
                 });
@@ -297,13 +686,14 @@
                     var ids = matched[i]._ids || [matched[i].id];
                     for (var j = 0; j < ids.length; j++) {
                         try {
-                            await window.fetch('/director/notifications/' + ids[j] + '/read', {
+                            var r = await window.fetch('/director/notifications/' + ids[j] + '/read', {
                                 method: 'PATCH',
                                 headers: {
                                     'X-CSRF-TOKEN':     csrf,
                                     'X-Requested-With': 'XMLHttpRequest',
                                 }
                             });
+                            if (r.status === 419) { window.__dirShowSessionExpired(); return; }
                         } catch (e) {}
                     }
                 }
@@ -322,6 +712,7 @@
     };
 
     window.__bootDirNotifsStore = function () {
+        if (window.__dirLoggingOut) return;
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         if (!Alpine.store('dirNotifs')) {
             Alpine.store('dirNotifs', window.__makeDirNotifsStore());
@@ -330,29 +721,28 @@
         if (s && !s._pollTimer) s.init();
     };
 
-    // PATH A
     document.addEventListener('alpine:init', function () {
         Alpine.store('dirNotifs', window.__makeDirNotifsStore());
     });
 
-    // PATH B
     document.addEventListener('alpine:initialized', function () {
         setTimeout(function () {
+            if (window.__dirLoggingOut) return;
             var s = window.__safeDirNotifsStore();
             if (s && !s._pollTimer) s.init();
         }, 0);
     });
 
-    // PATH C
     window.addEventListener('load', function () {
+        if (window.__dirLoggingOut) return;
         var s = window.__safeDirNotifsStore();
         if (s) { if (s.items.length === 0) s.init(); }
         else    { window.__bootDirNotifsStore(); }
     });
 
-    // PATH D
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
+            if (window.__dirLoggingOut) return;
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
             var s = Alpine.store('dirNotifs');
             if (s) {
@@ -368,7 +758,6 @@
         }, 150);
     });
 
-    // PATH E
     ;(function () {
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         var s = Alpine.store('dirNotifs');
@@ -379,42 +768,39 @@
         if (s && !s._pollTimer) setTimeout(function () { s.init(); }, 100);
     })();
 
-    // Re-fetch on tab focus
     document.addEventListener('visibilitychange', function () {
+        if (window.__dirLoggingOut) return;
         if (document.visibilityState === 'visible') {
             var s = window.__safeDirNotifsStore();
             if (s) s._fetch();
         }
     });
 
-    // ── dir-notif-refresh listener (fired by Livewire dispatch) ──
     document.addEventListener('dir-notif-refresh', function () {
+        if (window.__dirLoggingOut) return;
         var s = window.__safeDirNotifsStore();
         if (s) {
             s._fetch();
             setTimeout(function () {
+                if (window.__dirLoggingOut) return;
                 var s2 = window.__safeDirNotifsStore();
                 if (s2) s2._fetch();
             }, 800);
         }
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PANEL POSITIONING — desktop only (mobile is handled entirely by CSS, full screen)
+    // ─────────────────────────────────────────────────────────────────────────
     function positionDirPanel() {
+        if (window.innerWidth < 1024) return;
         var btn   = document.getElementById('dir-bell-btn');
         var panel = document.getElementById('dir-notif-panel');
-        var aside = document.querySelector('aside');
         if (!btn || !panel) return;
         var btnRect = btn.getBoundingClientRect();
-        if (aside && window.innerWidth >= 1024) {
-            var asideRect = aside.getBoundingClientRect();
-            panel.style.left  = (asideRect.right + 12) + 'px';
-            panel.style.top   = (btnRect.bottom  + 8)  + 'px';
-            panel.style.width = '400px';
-        } else {
-            panel.style.left  = '8px';
-            panel.style.top   = (btnRect.bottom + 8) + 'px';
-            panel.style.width = (window.innerWidth - 16) + 'px';
-        }
+        panel.style.left  = (btnRect.right - 400) + 'px';
+        panel.style.top   = (btnRect.bottom + 8) + 'px';
+        panel.style.width = '400px';
     }
     window.positionDirPanel = positionDirPanel;
 
@@ -423,18 +809,11 @@
         if (s && s.open) positionDirPanel();
     });
 
-    document.addEventListener('mousemove', function (e) {
-        var target = e.target;
-        if (!target || typeof target.closest !== 'function') return;
-        var item = target.closest('.dir-notif-item');
-        if (!item) return;
-        var label = item.querySelector('.dir-notif-hover-label');
-        if (!label) return;
-        label.style.left = (e.clientX + 14) + 'px';
-        label.style.top  = (e.clientY + 14) + 'px';
-    });
-
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SIDEBAR SMART MARK-READ
+    // ─────────────────────────────────────────────────────────────────────────
     window.__dirSidebarNotifsMarkRead = function (routeName) {
+        if (window.__dirLoggingOut) return;
         var s = window.__safeDirNotifsStore();
         if (!s) return;
         s.markReadByRoute(routeName);
@@ -451,8 +830,9 @@
         }
 
         async function _saveDirNotif(payload) {
+            if (window.__dirLoggingOut) return;
             try {
-                await window.fetch('/director/notifications', {
+                var res = await window.fetch('/director/notifications', {
                     method: 'POST',
                     headers: {
                         'Content-Type':     'application/json',
@@ -461,10 +841,13 @@
                     },
                     body: JSON.stringify(payload),
                 });
+                if (res.status === 419) { window.__dirShowSessionExpired(); return; }
                 await new Promise(function (r) { setTimeout(r, 300); });
+                if (window.__dirLoggingOut) return;
                 var s = window.__safeDirNotifsStore();
                 if (s) await s._fetch();
                 setTimeout(async function () {
+                    if (window.__dirLoggingOut) return;
                     var s2 = window.__safeDirNotifsStore();
                     if (s2) await s2._fetch();
                 }, 600);
@@ -472,6 +855,7 @@
         }
 
         window.addEventListener('dir-coordinator-updated', function (e) {
+            if (window.__dirLoggingOut) return;
             var d      = _dirDetail(e);
             var name   = d.name   || 'A coordinator';
             var action = d.action || 'updated';
@@ -501,6 +885,7 @@
         });
 
         window.addEventListener('dir-event-updated', function (e) {
+            if (window.__dirLoggingOut) return;
             var d = _dirDetail(e);
             _saveDirNotif({
                 icon:       'calendar-check',
@@ -513,6 +898,7 @@
         });
 
         window.addEventListener('dir-job-updated', function (e) {
+            if (window.__dirLoggingOut) return;
             var d = _dirDetail(e);
             _saveDirNotif({
                 icon:       'briefcase',
@@ -525,6 +911,7 @@
         });
 
         window.addEventListener('dir-message-received', function (e) {
+            if (window.__dirLoggingOut) return;
             var d = _dirDetail(e);
             var sender = d.sender || 'Someone';
             var room   = d.room   || 'Chat Room';
@@ -543,101 +930,83 @@
                 dedup_key:  'message-received::' + sender + '::' + room + '::' + Math.floor(Date.now() / 60000),
             });
         });
-
-        window.addEventListener('dir-notif-refresh', function () {
-            var s = window.__safeDirNotifsStore();
-            if (s) {
-                s._fetch();
-                setTimeout(function () {
-                    var s2 = window.__safeDirNotifsStore();
-                    if (s2) s2._fetch();
-                }, 800);
-            }
-        });
     }
     </script>
 </head>
 
 <body
     class="antialiased"
-    x-data="{ open: false }"
-    @click="$store.dirNotifs && $store.dirNotifs.open && $store.dirNotifs.close()">
+    x-data="{
+        open: false,
+        sidebarCollapsed: false,
+        sidebarHiddenByModal: false,
+        loggingOut: false,
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+        }
+    }"
+    @click="$store.dirNotifs && $store.dirNotifs.open && $store.dirNotifs.close()"
+    @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
+    @open-sidebar.window="sidebarHiddenByModal = false;">
 
-<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="dir-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile overlay --}}
     <div
         x-show="open"
-        x-transition:enter="transition ease-out duration-300"
+        x-transition:enter="transition opacity-ease-out duration-300"
         x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100"
-        x-transition:leave="transition ease-in duration-300"
+        x-transition:leave="transition opacity-ease-in duration-300"
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
         @click="open = false"
-        class="fixed inset-0 z-40 bg-black/50 lg:hidden">
+        class="fixed inset-0 z-50 bg-black/50 lg:hidden">
     </div>
 
-    {{-- ══ SIDEBAR ══ --}}
     <aside
-        :class="open ? 'translate-x-0' : '-translate-x-full'"
-        class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
-               shadow-2xl lg:translate-x-0 lg:static lg:inset-0
-               flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
-        style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
+        id="dir-sidebar-aside"
+        :class="{
+            'translate-x-0': open,
+            '-translate-x-full': !open,
+            'is-collapsed': sidebarCollapsed,
+            'dir-sidebar-modal-hidden': sidebarHiddenByModal
+        }"
+        class="dir-sidebar fixed inset-y-0 left-0 z-[60] transform
+               lg:translate-x-0 lg:static lg:inset-0
+               flex flex-col h-full text-[#333333] overflow-hidden shrink-0">
 
         {{-- Sidebar header --}}
-        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
-
-            <div class="text-left min-w-0 flex-1 pr-2">
-                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
-                    Director<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
-                </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
-                    Alumni Management
-                </p>
+        <div class="dir-sidebar-header h-24 px-5 shrink-0">
+            <div class="dir-header-inner">
+                <div class="dir-badge-icon">
+                    <i class="fa-solid fa-user-tie text-white" style="font-size:17px;"></i>
+                </div>
+                <div class="min-w-0 dir-collapsible-text">
+                    <h1 class="text-[19px] font-bold tracking-tight text-white leading-tight truncate">
+                        Director<span class="font-semibold text-white/70">Portal</span>
+                    </h1>
+                    <p class="text-[10px] uppercase tracking-[0.2em] text-white/60 font-semibold">
+                        Alumni Management
+                    </p>
+                </div>
             </div>
-
-            {{-- Bell Button --}}
-            <button
-                id="dir-bell-btn"
-                type="button"
-                @click.stop="$store.dirNotifs && $store.dirNotifs.toggle(); positionDirPanel();"
-                title="Notifications"
-                aria-label="Open notifications">
-
-                <i class="fas fa-bell"
-                   :class="$store.dirNotifs && $store.dirNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
-                          --fa-animation-duration:4s;
-                          --fa-animation-iteration-count:infinite;
-                          pointer-events:none;"></i>
-
-                <span
-                    x-show="$store.dirNotifs && $store.dirNotifs.unread > 0"
-                    x-cloak
-                    x-transition:enter="transition ease-out duration-200"
-                    x-transition:enter-start="opacity-0 scale-0"
-                    x-transition:enter-end="opacity-100 scale-100"
-                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
-                           bg-red-500 text-white text-[9px] font-black
-                           flex items-center justify-center px-1 leading-none
-                           shadow-md ring-2 ring-white"
-                    x-text="$store.dirNotifs && $store.dirNotifs.unread > 99
-                                ? '99+'
-                                : ($store.dirNotifs ? $store.dirNotifs.unread : 0)">
-                </span>
-            </button>
-
-            {{-- Mobile close --}}
-            <button @click="open = false"
-                    class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
-                <i class="fa-solid fa-circle-xmark text-xl"></i>
-            </button>
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+
+            <div class="dir-nav-section-row">
+                <p class="dir-section-label dir-collapsible-text">MENU</p>
+
+                <button type="button"
+                        @click.stop="toggleSidebar()"
+                        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                        class="dir-collapse-icon-btn hidden lg:flex">
+                    <i class="fas"
+                       :class="{ 'fa-angles-right': sidebarCollapsed, 'fa-angles-left': !sidebarCollapsed }"
+                       style="font-size:11px;line-height:1;"></i>
+                </button>
+            </div>
 
             @php
                 $sidebarLinks = [
@@ -678,52 +1047,71 @@
                 @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
-                   @click="window.__dirSidebarNotifsMarkRead('{{ $link['route'] }}')"
-                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
-                          {{ $isActive
-                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
-                              : 'hover:bg-[#F9F7FC]' }}">
+                   title="{{ $link['label'] }}"
+                   @click="window.__dirSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
+                   class="dir-nav-link {{ $isActive ? 'is-active' : '' }}
+                          flex items-center px-4 py-3 rounded-xl group">
 
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg
-                                transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         style="background-color:{{ $isActive ? '#EDE9F8' : '#F9F7FC' }};color:#7A3F91;">
+                    <div class="dir-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
+                         style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
+                                box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="font-medium tracking-wide flex-1
-                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px]
+                                 {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
-                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                        <span class="dir-active-dot dir-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
+                              style="background:#7A3F91;"></span>
                     @endif
                 </a>
             @endforeach
         </nav>
 
+        {{-- ══ BACKGROUND NOTIF POLLER ══ --}}
+        <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-dir-polling.window="pollingActive = false">
+            <template x-if="pollingActive">
+                @livewire('director.director-notif-poller')
+            </template>
+        </div>
+
         {{-- Logout --}}
-        <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            <form method="POST" action="{{ route('logout') }}">
+        <div class="p-2 lg:p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
+            <form method="POST"
+                  action="{{ route('logout') }}"
+                  @submit="loggingOut = true; window.dispatchEvent(new CustomEvent('stop-dir-polling'));">
                 @csrf
                 <button type="submit"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
-                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background:linear-gradient(135deg,#7A3F91,#6a3080);">
-                    <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                        :disabled="loggingOut"
+                        title="Logout"
+                        class="dir-logout-btn">
+                    <template x-if="!loggingOut">
+                        <span class="dir-logout-text-swap">
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                            <span class="dir-logout-label-text dir-collapsible-text">Logout</span>
+                        </span>
+                    </template>
+                    <template x-if="loggingOut">
+                        <span class="dir-logout-text-swap">
+                            <span class="dir-logout-spinner mr-2"></span>
+                            <span class="dir-logout-label-text dir-collapsible-text">Logging out…</span>
+                        </span>
+                    </template>
                 </button>
             </form>
         </div>
     </aside>
 
     {{-- ══ MAIN CONTENT ══ --}}
-    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 min-h-0">
 
-        {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
-                       lg:hidden shrink-0 z-30">
-            <button @click.stop="open = !open"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
+        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+                       shrink-0 z-30">
+            <button @click="open = !open"
+                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
                     <span :class="open ? 'rotate-45 translate-y-2' : ''"
                           class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
@@ -733,12 +1121,41 @@
                           class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#333333]">Director Portal</h2>
-            <div class="w-10"></div>
+            <span class="hidden lg:block"></span>
+
+            <button
+                id="dir-bell-btn"
+                type="button"
+                @click.stop="$store.dirNotifs && $store.dirNotifs.toggle(); positionDirPanel();"
+                title="Notifications"
+                aria-label="Open notifications"
+                class="dir-topbar-bell">
+                <i class="bell-icon fas fa-bell"
+                   :class="$store.dirNotifs && $store.dirNotifs.unread > 0 ? 'fa-shake' : ''"
+                   style="font-size:20px; color:#7A3F91;
+                          --fa-animation-duration:4s;
+                          --fa-animation-iteration-count:infinite;
+                          pointer-events:none;"></i>
+                <span
+                    x-show="$store.dirNotifs && $store.dirNotifs.unread > 0"
+                    x-cloak
+                    x-transition:enter="transition ease-out duration-200"
+                    x-transition:enter-start="opacity-0 scale-0"
+                    x-transition:enter-end="opacity-100 scale-100"
+                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                           bg-red-500 text-white text-[9px] font-black
+                           flex items-center justify-center px-1 leading-none
+                           shadow-md ring-2 ring-white"
+                    x-text="$store.dirNotifs && $store.dirNotifs.unread > 99
+                                ? '99+'
+                                : ($store.dirNotifs ? $store.dirNotifs.unread : 0)">
+                </span>
+            </button>
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto min-h-0 bg-[#F5F5F5] p-4 lg:p-8 no-scrollbar">
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+             style="min-height: 0; -webkit-overflow-scrolling: touch;">
             <div class="container mx-auto">
                 @yield('content')
             </div>
@@ -747,7 +1164,9 @@
 
 </div>
 
-{{-- ══ NOTIFICATION PANEL ══ --}}
+{{-- ══════════════════════════════════════════════════════════════════════════
+     DIRECTOR NOTIFICATION PANEL — dropdown on desktop, full screen on mobile
+════════════════════════════════════════════════════════════════════════════ --}}
 <div
     id="dir-notif-panel"
     x-show="$store.dirNotifs && $store.dirNotifs.open"
@@ -777,8 +1196,11 @@
     <div class="flex items-center justify-between px-5 py-4 shrink-0"
          style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
         <div class="flex items-center gap-2.5">
-            <i class="fas fa-bell text-white" style="font-size:15px;"></i>
-            <span class="text-white font-bold" style="font-size:16px;">Notifications</span>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center"
+                 style="background:rgba(255,255,255,0.14);">
+                <i class="fas fa-bell text-white" style="font-size:13px;"></i>
+            </div>
+            <span class="text-white font-bold" style="font-size:15px;">Notifications</span>
             <span x-show="$store.dirNotifs && $store.dirNotifs.unread > 0"
                   x-cloak
                   class="bg-red-500 text-white font-black px-2 py-0.5 rounded-full leading-none"
@@ -796,6 +1218,7 @@
                     style="font-size:11px;">
                 Mark all read
             </button>
+
             <div class="dir-notif-close-wrap ml-1">
                 <span class="dir-notif-close-tip">Close</span>
                 <button type="button"
@@ -808,14 +1231,25 @@
         </div>
     </div>
 
-    {{-- Notification List --}}
-    <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+    {{-- Sub-header --}}
+    <div class="px-5 py-2.5 flex items-center justify-between shrink-0"
+         style="background:#FAF6FE; border-bottom:1px solid #ECE2F8;">
+        <span style="font-size:11px; font-weight:700; color:#7A3F91; letter-spacing:0.08em; text-transform:uppercase;">
+            Recent Activity
+        </span>
+        <span style="font-size:11px; color:#9A8AA8; font-weight:500;"
+              x-text="($store.dirNotifs ? $store.dirNotifs.items.length : 0) + ' notification(s)'">
+        </span>
+    </div>
+
+    {{-- Scrollable notification list --}}
+    <div class="dir-notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 420px;">
 
         <template x-if="$store.dirNotifs && $store.dirNotifs.items.length === 0">
             <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
                 <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-                     style="background:#F5F5F5;">
-                    <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
+                     style="background:#F9F7FC; border:1px solid #ECE2F8;">
+                    <i class="fas fa-bell-slash" style="font-size:26px;color:#D7C8E6;"></i>
                 </div>
                 <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
                 <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
@@ -830,7 +1264,7 @@
                     class="dir-notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#F8F5FD] hover:bg-[#F0E9FA]'"
+                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
                     @click.stop="
                         $store.dirNotifs.markRead(notif);
                         $store.dirNotifs.close();
@@ -947,16 +1381,13 @@
                                   x-text="notif.created_at
                                       ? new Date(notif.created_at).toLocaleString('en-PH',{
                                           month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit'
+                                          hour:'2-digit',minute:'2-digit',second:'2-digit'
                                         })
                                       : ''">
                             </span>
                         </div>
                     </div>
 
-                    <span class="dir-notif-hover-label">
-                        <i class="fas fa-eye" style="font-size:10px;margin-right:5px;"></i>View Details
-                    </span>
                 </div>
             </template>
         </template>
@@ -970,15 +1401,30 @@
     </div>
 </div>
 
-<livewire:director.director-notif-poller />
+{{-- ══ SESSION-EXPIRED SOFT MODAL — replaces raw "Page Expired" screen ══ --}}
+<div id="dir-session-expired-modal">
+    <div class="dir-sem-card">
+        <div class="dir-sem-icon"><i class="fas fa-clock-rotate-left"></i></div>
+        <p class="dir-sem-title">Your session has expired</p>
+        <p class="dir-sem-sub">
+            This tab was open for a while and your session timed out.
+            Refresh the page to continue where you left off.
+        </p>
+        <button type="button" class="dir-sem-btn" onclick="window.location.reload()">
+            <i class="fas fa-rotate-right mr-1.5"></i> Refresh Page
+        </button>
+    </div>
+</div>
 
 @livewireScripts
 
+{{-- ✅ CLOSE ON OUTSIDE CLICK (no-op on mobile since panel is full screen) --}}
 <div
+    x-data
     x-show="$store.dirNotifs && $store.dirNotifs.open"
     x-cloak
     @click="$store.dirNotifs && $store.dirNotifs.close()"
-    class="fixed inset-0"
+    class="fixed inset-0 lg:block hidden"
     style="z-index: 9998; background: transparent;">
 </div>
 

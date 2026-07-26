@@ -132,6 +132,26 @@ new class extends Component {
     {
         $this->authorizeRole();
 
+        // ─────────────────────────────────────────────────────────────────
+        // NEW: pick up the auto-filter coming from the Director Dashboard's
+        // job stat cards ("Total Jobs" / "Active" / "Inactive" mini tiles).
+        // Dashboard sets 'director_job_status' in session right before
+        // redirecting here (same clean-URL pattern already used for
+        // 'director_coord_status' -> Active Coordinators).
+        //
+        // We apply it once to $filterStatus, then pull() it out of the
+        // session (pull = read + forget in one call) — so a plain refresh
+        // of this page afterwards goes back to showing every status
+        // (ACTIVE + INACTIVE + ORGANIZER_DELETED), same as normal.
+        // ─────────────────────────────────────────────────────────────────
+        if (session()->has('director_job_status')) {
+            $incomingStatus = session()->pull('director_job_status'); // '' | 'ACTIVE' | 'INACTIVE'
+            $this->filterStatus = in_array($incomingStatus, ['', 'ACTIVE', 'INACTIVE'], true)
+                ? $incomingStatus
+                : '';
+            $this->resetPage();
+        }
+
         $dirRecord = DB::table('director')
             ->where('user_id', auth()->id())
             ->whereNull('deleted_at')

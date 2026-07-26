@@ -24,24 +24,12 @@ new class extends Component {
     public int $newJobsThisMonth   = 0;
 
     public string $activeModal      = '';
-    public string $eventModalTitle  = '';
-    public array  $modalEvents      = [];
-    public array  $modalJobs        = [];
     public array  $modalCoords      = [];
 
-    public string $eventSearch  = '';
-    public string $jobSearch    = '';
     public string $coordSearch  = '';
 
-    public int $eventModalPage    = 1;
-    public int $eventModalSize    = 20;
-    public int $jobModalPage      = 1;
-    public int $jobModalPageSize  = 20;
     public int $coordModalPage    = 1;
     public int $coordModalSize    = 20;
-
-    public string $chartEventData = '{}';
-    public string $chartJobData   = '{}';
 
     public string $greeting    = '';
     public string $currentDate = '';
@@ -59,7 +47,6 @@ new class extends Component {
         };
 
         $this->loadStats();
-        $this->loadCharts();
     }
 
     private function loadStats(): void
@@ -80,177 +67,6 @@ new class extends Component {
         $monthStart = now('Asia/Manila')->startOfMonth()->utc();
         $this->newJobsThisMonth = JobPosting::where('created_at', '>=', $monthStart)
             ->whereNotIn('status', ['ADMIN_DELETED'])->count();
-    }
-
-    private function loadCharts(): void
-    {
-        $eventRows = AdminEvent::withTrashed()
-            ->select('status', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('status')
-            ->get()
-            ->keyBy('status');
-
-        $this->chartEventData = json_encode([
-            'labels'  => ['Approved', 'Pending', 'Rejected', 'Completed'],
-            'data'    => [
-                $eventRows->get('APPROVED')->cnt  ?? 0,
-                $eventRows->get('PENDING')->cnt   ?? 0,
-                $eventRows->get('REJECTED')->cnt  ?? 0,
-                $eventRows->get('COMPLETED')->cnt ?? 0,
-            ],
-            'colors'  => ['#22c55e', '#f59e0b', '#ef4444', '#3b82f6'],
-            'filters' => ['APPROVED', 'PENDING', 'REJECTED', 'COMPLETED'],
-        ]);
-
-        $jobRows = JobPosting::whereNotIn('status', ['ADMIN_DELETED'])
-            ->select('status', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('status')
-            ->get()
-            ->keyBy('status');
-
-        $this->chartJobData = json_encode([
-            'labels'  => ['Active', 'Inactive'],
-            'data'    => [
-                $jobRows->get('ACTIVE')->cnt   ?? 0,
-                $jobRows->get('INACTIVE')->cnt ?? 0,
-            ],
-            'colors'  => ['#22c55e', '#f59e0b'],
-            'filters' => ['ACTIVE', 'INACTIVE'],
-        ]);
-    }
-
-    protected function buildEventRows(string $status = ''): array
-    {
-        $q = AdminEvent::withTrashed();
-        if ($status) {
-            $q->where('status', $status);
-        } else {
-            $q->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED']);
-        }
-        return $q->orderByDesc('event_date')
-            ->get(['id', 'title', 'event_date', 'status', 'created_at'])
-            ->map(fn($e) => [
-                'id'         => $e->id,
-                'title'      => $e->title,
-                'date'       => $e->event_date->setTimezone('Asia/Manila')->format('M d, Y'),
-                'time'       => $e->event_date->setTimezone('Asia/Manila')->format('h:i A'),
-                'status'     => $e->status,
-                'created_at' => $e->created_at->diffForHumans(),
-            ])->toArray();
-    }
-
-    public function openTotalEventsModal(): void
-    {
-        $this->eventModalTitle = 'All Events';
-        $this->modalEvents     = $this->buildEventRows();
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
-    }
-
-    public function openPendingEventsModal(): void
-    {
-        $this->eventModalTitle = 'Pending Events';
-        $this->modalEvents     = $this->buildEventRows('PENDING');
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
-    }
-
-    public function openApprovedEventsModal(): void
-    {
-        $this->eventModalTitle = 'Approved Events';
-        $this->modalEvents     = $this->buildEventRows('APPROVED');
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
-    }
-
-    public function openRejectedEventsModal(): void
-    {
-        $this->eventModalTitle = 'Rejected Events';
-        $this->modalEvents     = $this->buildEventRows('REJECTED');
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
-    }
-
-    public function openCompletedEventsModal(): void
-    {
-        $this->eventModalTitle = 'Completed Events';
-        $this->modalEvents     = $this->buildEventRows('COMPLETED');
-        $this->eventSearch     = '';
-        $this->eventModalPage  = 1;
-        $this->activeModal     = 'events';
-    }
-
-    public function openEventModalByStatus(string $status): void
-    {
-        match($status) {
-            'PENDING'   => $this->openPendingEventsModal(),
-            'APPROVED'  => $this->openApprovedEventsModal(),
-            'REJECTED'  => $this->openRejectedEventsModal(),
-            'COMPLETED' => $this->openCompletedEventsModal(),
-            default     => $this->openTotalEventsModal(),
-        };
-    }
-
-    protected function buildJobRows(string $status = ''): array
-    {
-        $q = JobPosting::query();
-        if ($status) {
-            $q->where('status', $status);
-        } else {
-            $q->whereNotIn('status', ['ADMIN_DELETED']);
-        }
-        return $q->orderByDesc('created_at')
-            ->get(['id', 'job_title', 'company_name', 'employment_type', 'location', 'deadline', 'salary', 'status'])
-            ->map(fn($j) => [
-                'id'        => $j->id,
-                'title'     => $j->job_title,
-                'company'   => $j->company_name,
-                'type'      => $j->employment_type,
-                'location'  => $j->location ?? '',
-                'salary'    => $j->salary   ?? '',
-                'deadline'  => Carbon::parse($j->deadline)->setTimezone('Asia/Manila')->format('M d, Y'),
-                'days_left' => (int) now('Asia/Manila')->startOfDay()->diffInDays(
-                    Carbon::parse($j->deadline)->startOfDay(), false
-                ),
-                'status'    => $j->status,
-            ])->toArray();
-    }
-
-    public function openJobsModal(): void
-    {
-        $this->modalJobs    = $this->buildJobRows();
-        $this->jobSearch    = '';
-        $this->jobModalPage = 1;
-        $this->activeModal  = 'jobs';
-    }
-
-    public function openActiveJobsModal(): void
-    {
-        $this->modalJobs    = $this->buildJobRows('ACTIVE');
-        $this->jobSearch    = '';
-        $this->jobModalPage = 1;
-        $this->activeModal  = 'jobs';
-    }
-
-    public function openInactiveJobsModal(): void
-    {
-        $this->modalJobs    = $this->buildJobRows('INACTIVE');
-        $this->jobSearch    = '';
-        $this->jobModalPage = 1;
-        $this->activeModal  = 'jobs';
-    }
-
-    public function openJobModalByStatus(string $status): void
-    {
-        match($status) {
-            'ACTIVE'   => $this->openActiveJobsModal(),
-            'INACTIVE' => $this->openInactiveJobsModal(),
-            default    => $this->openJobsModal(),
-        };
     }
 
     protected function buildCoordRows(string $status = ''): array
@@ -279,15 +95,56 @@ new class extends Component {
 
     public function closeModal(): void { $this->activeModal = ''; }
 
-    public function updatingEventSearch(): void { $this->eventModalPage = 1; }
-    public function updatingJobSearch(): void   { $this->jobModalPage   = 1; }
+    /**
+     * Sends the director to the coordinator management page with the
+     * "Active" status filter pre-applied. We use the session (instead of
+     * a route/query parameter) so the URL stays clean:
+     *   /director/coordinator/management
+     * The management page's mount() pulls this value once, applies it
+     * to the filter, then clears it — so a plain refresh afterwards goes
+     * back to showing all statuses, which is expected.
+     */
+    public function goToActiveCoordinators()
+    {
+        session()->put('director_coord_status', 'ACTIVE');
+        return $this->redirect(route('director.coordinator/management'), navigate: true);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // NEW: Job stat card / mini-tile clicks now navigate straight to the
+    // Job Management page (director.job/management) instead of opening a
+    // modal on the dashboard — same clean-URL + session pattern already
+    // used above for goToActiveCoordinators().
+    //
+    // 'director_job_status' is read once in manage-job.blade.php's mount()
+    // via session()->pull(), applied to $filterStatus, then cleared — so a
+    // plain refresh of the job management page afterwards goes back to
+    // showing every status (ACTIVE + INACTIVE + ORGANIZER_DELETED), same
+    // as normal. This mirrors the existing coordinator-filter pattern.
+    //
+    //   goToAllJobs()      -> Total Jobs card      -> no filter (all)
+    //   goToActiveJobs()   -> Active mini-tile      -> filterStatus=ACTIVE
+    //   goToInactiveJobs() -> Inactive mini-tile    -> filterStatus=INACTIVE
+    // ─────────────────────────────────────────────────────────────────────
+    public function goToAllJobs()
+    {
+        session()->put('director_job_status', '');
+        return $this->redirect(route('director.job/management'), navigate: true);
+    }
+
+    public function goToActiveJobs()
+    {
+        session()->put('director_job_status', 'ACTIVE');
+        return $this->redirect(route('director.job/management'), navigate: true);
+    }
+
+    public function goToInactiveJobs()
+    {
+        session()->put('director_job_status', 'INACTIVE');
+        return $this->redirect(route('director.job/management'), navigate: true);
+    }
+
     public function updatingCoordSearch(): void { $this->coordModalPage = 1; }
-
-    public function eventPrevPage(): void { if ($this->eventModalPage > 1) $this->eventModalPage--; }
-    public function eventNextPage(int $last): void { if ($this->eventModalPage < $last) $this->eventModalPage++; }
-
-    public function jobPrevPage(): void { if ($this->jobModalPage > 1) $this->jobModalPage--; }
-    public function jobNextPage(int $last): void { if ($this->jobModalPage < $last) $this->jobModalPage++; }
 
     public function coordPrevPage(): void { if ($this->coordModalPage > 1) $this->coordModalPage--; }
     public function coordNextPage(int $last): void { if ($this->coordModalPage < $last) $this->coordModalPage++; }
@@ -296,13 +153,10 @@ new class extends Component {
 
 <div
     class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full"
-    @open-dir-event-modal.window="$wire.openEventModalByStatus($event.detail.filter)"
-    @open-dir-job-modal.window="$wire.openJobModalByStatus($event.detail.filter)"
 >
 
 <style>
-/* ── Stat card tooltip (desktop only — no tooltip text on mobile) ──
-     (identical pattern to organizer's .org-stat-card / .org-card-tip) ── */
+/* ── Stat card tooltip (desktop only — no tooltip text on mobile) ── */
 .dir-stat-card { position: relative; overflow: visible; }
 .dir-stat-card .dir-card-tip {
     position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
@@ -321,8 +175,7 @@ new class extends Component {
     .dir-stat-card .dir-card-tip { display: none !important; }
 }
 
-/* ── Mini cards (clickable stat tiles) — identical to organizer's
-     .org-mini-card / .org-mini-tip ── */
+/* ── Mini cards (clickable stat tiles) ── */
 .dir-mini-card { position: relative; overflow: visible; cursor: pointer; transition: transform .12s ease, box-shadow .15s ease; }
 .dir-mini-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.10); }
 .dir-mini-card:active { transform: scale(.97); }
@@ -343,23 +196,17 @@ new class extends Component {
     .dir-mini-card .dir-mini-tip { display: none !important; }
 }
 
-/* ── Main grid — align-items: start so the account card only takes its
-     own natural height, no stretching to match the taller right column
-     (identical to organizer's .org-main-grid) ── */
+/* ── Main grid ── */
 .dir-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
 @media (max-width: 1023px) {
     .dir-main-grid { grid-template-columns: 1fr; gap: 0.85rem; }
 }
 
-/* ── Account column — natural height, no forced stretch ── */
 .dir-account-col { display: flex; flex-direction: column; }
 .dir-account-card { display: flex; flex-direction: column; }
 
-/* ── Right col ── */
 .dir-right-col { display: flex; flex-direction: column; gap: 1rem; }
 
-/* ── 2x2 stat grid: equal height on desktop, 1-col on phone
-     (identical to organizer's .org-stat-grid) ── */
 .dir-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 .dir-stat-grid .dir-stat-card { display: flex; flex-direction: column; justify-content: center; }
 @media (max-width: 639px) {
@@ -371,8 +218,6 @@ new class extends Component {
     .dir-stat-grid .dir-stat-card .dir-stat-num { font-size: 2.4rem !important; }
 }
 
-/* ── Info rows — dark, readable text (no gray)
-     (identical to organizer's .org-info-row) ── */
 .dir-info-body { display: flex; flex-direction: column; }
 .dir-info-row {
     display: flex; align-items: center; justify-content: space-between;
@@ -383,11 +228,9 @@ new class extends Component {
 .dir-info-value { font-size: 0.875rem; font-weight: 600; color: #111111; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .dir-info-value-sm { font-size: 0.80rem; font-weight: 600; color: #111111; text-align: right; word-break: break-all; max-width: 160px; }
 
-/* ── Chips section wrapper (identical to organizer's .org-chips-section) ── */
 .dir-chips-section { padding: 0.65rem 1rem; }
 .dir-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; margin-bottom: 0.4rem; }
 
-/* ── Chips — color-coded per status, same palette as organizer's chips ── */
 .dir-chip {
     font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
     display: inline-flex; align-items: center; gap: 4px;
@@ -395,50 +238,25 @@ new class extends Component {
 }
 .dir-chip i { font-size: 7px; }
 
-/* Event status chips */
 .dir-chip-approved  { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
 .dir-chip-pending   { background: #FEF6E7; color: #B5750A; border-color: #FBE4B4; }
 .dir-chip-completed { background: #EAF1FE; color: #1D4ED8; border-color: #C9DBFC; }
 .dir-chip-rejected  { background: #FDECEC; color: #C0311A; border-color: #F8C9C2; }
 
-/* Job status chips */
 .dir-chip-active   { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
 .dir-chip-inactive { background: #F1F1F3; color: #52525B; border-color: #E1E1E5; }
 
-/* Coordinator status chips */
 .dir-chip-coord-active   { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
 .dir-chip-coord-inactive { background: #F1F1F3; color: #52525B; border-color: #E1E1E5; }
 
-/* ── Scrollbar (identical to organizer's .org-scroll) ── */
 .dir-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
 .dir-scroll::-webkit-scrollbar { width: 4px; }
 .dir-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
 
-/* ── Mini tiles inside the side-by-side breakdown panels — compacted
-     (identical proportions to organizer's .org-emp-tile) ── */
 .dir-mini-tile { padding: 0.45rem 0.6rem !important; }
 .dir-mini-tile .dir-mini-num { font-size: 1.1rem !important; line-height: 1 !important; }
 .dir-mini-tile .dir-mini-label { font-size: 0.6rem !important; margin-top: 0.15rem !important; }
 
-/* ── Chart card (kept from the original director dashboard, restyled to
-     sit inside the new breakdown-panel look) ── */
-.dir-chart-card {
-    background: #F9F7FC;
-    border-radius: 14px;
-    border: 1px solid #E8E0F0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    cursor: pointer;
-    transition: box-shadow .18s ease, border-color .18s ease;
-}
-.dir-chart-card:hover { box-shadow: 0 5px 16px rgba(122,63,145,.13); border-color: rgba(122,63,145,.35); }
-.dir-chart-hint {
-    font-size:.68rem; color:#bbb; font-weight:500;
-    margin-left:auto; display:flex; align-items:center; gap:3px; pointer-events:none;
-}
-
-/* ── Modal close button (same as organizer/coordinator .org-close-btn) ── */
 .dir-close-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 6px 16px; border-radius: 10px; background: rgba(255,255,255,.12);
@@ -447,7 +265,6 @@ new class extends Component {
 }
 .dir-close-btn:hover { background: rgba(255,255,255,.22); }
 
-/* ── Pagination ── */
 .dir-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 32px; height: 32px; padding: 0 10px; border-radius: 8px;
@@ -458,27 +275,19 @@ new class extends Component {
 .dir-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .dir-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-/* ── Table rows ── */
 .dir-table-row { transition: background .10s; }
 .dir-table-row:hover { background: #F5F0FA !important; }
 
-/* ── Modal animation ── */
 @keyframes dirModalIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
 .dir-modal-enter { animation: dirModalIn .2s cubic-bezier(.4,0,.2,1) both; }
 
-/* ── Fade-up entrance animations (identical to organizer's .org-fade-up) ── */
 @keyframes dirFadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:none } }
 .dir-fade-up { animation: dirFadeUp .4s cubic-bezier(.25,.8,.25,1) both; }
 .dir-fade-1 { animation-delay:.04s } .dir-fade-2 { animation-delay:.08s }
 .dir-fade-3 { animation-delay:.12s } .dir-fade-4 { animation-delay:.16s }
 </style>
 
-<div id="__dir_dash_data" style="display:none"
-     data-event="{{ $chartEventData }}"
-     data-job="{{ $chartJobData }}">
-</div>
-
-{{-- ── PAGE HEADER (identical structure to organizer) ── --}}
+{{-- ── PAGE HEADER ── --}}
 <div class="flex items-center gap-3 mb-5 dir-fade-up">
     <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
          style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -495,18 +304,13 @@ new class extends Component {
     </div>
 </div>
 
-{{-- ══ MAIN GRID (identical proportions to organizer: 300px account col + flexible right col) ══ --}}
+{{-- ══ MAIN GRID ══ --}}
 <div class="dir-main-grid">
 
-    {{-- ══ LEFT: Director Account Card (banner + info rows + chips —
-         mirrors organizer's photo-banner profile card, using a gradient
-         icon banner in place of a profile photo since directors don't
-         have a photo field) ══ --}}
+    {{-- ══ LEFT: Director Account Card ══ --}}
     <div class="dir-account-col dir-fade-up">
         <div class="dir-account-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
-            {{-- Banner — gradient purple hero matching the organizer photo
-                 banner's proportions and bottom-anchored name/role overlay --}}
             <div class="relative w-full overflow-hidden shrink-0 h-[400px] sm:h-[240px]"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <div class="w-full h-full flex items-center justify-center">
@@ -552,8 +356,6 @@ new class extends Component {
                     </span>
                 </div>
 
-                {{-- Quick chips — Events (color-coded per status,
-                     identical palette to organizer's chips) --}}
                 <div class="dir-chips-section">
                     <p class="dir-chips-label">Events Overview</p>
                     <div>
@@ -566,7 +368,6 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Quick chips — Jobs --}}
                 <div class="dir-chips-section">
                     <p class="dir-chips-label">Job Postings</p>
                     <div>
@@ -587,16 +388,14 @@ new class extends Component {
     {{-- ══ RIGHT: Stats + Breakdown Panels ══ --}}
     <div class="dir-right-col">
 
-        {{-- 2x2 Stat Cards (identical layout/typography to organizer's
-             stat grid — Active Coordinators, Total Events, Pending
-             Events, Job Postings) --}}
+        {{-- 2x2 Stat Cards --}}
         <div class="dir-stat-grid dir-fade-up dir-fade-1">
 
-            {{-- Active Coordinators --}}
-            <button type="button" wire:click="openCoordsModal('ACTIVE')"
-                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
-                           active:scale-[.985] cursor-pointer block text-left w-full">
+            {{-- Active Coordinators — clean URL, filter pre-set via session --}}
+            <button type="button" wire:click="goToActiveCoordinators"
+               class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                      hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block text-left w-full">
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Active Coordinators</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow"
@@ -616,11 +415,11 @@ new class extends Component {
                 </p>
             </button>
 
-            {{-- Total Events --}}
-            <button type="button" wire:click="openTotalEventsModal"
-                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-md hover:border-emerald-300 transition-all duration-200
-                           active:scale-[.985] cursor-pointer block text-left w-full">
+            {{-- Total Events — clean URL: /director/event/management (no status segment) --}}
+            <a href="{{ route('director.event/management') }}" wire:navigate
+               class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                      hover:shadow-md hover:border-emerald-300 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block text-left w-full">
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
@@ -638,13 +437,13 @@ new class extends Component {
                 @else
                     <p class="text-[#333333] font-normal mt-1 text-[0.85rem]">No approved events yet</p>
                 @endif
-            </button>
+            </a>
 
-            {{-- Pending Events --}}
-            <button type="button" wire:click="openPendingEventsModal"
-                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
-                           hover:shadow-md hover:border-amber-300 transition-all duration-200
-                           active:scale-[.985] cursor-pointer block text-left w-full">
+            {{-- Pending Events — clean URL: /director/event/management/pending --}}
+            <a href="{{ route('director.event/management', ['status' => 'pending']) }}" wire:navigate
+               class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                      hover:shadow-md hover:border-amber-300 transition-all duration-200
+                      active:scale-[.985] cursor-pointer block text-left w-full">
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Pending Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
@@ -662,10 +461,10 @@ new class extends Component {
                 @else
                     <p class="text-[#333333] font-normal mt-1 text-[0.85rem]">All clear</p>
                 @endif
-            </button>
+            </a>
 
-            {{-- Job Postings --}}
-            <button type="button" wire:click="openJobsModal"
+            {{-- Job Postings — clean URL, filter pre-set via session (same pattern as Active Coordinators) --}}
+            <button type="button" wire:click="goToAllJobs"
                     class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                            hover:shadow-md hover:border-blue-300 transition-all duration-200
                            active:scale-[.985] cursor-pointer block text-left w-full">
@@ -687,19 +486,16 @@ new class extends Component {
 
         </div>
 
-        {{-- Side-by-side breakdown panels — Events Overview mini-cards +
-             chart on the left, Jobs mini-cards + chart on the right
-             (mirrors organizer's Course Breakdown + Employment Snapshot
-             side-by-side layout) --}}
+        {{-- Side-by-side breakdown panels (chart cards removed) --}}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 dir-fade-up dir-fade-2">
 
-            {{-- Events Overview Panel --}}
+            {{-- Events Overview Panel — mini tiles now link to clean filtered URLs --}}
             @php
                 $evtCards = [
-                    ['label'=>'Pending',   'count'=>$pendingEvents,   'icon'=>'fa-hourglass-end',  'bg'=>'bg-amber-50 border-amber-200',     'color'=>'text-amber-700',   'action'=>'openPendingEventsModal',   'ctip'=>'View Pending Events'],
-                    ['label'=>'Approved',  'count'=>$approvedEvents,  'icon'=>'fa-calendar-check', 'bg'=>'bg-emerald-50 border-emerald-200', 'color'=>'text-emerald-700', 'action'=>'openApprovedEventsModal',  'ctip'=>'View Approved Events'],
-                    ['label'=>'Completed', 'count'=>$completedEvents, 'icon'=>'fa-flag-checkered', 'bg'=>'bg-blue-50 border-blue-200',       'color'=>'text-blue-700',    'action'=>'openCompletedEventsModal', 'ctip'=>'View Completed Events'],
-                    ['label'=>'Rejected',  'count'=>$rejectedEvents,  'icon'=>'fa-circle-xmark',   'bg'=>'bg-red-50 border-red-200',         'color'=>'text-red-700',     'action'=>'openRejectedEventsModal',  'ctip'=>'View Rejected Events'],
+                    ['label'=>'Pending',   'count'=>$pendingEvents,   'icon'=>'fa-hourglass-end',  'bg'=>'bg-amber-50 border-amber-200',     'color'=>'text-amber-700',   'status'=>'pending',   'ctip'=>'View Pending Events'],
+                    ['label'=>'Approved',  'count'=>$approvedEvents,  'icon'=>'fa-calendar-check', 'bg'=>'bg-emerald-50 border-emerald-200', 'color'=>'text-emerald-700', 'status'=>'approved',  'ctip'=>'View Approved Events'],
+                    ['label'=>'Completed', 'count'=>$completedEvents, 'icon'=>'fa-flag-checkered', 'bg'=>'bg-blue-50 border-blue-200',       'color'=>'text-blue-700',    'status'=>'completed', 'ctip'=>'View Completed Events'],
+                    ['label'=>'Rejected',  'count'=>$rejectedEvents,  'icon'=>'fa-circle-xmark',   'bg'=>'bg-red-50 border-red-200',         'color'=>'text-red-700',     'status'=>'rejected',  'ctip'=>'View Rejected Events'],
                 ];
             @endphp
             <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
@@ -719,33 +515,23 @@ new class extends Component {
                 </div>
 
                 <div class="p-3 flex-1">
-                    <div class="grid grid-cols-2 gap-2 mb-3">
+                    <div class="grid grid-cols-2 gap-2">
                         @foreach($evtCards as $card)
-                        <button type="button" wire:click="{{ $card['action'] }}"
-                                class="dir-mini-card dir-mini-tile rounded-xl border {{ $card['bg'] }} block w-full text-left">
+                        <a href="{{ route('director.event/management', ['status' => $card['status']]) }}" wire:navigate
+                           class="dir-mini-card dir-mini-tile rounded-xl border {{ $card['bg'] }} block w-full text-left">
                             <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>{{ $card['ctip'] }}</span>
                             <div class="flex items-center gap-1.5 mb-1">
                                 <i class="fas {{ $card['icon'] }} text-[10px] {{ $card['color'] }}"></i>
                                 <span class="text-[.68rem] font-bold text-[#333333] uppercase tracking-wide">{{ $card['label'] }}</span>
                             </div>
                             <p class="dir-mini-num font-extrabold leading-none {{ $card['color'] }}">{{ number_format($card['count']) }}</p>
-                        </button>
+                        </a>
                         @endforeach
-                    </div>
-
-                    <div class="dir-chart-card" onclick="dirOpenEventModal('')">
-                        <div class="px-3 py-2 flex items-center gap-2 border-b border-[#E8E0F0]">
-                            <p class="text-[.68rem] font-semibold text-[#333333] uppercase tracking-wide">Events Chart</p>
-                            <span class="dir-chart-hint"><i class="fas fa-hand-pointer"></i> Click segment</span>
-                        </div>
-                        <div class="p-2 flex items-center justify-center" style="height:150px;" wire:ignore>
-                            <canvas id="dChartEvent"></canvas>
-                        </div>
                     </div>
                 </div>
             </div>
 
-            {{-- Job Postings Panel --}}
+            {{-- Job Postings Panel — mini tiles now navigate to Job Management with auto-filter (session pattern) --}}
             <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
                 <div class="px-4 py-2 border-b border-[#E8E0F0] flex items-center justify-between"
                      style="background:linear-gradient(to right,#F9F7FC,#ffffff);">
@@ -762,28 +548,18 @@ new class extends Component {
                 </div>
 
                 <div class="p-3 grid grid-cols-2 gap-2 content-start flex-1">
-                    <button type="button" wire:click="openActiveJobsModal"
+                    <button type="button" wire:click="goToActiveJobs"
                             class="dir-mini-card dir-mini-tile rounded-xl border bg-emerald-50 border-emerald-200 block w-full text-left">
                         <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>View Active Jobs</span>
                         <p class="dir-mini-num font-extrabold leading-none text-emerald-700">{{ number_format($activeJobs) }}</p>
                         <p class="dir-mini-label font-bold text-[#333333] uppercase tracking-wide">Active</p>
                     </button>
-                    <button type="button" wire:click="openInactiveJobsModal"
+                    <button type="button" wire:click="goToInactiveJobs"
                             class="dir-mini-card dir-mini-tile rounded-xl border bg-gray-50 border-gray-200 block w-full text-left">
                         <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive Jobs</span>
                         <p class="dir-mini-num font-extrabold leading-none text-[#333333]">{{ number_format($inactiveJobs) }}</p>
                         <p class="dir-mini-label font-bold text-[#333333] uppercase tracking-wide">Inactive</p>
                     </button>
-
-                    <div class="dir-chart-card col-span-2" onclick="dirOpenJobModal('')">
-                        <div class="px-3 py-2 flex items-center gap-2 border-b border-[#E8E0F0]">
-                            <p class="text-[.68rem] font-semibold text-[#333333] uppercase tracking-wide">Jobs Chart</p>
-                            <span class="dir-chart-hint"><i class="fas fa-hand-pointer"></i> Click segment</span>
-                        </div>
-                        <div class="p-2 flex items-center justify-center" style="height:150px;" wire:ignore>
-                            <canvas id="dChartJob"></canvas>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -791,236 +567,6 @@ new class extends Component {
 
     </div>{{-- end right col --}}
 </div>{{-- end main grid --}}
-
-
-{{-- ════════════════════════════════════════════════════════════════
-     MODAL: EVENTS
-════════════════════════════════════════════════════════════════ --}}
-@if($activeModal === 'events')
-@php
-    $filteredEvents = collect($modalEvents)
-        ->when($eventSearch !== '', fn($c) => $c->filter(fn($e) =>
-            str_contains(strtolower($e['title']), strtolower($eventSearch))
-        ))
-        ->values();
-    $evtTotal      = $filteredEvents->count();
-    $evtLastPage   = max((int) ceil($evtTotal / $eventModalSize), 1);
-    $evtSafePage   = min($eventModalPage, $evtLastPage);
-    $evtFrom       = $evtTotal > 0 ? ($evtSafePage - 1) * $eventModalSize + 1 : 0;
-    $evtTo         = min($evtSafePage * $eventModalSize, $evtTotal);
-    $displayEvents = $filteredEvents->slice(($evtSafePage - 1) * $eventModalSize, $eventModalSize)->values()->toArray();
-@endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 dir-modal-enter"
-     @keydown.escape.window="$wire.closeModal()">
-    <div class="flex items-center justify-between px-6 lg:px-10 py-4 shrink-0 shadow" style="background:#7A3F91;">
-        <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                <i class="fas fa-calendar-days text-white text-sm"></i>
-            </div>
-            <div>
-                <h2 class="text-white font-semibold text-lg leading-tight">{{ $eventModalTitle }}</h2>
-                <p class="text-white/60 text-xs font-normal">{{ $evtFrom }}–{{ $evtTo }} of {{ $evtTotal }} event(s)</p>
-            </div>
-        </div>
-        <button wire:click="closeModal" class="dir-close-btn"><i class="fas fa-xmark"></i><span class="hidden sm:inline">Close</span></button>
-    </div>
-    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-        <div class="flex items-center gap-3">
-            <div class="relative flex-1 max-w-sm" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.eventSearch??''; $wire.$watch('eventSearch',v=>{if(v!==this.q)this.q=v;}); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('eventSearch', q)"
-                       placeholder="Search event title…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/30 transition-all"
-                       autocomplete="off">
-            </div>
-            <span class="text-xs text-gray-400 hidden sm:inline">Showing <strong class="text-gray-600">{{ $evtFrom }}–{{ $evtTo }}</strong> of <strong class="text-gray-600">{{ $evtTotal }}</strong></span>
-        </div>
-    </div>
-    <div class="flex-1 overflow-y-auto min-h-0 dir-scroll">
-        <table class="w-full border-collapse" style="min-width:500px;">
-            <thead class="sticky top-0 z-10" style="background:#f5f0fa;">
-                <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-6 lg:pl-10 pr-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-14">#</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Event Title</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Date &amp; Time</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden sm:table-cell">Posted</th>
-                    <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">
-                @forelse($displayEvents as $idx => $evt)
-                @php
-                    $evtSc = match($evt['status']) {
-                        'PENDING'   => ['text-amber-700 bg-amber-50 border-amber-200',       'fa-hourglass-end'],
-                        'APPROVED'  => ['text-emerald-700 bg-emerald-50 border-emerald-200', 'fa-circle-check'],
-                        'REJECTED'  => ['text-red-600 bg-red-50 border-red-200',             'fa-circle-xmark'],
-                        'COMPLETED' => ['text-blue-700 bg-blue-50 border-blue-200',          'fa-check-double'],
-                        default     => ['text-gray-600 bg-gray-50 border-gray-200',          'fa-circle'],
-                    };
-                @endphp
-                <tr class="dir-table-row bg-white">
-                    <td class="pl-6 lg:pl-10 pr-3 py-3.5"><span class="text-xs font-semibold" style="color:#c0a0d8;">{{ str_pad($evtFrom + $idx, 2, '0', STR_PAD_LEFT) }}</span></td>
-                    <td class="px-4 py-3.5"><p class="text-sm font-semibold text-gray-900 uppercase">{{ $evt['title'] }}</p></td>
-                    <td class="px-4 py-3.5">
-                        <p class="text-sm font-semibold text-gray-800">{{ $evt['date'] }}</p>
-                        <p class="text-xs text-gray-400">{{ $evt['time'] ?? '' }}</p>
-                    </td>
-                    <td class="px-4 py-3.5 hidden sm:table-cell"><p class="text-xs text-gray-500">{{ $evt['created_at'] }}</p></td>
-                    <td class="px-4 py-3.5 text-center">
-                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $evtSc[0] }}">
-                            <i class="fas {{ $evtSc[1] }} text-xs"></i> {{ $evt['status'] }}
-                        </span>
-                    </td>
-                </tr>
-                @empty
-                <tr><td colspan="5" class="py-20 text-center">
-                    <div class="flex flex-col items-center gap-3">
-                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;"><i class="fas fa-calendar-days text-2xl" style="color:#c89de0;"></i></div>
-                        <p class="text-sm font-semibold text-gray-400">No events found</p>
-                    </div>
-                </td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-    <div class="px-5 py-3 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" style="background:#7A3F91;">
-        <p class="text-white text-sm">Showing <strong class="font-bold text-base">{{ $evtFrom }}–{{ $evtTo }}</strong> of <strong class="font-bold text-base">{{ $evtTotal }}</strong> event(s)</p>
-        @if($evtLastPage > 1)
-        <div class="flex items-center gap-1.5">
-            <button wire:click="eventPrevPage" {{ $evtSafePage <= 1 ? 'disabled' : '' }} class="dir-pg-btn dir-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-            @for($p = max(1, $evtSafePage - 2); $p <= min($evtLastPage, $evtSafePage + 2); $p++)
-                @if($p === $evtSafePage)<span class="dir-pg-btn dir-pg-active">{{ $p }}</span>
-                @else<button wire:click="$set('eventModalPage', {{ $p }})" class="dir-pg-btn dir-pg-nav">{{ $p }}</button>@endif
-            @endfor
-            <button wire:click="eventNextPage({{ $evtLastPage }})" {{ $evtSafePage >= $evtLastPage ? 'disabled' : '' }} class="dir-pg-btn dir-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-            <span class="text-xs font-semibold text-white/80 ml-1">Page {{ $evtSafePage }}/{{ $evtLastPage }}</span>
-        </div>
-        @endif
-    </div>
-</div>
-@endif
-
-
-{{-- ════════════════════════════════════════════════════════════════
-     MODAL: JOB POSTINGS
-════════════════════════════════════════════════════════════════ --}}
-@if($activeModal === 'jobs')
-@php
-    $filteredJobs = collect($modalJobs)
-        ->when($jobSearch !== '', fn($c) => $c->filter(fn($j) =>
-            str_contains(strtolower($j['title']),          strtolower($jobSearch)) ||
-            str_contains(strtolower($j['company']),        strtolower($jobSearch)) ||
-            str_contains(strtolower($j['location'] ?? ''), strtolower($jobSearch))
-        ))
-        ->values();
-    $jobTotalCount = $filteredJobs->count();
-    $jobLastPage   = max((int) ceil($jobTotalCount / $jobModalPageSize), 1);
-    $jobSafePage   = min($jobModalPage, $jobLastPage);
-    $jobFrom       = $jobTotalCount > 0 ? ($jobSafePage - 1) * $jobModalPageSize + 1 : 0;
-    $jobTo         = min($jobSafePage * $jobModalPageSize, $jobTotalCount);
-    $displayJobs   = $filteredJobs->slice(($jobSafePage - 1) * $jobModalPageSize, $jobModalPageSize)->values()->toArray();
-    $jobStatuses = collect($modalJobs)->pluck('status')->unique()->toArray();
-    $jobModalTitleText = match(true) {
-        count($jobStatuses) === 1 && $jobStatuses[0] === 'ACTIVE'   => 'Active Job Postings',
-        count($jobStatuses) === 1 && $jobStatuses[0] === 'INACTIVE' => 'Inactive Job Postings',
-        default => 'All Job Postings',
-    };
-@endphp
-<div class="fixed inset-0 z-[9999] flex flex-col bg-gray-50 dir-modal-enter"
-     @keydown.escape.window="$wire.closeModal()">
-    <div class="flex items-center justify-between px-6 lg:px-10 py-4 shrink-0 shadow" style="background:#7A3F91;">
-        <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
-                <i class="fas fa-briefcase text-white text-sm"></i>
-            </div>
-            <div>
-                <h2 class="text-white font-semibold text-lg leading-tight">{{ $jobModalTitleText }}</h2>
-                <p class="text-white/60 text-xs">{{ $jobFrom }}–{{ $jobTo }} of {{ $jobTotalCount }} job(s)</p>
-            </div>
-        </div>
-        <button wire:click="closeModal" class="dir-close-btn"><i class="fas fa-xmark"></i><span class="hidden sm:inline">Close</span></button>
-    </div>
-    <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0">
-        <div class="flex items-center gap-3">
-            <div class="relative flex-1 max-w-sm" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.jobSearch??''; $wire.$watch('jobSearch',v=>{if(v!==this.q)this.q=v;}); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('jobSearch', q)"
-                       placeholder="Search title, company, location…"
-                       class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#7A3F91]/30 transition-all"
-                       autocomplete="off">
-            </div>
-            <span class="text-xs text-gray-400 hidden sm:inline">Showing <strong class="text-gray-600">{{ $jobFrom }}–{{ $jobTo }}</strong> of <strong class="text-gray-600">{{ $jobTotalCount }}</strong></span>
-        </div>
-    </div>
-    <div class="flex-1 overflow-y-auto min-h-0 dir-scroll">
-        <table class="w-full border-collapse" style="min-width:620px;">
-            <thead class="sticky top-0 z-10" style="background:#f5f0fa;">
-                <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-6 lg:pl-10 pr-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-14">#</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Position</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Company</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden sm:table-cell">Type</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden md:table-cell">Location</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden md:table-cell">Salary</th>
-                    <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                    <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Deadline</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-100">
-                @forelse($displayJobs as $idx => $job)
-                @php $isUrgent = ($job['days_left'] ?? 99) <= 7; $isActive = $job['status'] === 'ACTIVE'; @endphp
-                <tr class="dir-table-row bg-white">
-                    <td class="pl-6 lg:pl-10 pr-3 py-3.5"><span class="text-xs font-semibold" style="color:#c0a0d8;">{{ str_pad($jobFrom + $idx, 2, '0', STR_PAD_LEFT) }}</span></td>
-                    <td class="px-4 py-3.5"><p class="text-sm font-semibold text-gray-900 truncate" style="max-width:180px;">{{ $job['title'] }}</p></td>
-                    <td class="px-4 py-3.5"><p class="text-sm text-gray-600 truncate" style="max-width:140px;">{{ $job['company'] }}</p></td>
-                    <td class="px-4 py-3.5 hidden sm:table-cell">
-                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border" style="background:#F9F7FC; color:#7A3F91; border-color:#E8E0F0;">{{ $job['type'] }}</span>
-                    </td>
-                    <td class="px-4 py-3.5 hidden md:table-cell"><p class="text-sm text-gray-500">{{ $job['location'] ?: '—' }}</p></td>
-                    <td class="px-4 py-3.5 hidden md:table-cell"><p class="text-sm font-semibold" style="color:#7A3F91;">{{ $job['salary'] ?: '—' }}</p></td>
-                    <td class="px-4 py-3.5 text-center">
-                        @if($isActive)
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-emerald-700 bg-emerald-50 border-emerald-200"><i class="fas fa-circle text-[8px]"></i> Active</span>
-                        @else
-                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border text-amber-700 bg-amber-50 border-amber-200"><i class="fas fa-circle text-[8px]"></i> Inactive</span>
-                        @endif
-                    </td>
-                    <td class="px-4 py-3.5 text-center">
-                        <p class="text-xs font-semibold {{ $isUrgent ? 'text-red-600' : 'text-gray-500' }}">
-                            <i class="fas fa-{{ $isUrgent ? 'fire' : 'calendar' }} text-xs mr-0.5"></i>{{ $job['deadline'] }}
-                        </p>
-                        @if($isUrgent)<p class="text-xs text-red-400 mt-0.5">{{ $job['days_left'] }}d left</p>@endif
-                    </td>
-                </tr>
-                @empty
-                <tr><td colspan="8" class="py-20 text-center">
-                    <div class="flex flex-col items-center gap-3">
-                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;"><i class="fas fa-briefcase text-2xl" style="color:#c89de0;"></i></div>
-                        <p class="text-sm font-semibold text-gray-400">No job postings found</p>
-                    </div>
-                </td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-    <div class="px-5 py-3 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" style="background:#7A3F91;">
-        <p class="text-white text-sm">Showing <strong class="font-bold text-base">{{ $jobFrom }}–{{ $jobTo }}</strong> of <strong class="font-bold text-base">{{ $jobTotalCount }}</strong> posting(s)</p>
-        @if($jobLastPage > 1)
-        <div class="flex items-center gap-1.5">
-            <button wire:click="jobPrevPage" {{ $jobSafePage <= 1 ? 'disabled' : '' }} class="dir-pg-btn dir-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-            @for($p = max(1, $jobSafePage - 2); $p <= min($jobLastPage, $jobSafePage + 2); $p++)
-                @if($p === $jobSafePage)<span class="dir-pg-btn dir-pg-active">{{ $p }}</span>
-                @else<button wire:click="$set('jobModalPage', {{ $p }})" class="dir-pg-btn dir-pg-nav">{{ $p }}</button>@endif
-            @endfor
-            <button wire:click="jobNextPage({{ $jobLastPage }})" {{ $jobSafePage >= $jobLastPage ? 'disabled' : '' }} class="dir-pg-btn dir-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-            <span class="text-xs font-semibold text-white/80 ml-1">Page {{ $jobSafePage }}/{{ $jobLastPage }}</span>
-        </div>
-        @endif
-    </div>
-</div>
-@endif
 
 
 {{-- ════════════════════════════════════════════════════════════════
@@ -1132,120 +678,3 @@ new class extends Component {
 
 
 </div>{{-- end root --}}
-
-
-{{-- ══ CHARTS SCRIPT ══ --}}
-<script>
-(function () {
-    'use strict';
-
-    window.dirOpenEventModal = function (filter) {
-        window.dispatchEvent(new CustomEvent('open-dir-event-modal', { detail: { filter: filter || '' } }));
-    };
-    window.dirOpenJobModal = function (filter) {
-        window.dispatchEvent(new CustomEvent('open-dir-job-modal', { detail: { filter: filter || '' } }));
-    };
-
-    function loadChartJs(cb) {
-        if (window.Chart) { cb(); return; }
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
-        s.onload = cb; document.head.appendChild(s);
-    }
-
-    function readData() {
-        var el = document.getElementById('__dir_dash_data');
-        if (!el) return null;
-        try {
-            return {
-                event: JSON.parse(el.getAttribute('data-event') || 'null'),
-                job:   JSON.parse(el.getAttribute('data-job')   || 'null'),
-            };
-        } catch (e) { return null; }
-    }
-
-    function safeDestroy(id) {
-        var canvas = document.getElementById(id);
-        if (canvas && window.Chart && Chart.getChart) {
-            var existing = Chart.getChart(canvas);
-            if (existing) existing.destroy();
-        }
-    }
-
-    function buildDonut(id, data, openModalFn) {
-        if (!data || !data.labels) return;
-        var canvas = document.getElementById(id);
-        if (!canvas) return;
-        safeDestroy(id);
-        new Chart(canvas, {
-            type: 'doughnut',
-            data: {
-                labels: data.labels,
-                datasets: [{ data: data.data, backgroundColor: data.colors, borderWidth: 2, borderColor: '#fff', hoverOffset: 6 }],
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, cutout: '65%',
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            font: { size: 9, weight: '600', family: 'inherit' },
-                            color: function (ctx) { return data.colors[ctx.index] || '#333'; },
-                            padding: 6, usePointStyle: true, pointStyleWidth: 6,
-                        },
-                        onClick: function (e, legendItem, legend) {
-                            if (e && e.native) e.native.stopPropagation();
-                            var chart = legend.chart, index = legendItem.index;
-                            if (chart.getDataVisibility(index)) { chart.hide(index); } else { chart.show(index); }
-                            chart.update();
-                        },
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function (ctx) {
-                                var total = ctx.dataset.data.reduce(function (a, b) { return a + b; }, 0);
-                                var pct = total ? Math.round(ctx.parsed / total * 100) : 0;
-                                return ' ' + ctx.label + ': ' + ctx.parsed + ' (' + pct + '%)';
-                            },
-                        },
-                    },
-                },
-                onClick: function (event, elements) {
-                    if (event && event.native) event.native.stopPropagation();
-                    if (elements && elements.length) {
-                        var idx = elements[0].index;
-                        var filter = (data.filters && data.filters[idx]) ? data.filters[idx] : '';
-                        openModalFn(filter);
-                    }
-                },
-            },
-        });
-    }
-
-    function initAll() {
-        var d = readData();
-        if (!d) return;
-        buildDonut('dChartEvent', d.event, function (f) { window.dispatchEvent(new CustomEvent('open-dir-event-modal', { detail: { filter: f } })); });
-        buildDonut('dChartJob',   d.job,   function (f) { window.dispatchEvent(new CustomEvent('open-dir-job-modal',   { detail: { filter: f } })); });
-    }
-
-    loadChartJs(function () {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function () { requestAnimationFrame(initAll); });
-        } else {
-            requestAnimationFrame(initAll);
-        }
-        document.addEventListener('livewire:navigated', function () {
-            safeDestroy('dChartEvent'); safeDestroy('dChartJob'); requestAnimationFrame(initAll);
-        });
-        function hookLivewire() {
-            if (!window.Livewire) return;
-            Livewire.hook('commit', function (payload) {
-                var succeed = payload.succeed || function (cb) { cb({}); };
-                if (typeof succeed === 'function') { succeed(function () { requestAnimationFrame(initAll); }); }
-            });
-        }
-        if (window.Livewire) { hookLivewire(); } else { document.addEventListener('livewire:initialized', hookLivewire); }
-    });
-})();
-</script>

@@ -1435,7 +1435,7 @@
             is now silently swallowed because __coordShowSessionExpired()
             checks __coordLoggingOut and no-ops if true.
         --}}
-        <div wire:ignore.self x-data="{ pollingActive: true }" @stop-coord-polling.window="pollingActive = false">
+      <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-coord-polling.window="pollingActive = false">
             <template x-if="pollingActive">
                 @livewire('organizer.coord-notif-poller')
             </template>

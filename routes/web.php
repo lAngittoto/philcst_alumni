@@ -140,7 +140,7 @@ Route::middleware(['auth', 'director.password.ensure'])->group(function () {
 // ===================================
 Route::middleware(['auth', 'director', 'director.password.ensure'])->prefix('director')->name('director.')->group(function () {
     Route::view('/dashboard',              'director.dashboard-wrapper')          ->name('dashboard');
-    Route::view('/coordinator/management', 'director.manage-coordinator-wrapper') ->name('coordinator/management');
+    Route::view('/coordinator/management', 'director.manage-coordinator-wrapper')->name('coordinator/management');
     Route::view('/event/management',       'director.manage-event-wrapper')       ->name('event/management');
     Route::view('/job/management',         'director.manage-job-wrapper')         ->name('job/management');
     Route::view('/messenger',              'director.director-messenger-wrapper') ->name('director/messenger');

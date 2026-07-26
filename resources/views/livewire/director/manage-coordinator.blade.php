@@ -62,8 +62,21 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
+    /**
+     * The dashboard's "Active Coordinators" card stores 'ACTIVE' in the
+     * session (director_coord_status) instead of putting it in the URL,
+     * so the URL here always stays clean: /director/coordinator/management
+     *
+     * session()->pull() reads the value AND removes it in one step, so a
+     * plain refresh afterwards goes back to showing all statuses — only
+     * navigating from the dashboard card pre-applies the Active filter.
+     */
     public function mount(): void
     {
+        if (session()->has('director_coord_status')) {
+            $this->coordStatus = session()->pull('director_coord_status');
+        }
+
         $this->loadOrgCourses();
         if (session()->has('success'))
             $this->dispatch('showFlash', type: 'success', message: session()->pull('success'));

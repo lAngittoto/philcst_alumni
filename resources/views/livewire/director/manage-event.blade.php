@@ -82,6 +82,14 @@ new class extends Component {
     public string $shareEventTarget      = '';
     public string $shareEventStatus      = '';
 
+    /**
+     * Status filter arrives as a clean query string from the dashboard cards,
+     * e.g. /director/event/management?status=rejected — the route itself
+     * (director.event/management -> Route::view('/event/management', ...))
+     * has no {status} URI segment defined in web.php, so this is NOT a
+     * route-bound parameter. We read it straight off the query string here.
+     * The URL stays exactly as the dashboard built it — nothing rewrites it.
+     */
     public function mount(): void
     {
         set_time_limit(600);
@@ -98,6 +106,18 @@ new class extends Component {
 
         if (! $this->myDisplayName) {
             $this->myDisplayName = auth()->user()?->name ?? 'Director';
+        }
+
+        $statusMap = [
+            'pending'   => 'PENDING',
+            'approved'  => 'APPROVED',
+            'rejected'  => 'REJECTED',
+            'completed' => 'COMPLETED',
+        ];
+
+        $incomingStatus = request()->query('status');
+        if ($incomingStatus && isset($statusMap[strtolower($incomingStatus)])) {
+            $this->filterStatus = $statusMap[strtolower($incomingStatus)];
         }
 
         $cacheKey = 'director_events_auto_processed';
