@@ -437,6 +437,17 @@
 
     <script>
     // ─────────────────────────────────────────────────────────────────────────
+    //  LOGOUT-IN-PROGRESS FLAG
+    //  Set to true the instant the Logout button is clicked (before the
+    //  POST /logout request is even sent). Every 419-handling path below
+    //  checks this flag first and bails out silently if it's true — because
+    //  once we're logging out, a 419 is EXPECTED (session is being killed)
+    //  and should never trigger the session-expired modal or any fallback
+    //  page content, soft or raw.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__coordLoggingOut = false;
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  BFCACHE FIX
     // ─────────────────────────────────────────────────────────────────────────
     window.addEventListener('pageshow', function (event) {
@@ -452,8 +463,15 @@
     //  request, suppress the default full-page replace, and show a small
     //  branded modal asking the user to refresh. Clicking refresh does a
     //  normal location.reload(), which mints a fresh session + CSRF token.
+    //
+    //  EXCEPTION: if the user is actively logging out (__coordLoggingOut),
+    //  we suppress this entirely — a 419 during logout is expected (the
+    //  session was just destroyed server-side) and should not surface
+    //  anything to the user, since they're already being redirected to
+    //  the login page.
     // ─────────────────────────────────────────────────────────────────────────
     window.__coordShowSessionExpired = function () {
+        if (window.__coordLoggingOut) return;
         var modal = document.getElementById('coord-session-expired-modal');
         if (modal) modal.classList.add('is-visible');
     };
@@ -465,7 +483,8 @@
             fail(({ status, preventDefault }) => {
                 if (status === 419) {
                     // Stop Livewire from dumping the raw expired-page HTML
-                    // into the DOM — show our own modal instead.
+                    // into the DOM — show our own modal instead (unless
+                    // we're logging out, in which case show nothing).
                     preventDefault();
                     window.__coordShowSessionExpired();
                 }
@@ -477,6 +496,30 @@
     // that don't go through the hook above (defensive double-cover).
     window.addEventListener('livewire:navigate:failed', function () {
         window.__coordShowSessionExpired();
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  STOP ALL BACKGROUND POLLING ON LOGOUT
+    //  Fired from the logout <form>'s @submit handler, BEFORE the POST
+    //  request is sent. This kills the Alpine-store notification poll
+    //  (_pollTimer) immediately so no stale-session fetch can race the
+    //  logout request and trip a 419. Combined with the __coordLoggingOut
+    //  flag above (which mutes any 419 handling that still slips through
+    //  from the Livewire wire:poll on coord-notif-poller), this closes
+    //  the race condition that caused "This page has expired" to flash
+    //  right before the redirect to /login.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('stop-coord-polling', function () {
+        window.__coordLoggingOut = true;
+
+        var s = window.__safeCoordNotifsStore();
+        if (s && s._pollTimer) {
+            clearInterval(s._pollTimer);
+            s._pollTimer = null;
+        }
+        if (s) {
+            s.open = false;
+        }
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -530,17 +573,27 @@
             _pollTimer: null,
 
             async init() {
+                if (window.__coordLoggingOut) return;
                 await this._fetch();
                 this._startPolling();
             },
 
             _startPolling() {
+                if (window.__coordLoggingOut) return;
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
-                this._pollTimer = setInterval(function () { self._fetch(); }, 3000);
+                this._pollTimer = setInterval(function () {
+                    if (window.__coordLoggingOut) {
+                        clearInterval(self._pollTimer);
+                        self._pollTimer = null;
+                        return;
+                    }
+                    self._fetch();
+                }, 3000);
             },
 
             async _fetch() {
+                if (window.__coordLoggingOut) return;
                 try {
                     var res = await window.fetch('/coordinator/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -783,6 +836,7 @@
             close()  { this.open = false; },
 
             async markRead(item) {
+                if (window.__coordLoggingOut) return;
                 if (item.read) return;
                 item.read = true;
                 var ids  = Array.isArray(item._ids) ? item._ids : [item.id];
@@ -802,6 +856,7 @@
             },
 
             async markAllRead() {
+                if (window.__coordLoggingOut) return;
                 this.items.forEach(function (n) { n.read = true; });
                 try {
                     var r = await window.fetch('/coordinator/notifications/read-all', {
@@ -816,6 +871,7 @@
             },
 
             async markReadByRoute(routeName) {
+                if (window.__coordLoggingOut) return;
                 var matched = this.items.filter(function (n) {
                     return n.link_route === routeName && !n.read;
                 });
@@ -855,6 +911,7 @@
     };
 
     window.__bootCoordNotifsStore = function () {
+        if (window.__coordLoggingOut) return;
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
         if (!Alpine.store('coordNotifs')) {
             Alpine.store('coordNotifs', window.__makeCoordNotifsStore());
@@ -869,12 +926,14 @@
 
     document.addEventListener('alpine:initialized', function () {
         setTimeout(function () {
+            if (window.__coordLoggingOut) return;
             var s = window.__safeCoordNotifsStore();
             if (s && !s._pollTimer) s.init();
         }, 0);
     });
 
     window.addEventListener('load', function () {
+        if (window.__coordLoggingOut) return;
         var s = window.__safeCoordNotifsStore();
         if (s) { if (s.items.length === 0) s.init(); }
         else    { window.__bootCoordNotifsStore(); }
@@ -882,6 +941,7 @@
 
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
+            if (window.__coordLoggingOut) return;
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
             var s = Alpine.store('coordNotifs');
             if (s) {
@@ -908,6 +968,7 @@
     })();
 
     document.addEventListener('visibilitychange', function () {
+        if (window.__coordLoggingOut) return;
         if (document.visibilityState === 'visible') {
             var s = window.__safeCoordNotifsStore();
             if (s) s._fetch();
@@ -938,6 +999,7 @@
     //  SIDEBAR SMART MARK-READ
     // ─────────────────────────────────────────────────────────────────────────
     window.__coordSidebarNotifsMarkRead = function (routeName) {
+        if (window.__coordLoggingOut) return;
         var s = window.__safeCoordNotifsStore();
         if (!s) return;
         s.markReadByRoute(routeName);
@@ -967,6 +1029,7 @@
         }
 
         async function _saveCoordNotif(payload) {
+            if (window.__coordLoggingOut) return;
             try {
                 var res = await window.fetch('/coordinator/notifications', {
                     method: 'POST',
@@ -979,9 +1042,11 @@
                 });
                 if (res.status === 419) { window.__coordShowSessionExpired(); return; }
                 await new Promise(function (r) { setTimeout(r, 300); });
+                if (window.__coordLoggingOut) return;
                 var s = window.__safeCoordNotifsStore();
                 if (s) await s._fetch();
                 setTimeout(async function () {
+                    if (window.__coordLoggingOut) return;
                     var s2 = window.__safeCoordNotifsStore();
                     if (s2) await s2._fetch();
                 }, 600);
@@ -989,6 +1054,7 @@
         }
 
         window.addEventListener('event-management-updated', function (e) {
+            if (window.__coordLoggingOut) return;
             var d = _coordDetail(e);
             var action = d.action || '';
 
@@ -1032,6 +1098,7 @@
         //    "by the Alumni Director" so organizers/coordinators know these
         //    came from the director's side, not their own actions. ──
         window.addEventListener('job-management-updated', function (e) {
+            if (window.__coordLoggingOut) return;
             var d = _coordDetail(e);
             var action = d.action || '';
 
@@ -1078,6 +1145,7 @@
         //    on the frontend (job-self::{action}::{day}::{jobId} dedup key),
         //    so 3 edits today collapse into one "3 Jobs Updated Today" row. ──
         window.addEventListener('job-self-action', function (e) {
+            if (window.__coordLoggingOut) return;
             var d = _coordDetail(e);
             var action = d.action || 'updated';
 
@@ -1119,6 +1187,7 @@
         //    (event-self::{action}::{day}::{eventId} dedup key), so multiple
         //    edits today collapse into one "3 Events Updated Today" row. ──
         window.addEventListener('event-self-action', function (e) {
+            if (window.__coordLoggingOut) return;
             var d = _coordDetail(e);
             var action = d.action || 'updated';
 
@@ -1156,10 +1225,12 @@
         //    coordinator should NOT see employment-status-update notifs. ──
 
         window.addEventListener('coord-notif-refresh', function () {
+            if (window.__coordLoggingOut) return;
             var s = window.__safeCoordNotifsStore();
             if (s) {
                 s._fetch();
                 setTimeout(function () {
+                    if (window.__coordLoggingOut) return;
                     var s2 = window.__safeCoordNotifsStore();
                     if (s2) s2._fetch();
                 }, 600);
@@ -1167,6 +1238,7 @@
         });
 
         window.addEventListener('coord-message-received', function (e) {
+            if (window.__coordLoggingOut) return;
             var d = _coordDetail(e);
             var sender = d.sender || 'Someone';
             var room   = d.room   || 'Group Chat';
@@ -1188,6 +1260,7 @@
         });
 
         window.addEventListener('alumni-registered', function (e) {
+            if (window.__coordLoggingOut) return;
             var d = _coordDetail(e);
             _saveCoordNotif({
                 icon:       'user-plus',
@@ -1346,13 +1419,33 @@
         </nav>
 
         {{-- ══ BACKGROUND NOTIF POLLER ══ --}}
-        @livewire('organizer.coord-notif-poller')
+        {{--
+            IMPORTANT: this Livewire component is what caused the "This page
+            has expired" flash on logout. Its wire:poll.3000ms request runs
+            through Livewire's own request pipeline, and can be in-flight
+            (or fire) the instant the session/CSRF token is destroyed by
+            POST /logout, right before the redirect navigates away.
+
+            We stop it from ever making a poll request AGAIN after logout
+            starts by wiring wire:poll to a condition that goes false the
+            moment __coordLoggingOut flips true (see @submit on the logout
+            form below, and the 'stop-coord-polling' listener in <head>).
+            wire:poll.3000ms.keep-alive would still fire once more mid-flight
+            in the worst case, but the 419 that comes back from THAT request
+            is now silently swallowed because __coordShowSessionExpired()
+            checks __coordLoggingOut and no-ops if true.
+        --}}
+        <div wire:ignore.self x-data="{ pollingActive: true }" @stop-coord-polling.window="pollingActive = false">
+            <template x-if="pollingActive">
+                @livewire('organizer.coord-notif-poller')
+            </template>
+        </div>
 
         {{-- Logout --}}
         <div class="p-2 lg:p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
-                  @submit="loggingOut = true">
+                  @submit="loggingOut = true; window.dispatchEvent(new CustomEvent('stop-coord-polling'));">
                 @csrf
                 <button type="submit"
                         :disabled="loggingOut"

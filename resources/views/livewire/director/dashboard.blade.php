@@ -295,12 +295,14 @@ new class extends Component {
 ?>
 
 <div
+    class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full"
     @open-dir-event-modal.window="$wire.openEventModalByStatus($event.detail.filter)"
     @open-dir-job-modal.window="$wire.openJobModalByStatus($event.detail.filter)"
 >
 
 <style>
-/* ── Stat card tooltip (same as organizer .org-stat-card) ── */
+/* ── Stat card tooltip (desktop only — no tooltip text on mobile) ──
+     (identical pattern to organizer's .org-stat-card / .org-card-tip) ── */
 .dir-stat-card { position: relative; overflow: visible; }
 .dir-stat-card .dir-card-tip {
     position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
@@ -312,9 +314,15 @@ new class extends Component {
     content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
     border: 5px solid transparent; border-top-color: #000;
 }
-.dir-stat-card:hover .dir-card-tip { opacity: 1; }
+@media (min-width: 1024px) {
+    .dir-stat-card:hover .dir-card-tip { opacity: 1; }
+}
+@media (max-width: 1023px) {
+    .dir-stat-card .dir-card-tip { display: none !important; }
+}
 
-/* ── Mini event cards (same as organizer .org-emp-card) ── */
+/* ── Mini cards (clickable stat tiles) — identical to organizer's
+     .org-mini-card / .org-mini-tip ── */
 .dir-mini-card { position: relative; overflow: visible; cursor: pointer; transition: transform .12s ease, box-shadow .15s ease; }
 .dir-mini-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.10); }
 .dir-mini-card:active { transform: scale(.97); }
@@ -328,64 +336,92 @@ new class extends Component {
     content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
     border: 4px solid transparent; border-top-color: #000;
 }
-.dir-mini-card:hover .dir-mini-tip { opacity: 1; }
+@media (min-width: 1024px) {
+    .dir-mini-card:hover .dir-mini-tip { opacity: 1; }
+}
+@media (max-width: 1023px) {
+    .dir-mini-card .dir-mini-tip { display: none !important; }
+}
 
-/* ── Main grid (same proportions as organizer .org-main-grid) ── */
+/* ── Main grid — align-items: start so the account card only takes its
+     own natural height, no stretching to match the taller right column
+     (identical to organizer's .org-main-grid) ── */
 .dir-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
-@media (max-width: 1023px) { .dir-main-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1023px) {
+    .dir-main-grid { grid-template-columns: 1fr; gap: 0.85rem; }
+}
 
-/* ── Account column & card (same as organizer .org-account-col / .org-account-card) ── */
+/* ── Account column — natural height, no forced stretch ── */
 .dir-account-col { display: flex; flex-direction: column; }
 .dir-account-card { display: flex; flex-direction: column; }
 
-/* ── Right col (same as organizer .org-right-col) ── */
+/* ── Right col ── */
 .dir-right-col { display: flex; flex-direction: column; gap: 1rem; }
 
-/* ── 2x2 stat grid (same as organizer .org-stat-grid) ── */
+/* ── 2x2 stat grid: equal height on desktop, 1-col on phone
+     (identical to organizer's .org-stat-grid) ── */
 .dir-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 .dir-stat-grid .dir-stat-card { display: flex; flex-direction: column; justify-content: center; }
+@media (max-width: 639px) {
+    .dir-stat-grid { grid-template-columns: 1fr; gap: 0.65rem; }
+    .dir-stat-grid .dir-stat-card { padding: 1rem !important; }
+    .dir-stat-grid .dir-stat-card .dir-stat-num { font-size: 2.1rem !important; }
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+    .dir-stat-grid .dir-stat-card .dir-stat-num { font-size: 2.4rem !important; }
+}
 
-/* ── Info body fills space (same as organizer .org-info-body) ── */
-.dir-info-body { display: flex; flex-direction: column; overflow-y: auto; }
-
-/* ── Info rows (same as organizer .org-info-row / label / value) ── */
+/* ── Info rows — dark, readable text (no gray)
+     (identical to organizer's .org-info-row) ── */
+.dir-info-body { display: flex; flex-direction: column; }
 .dir-info-row {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0.6rem 1rem; border-bottom: 1px solid #EDE0F5; gap: 0.5rem;
 }
 .dir-info-row:last-child { border-bottom: none; }
-.dir-info-label {
-    font-size: 0.70rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.07em; color: #555555; flex-shrink: 0;
-}
-.dir-info-value {
-    font-size: 0.875rem; font-weight: 600; color: #111111;
-    text-align: right; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; max-width: 165px;
-}
-.dir-info-value-sm {
-    font-size: 0.80rem; font-weight: 600; color: #111111;
-    text-align: right; word-break: break-all; max-width: 165px;
-}
+.dir-info-label { font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; flex-shrink: 0; }
+.dir-info-value { font-size: 0.875rem; font-weight: 600; color: #111111; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.dir-info-value-sm { font-size: 0.80rem; font-weight: 600; color: #111111; text-align: right; word-break: break-all; max-width: 160px; }
 
-/* ── Overview chips section (same as organizer .org-courses-section / .org-course-chip) ── */
+/* ── Chips section wrapper (identical to organizer's .org-chips-section) ── */
 .dir-chips-section { padding: 0.65rem 1rem; }
-.dir-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #777777; margin-bottom: 0.4rem; }
+.dir-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; margin-bottom: 0.4rem; }
+
+/* ── Chips — color-coded per status, same palette as organizer's chips ── */
 .dir-chip {
-    font-size: 0.72rem; font-weight: 600; padding: 2px 9px; border-radius: 999px;
-    background: #F0E6F8; color: #333333; border: 1px solid #D8BEF0;
-    display: inline-block; margin: 2px 2px 2px 0;
+    font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 1px solid transparent; margin: 2px 4px 2px 0;
 }
+.dir-chip i { font-size: 7px; }
 
-/* ── Avatar (same size as organizer .org-avatar) ── */
-.dir-avatar {
-    width: 52px; height: 52px; border-radius: 50%;
-    background: rgba(255,255,255,0.22); border: 2px solid rgba(255,255,255,0.5);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.15rem; font-weight: 700; color: #ffffff; flex-shrink: 0; letter-spacing: 0.04em;
-}
+/* Event status chips */
+.dir-chip-approved  { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
+.dir-chip-pending   { background: #FEF6E7; color: #B5750A; border-color: #FBE4B4; }
+.dir-chip-completed { background: #EAF1FE; color: #1D4ED8; border-color: #C9DBFC; }
+.dir-chip-rejected  { background: #FDECEC; color: #C0311A; border-color: #F8C9C2; }
 
-/* ── Chart card ── */
+/* Job status chips */
+.dir-chip-active   { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
+.dir-chip-inactive { background: #F1F1F3; color: #52525B; border-color: #E1E1E5; }
+
+/* Coordinator status chips */
+.dir-chip-coord-active   { background: #E8F8F0; color: #0F7A4E; border-color: #BEEBD4; }
+.dir-chip-coord-inactive { background: #F1F1F3; color: #52525B; border-color: #E1E1E5; }
+
+/* ── Scrollbar (identical to organizer's .org-scroll) ── */
+.dir-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
+.dir-scroll::-webkit-scrollbar { width: 4px; }
+.dir-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+
+/* ── Mini tiles inside the side-by-side breakdown panels — compacted
+     (identical proportions to organizer's .org-emp-tile) ── */
+.dir-mini-tile { padding: 0.45rem 0.6rem !important; }
+.dir-mini-tile .dir-mini-num { font-size: 1.1rem !important; line-height: 1 !important; }
+.dir-mini-tile .dir-mini-label { font-size: 0.6rem !important; margin-top: 0.15rem !important; }
+
+/* ── Chart card (kept from the original director dashboard, restyled to
+     sit inside the new breakdown-panel look) ── */
 .dir-chart-card {
     background: #F9F7FC;
     border-radius: 14px;
@@ -402,7 +438,7 @@ new class extends Component {
     margin-left:auto; display:flex; align-items:center; gap:3px; pointer-events:none;
 }
 
-/* ── Modal close button (same as organizer .org-close-btn) ── */
+/* ── Modal close button (same as organizer/coordinator .org-close-btn) ── */
 .dir-close-btn {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 6px 16px; border-radius: 10px; background: rgba(255,255,255,.12);
@@ -411,7 +447,7 @@ new class extends Component {
 }
 .dir-close-btn:hover { background: rgba(255,255,255,.22); }
 
-/* ── Pagination (same as organizer .org-pg-*) ── */
+/* ── Pagination ── */
 .dir-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 32px; height: 32px; padding: 0 10px; border-radius: 8px;
@@ -422,18 +458,19 @@ new class extends Component {
 .dir-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .dir-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-/* ── Scrollbar (same as organizer .org-scroll) ── */
-.dir-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
-.dir-scroll::-webkit-scrollbar { width: 4px; }
-.dir-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
-
-/* ── Table rows (same as organizer .org-table-row) ── */
+/* ── Table rows ── */
 .dir-table-row { transition: background .10s; }
 .dir-table-row:hover { background: #F5F0FA !important; }
 
-/* ── Modal animation (same as organizer .org-modal-enter) ── */
+/* ── Modal animation ── */
 @keyframes dirModalIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
 .dir-modal-enter { animation: dirModalIn .2s cubic-bezier(.4,0,.2,1) both; }
+
+/* ── Fade-up entrance animations (identical to organizer's .org-fade-up) ── */
+@keyframes dirFadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:none } }
+.dir-fade-up { animation: dirFadeUp .4s cubic-bezier(.25,.8,.25,1) both; }
+.dir-fade-1 { animation-delay:.04s } .dir-fade-2 { animation-delay:.08s }
+.dir-fade-3 { animation-delay:.12s } .dir-fade-4 { animation-delay:.16s }
 </style>
 
 <div id="__dir_dash_data" style="display:none"
@@ -441,278 +478,319 @@ new class extends Component {
      data-job="{{ $chartJobData }}">
 </div>
 
-<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-10 max-w-screen-2xl mx-auto">
-
-    {{-- PAGE HEADER (same style as organizer) --}}
-    <div class="flex items-center gap-3 mb-5">
-        <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <i class="fas fa-gauge-high text-white text-base"></i>
-        </div>
-        <div>
-            <h1 class="text-2xl font-semibold text-[#111111] leading-tight">
-                {{ $greeting }}, Director
-            </h1>
-            <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
-                <span>{{ $currentDate }}</span>
-                <span class="text-[#c0a0d8]">·</span>
-                <span class="font-semibold text-[#7A3F91]">Director Portal</span>
-            </p>
-        </div>
+{{-- ── PAGE HEADER (identical structure to organizer) ── --}}
+<div class="flex items-center gap-3 mb-5 dir-fade-up">
+    <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+        <i class="fas fa-gauge-high text-white text-base"></i>
     </div>
+    <div>
+        <h1 class="text-2xl font-semibold text-[#111111] leading-tight">
+            {{ $greeting }}, Director
+        </h1>
+        <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+            <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
+            <span>{{ $currentDate }}</span>
+        </p>
+    </div>
+</div>
 
-    <div class="dir-main-grid">
+{{-- ══ MAIN GRID (identical proportions to organizer: 300px account col + flexible right col) ══ --}}
+<div class="dir-main-grid">
 
-        {{-- ══ LEFT: Director Account Card ══ --}}
-        <div class="dir-account-col">
-            <div class="dir-account-card rounded-2xl overflow-hidden shadow-md border border-[#E8E0F0] bg-white">
+    {{-- ══ LEFT: Director Account Card (banner + info rows + chips —
+         mirrors organizer's photo-banner profile card, using a gradient
+         icon banner in place of a profile photo since directors don't
+         have a photo field) ══ --}}
+    <div class="dir-account-col dir-fade-up">
+        <div class="dir-account-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
-                {{-- Header with avatar --}}
-                <div class="px-4 py-4 shrink-0 flex items-center gap-3"
-                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                    <div class="dir-avatar">
+            {{-- Banner — gradient purple hero matching the organizer photo
+                 banner's proportions and bottom-anchored name/role overlay --}}
+            <div class="relative w-full overflow-hidden shrink-0 h-[400px] sm:h-[240px]"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <div class="w-full h-full flex items-center justify-center">
+                    <div class="w-24 h-24 sm:w-20 sm:h-20 rounded-full flex items-center justify-center font-black text-white text-[2.4rem] sm:text-[2rem]"
+                         style="background:rgba(255,255,255,0.16); border:2px solid rgba(255,255,255,0.4);">
                         <i class="fas fa-user-shield"></i>
                     </div>
-                    <div class="min-w-0">
-                        <p class="text-[0.60rem] font-bold uppercase tracking-[0.14em] text-white/60 leading-none mb-0.5">DIRECTOR ACCOUNT</p>
-                        <p class="text-[0.95rem] font-bold text-white leading-snug truncate">{{ auth()->user()->name ?? 'Director' }}</p>
-                        <p class="text-[0.72rem] text-white/70 font-normal truncate mt-0.5">Alumni Portal Admin</p>
+                </div>
+                <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.55) 100%);"></div>
+                <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
+                    <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"
+                       style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
+                        {{ auth()->user()->name ?? 'Director' }}
+                    </p>
+                    <p class="font-mono text-[0.78rem] sm:text-[0.8rem]" style="color:rgba(255,255,255,.75);">
+                        Alumni Portal Admin
+                    </p>
+                </div>
+            </div>
+
+            <div class="dir-info-body dir-scroll">
+
+                <div class="dir-info-row">
+                    <span class="dir-info-label">Name</span>
+                    <span class="dir-info-value">{{ auth()->user()->name ?? 'Director' }}</span>
+                </div>
+
+                <div class="dir-info-row" style="align-items:flex-start;">
+                    <span class="dir-info-label" style="margin-top:2px;">Email</span>
+                    <span class="dir-info-value-sm">{{ auth()->user()->email ?? '—' }}</span>
+                </div>
+
+                <div class="dir-info-row">
+                    <span class="dir-info-label">Role</span>
+                    <span class="dir-info-value text-[#7A3F91] font-bold">Director</span>
+                </div>
+
+                <div class="dir-info-row">
+                    <span class="dir-info-label">Active Coordinators</span>
+                    <span class="dir-info-value">
+                        {{ $activeCoordinators }}
+                        <span class="text-[#333333] font-normal text-xs ml-1">/ {{ $totalCoordinators }}</span>
+                    </span>
+                </div>
+
+                {{-- Quick chips — Events (color-coded per status,
+                     identical palette to organizer's chips) --}}
+                <div class="dir-chips-section">
+                    <p class="dir-chips-label">Events Overview</p>
+                    <div>
+                        <span class="dir-chip dir-chip-approved"><i class="fas fa-circle"></i>Approved · {{ $approvedEvents }}</span>
+                        <span class="dir-chip dir-chip-pending"><i class="fas fa-circle"></i>Pending · {{ $pendingEvents }}</span>
+                        <span class="dir-chip dir-chip-completed"><i class="fas fa-circle"></i>Completed · {{ $completedEvents }}</span>
+                        @if($rejectedEvents > 0)
+                            <span class="dir-chip dir-chip-rejected"><i class="fas fa-circle"></i>Rejected · {{ $rejectedEvents }}</span>
+                        @endif
                     </div>
                 </div>
 
-                {{-- Info body --}}
-                <div class="dir-info-body dir-scroll">
-
-                    <div class="dir-info-row">
-                        <span class="dir-info-label">Name</span>
-                        <span class="dir-info-value">{{ auth()->user()->name ?? 'Director' }}</span>
-                    </div>
-
-                    <div class="dir-info-row" style="align-items:flex-start;">
-                        <span class="dir-info-label" style="margin-top:2px;">Email</span>
-                        <span class="dir-info-value-sm">{{ auth()->user()->email ?? '—' }}</span>
-                    </div>
-
-                    <div class="dir-info-row">
-                        <span class="dir-info-label">Role</span>
-                        <span class="text-[0.80rem] font-bold px-3 py-0.5 rounded-full text-white" style="background:#7A3F91;">Director</span>
-                    </div>
-
-                    <div class="dir-info-row">
-                        <span class="dir-info-label">Active Coordinators</span>
-                        <span class="dir-info-value">
-                            {{ $activeCoordinators }}
-                            <span class="text-[#999999] font-normal">/ {{ $totalCoordinators }}</span>
-                        </span>
-                    </div>
-
-                    {{-- Quick overview chips --}}
-                    <div class="dir-chips-section">
-                        <p class="dir-chips-label">Events Overview</p>
-                        <div>
-                            <span class="dir-chip">Approved · {{ $approvedEvents }}</span>
-                            <span class="dir-chip">Pending · {{ $pendingEvents }}</span>
-                            <span class="dir-chip">Completed · {{ $completedEvents }}</span>
-                            @if($rejectedEvents > 0)
-                                <span class="dir-chip">Rejected · {{ $rejectedEvents }}</span>
+                {{-- Quick chips — Jobs --}}
+                <div class="dir-chips-section">
+                    <p class="dir-chips-label">Job Postings</p>
+                    <div>
+                        <span class="dir-chip dir-chip-active">
+                            <i class="fas fa-circle"></i>Active · {{ $activeJobs }}
+                            @if($newJobsThisMonth > 0)
+                                <span class="font-normal">(+{{ $newJobsThisMonth }} this month)</span>
                             @endif
-                        </div>
+                        </span>
+                        <span class="dir-chip dir-chip-inactive"><i class="fas fa-circle"></i>Inactive · {{ $inactiveJobs }}</span>
                     </div>
+                </div>
 
-                    <div class="dir-chips-section">
-                        <p class="dir-chips-label">Job Postings</p>
-                        <div>
-                            <span class="dir-chip">
-                                Active · {{ $activeJobs }}
-                                @if($newJobsThisMonth > 0)
-                                    <span class="text-[#7A3F91]">(+{{ $newJobsThisMonth }} this month)</span>
-                                @endif
-                            </span>
-                            <span class="dir-chip">Inactive · {{ $inactiveJobs }}</span>
-                        </div>
-                    </div>
-
-                </div>{{-- end info body --}}
             </div>
         </div>
+    </div>
 
-        {{-- ══ RIGHT: Stat Cards + Events Overview ══ --}}
-        <div class="dir-right-col">
+    {{-- ══ RIGHT: Stats + Breakdown Panels ══ --}}
+    <div class="dir-right-col">
 
-            <div class="dir-stat-grid">
+        {{-- 2x2 Stat Cards (identical layout/typography to organizer's
+             stat grid — Active Coordinators, Total Events, Pending
+             Events, Job Postings) --}}
+        <div class="dir-stat-grid dir-fade-up dir-fade-1">
 
-                {{-- Active Coordinators --}}
-                <button wire:click="openCoordsModal('ACTIVE')"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
-                               hover:shadow-lg hover:border-[#7A3F91]/40 transition-all duration-200
-                               active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Active Coordinators</span>
-                    <div class="flex items-start justify-between mb-2">
-                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
-                             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                            <i class="fas fa-user-tie text-white text-sm"></i>
-                        </div>
-                        <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-[#333333]
-                                     border border-[#E8E0F0] bg-[#F9F7FC] text-[0.75rem]">Coordinators</span>
+            {{-- Active Coordinators --}}
+            <button type="button" wire:click="openCoordsModal('ACTIVE')"
+                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                           hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
+                           active:scale-[.985] cursor-pointer block text-left w-full">
+                <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Active Coordinators</span>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow"
+                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        <i class="fas fa-user-tie text-white text-base sm:text-lg"></i>
                     </div>
-                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($activeCoordinators) }}</p>
-                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Active Coordinators</p>
-                    <p class="font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]" style="color:#7A3F91;">
-                        <i class="fas fa-users text-xs"></i> {{ $totalCoordinators }} total
-                        @if(($totalCoordinators - $activeCoordinators) > 0)
-                            <span class="text-[#555555] font-normal">· {{ $totalCoordinators - $activeCoordinators }} inactive</span>
-                        @endif
-                    </p>
-                </button>
-
-                {{-- Total Events --}}
-                <button wire:click="openTotalEventsModal"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
-                               hover:shadow-lg hover:border-emerald-300 transition-all duration-200
-                               active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Events</span>
-                    <div class="flex items-start justify-between mb-2">
-                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-emerald-600">
-                            <i class="fas fa-calendar-days text-white text-sm"></i>
-                        </div>
-                        <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700
-                                     border border-emerald-200 bg-emerald-50 text-[0.75rem]">Events</span>
-                    </div>
-                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalEvents) }}</p>
-                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Total Events</p>
-                    @if($approvedEvents > 0)
-                        <p class="text-emerald-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
-                            <i class="fas fa-circle-check text-xs"></i> {{ $approvedEvents }} Approved
-                        </p>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-[#333333]
+                                 border border-[#E8E0F0] bg-[#F9F7FC] text-[0.7rem] sm:text-[0.75rem]">Coordinators</span>
+                </div>
+                <p class="dir-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($activeCoordinators) }}</p>
+                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Active Coordinators</p>
+                <p class="font-semibold mt-1 flex items-center gap-1 text-[0.85rem]" style="color:#7A3F91;">
+                    <i class="fas fa-users text-xs"></i> {{ $totalCoordinators }} total
+                    @if(($totalCoordinators - $activeCoordinators) > 0)
+                        <span class="text-[#333333] font-normal">· {{ $totalCoordinators - $activeCoordinators }} inactive</span>
                     @endif
-                </button>
+                </p>
+            </button>
 
-                {{-- Pending Events --}}
-                <button wire:click="openPendingEventsModal"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
-                               hover:shadow-lg hover:border-amber-300 transition-all duration-200
-                               active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Pending Events</span>
-                    <div class="flex items-start justify-between mb-2">
-                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-amber-500">
-                            <i class="fas fa-hourglass-end text-white text-sm"></i>
-                        </div>
-                        <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700
-                                     border border-amber-200 bg-amber-50 text-[0.75rem]">Pending</span>
+            {{-- Total Events --}}
+            <button type="button" wire:click="openTotalEventsModal"
+                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                           hover:shadow-md hover:border-emerald-300 transition-all duration-200
+                           active:scale-[.985] cursor-pointer block text-left w-full">
+                <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Events</span>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
+                        <i class="fas fa-calendar-days text-white text-base sm:text-lg"></i>
                     </div>
-                    <p class="text-amber-600 font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($pendingEvents) }}</p>
-                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Pending Review</p>
-                    @if($pendingEvents > 0)
-                        <p class="text-amber-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
-                            <i class="fas fa-circle-exclamation text-xs"></i> Needs attention
-                        </p>
-                    @else
-                        <p class="text-[#555555] font-normal mt-0.5 text-[0.78rem]">All clear</p>
-                    @endif
-                </button>
-
-                {{-- Job Postings --}}
-                <button wire:click="openJobsModal"
-                        class="dir-stat-card bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3.5
-                               hover:shadow-lg hover:border-blue-300 transition-all duration-200
-                               active:scale-[.985] text-left cursor-pointer w-full">
-                    <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Job Postings</span>
-                    <div class="flex items-start justify-between mb-2">
-                        <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-blue-600">
-                            <i class="fas fa-briefcase text-white text-sm"></i>
-                        </div>
-                        <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700
-                                     border border-blue-200 bg-blue-50 text-[0.75rem]">Jobs</span>
-                    </div>
-                    <p class="text-[#111111] font-extrabold leading-none tracking-tight text-[2.2rem]">{{ number_format($totalJobs) }}</p>
-                    <p class="text-[#111111] font-semibold mt-1 text-[0.9rem]">Job Postings</p>
-                    <p class="text-emerald-600 font-semibold mt-0.5 flex items-center gap-1 text-[0.78rem]">
-                        <i class="fas fa-circle text-[8px]"></i> {{ $activeJobs }} Active
-                        <span class="text-[#555555] font-normal">· {{ $inactiveJobs }} Inactive</span>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700
+                                 border border-emerald-200 bg-emerald-50 text-[0.7rem] sm:text-[0.75rem]">Events</span>
+                </div>
+                <p class="dir-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($totalEvents) }}</p>
+                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Total Events</p>
+                @if($approvedEvents > 0)
+                    <p class="text-emerald-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                        <i class="fas fa-circle-check text-xs"></i> {{ $approvedEvents }} Approved
                     </p>
-                </button>
+                @else
+                    <p class="text-[#333333] font-normal mt-1 text-[0.85rem]">No approved events yet</p>
+                @endif
+            </button>
 
-            </div>{{-- end stat grid --}}
+            {{-- Pending Events --}}
+            <button type="button" wire:click="openPendingEventsModal"
+                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                           hover:shadow-md hover:border-amber-300 transition-all duration-200
+                           active:scale-[.985] cursor-pointer block text-left w-full">
+                <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Pending Events</span>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
+                        <i class="fas fa-hourglass-end text-white text-base sm:text-lg"></i>
+                    </div>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700
+                                 border border-amber-200 bg-amber-50 text-[0.7rem] sm:text-[0.75rem]">Pending</span>
+                </div>
+                <p class="dir-stat-num text-amber-600 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($pendingEvents) }}</p>
+                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Pending Review</p>
+                @if($pendingEvents > 0)
+                    <p class="text-amber-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                        <i class="fas fa-circle-exclamation text-xs"></i> Needs attention
+                    </p>
+                @else
+                    <p class="text-[#333333] font-normal mt-1 text-[0.85rem]">All clear</p>
+                @endif
+            </button>
 
-            {{-- EVENTS OVERVIEW PANEL (same layout as organizer's Employment Overview) --}}
+            {{-- Job Postings --}}
+            <button type="button" wire:click="openJobsModal"
+                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                           hover:shadow-md hover:border-blue-300 transition-all duration-200
+                           active:scale-[.985] cursor-pointer block text-left w-full">
+                <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Job Postings</span>
+                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                    <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
+                        <i class="fas fa-briefcase text-white text-base sm:text-lg"></i>
+                    </div>
+                    <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700
+                                 border border-blue-200 bg-blue-50 text-[0.7rem] sm:text-[0.75rem]">Jobs</span>
+                </div>
+                <p class="dir-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($totalJobs) }}</p>
+                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Job Postings</p>
+                <p class="text-emerald-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                    <i class="fas fa-circle text-[8px]"></i> {{ $activeJobs }} Active
+                    <span class="text-[#333333] font-normal">· {{ $inactiveJobs }} Inactive</span>
+                </p>
+            </button>
+
+        </div>
+
+        {{-- Side-by-side breakdown panels — Events Overview mini-cards +
+             chart on the left, Jobs mini-cards + chart on the right
+             (mirrors organizer's Course Breakdown + Employment Snapshot
+             side-by-side layout) --}}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 dir-fade-up dir-fade-2">
+
+            {{-- Events Overview Panel --}}
             @php
                 $evtCards = [
-                    ['label'=>'Pending',   'count'=>$pendingEvents,   'icon'=>'fa-hourglass-end',  'cardCls'=>'bg-amber-50 border-amber-200',     'iconCls'=>'bg-amber-100 text-amber-600',     'cntCls'=>'text-amber-700',  'action'=>'openPendingEventsModal',   'ctip'=>'View Pending Events'],
-                    ['label'=>'Approved',  'count'=>$approvedEvents,  'icon'=>'fa-calendar-check', 'cardCls'=>'bg-emerald-50 border-emerald-200', 'iconCls'=>'bg-emerald-100 text-emerald-600', 'cntCls'=>'text-emerald-700','action'=>'openApprovedEventsModal',  'ctip'=>'View Approved Events'],
-                    ['label'=>'Completed', 'count'=>$completedEvents, 'icon'=>'fa-flag-checkered', 'cardCls'=>'bg-blue-50 border-blue-200',       'iconCls'=>'bg-blue-100 text-blue-600',       'cntCls'=>'text-blue-700',   'action'=>'openCompletedEventsModal', 'ctip'=>'View Completed Events'],
-                    ['label'=>'Rejected',  'count'=>$rejectedEvents,  'icon'=>'fa-circle-xmark',   'cardCls'=>'bg-red-50 border-red-200',         'iconCls'=>'bg-red-100 text-red-600',         'cntCls'=>'text-red-700',    'action'=>'openRejectedEventsModal',  'ctip'=>'View Rejected Events'],
+                    ['label'=>'Pending',   'count'=>$pendingEvents,   'icon'=>'fa-hourglass-end',  'bg'=>'bg-amber-50 border-amber-200',     'color'=>'text-amber-700',   'action'=>'openPendingEventsModal',   'ctip'=>'View Pending Events'],
+                    ['label'=>'Approved',  'count'=>$approvedEvents,  'icon'=>'fa-calendar-check', 'bg'=>'bg-emerald-50 border-emerald-200', 'color'=>'text-emerald-700', 'action'=>'openApprovedEventsModal',  'ctip'=>'View Approved Events'],
+                    ['label'=>'Completed', 'count'=>$completedEvents, 'icon'=>'fa-flag-checkered', 'bg'=>'bg-blue-50 border-blue-200',       'color'=>'text-blue-700',    'action'=>'openCompletedEventsModal', 'ctip'=>'View Completed Events'],
+                    ['label'=>'Rejected',  'count'=>$rejectedEvents,  'icon'=>'fa-circle-xmark',   'bg'=>'bg-red-50 border-red-200',         'color'=>'text-red-700',     'action'=>'openRejectedEventsModal',  'ctip'=>'View Rejected Events'],
                 ];
             @endphp
-            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden">
-                <div class="px-5 py-3 border-b border-[#E8E0F0] flex items-center justify-between"
-                     style="background:linear-gradient(to right, #F9F7FC, #ffffff);">
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+                <div class="px-4 py-2 border-b border-[#E8E0F0] flex items-center justify-between"
+                     style="background:linear-gradient(to right,#F9F7FC,#ffffff);">
                     <div class="flex items-center gap-2">
                         <div class="w-6 h-6 rounded-lg flex items-center justify-center"
                              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                             <i class="fas fa-calendar-days text-white text-[10px]"></i>
                         </div>
                         <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Events Overview</p>
-                        <span class="text-[10px] text-[#999999] font-normal hidden sm:inline">— click a card to view</span>
                     </div>
                     <a href="{{ route('director.event/management') }}" wire:navigate
-                       class="text-xs font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
-                        Manage <i class="fas fa-arrow-right text-xs"></i>
+                       class="text-[.68rem] font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                        Manage <i class="fas fa-arrow-right text-[10px]"></i>
                     </a>
                 </div>
 
-                <div class="p-4">
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                <div class="p-3 flex-1">
+                    <div class="grid grid-cols-2 gap-2 mb-3">
                         @foreach($evtCards as $card)
-                        <div wire:click="{{ $card['action'] }}"
-                             class="dir-mini-card rounded-xl border p-3 {{ $card['cardCls'] }}">
+                        <button type="button" wire:click="{{ $card['action'] }}"
+                                class="dir-mini-card dir-mini-tile rounded-xl border {{ $card['bg'] }} block w-full text-left">
                             <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>{{ $card['ctip'] }}</span>
-                            <div class="flex items-center gap-1.5 mb-2">
-                                <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 {{ $card['iconCls'] }}">
-                                    <i class="fas {{ $card['icon'] }} text-xs"></i>
-                                </div>
-                                <span class="text-xs font-bold text-[#333333]">{{ $card['label'] }}</span>
+                            <div class="flex items-center gap-1.5 mb-1">
+                                <i class="fas {{ $card['icon'] }} text-[10px] {{ $card['color'] }}"></i>
+                                <span class="text-[.68rem] font-bold text-[#333333] uppercase tracking-wide">{{ $card['label'] }}</span>
                             </div>
-                            <p class="text-2xl font-extrabold leading-none {{ $card['cntCls'] }}">{{ number_format($card['count']) }}</p>
-                        </div>
+                            <p class="dir-mini-num font-extrabold leading-none {{ $card['color'] }}">{{ number_format($card['count']) }}</p>
+                        </button>
                         @endforeach
                     </div>
 
-                    {{-- Charts Row --}}
-                    <div class="border-t border-[#E8E0F0] pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="dir-chart-card" onclick="dirOpenEventModal('')">
-                            <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0]">
-                                <div class="w-6 h-6 rounded-lg flex items-center justify-center"
-                                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                                    <i class="fas fa-calendar-days text-white" style="font-size:9px;"></i>
-                                </div>
-                                <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Events Chart</p>
-                                <span class="dir-chart-hint"><i class="fas fa-hand-pointer"></i> Click segment</span>
-                            </div>
-                            <div class="p-3 flex items-center justify-center" style="height:170px;" wire:ignore>
-                                <canvas id="dChartEvent"></canvas>
-                            </div>
+                    <div class="dir-chart-card" onclick="dirOpenEventModal('')">
+                        <div class="px-3 py-2 flex items-center gap-2 border-b border-[#E8E0F0]">
+                            <p class="text-[.68rem] font-semibold text-[#333333] uppercase tracking-wide">Events Chart</p>
+                            <span class="dir-chart-hint"><i class="fas fa-hand-pointer"></i> Click segment</span>
                         </div>
-
-                        <div class="dir-chart-card" onclick="dirOpenJobModal('')">
-                            <div class="px-4 py-2.5 flex items-center gap-2 border-b border-[#E8E0F0]">
-                                <div class="w-6 h-6 rounded-lg flex items-center justify-center bg-blue-500">
-                                    <i class="fas fa-briefcase text-white" style="font-size:9px;"></i>
-                                </div>
-                                <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Jobs Chart</p>
-                                <span class="dir-chart-hint"><i class="fas fa-hand-pointer"></i> Click segment</span>
-                            </div>
-                            <div class="p-3 flex items-center justify-center" style="height:170px;" wire:ignore>
-                                <canvas id="dChartJob"></canvas>
-                            </div>
+                        <div class="p-2 flex items-center justify-center" style="height:150px;" wire:ignore>
+                            <canvas id="dChartEvent"></canvas>
                         </div>
                     </div>
                 </div>
             </div>
 
-        </div>{{-- end right col --}}
-    </div>{{-- end main grid --}}
+            {{-- Job Postings Panel --}}
+            <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
+                <div class="px-4 py-2 border-b border-[#E8E0F0] flex items-center justify-between"
+                     style="background:linear-gradient(to right,#F9F7FC,#ffffff);">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-lg flex items-center justify-center bg-blue-600">
+                            <i class="fas fa-briefcase text-white text-[10px]"></i>
+                        </div>
+                        <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Job Postings</p>
+                    </div>
+                    <a href="{{ route('director.job/management') }}" wire:navigate
+                       class="text-[.68rem] font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
+                        Manage <i class="fas fa-arrow-right text-[10px]"></i>
+                    </a>
+                </div>
 
-</div>
+                <div class="p-3 grid grid-cols-2 gap-2 content-start flex-1">
+                    <button type="button" wire:click="openActiveJobsModal"
+                            class="dir-mini-card dir-mini-tile rounded-xl border bg-emerald-50 border-emerald-200 block w-full text-left">
+                        <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>View Active Jobs</span>
+                        <p class="dir-mini-num font-extrabold leading-none text-emerald-700">{{ number_format($activeJobs) }}</p>
+                        <p class="dir-mini-label font-bold text-[#333333] uppercase tracking-wide">Active</p>
+                    </button>
+                    <button type="button" wire:click="openInactiveJobsModal"
+                            class="dir-mini-card dir-mini-tile rounded-xl border bg-gray-50 border-gray-200 block w-full text-left">
+                        <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive Jobs</span>
+                        <p class="dir-mini-num font-extrabold leading-none text-[#333333]">{{ number_format($inactiveJobs) }}</p>
+                        <p class="dir-mini-label font-bold text-[#333333] uppercase tracking-wide">Inactive</p>
+                    </button>
+
+                    <div class="dir-chart-card col-span-2" onclick="dirOpenJobModal('')">
+                        <div class="px-3 py-2 flex items-center gap-2 border-b border-[#E8E0F0]">
+                            <p class="text-[.68rem] font-semibold text-[#333333] uppercase tracking-wide">Jobs Chart</p>
+                            <span class="dir-chart-hint"><i class="fas fa-hand-pointer"></i> Click segment</span>
+                        </div>
+                        <div class="p-2 flex items-center justify-center" style="height:150px;" wire:ignore>
+                            <canvas id="dChartJob"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>{{-- end side-by-side grid --}}
+
+    </div>{{-- end right col --}}
+</div>{{-- end main grid --}}
 
 
 {{-- ════════════════════════════════════════════════════════════════

@@ -47,7 +47,7 @@ Volt::route('/alumni/forgot-password', 'alumni/forgot-password')
 // Organizer — Password Change Wizard
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
-    Volt::route('/organizer/change-password', 'organizer/change-password')
+    Volt::route('/coordinator/change-password', 'organizer/change-password')
         ->name('organizer.change-password');
 });
 
@@ -55,13 +55,13 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
 // Organizer — Main Portal
 // ===================================
 Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
-    Route::view('/organizer/dashboard',        'organizer.dashboard-wrapper')        ->name('organizer.dashboard');
-    Route::view('/organizer/event/organizer',  'organizer.event-organizer-wrapper')  ->name('organizer.event/organizer');
-    Route::view('/organizer/job/management',   'organizer.job-management-wrapper')   ->name('organizer.job/management');
-    Route::view('/organizer/alumni/employment','organizer.alumni-employment-wrapper') ->name('organizer.alumni/employment');
-    Route::view('/organizer/reports',          'organizer.reports')                   ->name('organizer.reports');
-    Route::view('/organizer/chat/alumni',      'organizer.chat-alumni-wrapper')       ->name('organizer.chat/alumni');
-    Route::view('/organizer/yearbook',         'organizer.yearbook-wrapper')          ->name('organizer.yearbook');
+    Route::view('/coordinator/dashboard',        'organizer.dashboard-wrapper')        ->name('organizer.dashboard');
+    Route::view('/coordinator/event/management', 'organizer.event-organizer-wrapper')  ->name('organizer.event/organizer');
+    Route::view('/coordinator/job/management',   'organizer.job-management-wrapper')   ->name('organizer.job/management');
+    Route::view('/coordinator/alumni/employment','organizer.alumni-employment-wrapper') ->name('organizer.alumni/employment');
+    Route::view('/coordinator/reports',          'organizer.reports')                   ->name('organizer.reports');
+    Route::view('/coordinator/message/hub',      'organizer.chat-alumni-wrapper')       ->name('organizer.chat/alumni');
+    Route::view('/coordinator/yearbook',         'organizer.yearbook-wrapper')          ->name('organizer.yearbook');
 
     // ── Coordinator Notification API ──────────────────────────────────────
     Route::get('/coordinator/notifications',                [CoordinatorNotificationController::class, 'index']);
@@ -201,5 +201,15 @@ Route::post('/logout', function () {
     Auth::logout();
     session()->invalidate();
     session()->regenerateToken();
-    return redirect()->route('login');
+
+    // 303 See Other tells the browser "fetch the redirect target with GET,
+    // don't treat it as a resubmittable POST". This stops the browser from
+    // offering to resubmit the /logout POST when the user hits Back later,
+    // which is what caused the native "This page has expired / Confirm
+    // Form Resubmission" prompt right after logging out.
+    return redirect()->route('login')
+        ->setStatusCode(303)
+        ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        ->header('Pragma', 'no-cache')
+        ->header('Expires', '0');
 })->name('logout')->middleware('auth');

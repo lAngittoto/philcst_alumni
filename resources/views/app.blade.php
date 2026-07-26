@@ -19,6 +19,20 @@
             </style>
         @endif
           @livewireStyles  {{-- ✅ KAILANGAN ITO --}}
+
+        {{-- Hide Livewire's wire:navigate blue progress bar --}}
+        <style>
+            [data-navigate-progress-bar],
+            #livewire-progress-bar,
+            livewire-progress-bar,
+            .livewire-progress-bar {
+                display: none !important;
+                opacity: 0 !important;
+                visibility: hidden !important;
+                height: 0 !important;
+                pointer-events: none !important;
+            }
+        </style>
     </head>
 <body>
 
