@@ -999,6 +999,13 @@ new class extends Component {
             return;
         }
 
+        // Auto-editable jobs are only editable while INACTIVE — guard here
+        // the same way the organizer component guards saveEditJob().
+        if ($checkJob && $checkJob->status === 'ACTIVE') {
+            $this->dispatch('flash-message', type: 'warning', message: 'Deactivate this job posting before editing it.');
+            return;
+        }
+
         $this->editErrors = [];
         $errors = [];
 
@@ -1554,7 +1561,7 @@ new class extends Component {
 .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
 
 .scroll-c::-webkit-scrollbar { width: 5px; }
-.scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+.scroll-c::-webkit-scrollbar-track { background: transparent; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
@@ -1624,6 +1631,26 @@ select.tw-select-arrow {
 }
 .view-field-display.multiline { white-space: pre-wrap; min-height: 100px; }
 .view-field-display.empty     { color: #aaa; font-style: italic; }
+
+/* ══ Table rows white (not gray), no inner horizontal scrollbar — matches
+   the organizer component's table styling exactly. ══ */
+#dm-table-scroll,
+#dm-table-scroll table,
+#dm-table-scroll tbody,
+#dm-table-scroll tr {
+    background: #ffffff !important;
+}
+#dm-table-scroll .overflow-x-auto {
+    overflow-x: visible !important;
+}
+
+.dm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
+.dm-filter-progress-bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
+    animation: dmFilterProgress 1s ease-in-out infinite;
+}
+@keyframes dmFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
 </style>
 
 {{-- Hover tooltip (row "View Details") --}}
@@ -1693,19 +1720,23 @@ select.tw-select-arrow {
                         class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                     <i class="fas fa-plus text-sm"></i>
                 </button>
-                <div class="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
+                <div class="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
                     <i class="fas fa-plus text-[9px] mr-1"></i>Post a Job
-                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-t-[#1a1a1a]"></span>
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-b-[#1a1a1a]"></span>
                 </div>
             </div>
         </div>
     </div>
 
-    {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height:75vh;max-height:75vh;overflow:hidden;">
+    {{-- ══ UNIFIED TABLE BLOCK — same fixed-height / inner-scroll pattern as
+         the organizer job management component: only the table body area
+         scrolls (and shows the loading dim/progress bar), never the whole
+         page or the table sideways. ══ --}}
+    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterSort">
             <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
             </div>
@@ -1751,7 +1782,7 @@ select.tw-select-arrow {
                 $sPill = $statusPillMap[$filterStatus] ?? null;
             @endphp
             @if($sPill)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border-[1.5px] {{ $sPill['cls'] }}">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $sPill['cls'] }}">
                 <i class="fas fa-filter text-[9px]"></i>{{ $sPill['label'] }}
                 <button wire:click="$set('filterStatus', '')" type="button"
                         class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
@@ -1762,7 +1793,7 @@ select.tw-select-arrow {
             @endif
 
             @if($filterType)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border-[1.5px] bg-blue-50 border-blue-300 text-blue-800">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-blue-50 border-blue-300 text-blue-800">
                 <i class="fas fa-filter text-[9px]"></i>{{ $filterType }}
                 <button wire:click="$set('filterType', '')" type="button"
                         class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
@@ -1772,7 +1803,7 @@ select.tw-select-arrow {
             @endif
 
             @if($filterCollege)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border-[1.5px] bg-purple-50 border-purple-300 text-purple-800">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
                 <i class="fas fa-building-columns text-[9px]"></i>{{ $filterCollege }}
                 <button wire:click="$set('filterCollege', '')" type="button"
                         class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
@@ -1807,12 +1838,22 @@ select.tw-select-arrow {
             </select>
         </div>
 
-        {{-- ── TABLE WRAPPER ── --}}
-        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {{-- Filtering / searching progress bar (matches organizer pattern) --}}
+        <div class="dm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterType,filterCollege,filterSort">
+            <div class="dm-filter-progress-bar"></div>
+        </div>
+
+        {{-- ── TABLE WRAPPER — only this region scrolls; loading dim applies
+             here only so the header/filter bar and pagination stay fixed. ── --}}
+        <div class="relative flex-1 min-h-0 bg-white">
+            <div id="dm-table-scroll"
+                 class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
+                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterSort">
 
             @if($this->jobPostings->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
-                <table class="w-full bg-white border-collapse">
+
+            <div class="bg-white">
+                <table class="w-full bg-white border-collapse table-fixed">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
@@ -1938,10 +1979,8 @@ select.tw-select-arrow {
                                                     </div>
                                                 </div>
                                             @else
-                                                {{-- CHANGED: was a CSS-absolute .adtip span (could get
-                                                     clipped by the table's overflow). Now uses data-tip
-                                                     + the global fixed #eo-deadline-tip so it's always
-                                                     fully readable, positioned above the cursor. --}}
+                                                {{-- Uses the global fixed/JS-driven #eo-deadline-tip overlay so it can
+                                                     never get clipped by the table's overflow-y-auto ancestor. --}}
                                                 <div class="activate-disabled-wrap" data-eo-action data-tip="Update deadline to activate">
                                                     <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-red-50 text-red-400 border border-red-200 cursor-not-allowed">
                                                         <i class="fas fa-calendar-xmark"></i>
@@ -1959,7 +1998,7 @@ select.tw-select-arrow {
             </div>
 
             @else
-            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-briefcase text-xl text-gray-400"></i>
                 </div>
@@ -1983,6 +2022,8 @@ select.tw-select-arrow {
                 @endif
             </div>
             @endif
+
+            </div>
         </div>
 
         {{-- ── PAGINATION ── --}}
@@ -1996,7 +2037,7 @@ select.tw-select-arrow {
             $pgStart = max(1, $cp - 2);
             $pgEnd   = min($lp, $cp + 2);
         @endphp
-        <div class="flex-shrink-0 border-t border-[#7a3f91]/30 px-4 min-h-[48px] flex items-center justify-between gap-2 flex-wrap py-2"
+        <div class="flex-shrink-0 border-t border-[#7a3f91]/30 px-4 min-h-[48px] flex items-center justify-between gap-2 flex-wrap py-1"
              style="background: linear-gradient(to right, #7a3f91, #9b59b6);">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
@@ -2046,7 +2087,7 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     DELETE CONFIRM MODAL (NEW) — z-[60], stacks above Edit/View modal
+     DELETE CONFIRM MODAL — z-[60], stacks above Edit/View modal
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showDeleteModal)
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
@@ -2095,7 +2136,7 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     RESTORE CONFIRM MODAL (NEW) — z-[60]
+     RESTORE CONFIRM MODAL — z-[60]
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showRestoreModal)
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
@@ -2152,7 +2193,7 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     ACTIVATE / DEACTIVATE CONFIRM MODAL (NEW) — z-[60]
+     ACTIVATE / DEACTIVATE CONFIRM MODAL — z-[60]
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showConfirmModal)
 @php $confirmIsActivating = $confirmAction === 'ACTIVE'; @endphp
@@ -2180,7 +2221,7 @@ select.tw-select-arrow {
             @else
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. No data will be lost.</span>
+                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. All fields become editable while inactive.</span>
             </div>
             @endif
             <div class="flex gap-2">
@@ -2601,8 +2642,18 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     EDIT JOB MODAL (NEW) — director-posted jobs (organizer_id is null)
-     z-50, full screen, View/Edit toggle (defaults to View Mode)
+     EDIT JOB MODAL — director-posted jobs (organizer_id is null)
+     z-50, full screen.
+
+     CHANGED: no more manual "Edit Mode / View Mode" toggle button. This now
+     mirrors the organizer component's behavior exactly:
+       - If the job is INACTIVE (and always director-posted here, since only
+         director jobs reach this modal), all fields are AUTOMATICALLY
+         editable the moment you open it — no extra click needed.
+       - If the job is ACTIVE, it's automatically view-only; Deactivate it
+         first (top-right button) to unlock editing.
+     Alpine's `editMode` is now driven by the job's real status via
+     `x-effect`, same pattern as organizer-job-management.blade.php.
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showEditModal)
 @php
@@ -2610,15 +2661,18 @@ select.tw-select-arrow {
     $editJobIsActive       = $editingJob && $editingJob->status === 'ACTIVE';
     $editJobDeadlinePassed = $editingJob ? \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay()) : false;
     $editJobCanShare       = $editingJob && !$editJobDeadlinePassed && $editJobIsActive;
+    // Auto-editable the moment the job is INACTIVE — no manual toggle.
+    $editModeAllowed       = $editingJob && !$editJobIsActive;
 @endphp
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
-     x-data="{ editMode: false }">
+     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }"
+     x-effect="editMode = {{ $editModeAllowed ? 'true' : 'false' }}">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg">
         <div class="flex items-center gap-3 min-w-0">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-pen-to-square text-white text-sm"></i>
+                <i class="fas" :class="editMode ? 'fa-pen-to-square' : 'fa-eye'" style="color:#fff;"></i>
             </div>
             <div>
                 <h2 class="text-white font-semibold text-lg leading-tight">
@@ -2631,13 +2685,6 @@ select.tw-select-arrow {
             </div>
         </div>
         <div class="flex items-center gap-1.5">
-            <button type="button"
-                    @click="editMode = !editMode"
-                    class="modal-top-btn relative inline-flex items-center gap-1.5 px-3 h-8 rounded-lg cursor-pointer transition active:scale-95 border text-xs font-semibold"
-                    :class="editMode ? 'bg-white/20 border-white/40 text-white' : 'bg-white text-[#7a3f91] border-white/80 hover:bg-white/90'">
-                <i class="fas" :class="editMode ? 'fa-eye' : 'fa-pen'"></i>
-                <span x-text="editMode ? 'View Mode' : 'Edit Mode'"></span>
-            </button>
 
             @if($editingJob)
                 @if(!$editJobIsActive)
@@ -2691,27 +2738,25 @@ select.tw-select-arrow {
     </div>
 
     @if($editingJob && $editingJob->status === 'INACTIVE')
-    <div class="bg-amber-50 border-b border-amber-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-circle-pause text-amber-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-amber-800">
-            <strong>This job is currently Inactive.</strong>
+    <div class="bg-blue-50 border-b border-blue-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
+        <p class="text-xs text-blue-800">
+            <strong>This job is currently Inactive — all fields below are editable.</strong>
             @if($editJobDeadlinePassed)
                 The deadline has passed — update it, save, then use <strong>Activate</strong>.
             @else
-                Edit details and use <strong>Activate</strong> (top-right) to go live.
+                Review your changes carefully before clicking <strong>Save Changes</strong>, then use <strong>Activate</strong> (top-right) to go live.
             @endif
         </p>
     </div>
     @endif
 
-    <div x-show="editMode" x-cloak class="bg-blue-50 border-b border-blue-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-blue-800"><strong>Edit Mode:</strong> Fields are now editable. Click <strong>Save Changes</strong> when done, or switch back to View Mode.</p>
-    </div>
-    <div x-show="!editMode" class="bg-purple-50 border-b border-purple-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
+    @if($editJobIsActive)
+    <div class="bg-purple-50 border-b border-purple-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
         <i class="fas fa-eye text-purple-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-purple-800"><strong>View Mode:</strong> Reading job details. Click <strong>Edit Mode</strong> (top-right) to make changes.</p>
+        <p class="text-xs text-purple-800"><strong>View Mode:</strong> This job is currently Active. Deactivate it (top-right) first to make changes.</p>
     </div>
+    @endif
 
     @if(count($editErrors))
     <div class="bg-red-50 border-b border-red-200 px-6 py-2 flex-shrink-0 flex items-start gap-3">
@@ -3027,8 +3072,8 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
-                             style="min-height:160px;">{{ $editDescription ?: 'No description provided.' }}</div>
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             style="min-height:160px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editDescription ?: 'No description provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editDescription"
                                   class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
@@ -3044,8 +3089,8 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
-                             style="min-height:120px;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editQualifications"
                                   class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
@@ -3061,8 +3106,8 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="flex-1 px-3 py-2 bg-emerald-50/50 border border-emerald-100 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
-                             style="min-height:120px;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editApplicationInstructions"
                                   class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
@@ -3131,7 +3176,7 @@ select.tw-select-arrow {
                     </button>
                 </div>
                 <div x-show="!editMode" class="pb-1">
-                    <p class="text-center text-xs text-[#777777]">Switch to <strong>Edit Mode</strong> to make changes.</p>
+                    <p class="text-center text-xs text-[#777777]">Deactivate this job (top-right) to make changes.</p>
                 </div>
                 <button type="button" wire:click="closeEditModal"
                         wire:loading.attr="disabled"
@@ -3152,7 +3197,7 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     VIEW JOB MODAL (NEW) — organizer-posted jobs, read-only
+     VIEW JOB MODAL — organizer-posted jobs, read-only
      z-50, full screen, 2-column
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showViewModal && $this->viewingJob)
@@ -3634,10 +3679,10 @@ select.tw-select-arrow {
         });
     }
 
-    // NEW: generic fixed/overlay tooltip for any [data-tip] element.
-    // Always position:fixed + follows the mouse + shows ABOVE the cursor,
-    // so it can never get clipped by a scrollable ancestor (table, modal
-    // body, etc.) — fixes the "Update deadline to activate" readability bug.
+    // Generic fixed/overlay tooltip for any [data-tip] element. Always
+    // position:fixed + follows the mouse + shows ABOVE the cursor, so it
+    // can never get clipped by a scrollable ancestor (table, modal body,
+    // etc.) — fixes the "Update deadline to activate" readability bug.
     function bindDeadlineTips() {
         var dTip     = document.getElementById('eo-deadline-tip');
         var dTipText = document.getElementById('eo-deadline-tip-text');

@@ -875,16 +875,22 @@ select.tw-select-arrow {
 {{-- ══ MAIN LAYOUT ══ --}}
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
-    {{-- ══ PAGE HEADER ══ --}}
+    {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left, mirrors organizer style) ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-calendar-days text-white text-lg"></i>
+        <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-calendar-days text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Event Overview</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">Review, moderate, and manage all event postings.</p>
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Event Overview</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    Review, moderate, and manage
+                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                        <i class="fas fa-building-columns text-[9px]"></i>
+                        all colleges
+                    </span>
+                </p>
             </div>
         </div>
         <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide">
@@ -897,7 +903,7 @@ select.tw-select-arrow {
     <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 75vh; max-height: 75vh; overflow: hidden;">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
@@ -939,7 +945,7 @@ select.tw-select-arrow {
                 $pillMap = [
                     'PENDING'   => ['label' => 'Pending',   'cls' => 'bg-yellow-50 border-yellow-300 text-yellow-800'],
                     'APPROVED'  => ['label' => 'Approved',  'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-red-50 border-red-300 text-red-800'],
+                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-orange-50 border-orange-300 text-orange-800'],
                     'COMPLETED' => ['label' => 'Completed', 'cls' => 'bg-green-50 border-green-300 text-green-800'],
                 ];
                 $pill = $pillMap[$filterStatus] ?? null;
@@ -1054,7 +1060,7 @@ select.tw-select-arrow {
                                     </span>
                                 @elseif($isApproved)
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-check text-[9px] mr-1"></i>Approved
+                                        <i class="fas fa-badge-check text-[9px] mr-1"></i>Approved
                                     </span>
                                 @elseif($isPending)
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-yellow-200 bg-yellow-50 text-yellow-700 whitespace-nowrap">
@@ -1157,7 +1163,7 @@ select.tw-select-arrow {
                 of <strong class="text-white font-bold">{{ $total }}</strong>
                 event{{ $total !== 1 ? 's' : '' }}
                 @if($filterStatus || $filterCollege || $search)
-                    <span class="text-white/50 text-xs ml-1">(filtered)</span>
+                    <span class="text-white/60 text-xs ml-1">(filtered)</span>
                 @endif
             </p>
 
@@ -1224,7 +1230,7 @@ select.tw-select-arrow {
         <div class="px-6 py-4 border-b border-emerald-100 bg-emerald-50">
             <h2 class="text-base font-semibold text-emerald-800 flex items-center gap-2.5">
                 <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-circle-check text-emerald-600 text-sm"></i>
+                    <i class="fas fa-badge-check text-emerald-600 text-sm"></i>
                 </div>
                 Approve Event
             </h2>
@@ -1252,7 +1258,7 @@ select.tw-select-arrow {
                         wire:target="executeApprove"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition cursor-pointer disabled:opacity-60">
                     <span wire:loading wire:target="executeApprove"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="executeApprove"><i class="fas fa-circle-check mr-1 text-xs"></i></span>
+                    <span wire:loading.remove wire:target="executeApprove"><i class="fas fa-badge-check mr-1 text-xs"></i></span>
                     Yes, Approve
                 </button>
             </div>
@@ -1366,7 +1372,7 @@ select.tw-select-arrow {
 
                 {{-- Event Photo --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Event Photo
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
@@ -1416,7 +1422,7 @@ select.tw-select-arrow {
 
                 {{-- Target Participants --}}
                 <div class="bg-white border-[1.5px] {{ isset($formErrors['target']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Target Participants
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
@@ -1501,7 +1507,7 @@ select.tw-select-arrow {
             <div class="flex-1 min-h-0 overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
                 <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Event Details
                     </div>
                     <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3">
@@ -1578,7 +1584,7 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Notes / Requirements
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
@@ -1598,7 +1604,7 @@ select.tw-select-arrow {
             <div class="p-3 space-y-3 flex-1">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Contact Person
                         @if($editingIsOrganizerEvent)
                             <span class="ml-auto inline-flex items-center gap-1 text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-lg">
@@ -1634,7 +1640,7 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
                         Director Notes
                     </div>
                     <div class="p-2.5">
@@ -1723,12 +1729,12 @@ select.tw-select-arrow {
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in"
      @keydown.escape.window="$wire.closeViewModal()">
 
-    <div class="flex items-center justify-between px-6 py-3 flex-shrink-0 shadow-md"
+    <div class="flex items-center justify-between px-4 sm:px-6 py-3 flex-shrink-0 shadow-md"
          style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-        <div class="flex items-center gap-3 min-w-0">
-            <div>
-                <p class="text-white/60 text-xs font-semibold uppercase tracking-widest">Event Details</p>
-                <h2 class="text-white font-semibold text-base leading-tight truncate">{{ $ev->title }}</h2>
+        <div class="flex items-center gap-3 min-w-0 flex-1">
+            <div class="min-w-0 flex-1">
+                <p class="text-white/60 text-[10px] sm:text-xs font-semibold uppercase tracking-widest">Event Details</p>
+                <h2 class="text-white font-semibold text-sm sm:text-base leading-tight line-clamp-2 sm:truncate">{{ $ev->title }}</h2>
             </div>
         </div>
         <div class="flex items-center gap-1.5 flex-shrink-0 ml-3">
@@ -1799,9 +1805,9 @@ select.tw-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c">
+        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white lg:overflow-y-auto scroll-c">
 
             @if($hasPhoto)
             <div class="w-full px-5 pt-5 pb-3 flex-shrink-0">
@@ -1837,14 +1843,14 @@ select.tw-select-arrow {
             <div class="flex flex-col gap-3 px-5 pb-5">
 
                 <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-xs font-bold uppercase tracking-widest mb-1 text-[#333333]">Date &amp; Time</p>
+                    <p class="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#333333]">Date &amp; Time</p>
                     <p class="text-lg font-bold text-[#333333]">{{ $eventDatePH->format('F d, Y') }}</p>
                     <p class="text-base font-semibold mt-0.5 text-[#333333]">{{ $timeDisplay }}</p>
                 </div>
 
                 @if($ev->venue)
                 <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-xs font-bold uppercase tracking-widest mb-1 text-[#333333]">Venue</p>
+                    <p class="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#333333]">Venue</p>
                     <p class="text-base font-bold text-[#333333]">{{ $ev->venue }}</p>
                     @if($ev->venue_address)<p class="text-sm font-medium mt-0.5 text-[#333333]">{{ $ev->venue_address }}</p>@endif
                 </div>
@@ -1852,19 +1858,19 @@ select.tw-select-arrow {
 
                 @if($ev->target_participants)
                 <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-xs font-bold uppercase tracking-widest mb-1 text-[#333333]">Open For</p>
+                    <p class="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#333333]">Open For</p>
                     <p class="text-base font-bold text-[#333333]">{{ $ev->target_participants }}</p>
                 </div>
                 @endif
 
                 <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-xs font-bold uppercase tracking-widest mb-1 text-[#333333]">{{ $ev->organizer ? 'Coordinator' : 'Posted By' }}</p>
+                    <p class="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#333333]">{{ $ev->organizer ? 'Coordinator' : 'Posted By' }}</p>
                     <p class="text-base font-bold text-[#333333]">{{ $postedByLabel }}</p>
                 </div>
 
                 @if($ev->contact_person || $ev->contact_email || $ev->contact_phone)
                 <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-xs font-bold uppercase tracking-widest mb-2 text-[#333333]">Contact</p>
+                    <p class="text-[10px] font-bold uppercase tracking-widest mb-2 text-[#333333]">Contact</p>
                     <div class="flex flex-col gap-1.5">
                         @if($ev->contact_person)<p class="text-base font-bold text-[#333333]">{{ $ev->contact_person }}</p>@endif
                         @if($ev->contact_email)<p class="text-sm font-medium text-[#333333]">{{ $ev->contact_email }}</p>@endif
@@ -1906,10 +1912,10 @@ select.tw-select-arrow {
             </div>
         </div>
 
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
+        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden bg-gray-50">
 
             <div class="flex-shrink-0 px-6 py-4 bg-white border-b border-gray-200">
-                <p class="text-xs font-bold uppercase tracking-widest mb-2 text-[#333333]">Responses</p>
+                <p class="text-[10px] font-bold uppercase tracking-widest mb-2 text-[#333333]">Responses</p>
                 @if($totalRsvp === 0)
                     <p class="text-base font-medium text-[#333333]">No responses yet.</p>
                 @else
@@ -1930,26 +1936,26 @@ select.tw-select-arrow {
                 @endif
             </div>
 
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
+            <div class="flex-1 min-h-0 lg:overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
 
                 @if($ev->description)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                        <p class="text-xs font-bold uppercase tracking-widest text-[#333333]">About This Event</p>
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                    <div class="px-5 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
+                        <p class="text-[12px] font-bold uppercase tracking-widest text-[#333333]">About This Event</p>
                     </div>
-                    <div class="px-5 py-4">
-                        <p class="text-base leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->description) }}</p>
+                    <div class="px-5 py-4 lg:flex-1 lg:overflow-y-auto scroll-c">
+                        <p class="text-sm leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->description) }}</p>
                     </div>
                 </div>
                 @endif
 
                 @if($ev->notes)
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div class="px-5 py-3 border-b border-gray-100 bg-amber-50">
-                        <p class="text-xs font-bold uppercase tracking-widest text-[#333333]">Additional Notes</p>
+                <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
+                    <div class="px-5 py-3 border-b border-gray-100 bg-amber-50 flex-shrink-0">
+                        <p class="text-[12px] font-bold uppercase tracking-widest text-[#333333]">Additional Notes</p>
                     </div>
-                    <div class="px-5 py-4">
-                        <p class="text-base leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->notes) }}</p>
+                    <div class="px-5 py-4 lg:flex-1 lg:overflow-y-auto scroll-c">
+                        <p class="text-sm leading-relaxed whitespace-pre-wrap font-medium text-[#333333]" style="line-height:1.8;">{{ trim($ev->notes) }}</p>
                     </div>
                 </div>
                 @endif
@@ -2013,6 +2019,41 @@ select.tw-select-arrow {
         && !str_contains($shareEventPhotoUrl, 'default')
         && str_contains($shareEventPhotoUrl, '/storage/');
 @endphp
+
+<style>
+@keyframes eoPanelIn {
+    from { opacity: 0; transform: scale(.97) translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+.dir-share-sheet { animation: eoPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
+
+.dir-share-close-btn {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #f3f4f6; border: 1px solid #e5e7eb;
+    cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
+    flex-shrink: 0;
+}
+.dir-share-close-btn:hover  { background: #e5e7eb; border-color: #d1d5db; }
+.dir-share-close-btn:active { transform: scale(.93); }
+.dir-share-close-btn svg    { width: 14px; height: 14px; stroke: #4b5563; stroke-width: 2.25; stroke-linecap: round; }
+
+.dir-share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
+}
+.dir-share-option-btn:hover  { filter: brightness(0.94); }
+.dir-share-option-btn:active { transform: scale(.98); }
+.dir-share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.dir-share-option-btn .label-text { flex: 1; text-align: left; }
+</style>
 
 <div wire:ignore
      class="fixed inset-0 z-[70] flex items-center justify-center p-4"
@@ -2109,17 +2150,18 @@ select.tw-select-arrow {
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="opacity-100 scale-100 translate-y-0"
          x-transition:leave-end="opacity-0 scale-95 translate-y-4"
-         class="relative w-full max-w-5xl bg-white shadow-2xl flex flex-col rounded-2xl overflow-hidden will-change-transform"
+         class="dir-share-sheet relative w-full max-w-5xl bg-white shadow-2xl flex flex-col rounded-2xl overflow-hidden will-change-transform"
          style="max-height: 90vh;">
 
         <div class="flex items-center justify-between px-6 py-3.5 border-b border-gray-100 flex-shrink-0 bg-white">
             <h2 class="text-base font-semibold flex items-center gap-2.5 text-[#333333]">
-                <i class="fas fa-share-nodes text-blue-500 text-sm"></i>
+                <i class="fas fa-share-nodes text-[#7a3f91] text-sm"></i>
                 <span>Share Event</span>
             </h2>
-            <button @click="close()" type="button"
-                    class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100 transition cursor-pointer text-[#333333]">
-                <i class="fas fa-xmark text-base"></i>
+            <button @click="close()" type="button" class="dir-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
             </button>
         </div>
 
@@ -2136,7 +2178,7 @@ select.tw-select-arrow {
                              class="w-full rounded-lg object-contain" style="max-height:180px; display:block;">
                     </div>
                     @endif
-                    <div class="border-b border-gray-200 px-5 py-4 {{ $isCompleted ? 'bg-amber-50' : 'bg-[#f0f7ff]' }}">
+                    <div class="border-b border-gray-200 px-5 py-4 {{ $isCompleted ? 'bg-amber-50' : 'bg-[#f5eef9]' }}">
                         <p class="font-semibold text-base leading-tight text-[#333333]">{{ $shareEventTitle }}</p>
                         <p class="text-sm mt-1 font-semibold text-[#333333]">
                             {{ $shareEventDate }}@if($shTimeDisplay) · {{ $shTimeDisplay }}@endif
@@ -2148,7 +2190,7 @@ select.tw-select-arrow {
                             </span>
                             @endif
                             @if($shareEventTarget)
-                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-blue-100 text-blue-700">
+                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-purple-100 text-purple-700">
                                 <i class="fas fa-users text-[10px]"></i>{{ Str::limit($shareEventTarget, 30) }}
                             </span>
                             @endif
@@ -2159,17 +2201,17 @@ select.tw-select-arrow {
                         <p class="text-sm leading-relaxed text-[#333333]">{{ $shDescPreview }}</p>
                     </div>
                     @endif
-                    <div class="px-5 py-2 flex items-center gap-2 bg-[#f0f7ff]">
-                        <i class="fas fa-globe text-xs text-blue-400"></i>
-                        <span class="text-xs uppercase tracking-wider font-semibold text-blue-600">{{ strtoupper($shareHost) }}</span>
+                    <div class="px-5 py-2 flex items-center gap-2 bg-[#f5eef9]">
+                        <i class="fas fa-globe text-xs text-[#7a3f91]"></i>
+                        <span class="text-xs uppercase tracking-wider font-semibold text-[#7a3f91]">{{ strtoupper($shareHost) }}</span>
                     </div>
                 </div>
 
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
+                <div class="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
+                    <i class="fas fa-circle-info text-[#7a3f91] text-sm flex-shrink-0 mt-0.5"></i>
                     <div>
-                        <p class="text-sm font-semibold text-blue-800 mb-1">How sharing works</p>
-                        <p class="text-sm text-blue-700 leading-relaxed">
+                        <p class="text-sm font-semibold text-purple-800 mb-1">How sharing works</p>
+                        <p class="text-sm text-purple-700 leading-relaxed">
                             Clicking <strong>Facebook</strong> copies the caption to clipboard then opens the share dialog.
                             Clicking <strong>Messenger</strong> opens the <strong>conversation picker</strong> so you can
                             forward the event directly to friends or groups.
@@ -2177,16 +2219,16 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-users text-blue-600 text-sm flex-shrink-0 mt-0.5"></i>
+                <div class="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
+                    <i class="fas fa-users text-[#7a3f91] text-sm flex-shrink-0 mt-0.5"></i>
                     <div>
-                        <p class="text-sm font-semibold flex items-center gap-2 text-blue-800">
+                        <p class="text-sm font-semibold flex items-center gap-2 text-purple-800">
                             Post to Chat Room
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-semibold tracking-wide">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#7a3f91] text-white text-[10px] font-semibold tracking-wide">
                                 <i class="fas fa-at text-[9px]"></i>everyone tagged
                             </span>
                         </p>
-                        <p class="text-sm mt-0.5 text-blue-700">
+                        <p class="text-sm mt-0.5 text-purple-700">
                             Posts to the <strong>Directors &amp; Coordinators</strong> chat room
                             @if($shareEventId)
                                 @php
@@ -2202,7 +2244,7 @@ select.tw-select-arrow {
                 </div>
             </div>
 
-            <div class="w-full md:w-80 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto"
+            <div class="w-full md:w-80 px-6 py-5 flex flex-col gap-2.5 flex-shrink-0 overflow-y-auto"
                  style="scrollbar-width:thin;scrollbar-color:#d1d5db #f9fafb;">
                 <p class="text-xs font-bold uppercase tracking-widest text-[#333333]">Share via</p>
 
@@ -2228,17 +2270,16 @@ select.tw-select-arrow {
                      x-transition:enter="transition ease-out duration-300"
                      x-transition:enter-start="opacity-0 -translate-y-2"
                      x-transition:enter-end="opacity-100 translate-y-0"
-                     class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-2">
-                    <i class="fas fa-check text-blue-600 text-sm mt-0.5 flex-shrink-0"></i>
+                     class="bg-purple-50 border border-purple-300 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <i class="fas fa-check text-[#7a3f91] text-sm mt-0.5 flex-shrink-0"></i>
                     <div>
-                        <p class="text-sm font-semibold text-blue-800">Conversation picker opened!</p>
-                        <p class="text-xs text-blue-700 mt-0.5">Choose who to send it to, then press Ctrl+V to paste the caption.</p>
+                        <p class="text-sm font-semibold text-purple-800">Conversation picker opened!</p>
+                        <p class="text-xs text-purple-700 mt-0.5">Choose who to send it to, then press Ctrl+V to paste the caption.</p>
                     </div>
                 </div>
 
-                <button type="button" @click="shareOnFacebook()"
-                        class="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
+                <button type="button" @click="shareOnFacebook()" class="dir-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
                             <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
                         </svg>
@@ -2247,13 +2288,12 @@ select.tw-select-arrow {
                         <span class="block font-semibold text-sm">Post on Facebook</span>
                         <span class="block text-xs text-white/70 mt-0.5">Opens share dialog · photo+text copied</span>
                     </span>
-                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
+                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm"></i>
                 </button>
 
-                <button type="button" @click="shareOnMessenger()"
-                        class="w-full flex items-center gap-4 px-4 py-3.5 rounded-xl text-white font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group"
+                <button type="button" @click="shareOnMessenger()" class="dir-share-option-btn"
                         style="background: linear-gradient(135deg, #0084FF 0%, #0050D0 100%);">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
+                    <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
                             <defs>
                                 <linearGradient id="msg_dir_grad" x1="0%" y1="100%" x2="100%" y2="0%">
@@ -2268,7 +2308,7 @@ select.tw-select-arrow {
                         <span class="block font-semibold text-sm">Send via Messenger</span>
                         <span class="block text-xs text-white/70 mt-0.5">Opens conversation picker · forward to friends</span>
                     </span>
-                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
+                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm"></i>
                 </button>
 
                 <div class="relative my-0.5">
@@ -2282,8 +2322,8 @@ select.tw-select-arrow {
                         wire:click="postToBatchChat"
                         wire:loading.attr="disabled"
                         wire:target="postToBatchChat"
-                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed bg-blue-50 text-blue-700">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-blue-600">
+                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-200 hover:border-purple-400 hover:bg-purple-50 disabled:opacity-60 disabled:cursor-not-allowed bg-purple-50 text-purple-700">
+                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-[#7a3f91]">
                         <i class="fas fa-users text-white text-sm"></i>
                     </span>
                     <span class="flex-1 text-left">
@@ -2293,14 +2333,14 @@ select.tw-select-arrow {
                         <span wire:loading wire:target="postToBatchChat" class="block font-semibold text-sm">
                             <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
                         </span>
-                        <span class="flex items-center gap-1.5 text-xs mt-0.5 text-blue-600">
+                        <span class="flex items-center gap-1.5 text-xs mt-0.5 text-purple-600">
                             Directors &amp; Coordinators
-                            · <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-semibold">
+                            · <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#7a3f91] text-white text-[9px] font-semibold">
                                 <i class="fas fa-at text-[8px]"></i>everyone
                             </span>
                         </span>
                     </span>
-                    <i class="fas fa-paper-plane text-sm text-blue-500"></i>
+                    <i class="fas fa-paper-plane text-sm text-[#7a3f91]"></i>
                 </button>
 
                 <div class="relative my-0.5">
@@ -2311,12 +2351,12 @@ select.tw-select-arrow {
                 </div>
 
                 <button type="button" @click="copyLinkFn()"
-                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50 font-semibold text-sm transition cursor-pointer group bg-white text-[#333333]">
-                    <span class="w-9 h-9 bg-gray-100 group-hover:bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0 transition">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-blue-500'" class="text-base"></i>
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50 font-semibold text-sm transition cursor-pointer group bg-white text-[#333333]">
+                    <span class="w-9 h-9 bg-gray-100 group-hover:bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0 transition">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-[#7a3f91]'" class="text-base"></i>
                     </span>
                     <div class="flex-1 text-left min-w-0">
-                        <p class="font-semibold text-sm" :class="copied ? 'text-emerald-600' : 'text-blue-600'"
+                        <p class="font-semibold text-sm" :class="copied ? 'text-emerald-600' : 'text-[#7a3f91]'"
                            x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
                         <p class="text-xs font-mono mt-0.5 truncate text-[#555555]">{{ $shareBaseUrl }}</p>
                     </div>
@@ -2339,13 +2379,18 @@ select.tw-select-arrow {
     var tip       = document.getElementById('dir-hover-tip');
     var actionTip = document.getElementById('dir-action-tip');
 
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
+    }
+
     function bindRows() {
         document.querySelectorAll('[data-dir-row]').forEach(function (row) {
             if (row._dirTipBound) return;
             row._dirTipBound = true;
 
             row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
+                if (!tip || !isHoverCapable()) return;
                 var actionWrap = e.target.closest('[data-dir-action]');
                 if (actionWrap) {
                     tip.style.opacity = '0';

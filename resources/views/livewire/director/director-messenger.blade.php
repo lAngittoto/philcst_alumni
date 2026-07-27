@@ -59,6 +59,21 @@ new class extends Component {
     // ── Unread / watermark tracking ───────────────────────────────────────
     public int $lastNotifiedMessageId = 0;
 
+    // ── Tick counter — drives staggered work inside the single poll ───────
+    // SMOOTHNESS FIX (mirrors organizer/chat-alumni.blade.php): previously
+    // this component ran TWO separate wire:poll timers (refreshAll every
+    // 8000ms doing presence+notif+full message reload+online-count, and a
+    // second poll every 3000ms just for typing). Two independent Livewire
+    // polling requests fighting for the same request queue is exactly what
+    // made sending/clicking feel like it stalls for a beat. Now there is
+    // ONE poll (wire:poll.2500ms.visible) driving a single unifiedPoll()
+    // that staggers its heavier steps across ticks, same rhythm as the
+    // organizer side, so nothing blocks a user-initiated action.
+    public int $pollTick = 0;
+
+    // ── Room display name — single source of truth for the header/title ──
+    public string $roomLabel = 'Staff Chat';
+
     // ─────────────────────────────────────────────────────────────────────
     // Cache key — MUST match director-notif-poller.blade.php
     // ─────────────────────────────────────────────────────────────────────
@@ -155,6 +170,11 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Ensure the one global director room exists
+    // NOTE: the DB 'name' column keeps its original stored value ("Internal
+    // Staff Chat") intentionally untouched — renaming the display label is
+    // purely presentational via $roomLabel above, so no migration/backfill
+    // is needed and other places reading chat_rooms.name (e.g. any admin
+    // tooling) keep working unchanged.
     // ─────────────────────────────────────────────────────────────────────
     protected function ensureRoomExists(): void
     {
@@ -189,20 +209,38 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Polling hooks
+    // SINGLE UNIFIED POLL — wire:poll.2500ms.visible
+    //
+    // Replaces the old refreshAll() (8000ms) + refreshTyping() (3000ms)
+    // dual-poll setup. Staggering the heavier steps across ticks keeps any
+    // single tick cheap, and .visible means it fully pauses while the tab
+    // is unfocused — same pattern as organizer/chat-alumni.blade.php.
     // ─────────────────────────────────────────────────────────────────────
-    public function refreshAll(): void
+    public function unifiedPoll(): void
     {
-        $this->pingPresence();
-        $this->checkAndDispatchNewMessageNotifications();
-        $this->loadMessages();
-        $this->loadTypingIndicators();
-        $this->refreshOnlineCount();
-    }
+        $this->pollTick++;
 
-    public function refreshTyping(): void
-    {
+        // Presence + typing are the cheapest / most time-sensitive, so
+        // these run every tick (every ~2.5s).
+        $this->pingPresence();
         $this->loadTypingIndicators();
+
+        // Notification watermark + message reload are a bit heavier and
+        // don't need sub-3s freshness — every other tick (~5s) is plenty.
+        if ($this->pollTick % 2 === 0) {
+            $this->checkAndDispatchNewMessageNotifications();
+            $this->loadMessages();
+            $this->dispatch('chat-scroll-bottom');
+        }
+
+        // Online/offline counts change the least often — every 4th tick
+        // (~10s) keeps this from hammering director+organizer tables.
+        if ($this->pollTick % 4 === 0) {
+            $this->refreshOnlineCount();
+            if ($this->showMembers) {
+                $this->loadMembers();
+            }
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -458,6 +496,13 @@ new class extends Component {
 
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Send
+    //
+    // SMOOTHNESS FIX: sendMessage() itself was already lean (no full-room
+    // rebuild), but it used to rely on the old 8s refreshAll() poll to
+    // pick up typing/notif bookkeeping. Now that unifiedPoll() runs every
+    // 2.5s, the sender still sees their own message instantly via
+    // loadMessages() below, and everything else reconciles within a
+    // couple seconds without a heavy synchronous call blocking send.
     // ─────────────────────────────────────────────────────────────────────
     public function sendMessage(): void
     {
@@ -923,11 +968,26 @@ new class extends Component {
 }; ?>
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     DIRECTOR MESSENGER UI  —  Internal Staff Chat
+     DIRECTOR MESSENGER UI  —  "Command Circle" (Directors + Coordinators)
+     - FIX: header icon was oversized (a big circular bubble icon dominating
+       the header). It's now a compact rounded-square badge sized to match
+       the organizer chat header (w-10 h-10), so the title/status line reads
+       clearly instead of being visually crowded.
+     - FIX: room title renamed from generic "Internal Staff Chat" to
+       "Command Circle" — the underlying chat_rooms.name DB value and
+       course_code='__director__' marker are untouched, this is purely the
+       label shown in the header ($roomLabel).
+     - SMOOTHNESS FIX: merged the old dual wire:poll (8000ms refreshAll +
+       3000ms refreshTyping) into a single wire:poll.2500ms.visible calling
+       unifiedPoll(), which staggers presence/typing (every tick), message
+       reload + notif watermark (every other tick), and online counts
+       (every 4th tick) — same rhythm as organizer/chat-alumni.blade.php.
+       This removes the double-polling contention that made sends/clicks
+       feel like they paused.
      ════════════════════════════════════════════════════════════════════════ --}}
-<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
-     style="height: calc(100vh - 90px);"
-     wire:poll.8000ms="refreshAll">
+<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full"
+     style="height: calc(100vh - 250px); max-width: 1400px;"
+     wire:poll.2500ms.visible="unifiedPoll">
 
     @if($room)
     <div class="flex flex-1 min-w-0 flex-col">
@@ -936,15 +996,17 @@ new class extends Component {
         <div class="flex items-center gap-3 px-5 py-3.5 flex-shrink-0 border-b border-[#E8E0F0]"
              style="background:#7a3f91;">
 
-            {{-- Room icon --}}
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-                 style="background:rgba(255,255,255,.18); border:1.5px solid rgba(255,255,255,.28);">
-                <i class="fa-solid fa-comments text-white text-lg"></i>
+            {{-- Room icon — FIX: compact rounded-square badge (w-10 h-10),
+                 matching the organizer chat header scale instead of the
+                 previous oversized circular bubble icon. --}}
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                 style="background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.28);">
+                <i class="fa-solid fa-shield-halved text-white text-sm"></i>
             </div>
 
             <div class="flex-1 min-w-0">
-                <p class="text-white font-semibold text-base sm:text-lg leading-tight tracking-wide">
-                    Internal Staff Chat
+                <p class="text-white font-semibold text-sm leading-tight truncate uppercase tracking-wide">
+                    {{ $roomLabel }}
                 </p>
                 <div class="flex items-center gap-2 flex-wrap mt-0.5">
                     @if($onlineCount > 0)
@@ -954,14 +1016,14 @@ new class extends Component {
                             {{ $onlineCount }}/{{ $totalCount }} online
                         </span>
                     </div>
-                    <span class="text-white/30 text-xs">·</span>
+                    <span class="text-white/30 text-xs hidden sm:inline">·</span>
                     @endif
-                    <span class="flex items-center gap-1 text-white/60 text-xs font-semibold">
+                    <span class="hidden sm:flex items-center gap-1 text-white/60 text-xs font-semibold">
                         <i class="fa-solid fa-shield-halved text-[10px]"></i>Directors
                         <span class="text-white/30">+</span>
                         <i class="fa-solid fa-users text-[10px]"></i>Coordinators
                     </span>
-                    <span class="text-white/30 text-xs">·</span>
+                    <span class="text-white/30 text-xs hidden sm:inline">·</span>
                     <span class="text-white/60 text-xs font-semibold">
                         <i class="fa-solid fa-lock text-[10px] mr-0.5"></i>Internal Only
                     </span>
@@ -1028,7 +1090,7 @@ new class extends Component {
 
                 {{-- Message list --}}
                 <div id="msg-list"
-                     class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 bg-[#fafafa]"
+                     class="flex-1 overflow-y-auto px-3 py-3 space-y-0 bg-[#fafafa]"
                      x-data="{ openMessageId: null }"
                      x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
                      @click.outside="openMessageId = null"
@@ -1047,9 +1109,9 @@ new class extends Component {
 
                         {{-- Date separator --}}
                         @if($dateChanged)
-                        <div class="flex items-center gap-3 my-4">
+                        <div class="flex items-center gap-3 my-2.5">
                             <div class="flex-1 h-px bg-[#E8E0F0]"></div>
-                            <span class="text-xs font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">
+                            <span class="text-[10px] font-semibold text-[#999999] tracking-widest uppercase px-2 whitespace-nowrap">
                                 {{ $msg['date_label'] }}
                             </span>
                             <div class="flex-1 h-px bg-[#E8E0F0]"></div>
@@ -1064,8 +1126,8 @@ new class extends Component {
 
                             {{-- Avatar – others --}}
                             @if(! $msg['is_mine'])
-                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden
-                                        flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
+                            <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden
+                                        flex items-center justify-center text-xs font-semibold text-white mb-0.5 self-end"
                                  style="background:#7a3f91;"
                                  title="{{ $msg['sender_name'] }}">
                                 @if($msg['sender_photo'])
@@ -1083,7 +1145,7 @@ new class extends Component {
                             @endif
 
                             {{-- Bubble wrapper --}}
-                            <div class="relative flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[70%]">
+                            <div class="relative flex flex-col {{ $msg['is_mine'] ? 'items-end' : 'items-start' }} max-w-[78%] sm:max-w-[68%]">
 
                                 {{-- Sender name --}}
                                 @if(! $msg['is_mine'] && ! $sameGroup)
@@ -1103,14 +1165,14 @@ new class extends Component {
 
                                 {{-- Pinned indicator --}}
                                 @if($msg['is_pinned'] && !$msg['deleted'])
-                                <div class="flex items-center gap-1 text-xs text-amber-600 font-semibold mb-0.5 px-1">
-                                    <i class="fa-solid fa-thumbtack text-xs"></i> Pinned
+                                <div class="flex items-center gap-1 text-[10px] text-amber-600 font-semibold mb-0.5 px-1">
+                                    <i class="fa-solid fa-thumbtack text-[10px]"></i> Pinned
                                 </div>
                                 @endif
 
                                 {{-- Reply quote --}}
                                 @if($msg['reply_to'])
-                                <div class="text-xs rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug
+                                <div class="text-[11px] rounded-lg px-2 py-1 mb-0.5 max-w-full border-l-[3px] leading-snug
                                     {{ $msg['is_mine']
                                         ? 'bg-purple-200/60 border-white/70 text-purple-900'
                                         : 'bg-white border-[#E8E0F0] text-[#666666]' }}">
@@ -1220,10 +1282,10 @@ new class extends Component {
 
                                 {{-- ══ DELETED / UNSENT PLACEHOLDER ══ --}}
                                 @if($msg['deleted'])
-                                <div class="flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs italic
+                                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] italic
                                             {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
                                      style="background:rgba(0,0,0,0.05); border:1px dashed #d1d5db; color:#9ca3af;">
-                                    <i class="fa-solid fa-ban text-[11px] opacity-60"></i>
+                                    <i class="fa-solid fa-ban text-[10px] opacity-60"></i>
                                     <span>
                                         @if($msg['is_mine'])
                                             You unsent a message.
@@ -1345,11 +1407,11 @@ new class extends Component {
 
                                 {{-- Reaction pills --}}
                                 @if(! empty($msg['reactions']) && !$msg['deleted'])
-                                <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
+                                <div class="flex gap-1 mt-0.5 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk => $cnt)
                                     @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍' }; @endphp
                                     <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
-                                            class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all
+                                            class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border transition-all
                                                    {{ $msg['my_reaction'] === $rk
                                                         ? 'bg-[#f3eef8] border-[#d9c9e8] text-[#7a3f91] font-semibold'
                                                         : 'bg-white border-[#E8E0F0] text-[#666666] hover:border-[#d9c9e8]' }}">
@@ -1365,8 +1427,8 @@ new class extends Component {
 
                             {{-- Avatar – mine (director) --}}
                             @if($msg['is_mine'])
-                            <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden
-                                        flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
+                            <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden
+                                        flex items-center justify-center text-xs font-semibold text-white mb-0.5 self-end"
                                  style="background:#7a3f91;">
                                 @if($directorPhoto)
                                     <img src="{{ $directorPhoto }}"
@@ -1384,19 +1446,19 @@ new class extends Component {
                         </div>
 
                     @empty
-                        <div class="flex flex-col items-center justify-center h-full py-20 text-[#999999] select-none">
-                            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+                        <div class="flex flex-col items-center justify-center h-full py-16 text-[#999999] select-none">
+                            <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
                                  style="background:#f3eef8;">
-                                <i class="fa-solid fa-comments text-4xl" style="color:#7a3f91;"></i>
+                                <i class="fa-solid fa-comments text-xl" style="color:#7a3f91;"></i>
                             </div>
-                            <p class="text-base font-semibold text-[#666666]">No messages yet</p>
-                            <p class="text-sm text-[#999999] mt-1">Start the internal staff conversation! 👋</p>
+                            <p class="text-sm font-semibold text-[#666666]">No messages yet</p>
+                            <p class="text-xs text-[#999999] mt-1">Start the {{ $roomLabel }} conversation! 👋</p>
                         </div>
                     @endforelse
                 </div>
 
                 {{-- Typing indicator --}}
-                <div wire:poll.3000ms="refreshTyping" class="flex-shrink-0">
+                <div class="flex-shrink-0">
                     @if(! empty($typingUsers))
                     <div class="flex items-center gap-2.5 px-4 py-2 bg-[#fafafa] border-t border-[#E8E0F0]">
                         <div class="flex items-end gap-0.5 h-4">
@@ -1447,7 +1509,7 @@ new class extends Component {
                         @foreach($mentionSuggestions as $sug)
                         <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
                                 class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f3eef8] transition-colors text-left">
-                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white"
+                            <div class="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white"
                                  style="background:#7a3f91;">
                                 @if($sug['name'] === 'everyone')
                                     <i class="fa-solid fa-users text-xs"></i>
@@ -1480,7 +1542,7 @@ new class extends Component {
                                 id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
-                                placeholder="Message Internal Staff Chat… (@ to mention)"
+                                placeholder="Message {{ $roomLabel }}… (@ to mention)"
                                 rows="1"
                                 @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); $wire.sendMessage(); }"
                                 @focus-input.window="$el.focus()"
@@ -1496,11 +1558,16 @@ new class extends Component {
                                        transition placeholder-[#999999]"
                                 style="max-height:120px; overflow-y:auto;"></textarea>
                         </div>
-                        <button wire:click="sendMessage"
+                        <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
-                                       transition hover:opacity-90 active:scale-95 shadow-sm"
+                                       transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60"
                                 style="background:#7a3f91;">
-                            <i class="fa-solid fa-paper-plane text-base"></i>
+                            <i class="fa-solid fa-paper-plane text-base" wire:loading.remove wire:target="sendMessage"></i>
+                            <span class="hidden items-center gap-1" wire:loading.flex wire:target="sendMessage">
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:0ms;animation-duration:800ms;"></span>
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:150ms;animation-duration:800ms;"></span>
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:300ms;animation-duration:800ms;"></span>
+                            </span>
                         </button>
                     </div>
 
@@ -1555,7 +1622,7 @@ new class extends Component {
                                         {{ $dir['is_me'] ? 'bg-[#f3eef8] border border-[#d9c9e8]' : 'border border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]' }}
                                         transition-all">
                                 <div class="relative flex-shrink-0">
-                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
+                                    <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center
                                                 text-xs font-semibold text-white"
                                          style="background:#7a3f91;">
                                         @if($dir['photo'])
@@ -1635,7 +1702,7 @@ new class extends Component {
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
                                         hover:border-[#d9c9e8] hover:bg-[#f3eef8] transition-all">
                                 <div class="relative flex-shrink-0">
-                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
+                                    <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center
                                                 text-xs font-semibold text-white"
                                          style="background:#7a3f91;">
                                         @if($coord['photo'])
@@ -1678,7 +1745,7 @@ new class extends Component {
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#E8E0F0]
                                         hover:bg-[#fafafa] transition-all opacity-70">
                                 <div class="relative flex-shrink-0">
-                                    <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center
+                                    <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center
                                                 text-xs font-semibold text-white"
                                          style="background:#c4a8d4;">
                                         @if($coord['photo'])
@@ -1764,12 +1831,12 @@ new class extends Component {
     @else
     <div class="flex flex-1 items-center justify-center bg-[#fafafa]">
         <div class="flex flex-col items-center text-center px-8">
-            <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5"
+            <div class="w-14 h-14 rounded-xl flex items-center justify-center mb-4"
                  style="background:#f3eef8;">
-                <i class="fa-solid fa-comments text-5xl" style="color:#7a3f91;"></i>
+                <i class="fa-solid fa-comments text-2xl" style="color:#7a3f91;"></i>
             </div>
-            <p class="text-lg font-semibold text-[#333333]">Setting up the channel…</p>
-            <p class="text-sm text-[#999999] mt-2 max-w-xs leading-relaxed">
+            <p class="text-base font-semibold text-[#333333]">Setting up the channel…</p>
+            <p class="text-xs text-[#999999] mt-2 max-w-xs leading-relaxed">
                 The staff channel is being initialized. Please refresh the page.
             </p>
         </div>
