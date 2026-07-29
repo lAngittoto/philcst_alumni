@@ -1548,11 +1548,39 @@ new class extends Component {
     }
 };
 ?>
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col" style="height: calc(100vh - 120px); max-height: calc(100vh - 120px); overflow: hidden;">
 
 {{-- ═══════════════════ STYLES ═══════════════════ --}}
 <style>
 [x-cloak] { display: none !important; }
+
+/* ══ Fixed-height card, matches Manage Coordinator sizing exactly ══ */
+.job-table-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); }
+
+@media (max-width: 640px) {
+    .job-table-card {
+        border-radius: 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+    }
+}
+
+/* ══ Mobile stacked card rows (same interaction language as coord-mrow) ══ */
+.job-mrow {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #fff;
+    border-bottom: 1px solid #F0ECF5;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background .08s ease;
+}
+.job-mrow:active { background: #F0ECF5; }
 
 @keyframes fadeIn    { from { opacity:0 } to { opacity:1 } }
 @keyframes modalIn   { from { opacity:0; transform:translateY(14px) scale(.97) } to { opacity:1; transform:none } }
@@ -1732,7 +1760,7 @@ select.tw-select-arrow {
          the organizer job management component: only the table body area
          scrolls (and shows the loading dim/progress bar), never the whole
          page or the table sideways. ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
+    <div class="job-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
@@ -1853,15 +1881,19 @@ select.tw-select-arrow {
             @if($this->jobPostings->count() > 0)
 
             <div class="bg-white">
-                <table class="w-full bg-white border-collapse table-fixed">
+                {{-- ── DESKTOP / TABLET: table view ── --}}
+                <table class="w-full bg-white border-collapse hidden md:table table-fixed">
+                    <colgroup>
+                        <col style="width:6%;"><col style="width:32%;"><col style="width:20%;"><col style="width:14%;"><col style="width:14%;"><col style="width:14%;">
+                    </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">#</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Coordinator</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Type</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-[#555555]"></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -1995,6 +2027,42 @@ select.tw-select-arrow {
                         @endforeach
                     </tbody>
                 </table>
+
+                {{-- ── MOBILE: stacked card list ── --}}
+                <div class="block md:hidden">
+                    @foreach($this->jobPostings as $index => $job)
+                    @php
+                        $isOrgDel         = $job->status === 'ORGANIZER_DELETED';
+                        $isActive         = $job->status === 'ACTIVE';
+                        $organizerName    = $job->organizer?->name ?? null;
+                        $isDirectorJob    = is_null($job->organizer_id);
+                    @endphp
+                    <div class="job-mrow" wire:key="job-mrow-{{ $job->id }}" wire:click="viewJob({{ $job->id }})">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-semibold text-sm truncate {{ $isOrgDel ? 'line-through text-red-400' : 'text-gray-900' }}">
+                                {{ $job->job_title }}
+                            </p>
+                            <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                                <span class="text-xs text-gray-600 truncate">
+                                    {{ $organizerName ?: 'Alumni Director' }}
+                                </span>
+                                <span class="text-gray-300 text-xs">&bull;</span>
+                                <span class="text-xs text-gray-600 truncate">{{ $job->employment_type }}</span>
+                            </div>
+                            @if($isOrgDel)
+                                <span class="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-700">
+                                    <i class="fas fa-trash-can text-[8px]"></i>Deleted by Org.
+                                </span>
+                            @elseif($isActive)
+                                <span class="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">Active</span>
+                            @else
+                                <span class="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700">Inactive</span>
+                            @endif
+                        </div>
+                        <i class="fas fa-chevron-right text-gray-300 text-xs shrink-0"></i>
+                    </div>
+                    @endforeach
+                </div>
             </div>
 
             @else

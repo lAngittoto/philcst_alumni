@@ -526,12 +526,12 @@
     //  ROUTE MAP
     // ─────────────────────────────────────────────────────────────────────────
     window.__coordRouteMap = {
-        'organizer.dashboard':         '/organizer/dashboard',
-        'organizer.event/organizer':   '/organizer/event/organizer',
-        'organizer.job/management':    '/organizer/job/management',
-        'organizer.alumni/employment': '/organizer/alumni/employment',
-        'organizer.chat/alumni':       '/organizer/chat/alumni',
-        'organizer.yearbook':          '/organizer/yearbook',
+        'organizer.dashboard':         '/coordinator/dashboard',
+        'organizer.event/organizer':   '/coordinator/event/management',
+        'organizer.job/management':    '/coordinator/job/management',
+        'organizer.alumni/employment': '/coordinator/alumni/employment',
+        'organizer.chat/alumni':       '/coordinator/message/hub',
+        'organizer.yearbook':          '/coordinator/yearbook',
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1350,42 +1350,50 @@
             </div>
 
             @php
+                // NOTE: 'pattern' must match the ACTUAL URL path (see routes/web.php),
+                // NOT the route name. All coordinator/organizer routes live under the
+                // /coordinator/... prefix — e.g. Event Management's URL is
+                // /coordinator/event/management even though its route *name* is
+                // organizer.event/organizer. request()->is() matches against the URL
+                // path, so patterns here were previously wrong ('organizer/event/
+                // organizer*', 'organizer/chat/alumni*') and never matched anything,
+                // which is why no sidebar item ever showed as active.
                 $sidebarLinks = [
                     [
                         'route'   => 'organizer.dashboard',
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
-                        'pattern' => 'organizer/dashboard*',
+                        'pattern' => 'coordinator/dashboard*',
                     ],
                     [
                         'route'   => 'organizer.event/organizer',
                         'icon'    => 'calendar-check',
                         'label'   => 'Event Management',
-                        'pattern' => 'organizer/event/organizer*',
+                        'pattern' => 'coordinator/event/management*',
                     ],
                     [
                         'route'   => 'organizer.job/management',
                         'icon'    => 'briefcase',
                         'label'   => 'Job Management',
-                        'pattern' => 'organizer/job/management*',
+                        'pattern' => 'coordinator/job/management*',
                     ],
                     [
                         'route'   => 'organizer.alumni/employment',
                         'icon'    => 'chart-line',
                         'label'   => 'Employment Tracking',
-                        'pattern' => 'organizer/alumni/employment*',
+                        'pattern' => 'coordinator/alumni/employment*',
                     ],
                     [
                         'route'   => 'organizer.chat/alumni',
                         'icon'    => 'comments',
                         'label'   => 'Message Hub',
-                        'pattern' => 'organizer/chat/alumni*',
+                        'pattern' => 'coordinator/message/hub*',
                     ],
                     [
                         'route'   => 'organizer.yearbook',
                         'icon'    => 'book-open',
                         'label'   => 'Alumni Yearbook',
-                        'pattern' => 'organizer/yearbook*',
+                        'pattern' => 'coordinator/yearbook*',
                     ],
                 ];
             @endphp

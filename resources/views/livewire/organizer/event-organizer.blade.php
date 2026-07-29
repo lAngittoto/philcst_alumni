@@ -81,6 +81,10 @@ new class extends Component {
     public string $shareEventPhotoUrl    = '';
     public bool   $shareEventIsCompleted = false;
 
+    // ── "Share to Message Hub" — chat room multi-select ──
+    public array $shareAvailableRooms = [];   // [['id'=>, 'label'=>, 'type'=>], ...]
+    public array $shareTargetRoomIds  = [];   // checkbox-bound selected room ids (as strings)
+
     public function mount(): void
     {
         set_time_limit(600);
@@ -860,6 +864,9 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->shareEventOrganizer   = $this->organizerName ?: 'Organizer';
         $this->shareEventIsCompleted = $isCompleted;
 
+        $this->loadShareableRooms();
+        $this->shareTargetRoomIds = [];
+
         $this->showShareModal = true;
         // NOTE: intentionally NOT closing showViewModal here — opening the
         // Share modal from within View Details should keep the View Details
@@ -883,14 +890,145 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->shareEventTargetParts = '';
         $this->shareEventPhotoUrl    = '';
         $this->shareEventIsCompleted = false;
+        $this->shareAvailableRooms   = [];
+        $this->shareTargetRoomIds    = [];
     }
 
-    // ── "Share to Organizer Updates" — UI/button only for now (per request).
-    //    No chat backend wiring yet; this is a placeholder hook for a
-    //    future implementation. ──
+    // ── "Share to Message Hub" — posts the event recap as a chat
+    //    message into every chat room the organizer picks (checkbox list,
+    //    with Select All). Mirrors the same chat_rooms/chat_messages
+    //    tables used by the organizer's Message Hub (chat-alumni.blade). ──
+    private function loadShareableRooms(): void
+    {
+        $dept = $this->organizerDepartment;
+
+        $rooms = [];
+
+        // Staff Chat (directors + coordinators)
+        $staffRoom = DB::table('chat_rooms')->where('course_code', '__director__')->first(['id']);
+        if ($staffRoom) {
+            $rooms[] = ['id' => (int) $staffRoom->id, 'label' => 'Staff Chat', 'type' => 'staff'];
+        }
+
+        if ($dept) {
+            // College-wide room
+            $collegeRoom = DB::table('chat_rooms')
+                ->where('department', $dept)
+                ->where('batch', 0)
+                ->where(function ($q) use ($dept) {
+                    $q->where('course_code', '')->orWhere('course_code', 'like', 'CLG_%');
+                })
+                ->first(['id']);
+            if ($collegeRoom) {
+                $rooms[] = ['id' => (int) $collegeRoom->id, 'label' => $dept . ' · College-Wide', 'type' => 'college'];
+            }
+
+            $deptCourseCodes = DB::table('courses')->where('college', $dept)->pluck('code')->toArray();
+
+            if (!empty($deptCourseCodes)) {
+                // Course "All Batches" GCs
+                $courseRooms = DB::table('chat_rooms')
+                    ->whereIn('course_code', $deptCourseCodes)
+                    ->where('batch', 0)
+                    ->get(['id', 'course_code']);
+
+                foreach ($courseRooms as $r) {
+                    $courseName = DB::table('courses')->where('code', $r->course_code)->value('name') ?? strtoupper($r->course_code);
+                    $rooms[] = ['id' => (int) $r->id, 'label' => strtoupper($r->course_code) . ' · All Batches', 'type' => 'course'];
+                }
+
+                // Per-batch GCs
+                $batchRooms = DB::table('chat_rooms')
+                    ->whereIn('course_code', $deptCourseCodes)
+                    ->where('batch', '>', 0)
+                    ->orderBy('course_code')->orderByDesc('batch')
+                    ->get(['id', 'course_code', 'batch', 'name']);
+
+                foreach ($batchRooms as $r) {
+                    $rooms[] = ['id' => (int) $r->id, 'label' => $r->name ?: (strtoupper($r->course_code) . ' · Batch ' . $r->batch), 'type' => 'batch'];
+                }
+            }
+        }
+
+        $this->shareAvailableRooms = $rooms;
+    }
+
+    public function toggleSelectAllShareRooms(): void
+    {
+        $allIds = collect($this->shareAvailableRooms)->pluck('id')->map(fn ($id) => (string) $id)->toArray();
+
+        // If everything is already selected, uncheck all. Otherwise select all.
+        $allSelected = !empty($allIds) && empty(array_diff($allIds, $this->shareTargetRoomIds));
+
+        $this->shareTargetRoomIds = $allSelected ? [] : $allIds;
+    }
+
     public function shareToOrganizerUpdates(): void
     {
-        $this->dispatch('flash-message', type: 'info', message: 'Share to Organizer Updates is coming soon.');
+        if (empty($this->shareTargetRoomIds)) {
+            $this->dispatch('flash-message', type: 'error', message: 'Select at least one chat to share to.');
+            return;
+        }
+
+        if (!$this->shareEventId) {
+            $this->dispatch('flash-message', type: 'error', message: 'Nothing to share — please reopen the Share window.');
+            return;
+        }
+
+        $lines   = [];
+        $lines[] = ($this->shareEventIsCompleted ? '📸 EVENT HIGHLIGHTS: ' : '📅 ') . strtoupper($this->shareEventTitle);
+        $lines[] = '';
+
+        $whenLine = $this->shareEventDate;
+        if ($this->shareEventTime) {
+            $whenLine .= ' · ' . $this->shareEventTime . ($this->shareEventEndTime ? ' – ' . $this->shareEventEndTime : '');
+        }
+        $lines[] = '🗓️ ' . $whenLine;
+
+        if (trim($this->shareEventVenue) !== '') {
+            $lines[] = '📍 ' . trim($this->shareEventVenue);
+        }
+
+        if (trim($this->shareEventDescription) !== '') {
+            $lines[] = '';
+            $lines[] = trim($this->shareEventDescription);
+        }
+
+        if (trim($this->shareEventNotes) !== '') {
+            $lines[] = '';
+            $lines[] = 'Note: ' . trim($this->shareEventNotes);
+        }
+
+        $lines[] = '';
+        $lines[] = '— Shared by ' . ($this->shareEventOrganizer ?: 'Organizer') . ' via Event Management';
+
+        $body = implode("\n", $lines);
+
+        $validRoomIds = collect($this->shareAvailableRooms)->pluck('id')->map(fn ($id) => (string) $id)->toArray();
+        $targetIds    = array_values(array_intersect($this->shareTargetRoomIds, $validRoomIds));
+
+        if (empty($targetIds)) {
+            $this->dispatch('flash-message', type: 'error', message: 'Select at least one chat to share to.');
+            return;
+        }
+
+        $now = now();
+        foreach ($targetIds as $roomId) {
+            DB::table('chat_messages')->insert([
+                'room_id'     => (int) $roomId,
+                'sender_type' => 'organizer',
+                'sender_id'   => $this->organizerId,
+                'body'        => $body,
+                'reply_to_id' => null,
+                'created_at'  => $now,
+                'updated_at'  => $now,
+            ]);
+        }
+
+        $count = count($targetIds);
+        $this->dispatch('flash-message', type: 'success', message: 'Shared to ' . $count . ' chat' . ($count === 1 ? '' : 's') . '.');
+
+        $this->shareTargetRoomIds = [];
     }
 
     public function eventsBaseUrl(): string
@@ -1047,10 +1185,11 @@ select.tw-select-arrow {
     width: 100%; display: flex; align-items: center; gap: 0.75rem;
     padding: 0.75rem 1rem; border-radius: 0.75rem;
     font-weight: 600; font-size: 0.8125rem; color: #fff;
-    cursor: pointer; transition: filter .15s, transform .1s; border: none;
+    cursor: pointer; transition: filter .12s ease-out, transform .1s ease-out; border: none;
+    will-change: transform;
 }
 .eo-share-option-btn:hover  { filter: brightness(0.94); }
-.eo-share-option-btn:active { transform: scale(.98); }
+.eo-share-option-btn:active { transform: scale(.97); transition-duration: .05s; }
 .eo-share-option-btn .icon-wrap {
     width: 2rem; height: 2rem; border-radius: 0.5rem;
     background: rgba(255,255,255,.92);
@@ -1422,7 +1561,7 @@ select.tw-select-arrow {
                                         <div class="relative inline-flex group" data-eo-share>
                                             <button type="button"
                                                     wire:click.stop="openShareModal({{ $event->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-[.92] cursor-pointer
                                                            bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
                                                 <i class="fas fa-share-nodes"></i>
                                             </button>
@@ -2493,7 +2632,7 @@ select.tw-select-arrow {
 {{-- ══ SHARE MODAL — mirrors the alumni "Upcoming Events" share modal design:
      SVG X close button with hover tooltip, simplified icon+label option
      rows, pre-share "Download the photo?" confirm modal, and clipboard-
-     before-focus caption copy. Adds a "Share to Organizer Updates" chat
+     before-focus caption copy. Adds a "Share to Message Hub" chat
      option (UI only for now — no backend wiring yet, per request). ══ --}}
 @if($showShareModal)
 @php
@@ -2713,20 +2852,11 @@ select.tw-select-arrow {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
-                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
+                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                    <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
-                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
-                </div>
-
-                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
-                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
-                    <p class="text-xs leading-relaxed" style="color:#333333;">
-                        The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                        into the Facebook or Messenger window that opens.
-                    </p>
                 </div>
             </div>
 
@@ -2758,13 +2888,60 @@ select.tw-select-arrow {
                     <span class="label-text text-xs font-semibold">Send via Messenger</span>
                 </button>
 
-                <button type="button" wire:click="shareToOrganizerUpdates"
-                        class="eo-share-option-btn" style="background:#7a3f91;">
-                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
-                        <i class="fas fa-comments text-white text-sm"></i>
-                    </span>
-                    <span class="label-text text-xs font-semibold">Share to Organizer Updates</span>
-                </button>
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0" x-data="{ open: true }">
+                    <button type="button" @click="open = !open"
+                            class="w-full flex items-center gap-2.5 px-3 py-2.5 bg-[#F5F0FA] hover:bg-[#EFE6F7] active:scale-[.98] transition-all duration-150 cursor-pointer">
+                        <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#7a3f91;">
+                            <i class="fas fa-comments text-white text-xs"></i>
+                        </span>
+                        <span class="flex-1 text-left text-xs font-semibold" style="color:#333333;">Share to Message Hub</span>
+                        <i class="fas fa-chevron-down text-[10px] transition-transform" style="color:#7a3f91;" :class="open ? 'rotate-180' : ''"></i>
+                    </button>
+
+                    <div x-show="open" x-cloak
+                         x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+                        @if(empty($shareAvailableRooms))
+                            <p class="px-3 py-3 text-[11px]" style="color:#333333;">No chats available to share to yet.</p>
+                        @else
+                            @php
+                                $shareAllIds = collect($shareAvailableRooms)->pluck('id')->map(fn($id) => (string) $id)->toArray();
+                                $shareAllSelected = !empty($shareAllIds) && empty(array_diff($shareAllIds, $shareTargetRoomIds));
+                            @endphp
+                            <label class="flex items-center gap-2.5 px-3 py-2 border-t border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
+                                <input type="checkbox" wire:click="toggleSelectAllShareRooms"
+                                       wire:key="share-select-all-{{ $shareAllSelected ? 'on' : 'off' }}"
+                                       @checked($shareAllSelected)
+                                       class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
+                                <span class="text-[11px] font-bold uppercase tracking-wide" style="color:#7a3f91;">Select All</span>
+                            </label>
+
+                            <div class="max-h-40 overflow-y-auto scroll-c border-t border-gray-100">
+                                @foreach($shareAvailableRooms as $r)
+                                    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
+                                        <input type="checkbox" wire:model.live="shareTargetRoomIds" value="{{ $r['id'] }}"
+                                               class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
+                                        <span class="text-xs truncate" style="color:#333333;">{{ $r['label'] }}</span>
+                                    </label>
+                                @endforeach
+                            </div>
+
+                            <div class="px-3 py-2.5 border-t border-gray-100 bg-white">
+                                <button type="button" wire:click="shareToOrganizerUpdates"
+                                        wire:loading.attr="disabled" wire:target="shareToOrganizerUpdates"
+                                        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white text-xs font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+                                        style="background:#7a3f91;" onmouseover="this.style.background='#6a3280'" onmouseout="this.style.background='#7a3f91'">
+                                    <span wire:loading.remove wire:target="shareToOrganizerUpdates">
+                                        <i class="fas fa-paper-plane text-[11px]"></i> Share ({{ count($shareTargetRoomIds) }})
+                                    </span>
+                                    <span wire:loading wire:target="shareToOrganizerUpdates">
+                                        <i class="fas fa-spinner fa-spin text-[11px]"></i> Sharing…
+                                    </span>
+                                </button>
+                            </div>
+                        @endif
+                    </div>
+                </div>
 
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
@@ -2775,7 +2952,7 @@ select.tw-select-arrow {
 
                 <button type="button" @click="copyLinkFn()"
                         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
+                               hover:bg-gray-50 active:scale-[.98] text-sm transition-all duration-150 cursor-pointer bg-white" style="color:#333333;">
                     <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
                         <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
                     </span>
@@ -2786,6 +2963,16 @@ select.tw-select-arrow {
                 </button>
 
                 <p class="text-[10px] text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
+            </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+            <div class="flex items-start gap-2.5">
+                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                <p class="text-xs leading-relaxed" style="color:#333333;">
+                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                    into the Facebook or Messenger window that opens.
+                </p>
             </div>
         </div>
     </div>

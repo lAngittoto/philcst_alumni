@@ -464,6 +464,13 @@ new class extends Component {
     public function executeToggleCoordinatorStatus(): void
     {
         if (!$this->pendingToggleId) return;
+
+        // Remember whether this toggle was launched from inside the View Profile
+        // panel (viewingProfileId stays set the whole time it's open) so we can
+        // return the user right back to that same profile instead of closing
+        // everything and dropping them back on the table.
+        $cameFromProfile = $this->viewingProfileId === $this->pendingToggleId;
+
         try {
             $coordinator = Organizer::findOrFail($this->pendingToggleId);
             $newStatus   = $this->pendingToggleAction === 'deactivate' ? 'INACTIVE' : 'ACTIVE';
@@ -474,10 +481,10 @@ new class extends Component {
                 $conflict = Organizer::withoutTrashed()->where('status', 'ACTIVE')->where('department', $coordinator->department)->where('id', '!=', $coordinator->id)->first();
                 if ($conflict) {
                     $this->flash('error', "Cannot activate: college \"{$collegeName}\" already has an active coordinator ({$conflict->getFullName()}). Deactivate them first.");
-                    $this->activeModal = '';
                     $this->pendingToggleId = null;
                     $this->pendingToggleAction = '';
                     $this->pendingToggleName = '';
+                    $this->activeModal = $cameFromProfile ? 'viewProfile' : '';
                     return;
                 }
             }
@@ -491,13 +498,21 @@ new class extends Component {
                 action: $verb
             );
 
+            // Refresh the in-memory profile data so the status badge / action
+            // button on the View Profile panel reflect the change immediately.
+            if ($cameFromProfile) {
+                $this->viewingProfile = $coordinator->fresh()->toArray();
+            }
+
         } catch (\Exception $e) {
             $this->flash('error', 'Could not update status: ' . $e->getMessage());
         } finally {
             $this->pendingToggleId = null;
             $this->pendingToggleAction = '';
             $this->pendingToggleName = '';
-            $this->activeModal = '';
+            // Stay on View Profile if that's where the deactivate/activate was
+            // triggered from; otherwise close back out to the table like before.
+            $this->activeModal = $cameFromProfile ? 'viewProfile' : '';
         }
     }
 
@@ -685,7 +700,7 @@ new class extends Component {
        cause page-level scrolling; this content block fills the remaining
        vertical space with flex-1 + min-h-0, and the inner scroll div is the
        only element with overflow-y:auto. ══ */
-    .coord-table-card { display: flex; flex-direction: column; min-height: 0; }
+    .coord-table-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); }
     .coord-scroll-area { overflow-y: auto; overflow-x: hidden; }
 
     @media (max-width: 640px) {
@@ -725,7 +740,7 @@ new class extends Component {
        visible, never an overlay on top of the image. Hover still highlights
        the photo frame slightly for affordance, but the label itself doesn't
        fade in/out anymore. */
-    .cp-photo-wrap:hover img { box-shadow: 0 4px 14px rgba(122,63,145,.28); }
+    /* hover effect on photo removed per request — no visual change on hover */
     .cp-upload-label {
         display: flex; align-items: center; justify-content: center; gap: 6px;
         cursor: pointer;
@@ -772,6 +787,52 @@ new class extends Component {
         background: #111111; color: #fff;
         font-size: .9rem; font-weight: 800; letter-spacing: .04em;
     }
+
+    /* ═══════════ Compact suffix dropdown (Register Coordinator) ═══════════ */
+    .suffix-compact-wrap { position: relative; }
+    .suffix-compact-trigger {
+        width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+        gap: 6px; font-size: 1.05rem; font-weight: 600; color: #333333; text-align: center;
+        background: #ffffff; border: 1.5px solid #d6d6d6; border-radius: 0.5rem; padding: 0.45rem 0.65rem;
+        outline: none; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s;
+    }
+    .suffix-compact-trigger:hover { border-color: #b9b9b9; }
+    .suffix-compact-trigger.open,
+    .suffix-compact-trigger.has-value { border-color: #7a3f91; }
+    .suffix-compact-trigger.open { box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
+    .suffix-compact-trigger .sfx-placeholder { color: #333333; font-weight: 400; font-style: italic; font-size: 0.95rem; }
+    .suffix-compact-trigger .sfx-chevron { font-size: 0.65rem; opacity: .55; transition: transform .18s; margin-left: auto; }
+    .suffix-compact-trigger.open .sfx-chevron { transform: rotate(180deg); }
+
+    .suffix-compact-panel {
+        position: absolute; top: calc(100% + 6px); left: 0; width: 100%;
+        background: #fff; border: 1.5px solid #E8E0F0; border-radius: 12px;
+        box-shadow: 0 10px 28px rgba(122,63,145,.16);
+        z-index: 9999; overflow: hidden;
+    }
+    .suffix-compact-list {
+        max-height: 176px; overflow-y: auto; padding: 5px;
+        scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+    }
+    .suffix-compact-list::-webkit-scrollbar { width: 5px; }
+    .suffix-compact-list::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+    .suffix-compact-item {
+        width: 100%; text-align: left; display: flex; align-items: center; gap: 8px;
+        padding: 6px 9px; border-radius: 7px; border: none; background: transparent;
+        font-size: .82rem; font-weight: 600; color: #333; cursor: pointer;
+        transition: background .1s, color .1s;
+    }
+    .suffix-compact-item:hover { background: #F5F0FA; color: #7A3F91; }
+    .suffix-compact-item.is-selected { background: #7A3F91; color: #fff; }
+    .suffix-compact-footer {
+        padding: 5px 8px; border-top: 1px solid #F0E6F8; background: #FDFAFF;
+    }
+    .suffix-compact-clear {
+        width: 100%; text-align: center; font-size: .7rem; font-weight: 700; color: #333333;
+        background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px;
+        transition: color .12s, background .12s;
+    }
+    .suffix-compact-clear:hover { color: #dc2626; background: #fef2f2; }
 </style>
 
 {{-- ══ MOUSE-FOLLOWING CURSOR LABEL ══ --}}
@@ -849,9 +910,9 @@ new class extends Component {
 
             <div class="relative group">
                 <button wire:click="openModal('manageOrgCourses')"
-                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-white border border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm hover:shadow-md transition-all duration-150 active:scale-95"
+                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#1d4ed8] hover:bg-[#1e40af] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95"
                         aria-label="Manage Colleges">
-                    <i class="fas fa-building-columns text-gray-700 text-sm"></i>
+                    <i class="fas fa-building-columns text-white text-sm"></i>
                 </button>
                 <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
@@ -914,7 +975,7 @@ new class extends Component {
         </div>
 
         {{-- Loading progress shimmer (mirrors alumni-records) --}}
-        <div class="coord-filter-progress-track" wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,executeToggleCoordinatorStatus">
+        <div class="coord-filter-progress-track" wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters">
             <div class="coord-filter-progress-bar"></div>
         </div>
 
@@ -925,7 +986,7 @@ new class extends Component {
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
                  class="coord-scroll-area flex-1"
                  wire:loading.class="pointer-events-none"
-                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,executeToggleCoordinatorStatus">
+                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters">
 
                 @if($this->coordinatorRecords->count() > 0)
                 {{-- ── DESKTOP / TABLET: table view ── --}}
@@ -1222,8 +1283,8 @@ new class extends Component {
 
                 <form wire:submit="registerCoordinator" class="space-y-5">
 
-                    <div id="reg-section-personal" class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden scroll-mt-4">
-                        <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50">
+                    <div id="reg-section-personal" class="bg-white rounded-2xl border border-gray-200 shadow-sm scroll-mt-4">
+                        <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50 rounded-t-2xl">
                             <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Personal Information</h3>
                         </div>
                         <div class="p-6">
@@ -1267,10 +1328,51 @@ new class extends Component {
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Suffix</label>
-                                        <input wire:model.defer="coordSuffix" type="text" placeholder="e.g. Jr., Sr., III" maxlength="10"
-                                               class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordSuffix') border-red-400 @enderror">
-                                        <p class="text-xs text-gray-400 mt-1">Jr., Sr., II, III, IV, MD, PhD…</p>
-                                        @error('coordSuffix')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
+                                        <div class="suffix-compact-wrap w-full"
+                                             x-data="{
+                                                 open: false,
+                                                 top: 0, left: 0, width: 0,
+                                                 suffixes: ['Jr.','Sr.','II','III','IV','V','VI','VII','VIII','IX','X'],
+                                                 toggle() {
+                                                     if (!this.open) {
+                                                         const r = $refs.sfxTrigger.getBoundingClientRect();
+                                                         this.top = r.bottom + 6; this.left = r.left; this.width = r.width;
+                                                     }
+                                                     this.open = !this.open;
+                                                 },
+                                                 select(val) { $wire.set('coordSuffix', val); this.close(); },
+                                                 clear()  { $wire.set('coordSuffix', ''); this.close(); },
+                                                 close()  { this.open = false; },
+                                             }"
+                                             @click.outside="close()"
+                                             @scroll.window="close()">
+                                            <button type="button" x-ref="sfxTrigger" @click="toggle()"
+                                                    :class="{ 'has-value': $wire.coordSuffix !== '', 'open': open }"
+                                                    class="suffix-compact-trigger {{ $errors->has('coordSuffix') ? 'field-error' : '' }}">
+                                                <span x-show="$wire.coordSuffix !== ''" x-text="$wire.coordSuffix" style="display:none;"></span>
+                                                <span class="sfx-placeholder" x-show="$wire.coordSuffix === ''">None</span>
+                                                <i class="fas fa-chevron-down sfx-chevron"></i>
+                                            </button>
+                                            <template x-teleport="body">
+                                                <div x-show="open" x-cloak
+                                                     :style="{ top: top + 'px', left: left + 'px', width: width + 'px' }"
+                                                     x-transition:enter="transition ease-out duration-120" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
+                                                     x-transition:leave="transition ease-in duration-80" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                                                     class="suffix-compact-panel" style="display:none; position:fixed;">
+                                                    <div class="suffix-compact-list">
+                                                        <template x-for="s in suffixes" :key="s">
+                                                            <button type="button" @click="select(s)"
+                                                                    :class="{ 'is-selected': $wire.coordSuffix === s }"
+                                                                    class="suffix-compact-item" x-text="s"></button>
+                                                        </template>
+                                                    </div>
+                                                    <div class="suffix-compact-footer">
+                                                        <button type="button" @click.stop="clear()" class="suffix-compact-clear">Clear</button>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        @error('coordSuffix')<p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>@enderror
                                     </div>
                                 </div>
                             </div>
@@ -1737,10 +1839,19 @@ new class extends Component {
                             <div class="flex items-center justify-between mb-1.5">
                                 <p class="vp-field-label" style="margin-bottom:0;">Email Address</p>
                                 @if(!$editingProfileEmail)
-                                <button type="button" wire:click="startEditingProfileEmail"
-                                        class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[#7a3f91] border border-[#d4aaeb] bg-[#faf5ff] rounded-md px-2 py-1 hover:bg-[#ead5f5] hover:border-[#b47fd4] transition">
-                                    <i class="fas fa-pen text-[9px]"></i> Edit
-                                </button>
+                                <div class="relative group/email-edit">
+                                    <button type="button" wire:click="startEditingProfileEmail"
+                                            class="inline-flex items-center justify-center w-7 h-7 rounded-md text-[#7a3f91] border border-[#d4aaeb] bg-[#faf5ff] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95"
+                                            aria-label="Edit">
+                                        <i class="fas fa-pen text-[10px]"></i>
+                                    </button>
+                                    <div class="absolute top-full right-0 mt-1.5 pointer-events-none opacity-0 group-hover/email-edit:opacity-100 transition-opacity duration-150 z-50">
+                                        <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md whitespace-nowrap relative">
+                                            <span class="absolute bottom-full right-2.5 border-4 border-transparent border-b-gray-900"></span>
+                                            Edit
+                                        </div>
+                                    </div>
+                                </div>
                                 @endif
                             </div>
 
@@ -1834,7 +1945,7 @@ new class extends Component {
     <main id="org-modal-scroll"
           class="cfs-main overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
           @org-modal-scroll-top.window="$nextTick(() => $el.scrollTo({ top: 0, behavior: 'smooth' }))">
-        <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-10 py-7 space-y-5">
+        <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-7 space-y-5">
 
             @if($orgCourseAlert)
             <div class="flex items-start gap-2.5 p-4 rounded-2xl shadow-sm {{ $orgCourseAlertType === 'success' ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200' }}">
@@ -1897,7 +2008,7 @@ new class extends Component {
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
                 @if(!$orgAddingToCollege)
-                <div id="mc-section-add" class="lg:col-span-4 scroll-mt-4">
+                <div id="mc-section-add" class="lg:col-span-5 scroll-mt-4">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden lg:sticky lg:top-5">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Add New College</h3>
@@ -1917,7 +2028,7 @@ new class extends Component {
                 </div>
                 @endif
 
-                <div id="mc-section-list" class="{{ !$orgAddingToCollege ? 'lg:col-span-8' : 'lg:col-span-12' }} scroll-mt-4">
+                <div id="mc-section-list" class="{{ !$orgAddingToCollege ? 'lg:col-span-7' : 'lg:col-span-12' }} scroll-mt-4">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="min-height: 700px; max-height: calc(100vh - 220px);">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Colleges &amp; Departments</h3>

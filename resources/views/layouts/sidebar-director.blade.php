@@ -23,12 +23,6 @@
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
-        /* ── Mobile viewport height fix ── */
-        .dir-app-shell {
-            height: 100vh;
-            height: 100dvh;
-        }
-
         /* ── Topbar bell (all screen sizes) ── */
         .dir-topbar-bell {
             background: transparent !important;
@@ -949,7 +943,7 @@
     @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
     @open-sidebar.window="sidebarHiddenByModal = false;">
 
-<div class="dir-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
     <div
         x-show="open"
@@ -1153,10 +1147,14 @@
             </button>
         </header>
 
-        {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+        {{-- Page content ── FIX: outer wrapper no longer scrolls the whole page.
+             Pages that manage their own internal scroll region (e.g. Manage
+             Coordinator's table-only scroll) now render correctly — only the
+             table body scrolls, everything else (header, filters, footer)
+             stays fixed in place. --}}
+        <div class="flex-1 overflow-hidden no-scrollbar bg-[#F5F5F5] p-4 lg:p-8 flex flex-col"
              style="min-height: 0; -webkit-overflow-scrolling: touch;">
-            <div class="container mx-auto">
+            <div class="container mx-auto flex-1 min-h-0 flex flex-col">
                 @yield('content')
             </div>
         </div>

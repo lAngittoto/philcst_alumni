@@ -92,6 +92,9 @@ new class extends Component {
     public string $shareCollege     = '';
     public string $sharePhotoUrl    = '';
 
+    public array $shareAvailableRooms = [];   // [['id'=>, 'label'=>, 'type'=>], ...]
+    public array $shareTargetRoomIds  = [];   // checkbox-bound selected room ids (as strings)
+
     private array $expLevelOrder = [
         'No Experience Required',
         'Entry Level (At Least 1 Year)',
@@ -1016,23 +1019,97 @@ public function openEditModal(int $id): void
         $this->shareDescription = $job->description ?? '';
         $this->shareCollege     = $job->target_college ?? '';
         $this->sharePhotoUrl    = $this::jobImageUrl($job->job_image ?? null);
+
+        $this->loadShareableRooms();
+        $this->shareTargetRoomIds = [];
+
         $this->showShareModal   = true;
     }
 
     public function closeShareModal(): void
     {
-        $this->showShareModal   = false;
-        $this->shareJobId       = null;
-        $this->shareJobTitle    = '';
-        $this->shareCompany     = '';
-        $this->shareEmpType     = '';
-        $this->shareLocation    = '';
-        $this->shareExpLevel    = '';
-        $this->shareSalary      = '';
-        $this->shareDeadline    = '';
-        $this->shareDescription = '';
-        $this->shareCollege     = '';
-        $this->sharePhotoUrl    = '';
+        $this->showShareModal     = false;
+        $this->shareJobId         = null;
+        $this->shareJobTitle      = '';
+        $this->shareCompany       = '';
+        $this->shareEmpType       = '';
+        $this->shareLocation      = '';
+        $this->shareExpLevel      = '';
+        $this->shareSalary        = '';
+        $this->shareDeadline      = '';
+        $this->shareDescription   = '';
+        $this->shareCollege       = '';
+        $this->sharePhotoUrl      = '';
+        $this->shareAvailableRooms = [];
+        $this->shareTargetRoomIds  = [];
+    }
+
+    // ── "Share to Alumni Batch Chats" — posts the job recap as a chat
+    //    message into every chat room the organizer picks (checkbox list,
+    //    with Select All). Mirrors the same chat_rooms/chat_messages
+    //    tables used by Event Management's "Share to Message Hub". ──
+    private function loadShareableRooms(): void
+    {
+        $college = $this->shareCollege ?: $this->organizerCollege;
+
+        $rooms = [];
+
+        // Staff Chat (directors + coordinators)
+        $staffRoom = DB::table('chat_rooms')->where('course_code', '__director__')->first(['id']);
+        if ($staffRoom) {
+            $rooms[] = ['id' => (int) $staffRoom->id, 'label' => 'Staff Chat', 'type' => 'staff'];
+        }
+
+        if ($college) {
+            // College-wide room
+            $collegeRoom = DB::table('chat_rooms')
+                ->where('department', $college)
+                ->where('batch', 0)
+                ->where(function ($q) {
+                    $q->where('course_code', '')->orWhere('course_code', 'like', 'CLG_%');
+                })
+                ->first(['id']);
+            if ($collegeRoom) {
+                $rooms[] = ['id' => (int) $collegeRoom->id, 'label' => $college . ' · College-Wide', 'type' => 'college'];
+            }
+
+            $collegeCourseCodes = \App\Models\Course::where('college', $college)->pluck('code')->toArray();
+
+            if (!empty($collegeCourseCodes)) {
+                // Course "All Batches" GCs
+                $courseRooms = DB::table('chat_rooms')
+                    ->whereIn('course_code', $collegeCourseCodes)
+                    ->where('batch', 0)
+                    ->get(['id', 'course_code']);
+
+                foreach ($courseRooms as $r) {
+                    $rooms[] = ['id' => (int) $r->id, 'label' => strtoupper($r->course_code) . ' · All Batches', 'type' => 'course'];
+                }
+
+                // Per-batch GCs
+                $batchRooms = DB::table('chat_rooms')
+                    ->whereIn('course_code', $collegeCourseCodes)
+                    ->where('batch', '>', 0)
+                    ->orderBy('course_code')->orderByDesc('batch')
+                    ->get(['id', 'course_code', 'batch', 'name']);
+
+                foreach ($batchRooms as $r) {
+                    $rooms[] = ['id' => (int) $r->id, 'label' => $r->name ?: (strtoupper($r->course_code) . ' · Batch ' . $r->batch), 'type' => 'batch'];
+                }
+            }
+        }
+
+        $this->shareAvailableRooms = $rooms;
+    }
+
+    public function toggleSelectAllShareRooms(): void
+    {
+        $allIds = collect($this->shareAvailableRooms)->pluck('id')->map(fn ($id) => (string) $id)->toArray();
+
+        // If everything is already selected, uncheck all. Otherwise select all.
+        $allSelected = !empty($allIds) && empty(array_diff($allIds, $this->shareTargetRoomIds));
+
+        $this->shareTargetRoomIds = $allSelected ? [] : $allIds;
     }
 
     public function shareToAlumniChats(): void
@@ -1040,6 +1117,11 @@ public function openEditModal(int $id): void
         $this->guardAuth();
         if (! $this->shareJobId) {
             $this->dispatch('flash-message', type: 'error', message: 'No job selected to share.');
+            return;
+        }
+
+        if (empty($this->shareTargetRoomIds)) {
+            $this->dispatch('flash-message', type: 'error', message: 'Select at least one chat to share to.');
             return;
         }
 
@@ -1053,21 +1135,11 @@ public function openEditModal(int $id): void
             return;
         }
 
-        $college     = $this->shareCollege ?: $this->organizerCollege;
-        $courseCodes = \App\Models\Course::where('college', $college)->pluck('code')->toArray();
-
-        if (empty($courseCodes)) {
-            $this->dispatch('flash-message', type: 'error', message: 'No alumni batch chats found for your college.');
-            return;
-        }
-
-        $roomIds = DB::table('chat_rooms')
-            ->whereIn('course_code', $courseCodes)
-            ->pluck('id')
-            ->toArray();
+        $validRoomIds = collect($this->shareAvailableRooms)->pluck('id')->map(fn ($id) => (string) $id)->toArray();
+        $roomIds      = array_values(array_intersect($this->shareTargetRoomIds, $validRoomIds));
 
         if (empty($roomIds)) {
-            $this->dispatch('flash-message', type: 'error', message: 'No batch chat rooms found for this college.');
+            $this->dispatch('flash-message', type: 'error', message: 'Select at least one chat to share to.');
             return;
         }
 
@@ -1108,8 +1180,8 @@ public function openEditModal(int $id): void
         DB::table('chat_messages')->insert($inserts);
 
         $count = count($roomIds);
-        $this->closeShareModal();
-        $this->dispatch('flash-message', type: 'success', message: "Job shared to {$count} alumni batch chat" . ($count > 1 ? 's' : '') . "!");
+        $this->shareTargetRoomIds = [];
+        $this->dispatch('flash-message', type: 'success', message: "Job shared to {$count} chat" . ($count === 1 ? '' : 's') . "!");
     }
 
     public function jobsBaseUrl(): string
@@ -3155,20 +3227,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
-                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
+                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                    <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
-                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
-                </div>
-
-                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
-                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
-                    <p class="text-xs leading-relaxed" style="color:#333333;">
-                        The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                        into the Facebook or Messenger window that opens.
-                    </p>
                 </div>
             </div>
 
@@ -3200,13 +3263,65 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     <span class="label-text text-xs font-semibold">Send via Messenger</span>
                 </button>
 
-                <button type="button" wire:click="shareToAlumniChats"
-                        class="jm-share-option-btn" style="background:#7a3f91;">
-                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
-                        <i class="fas fa-comments text-white text-sm"></i>
-                    </span>
-                    <span class="label-text text-xs font-semibold">Share to Alumni Batch Chats</span>
-                </button>
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0" x-data="{ open: true }">
+                    <button type="button" @click="open = !open"
+                            class="w-full flex items-center gap-2.5 px-3 py-2.5 bg-[#F5F0FA] hover:bg-[#EFE6F7] active:scale-[.98] transition-all duration-150 cursor-pointer">
+                        <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#7a3f91;">
+                            <i class="fas fa-comments text-white text-xs"></i>
+                        </span>
+                        <span class="flex-1 text-left text-xs font-semibold" style="color:#333333;">Share to Alumni Batch Chats</span>
+                        <i class="fas fa-chevron-down text-[10px] transition-transform" style="color:#7a3f91;" :class="open ? 'rotate-180' : ''"></i>
+                    </button>
+
+                    <div x-show="open" x-cloak
+                         x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                         @if(!empty($shareAvailableRooms))
+                         x-data="{
+                             ids: {{ json_encode(array_values(array_map(fn($id) => (string) $id, collect($shareAvailableRooms)->pluck('id')->toArray()))) }},
+                             get allSelected() {
+                                 return this.ids.length > 0 && this.ids.every(id => $wire.shareTargetRoomIds.includes(id));
+                             },
+                             toggleAll() {
+                                 $wire.shareTargetRoomIds = this.allSelected ? [] : [...this.ids];
+                             }
+                         }"
+                         @endif>
+                        @if(empty($shareAvailableRooms))
+                            <p class="px-3 py-3 text-[11px]" style="color:#333333;">No chats available to share to yet.</p>
+                        @else
+                            <label class="flex items-center gap-2.5 px-3 py-2 border-t border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
+                                <input type="checkbox" @click="toggleAll()" :checked="allSelected"
+                                       class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
+                                <span class="text-[11px] font-bold uppercase tracking-wide" style="color:#7a3f91;">Select All</span>
+                            </label>
+
+                            <div class="max-h-40 overflow-y-auto scroll-c border-t border-gray-100">
+                                @foreach($shareAvailableRooms as $r)
+                                    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
+                                        <input type="checkbox" wire:model="shareTargetRoomIds" value="{{ $r['id'] }}"
+                                               class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
+                                        <span class="text-xs truncate" style="color:#333333;">{{ $r['label'] }}</span>
+                                    </label>
+                                @endforeach
+                            </div>
+
+                            <div class="px-3 py-2.5 border-t border-gray-100 bg-white">
+                                <button type="button" wire:click="shareToAlumniChats"
+                                        wire:loading.attr="disabled" wire:target="shareToAlumniChats"
+                                        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white text-xs font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+                                        style="background:#7a3f91;" onmouseover="this.style.background='#6a3280'" onmouseout="this.style.background='#7a3f91'">
+                                    <span wire:loading.remove wire:target="shareToAlumniChats">
+                                        <i class="fas fa-paper-plane text-[11px]"></i> Share (<span x-text="$wire.shareTargetRoomIds.length"></span>)
+                                    </span>
+                                    <span wire:loading wire:target="shareToAlumniChats">
+                                        <i class="fas fa-spinner fa-spin text-[11px]"></i> Sharing…
+                                    </span>
+                                </button>
+                            </div>
+                        @endif
+                    </div>
+                </div>
 
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
@@ -3228,6 +3343,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 </button>
 
                 <p class="text-[10px] text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
+            </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+            <div class="flex items-start gap-2.5">
+                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                <p class="text-xs leading-relaxed" style="color:#333333;">
+                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                    into the Facebook or Messenger window that opens.
+                </p>
             </div>
         </div>
     </div>

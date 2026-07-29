@@ -832,6 +832,34 @@ select.tw-select-arrow {
     appearance: none;
     cursor: pointer;
 }
+
+/* ══ Mobile stacked card row — mirrors the Manage Coordinators page ══ */
+.dir-mrow {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #fff;
+    border-bottom: 1px solid #F0ECF5;
+    padding: 12px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: background .08s ease;
+}
+.dir-mrow:active { background: #F7F4FA; }
+
+/* ══ Table container height — mirrors .coord-table-card on Manage Coordinators ══ */
+.dir-table-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); }
+
+@media (max-width: 640px) {
+    .dir-table-card {
+        border-radius: 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+    }
+}
 </style>
 
 {{-- Hover tooltip --}}
@@ -900,7 +928,7 @@ select.tw-select-arrow {
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 75vh; max-height: 75vh; overflow: hidden;">
+    <div class="dir-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
@@ -997,15 +1025,19 @@ select.tw-select-arrow {
 
             @if($this->events->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
-                <table class="w-full bg-white border-collapse">
+                {{-- ── DESKTOP / TABLET: table view ── --}}
+                <table class="w-full bg-white border-collapse hidden md:table table-fixed">
+                    <colgroup>
+                        <col style="width:6%;"><col style="width:28%;"><col style="width:18%;"><col style="width:20%;"><col style="width:14%;"><col style="width:14%;">
+                    </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Date &amp; Time</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Coordinator</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">#</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -1023,20 +1055,18 @@ select.tw-select-arrow {
                             wire:key="dir-event-row-{{ $event->id }}"
                             data-dir-row>
 
-                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
+                            <td class="px-4 sm:px-5 py-4 text-xs font-semibold text-purple-400 overflow-hidden">
                                 {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
                             </td>
 
-                            <td class="px-4 py-3.5">
-                                <div class="max-w-[240px]">
-                                    <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
-                                    <p class="text-xs mt-0.5 text-[#666666]">{{ $eventDate->diffForHumans() }}</p>
-                                </div>
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
+                                <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $eventDate->diffForHumans() }}</p>
                             </td>
 
-                            <td class="px-4 py-3.5 hidden md:table-cell whitespace-nowrap">
-                                <p class="text-sm font-semibold text-[#333333]">{{ $eventDate->format('M d, Y') }}</p>
-                                <p class="text-xs mt-0.5 text-[#555555]">
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+                                <p class="text-sm font-semibold text-[#333333] truncate">{{ $eventDate->format('M d, Y') }}</p>
+                                <p class="text-xs mt-0.5 text-[#555555] truncate">
                                     {{ $eventDate->format('g:i A') }}
                                     @if($event->event_end_date)
                                         &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}
@@ -1044,16 +1074,16 @@ select.tw-select-arrow {
                                 </p>
                             </td>
 
-                            <td class="px-4 py-3.5 hidden lg:table-cell">
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
                                 @if($event->organizer)
-                                    <p class="text-sm font-semibold text-[#333333]">{{ $event->organizer->name }}</p>
-                                    <p class="text-xs mt-0.5 text-[#777777]">{{ $event->organizer->department }}</p>
+                                    <p class="text-sm font-semibold text-[#333333] truncate">{{ $event->organizer->name }}</p>
+                                    <p class="text-xs mt-0.5 text-[#777777] truncate">{{ $event->organizer->department }}</p>
                                 @else
                                     <span class="text-xs text-[#bbbbbb]">—</span>
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5 text-center">
+                            <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
                                 @if($isCompleted)
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
                                         <i class="fas fa-circle-check text-[9px] mr-1"></i>Completed
@@ -1073,8 +1103,8 @@ select.tw-select-arrow {
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5">
-                                <div class="flex items-center justify-end gap-1.5" @click.stop>
+                            <td class="px-4 sm:px-5 py-4 text-center">
+                                <div class="flex items-center justify-center gap-1.5" @click.stop>
 
                                     @if($isCompleted || $isApproved)
                                         <button wire:click.stop="openShareModal({{ $event->id }})"
@@ -1115,6 +1145,100 @@ select.tw-select-arrow {
                         @endforeach
                     </tbody>
                 </table>
+
+                {{-- ── MOBILE: stacked card list ── --}}
+                <div class="block md:hidden">
+                    @foreach($this->events as $index => $event)
+                    @php
+                        $isCompleted = $event->status === 'COMPLETED';
+                        $isApproved  = $event->status === 'APPROVED';
+                        $isPending   = $event->status === 'PENDING';
+                        $isRejected  = $event->status === 'REJECTED';
+                        $eventDate   = $event->event_date->setTimezone('Asia/Manila');
+                        $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
+                    @endphp
+                    <div class="dir-mrow" wire:key="dir-event-mrow-{{ $event->id }}" wire:click="viewEvent({{ $event->id }})" data-dir-row>
+                        <span class="text-xs font-semibold text-purple-400 shrink-0 pt-0.5">{{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}</span>
+
+                        <div class="flex-1 min-w-0">
+                            <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
+                            <p class="text-xs mt-0.5 text-[#666666]">{{ $eventDate->diffForHumans() }}</p>
+
+                            <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                <span class="text-xs font-semibold text-[#333333]">{{ $eventDate->format('M d, Y') }}</span>
+                                <span class="text-gray-300 text-xs">&bull;</span>
+                                <span class="text-xs text-[#555555]">
+                                    {{ $eventDate->format('g:i A') }}
+                                    @if($event->event_end_date)
+                                        &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}
+                                    @endif
+                                </span>
+                            </div>
+
+                            @if($event->organizer)
+                                <p class="text-xs mt-1 text-[#777777] truncate">
+                                    <i class="fas fa-user-tie text-[9px] mr-1"></i>{{ $event->organizer->name }} &middot; {{ $event->organizer->department }}
+                                </p>
+                            @endif
+
+                            <div class="flex items-center justify-between gap-2 mt-2">
+                                @if($isCompleted)
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
+                                        <i class="fas fa-circle-check text-[9px] mr-1"></i>Completed
+                                    </span>
+                                @elseif($isApproved)
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
+                                        <i class="fas fa-badge-check text-[9px] mr-1"></i>Approved
+                                    </span>
+                                @elseif($isPending)
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-yellow-200 bg-yellow-50 text-yellow-700 whitespace-nowrap">
+                                        <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
+                                    </span>
+                                @else
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
+                                        <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
+                                    </span>
+                                @endif
+
+                                <div class="flex items-center gap-1.5" @click.stop>
+                                    @if($isCompleted || $isApproved)
+                                        <button wire:click.stop="openShareModal({{ $event->id }})"
+                                                aria-label="Share"
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                       bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400">
+                                            <i class="fas fa-share-nodes"></i>
+                                        </button>
+                                    @endif
+
+                                    @if($isPending)
+                                        <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                aria-label="Approve"
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                       bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
+                                            <i class="fas fa-check"></i>
+                                        </button>
+                                        <button wire:click.stop="confirmReject({{ $event->id }})"
+                                                aria-label="Reject"
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                       bg-red-50 text-red-600 border border-red-200 active:bg-red-100 active:border-red-400">
+                                            <i class="fas fa-xmark"></i>
+                                        </button>
+                                    @endif
+
+                                    @if($isRejected)
+                                        <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                aria-label="Re-Approve"
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                       bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
+                                            <i class="fas fa-rotate-left"></i>
+                                        </button>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    @endforeach
+                </div>
             </div>
 
             @else
