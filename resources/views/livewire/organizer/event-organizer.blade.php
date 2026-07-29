@@ -82,8 +82,11 @@ new class extends Component {
     public bool   $shareEventIsCompleted = false;
 
     // ── "Share to Message Hub" — chat room multi-select ──
-    public array $shareAvailableRooms = [];   // [['id'=>, 'label'=>, 'type'=>], ...]
-    public array $shareTargetRoomIds  = [];   // checkbox-bound selected room ids (as strings)
+    public array $shareAvailableRooms   = [];   // [['id'=>, 'label'=>, 'type'=>, 'course_code'=>, 'batch'=>, 'department'=>], ...]
+    public array $shareTargetRoomIds    = [];   // checkbox-bound selected room ids (as strings)
+    public array $shareAutoRoomIds      = [];   // room ids auto-checked because they match the event's target batch/courses
+    public string $shareTargetBatchYear = '';   // parsed from target_participants, e.g. "2026" (blank = all batches)
+    public array  $shareTargetCourseCodes = []; // parsed course codes (empty = "All Courses")
 
     public function mount(): void
     {
@@ -865,7 +868,7 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->shareEventIsCompleted = $isCompleted;
 
         $this->loadShareableRooms();
-        $this->shareTargetRoomIds = [];
+        $this->computeAutoSelectedShareRooms();
 
         $this->showShareModal = true;
         // NOTE: intentionally NOT closing showViewModal here — opening the
@@ -873,6 +876,56 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         // screen mounted underneath (per request #5). Previously this line
         // set showViewModal = false, which caused the view to "go back"
         // as soon as Share was clicked.
+    }
+
+    /**
+     * ── Auto-select the chats that match this event's target audience ──
+     * Parses target_participants (e.g. "BSIT, BSCS · Batch 2026" / "All
+     * Courses · Batch 2026" / "All Courses") the same way populateEditForm()
+     * does, then pre-checks the matching room(s) so the organizer doesn't
+     * have to hunt for the right batch GC every time — Batch 2026 event ⇒
+     * every targeted course's "Batch 2026" GC gets auto-ticked. Staff Chat
+     * is never auto-selected. The organizer can still freely check/uncheck
+     * before hitting Share.
+     */
+    private function computeAutoSelectedShareRooms(): void
+    {
+        $tp    = $this->shareEventTargetParts;
+        $parts = explode(' · Batch ', $tp, 2);
+        $coursesPart = trim($parts[0] ?? '');
+        $batchYear   = trim($parts[1] ?? '');
+        $courseCodes = (!empty($coursesPart) && $coursesPart !== 'All Courses')
+            ? array_map('trim', explode(',', $coursesPart))
+            : [];
+
+        $this->shareTargetBatchYear   = $batchYear;
+        $this->shareTargetCourseCodes = $courseCodes;
+
+        $matched = [];
+        foreach ($this->shareAvailableRooms as $r) {
+            if (($r['type'] ?? '') === 'staff') continue;
+
+            $roomCourse = strtoupper((string) ($r['course_code'] ?? ''));
+            $inTarget   = empty($courseCodes) || in_array($roomCourse, array_map('strtoupper', $courseCodes), true);
+
+            if ($batchYear !== '') {
+                // Specific batch targeted — only that batch's GC(s) qualify.
+                if ($r['type'] === 'batch' && (string) $r['batch'] === $batchYear && $inTarget) {
+                    $matched[] = (string) $r['id'];
+                }
+            } else {
+                // No specific batch — "All Batches" GC for targeted courses,
+                // or the college-wide room when every course is targeted.
+                if (!empty($courseCodes) && $r['type'] === 'course' && $inTarget) {
+                    $matched[] = (string) $r['id'];
+                } elseif (empty($courseCodes) && $r['type'] === 'college') {
+                    $matched[] = (string) $r['id'];
+                }
+            }
+        }
+
+        $this->shareAutoRoomIds   = $matched;
+        $this->shareTargetRoomIds = $matched;
     }
 
     public function closeShareModal(): void
@@ -892,6 +945,9 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->shareEventIsCompleted = false;
         $this->shareAvailableRooms   = [];
         $this->shareTargetRoomIds    = [];
+        $this->shareAutoRoomIds      = [];
+        $this->shareTargetBatchYear    = '';
+        $this->shareTargetCourseCodes  = [];
     }
 
     // ── "Share to Message Hub" — posts the event recap as a chat
@@ -907,7 +963,10 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         // Staff Chat (directors + coordinators)
         $staffRoom = DB::table('chat_rooms')->where('course_code', '__director__')->first(['id']);
         if ($staffRoom) {
-            $rooms[] = ['id' => (int) $staffRoom->id, 'label' => 'Staff Chat', 'type' => 'staff'];
+            $rooms[] = [
+                'id' => (int) $staffRoom->id, 'label' => 'Staff Chat', 'type' => 'staff',
+                'course_code' => '__director__', 'batch' => 0, 'department' => '',
+            ];
         }
 
         if ($dept) {
@@ -918,9 +977,12 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
                 ->where(function ($q) use ($dept) {
                     $q->where('course_code', '')->orWhere('course_code', 'like', 'CLG_%');
                 })
-                ->first(['id']);
+                ->first(['id', 'course_code']);
             if ($collegeRoom) {
-                $rooms[] = ['id' => (int) $collegeRoom->id, 'label' => $dept . ' · College-Wide', 'type' => 'college'];
+                $rooms[] = [
+                    'id' => (int) $collegeRoom->id, 'label' => $dept . ' · College-Wide', 'type' => 'college',
+                    'course_code' => $collegeRoom->course_code, 'batch' => 0, 'department' => $dept,
+                ];
             }
 
             $deptCourseCodes = DB::table('courses')->where('college', $dept)->pluck('code')->toArray();
@@ -934,7 +996,10 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
 
                 foreach ($courseRooms as $r) {
                     $courseName = DB::table('courses')->where('code', $r->course_code)->value('name') ?? strtoupper($r->course_code);
-                    $rooms[] = ['id' => (int) $r->id, 'label' => strtoupper($r->course_code) . ' · All Batches', 'type' => 'course'];
+                    $rooms[] = [
+                        'id' => (int) $r->id, 'label' => strtoupper($r->course_code) . ' · All Batches', 'type' => 'course',
+                        'course_code' => $r->course_code, 'batch' => 0, 'department' => $dept,
+                    ];
                 }
 
                 // Per-batch GCs
@@ -945,7 +1010,10 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
                     ->get(['id', 'course_code', 'batch', 'name']);
 
                 foreach ($batchRooms as $r) {
-                    $rooms[] = ['id' => (int) $r->id, 'label' => $r->name ?: (strtoupper($r->course_code) . ' · Batch ' . $r->batch), 'type' => 'batch'];
+                    $rooms[] = [
+                        'id' => (int) $r->id, 'label' => $r->name ?: (strtoupper($r->course_code) . ' · Batch ' . $r->batch), 'type' => 'batch',
+                        'course_code' => $r->course_code, 'batch' => (int) $r->batch, 'department' => $dept,
+                    ];
                 }
             }
         }
@@ -975,37 +1043,15 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
             return;
         }
 
-        $lines   = [];
-        $lines[] = ($this->shareEventIsCompleted ? '📸 EVENT HIGHLIGHTS: ' : '📅 ') . strtoupper($this->shareEventTitle);
-        $lines[] = '';
+        // ── Card marker only — the chat views (chat-alumni.blade.php /
+        //    director-messenger.blade.php) resolve [[EVENT:TYPE:id]] into a
+        //    rich preview card (photo, title, date, View Event button)
+        //    instead of a wall of plain "EVENT HIGHLIGHTS" text. ──────────
+        $body = '[[EVENT:' . $this->shareEventType . ':' . $this->shareEventId . ']]';
 
-        $whenLine = $this->shareEventDate;
-        if ($this->shareEventTime) {
-            $whenLine .= ' · ' . $this->shareEventTime . ($this->shareEventEndTime ? ' – ' . $this->shareEventEndTime : '');
-        }
-        $lines[] = '🗓️ ' . $whenLine;
-
-        if (trim($this->shareEventVenue) !== '') {
-            $lines[] = '📍 ' . trim($this->shareEventVenue);
-        }
-
-        if (trim($this->shareEventDescription) !== '') {
-            $lines[] = '';
-            $lines[] = trim($this->shareEventDescription);
-        }
-
-        if (trim($this->shareEventNotes) !== '') {
-            $lines[] = '';
-            $lines[] = 'Note: ' . trim($this->shareEventNotes);
-        }
-
-        $lines[] = '';
-        $lines[] = '— Shared by ' . ($this->shareEventOrganizer ?: 'Organizer') . ' via Event Management';
-
-        $body = implode("\n", $lines);
-
-        $validRoomIds = collect($this->shareAvailableRooms)->pluck('id')->map(fn ($id) => (string) $id)->toArray();
-        $targetIds    = array_values(array_intersect($this->shareTargetRoomIds, $validRoomIds));
+        $roomsById     = collect($this->shareAvailableRooms)->keyBy(fn ($r) => (string) $r['id']);
+        $validRoomIds  = $roomsById->keys()->toArray();
+        $targetIds     = array_values(array_intersect($this->shareTargetRoomIds, $validRoomIds));
 
         if (empty($targetIds)) {
             $this->dispatch('flash-message', type: 'error', message: 'Select at least one chat to share to.');
@@ -1023,12 +1069,88 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
                 'created_at'  => $now,
                 'updated_at'  => $now,
             ]);
+
+            // Notify the alumni who belong to this room so their unread
+            // "red dot" lights up right away, same as a normal chat send
+            // does — this used to be skipped entirely since this method
+            // inserted straight into chat_messages with no side effects.
+            $room = $roomsById->get((string) $roomId);
+            if ($room) {
+                $this->notifyAlumniOfSharedEvent((int) $roomId, $room);
+            }
         }
 
         $count = count($targetIds);
         $this->dispatch('flash-message', type: 'success', message: 'Shared to ' . $count . ' chat' . ($count === 1 ? '' : 's') . '.');
 
         $this->shareTargetRoomIds = [];
+    }
+
+    /**
+     * ── Alumni notification for a shared event card — mirrors
+     *    organizer/chat-alumni.blade.php's notifyAlumniInRoom(), but keyed
+     *    off an arbitrary target room (this method shares to many rooms in
+     *    one go, not just "the currently open room"). Staff Chat has no
+     *    alumni members, so it's skipped. ──────────────────────────────────
+     */
+    private function notifyAlumniOfSharedEvent(int $roomId, array $room): void
+    {
+        if (($room['type'] ?? '') === 'staff') return;
+
+        try {
+            $courseCode = $room['course_code'] ?? '';
+            $batch      = (int) ($room['batch'] ?? 0);
+            $dept       = $room['department'] ?? $this->organizerDepartment;
+
+            if (($room['type'] ?? '') === 'college') {
+                $deptCourseCodes = DB::table('courses')->where('college', $dept)->pluck('code')->toArray();
+                $alumniRows = empty($deptCourseCodes) ? collect() : DB::table('alumni')
+                    ->whereNull('deleted_at')
+                    ->whereIn('course_code', $deptCourseCodes)
+                    ->get(['id']);
+            } elseif (($room['type'] ?? '') === 'course') {
+                $alumniRows = DB::table('alumni')
+                    ->whereNull('deleted_at')
+                    ->where('course_code', $courseCode)
+                    ->get(['id']);
+            } else {
+                $alumniRows = DB::table('alumni')
+                    ->whereNull('deleted_at')
+                    ->where('course_code', $courseCode)
+                    ->where('batch', $batch)
+                    ->get(['id']);
+            }
+
+            $senderName = $this->shareEventOrganizer ?: ($this->organizerName ?: 'Organizer');
+            $title      = $senderName . ' shared an event';
+            $message    = $senderName . ' shared "' . $this->shareEventTitle . '" in ' . ($room['label'] ?? 'a group chat') . '.';
+            $dedupKey   = 'coord-event-share::' . $this->organizerId . '::' . $roomId . '::' . $this->shareEventId . '::' . floor(time() / 60);
+
+            foreach ($alumniRows as $alumnus) {
+                $alreadyExists = DB::table('alumni_notifications')
+                    ->where('alumni_id', (int) $alumnus->id)
+                    ->where('dedup_key', $dedupKey)
+                    ->exists();
+
+                if ($alreadyExists) continue;
+
+                DB::table('alumni_notifications')->insert([
+                    'alumni_id'  => (int) $alumnus->id,
+                    'icon'       => 'comments',
+                    'title'      => $title,
+                    'message'    => $message,
+                    'link_route' => 'alumni.messenger',
+                    'link_label' => 'Open Messenger',
+                    'dedup_key'  => $dedupKey,
+                    'read'       => 0,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        } catch (\Throwable) {
+            // Notification is best-effort — a failure here must never
+            // block the actual share from succeeding.
+        }
     }
 
     public function eventsBaseUrl(): string
@@ -2907,7 +3029,25 @@ select.tw-select-arrow {
                             @php
                                 $shareAllIds = collect($shareAvailableRooms)->pluck('id')->map(fn($id) => (string) $id)->toArray();
                                 $shareAllSelected = !empty($shareAllIds) && empty(array_diff($shareAllIds, $shareTargetRoomIds));
+
+                                $shareTargetLabel = '';
+                                if ($shareTargetBatchYear !== '') {
+                                    $shareTargetLabel = 'Batch ' . $shareTargetBatchYear
+                                        . ' · ' . (empty($shareTargetCourseCodes) ? 'All Courses' : implode(', ', $shareTargetCourseCodes));
+                                } elseif (!empty($shareTargetCourseCodes)) {
+                                    $shareTargetLabel = implode(', ', $shareTargetCourseCodes) . ' · All Batches';
+                                }
                             @endphp
+
+                            @if($shareTargetLabel !== '' && !empty($shareAutoRoomIds))
+                            <div class="mx-3 mt-2.5 mb-0.5 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style="background:#F5F0FA;">
+                                <i class="fas fa-wand-magic-sparkles text-[10px]" style="color:#7a3f91;"></i>
+                                <span class="text-[10.5px] leading-snug" style="color:#5c2d7a;">
+                                    Auto-selected for this event's target: <span class="font-bold">{{ $shareTargetLabel }}</span>
+                                </span>
+                            </div>
+                            @endif
+
                             <label class="flex items-center gap-2.5 px-3 py-2 border-t border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
                                 <input type="checkbox" wire:click="toggleSelectAllShareRooms"
                                        wire:key="share-select-all-{{ $shareAllSelected ? 'on' : 'off' }}"
@@ -2918,10 +3058,17 @@ select.tw-select-arrow {
 
                             <div class="max-h-40 overflow-y-auto scroll-c border-t border-gray-100">
                                 @foreach($shareAvailableRooms as $r)
-                                    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
+                                    @php $isAutoRoom = in_array((string) $r['id'], $shareAutoRoomIds, true); @endphp
+                                    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100 {{ $isAutoRoom ? 'bg-[#FAF7FD]' : '' }}">
                                         <input type="checkbox" wire:model.live="shareTargetRoomIds" value="{{ $r['id'] }}"
                                                class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
-                                        <span class="text-xs truncate" style="color:#333333;">{{ $r['label'] }}</span>
+                                        <span class="text-xs truncate flex-1" style="color:#333333;">{{ $r['label'] }}</span>
+                                        @if(($r['batch'] ?? 0) > 0)
+                                        <span class="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style="background:#EDE0F5;color:#5c2d7a;">Batch {{ $r['batch'] }}</span>
+                                        @endif
+                                        @if($isAutoRoom)
+                                        <span class="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style="background:#7a3f91;color:#fff;">Suggested</span>
+                                        @endif
                                     </label>
                                 @endforeach
                             </div>

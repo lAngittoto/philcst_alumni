@@ -158,6 +158,152 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Job/event image resolver — mirrors director/director-messenger.blade.php
+    // ─────────────────────────────────────────────────────────────────────
+    private function resolvePostImage(?string $path): ?string
+    {
+        if (! $path) return null;
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) return $path;
+        return asset('storage/' . $path);
+    }
+
+    /**
+     * ── Builds the "View Job" deep-link URL ─────────────────────────────────
+     */
+    private function jobsUrl(int $id): string
+    {
+        try {
+            $path = route('job.opportunities', [], false);
+        } catch (\Throwable) {
+            $path = '/job/opportunities';
+        }
+        return $path . '?job=' . $id;
+    }
+
+    /**
+     * ── Builds the "View Event" deep-link URL ───────────────────────────────
+     */
+    private function eventsUrl(int $id, string $type = 'ADMIN'): string
+    {
+        try {
+            $path = route('upcoming.events', [], false);
+        } catch (\Throwable) {
+            $path = '/upcoming/events';
+        }
+        return $path . '?event=' . $id . '&type=' . $type;
+    }
+
+    /**
+     * ── Messenger-style link preview for shared Jobs / Events — mirrors
+     *    director/director-messenger.blade.php so shared posts render as a
+     *    styled card here too, instead of raw marker/plain text. ─────────
+     */
+    private function resolvePostPreview(?string $body): ?array
+    {
+        if (! $body) return null;
+
+        // ── Job posting share marker: [[JOB:123]] ───────────────────────
+        if (preg_match('/\[\[JOB:(\d+)\]\]/i', $body, $m)) {
+            $id = (int) $m[1];
+            try {
+                $job = DB::table('job_postings')->where('id', $id)->first();
+                if ($job) {
+                    return [
+                        'type'      => 'job',
+                        'id'        => $id,
+                        'title'     => $job->job_title ?? 'Job Opportunity',
+                        'subtitle'  => $job->company_name ?? $job->location ?? '',
+                        'image'     => $this->resolvePostImage($job->job_image ?? null),
+                        'url'       => $this->jobsUrl($id),
+                        'available' => true,
+                    ];
+                }
+            } catch (\Throwable) {
+                // table/columns not found — fall through to the
+                // "unavailable" fallback card below.
+            }
+
+            return [
+                'type'      => 'job',
+                'id'        => $id,
+                'title'     => 'Job posting no longer available',
+                'subtitle'  => 'This job may have been removed or expired',
+                'image'     => null,
+                'url'       => $this->jobsUrl($id),
+                'available' => false,
+            ];
+        }
+
+        // ── Event share marker: [[EVENT:TYPE:123]] ──────────────────────
+        if (preg_match('/\[\[EVENT:(ADMIN|ORGANIZER):(\d+)\]\]/i', $body, $m)) {
+            $type = strtoupper($m[1]);
+            $id   = (int) $m[2];
+
+            $event = null;
+            try {
+                $event = $type === 'ADMIN'
+                    ? \App\Models\AdminEvent::withoutTrashed()->where('id', $id)->first()
+                    : \App\Models\OrganizerEvent::where('id', $id)->first();
+            } catch (\Throwable) {
+                $event = null;
+            }
+
+            if ($event) {
+                $when  = $event->event_date ?? null;
+                $image = $event->photo_url ?? null;
+
+                return [
+                    'type'       => 'event',
+                    'id'         => $id,
+                    'event_type' => $type,
+                    'title'      => $event->title ?? 'Event',
+                    'subtitle'   => $when ? Carbon::parse($when)->format('M d, Y') : ($event->venue ?? ''),
+                    'image'      => $image,
+                    'url'        => $this->eventsUrl($id, $type),
+                    'available'  => true,
+                ];
+            }
+
+            return [
+                'type'       => 'event',
+                'id'         => $id,
+                'event_type' => $type,
+                'title'      => 'Event no longer available',
+                'subtitle'   => 'This event may have been removed or expired',
+                'image'      => null,
+                'url'        => $this->eventsUrl($id, $type),
+                'available'  => false,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * ── Friendly one-line preview text for pinned list / notifications ──
+     */
+    private function resolvePreviewText(?string $body): string
+    {
+        if (! $body) return '';
+
+        if (preg_match('/\[\[JOB:(\d+)\]\]/i', $body, $m)) {
+            $id = (int) $m[1];
+            $title = null;
+            try { $title = DB::table('job_postings')->where('id', $id)->value('job_title'); } catch (\Throwable) {}
+            return $title ? ('📌 Shared a job: ' . $title) : '📌 Shared a job opening';
+        }
+
+        if (preg_match('/\[\[EVENT:(ADMIN|ORGANIZER):(\d+)\]\]/i', $body, $m)) {
+            $id = (int) $m[2];
+            $title = null;
+            try { $title = DB::table('events')->where('id', $id)->whereNull('deleted_at')->value('title'); } catch (\Throwable) {}
+            return $title ? ('📅 Shared an event: ' . $title) : '📅 Shared an event';
+        }
+
+        return $body;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Batch label helper — always "Batch 2026 · BSIT" style, never flipped
     // ─────────────────────────────────────────────────────────────────────
     private function batchLabel(string $courseCode, int|string $batch): string
@@ -677,7 +823,7 @@ new class extends Component {
             $latestTs   = null;
 
             if ($latest) {
-                $latestBody = $latest->body;
+                $latestBody = $self->resolvePreviewText($latest->body);
                 $latestTs   = Carbon::parse($latest->created_at);
                 $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
                 if ($latest->sender_type === 'director') {
@@ -763,7 +909,7 @@ new class extends Component {
             $latestTs   = null;
 
             if ($latest) {
-                $latestBody = $latest->body;
+                $latestBody = $self->resolvePreviewText($latest->body);
                 $latestTs   = Carbon::parse($latest->created_at);
                 $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
                 if ($latest->sender_type === 'alumni') {
@@ -878,7 +1024,7 @@ new class extends Component {
             $latestTs   = null;
 
             if ($latest) {
-                $latestBody = $latest->body;
+                $latestBody = $self->resolvePreviewText($latest->body);
                 $latestTs   = Carbon::parse($latest->created_at);
                 $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
                 if ($latest->sender_type === 'alumni') {
@@ -979,7 +1125,7 @@ new class extends Component {
             $latestTs   = null;
 
             if ($latest) {
-                $latestBody = $latest->body;
+                $latestBody = $self->resolvePreviewText($latest->body);
                 $latestTs   = Carbon::parse($latest->created_at);
                 $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
                 if ($latest->sender_type === 'alumni') {
@@ -1395,6 +1541,7 @@ new class extends Component {
                 'sender_course'  => (! $isDir && ! $isCoord && $s) ? ($s->course_code ?? '') : '',
                 'sender_batch'   => (! $isDir && ! $isCoord && $s) ? (string)($s->batch ?? '') : '',
                 'body'           => $m->body,
+                'post_preview'   => $self->resolvePostPreview($m->body),
                 'edited'         => ! is_null($m->edited_at),
                 'is_mine'        => $isMe,
                 'is_director'    => $isDir,
@@ -1763,9 +1910,11 @@ new class extends Component {
         $oMap = DB::table('organizer')->whereIn('id',$oIds)->get(['id','first_name','last_name'])->keyBy(fn($o)=>(int)$o->id);
         $dMap = DB::table('director')->whereIn('id',$dIds)->get(['id','first_name','last_name'])->keyBy(fn($d)=>(int)$d->id);
 
-        $this->pinnedMessages = collect($rows)->map(function ($p) use ($aMap,$oMap,$dMap) {
+        $self = $this;
+
+        $this->pinnedMessages = collect($rows)->map(function ($p) use ($aMap,$oMap,$dMap,$self) {
             $s = $p->sender_type==='director'?$dMap->get((int)$p->sender_id):($p->sender_type==='organizer'?$oMap->get((int)$p->sender_id):$aMap->get((int)$p->sender_id));
-            return ['id'=>$p->id,'body'=>$p->body,'from'=>$s?trim($s->first_name.' '.$s->last_name):'Unknown','pinned_at'=>Carbon::parse($p->pinned_at)->setTimezone('Asia/Manila')->format('M d, Y h:i A')];
+            return ['id'=>$p->id,'body'=>$self->resolvePreviewText($p->body),'from'=>$s?trim($s->first_name.' '.$s->last_name):'Unknown','pinned_at'=>Carbon::parse($p->pinned_at)->setTimezone('Asia/Manila')->format('M d, Y h:i A')];
         })->toArray();
     }
 
@@ -2082,6 +2231,118 @@ new class extends Component {
             #org-sidebar.org-mobile-show { display: flex; width: 100% !important; }
             #org-chatpane { display: none; }
             #org-chatpane.org-mobile-show { display: flex; width: 100% !important; }
+        }
+        /* ── Shared Job/Event post-preview card — mirrors
+           director/director-messenger.blade.php card design (msgr-post-*)
+           so shared events/jobs render as a rich card here instead of raw
+           marker/plain text. ── */
+        .msgr-post-card {
+            width: 100%;
+            max-width: 260px;
+            border-radius: 1rem;
+            overflow: hidden;
+            background: linear-gradient(160deg, #6b2490 0%, #4a1863 100%);
+            border: 1px solid rgba(107,36,144,.25);
+            box-shadow: 0 4px 14px rgba(107,36,144,.22);
+        }
+        .msgr-post-card.is-mine { border-color: rgba(255,255,255,.28); }
+        .msgr-post-card.is-unavailable { opacity: .82; }
+
+        .msgr-post-thumb {
+            position: relative;
+            height: 165px;
+            width: 100%;
+            overflow: hidden;
+            background: linear-gradient(135deg,#8e3fb8,#4a1863);
+        }
+        .msgr-post-thumb img {
+            width: 100%; height: 100%; object-fit: cover; display: block;
+            filter: saturate(1.02);
+        }
+        .msgr-post-card.is-unavailable .msgr-post-thumb img { filter: grayscale(.55) saturate(.7); }
+
+        .msgr-post-thumb-placeholder {
+            width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #7d3aa3 0%, #4a1863 100%);
+        }
+        .msgr-post-thumb-placeholder i {
+            font-size: 42px;
+            color: rgba(255,255,255,.35);
+        }
+
+        .msgr-post-thumb-gradient {
+            width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #6b2490 0%, #38134f 100%);
+        }
+        .msgr-post-thumb-gradient i {
+            font-size: 42px;
+            color: rgba(255,255,255,.20);
+        }
+
+        .msgr-post-tag {
+            position: absolute; top: 9px; right: 9px; font-size: 9.5px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: .04em; padding: 3px 8px;
+            border-radius: 999px; color: #fff; z-index: 2;
+        }
+        .msgr-post-tag.unavailable-tag { background: rgba(120,53,15,.85); }
+
+        .msgr-post-thumb::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: linear-gradient(to top, rgba(48,20,66,.82) 0%, rgba(48,20,66,0) 55%);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .msgr-post-overlay-strip {
+            position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 2;
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 6px 9px;
+        }
+        .msgr-post-overlay-strip p {
+            font-size: 12px; font-weight: 600; line-height: 1.25;
+            color: #1a1a1a; text-align: center;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .msgr-post-overlay-strip p .accent { color: #6b2490; }
+
+        .msgr-post-thumb-overlay {
+            position: absolute; inset: 0; z-index: 3;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(48,20,66,0); transition: background .18s ease;
+        }
+        .msgr-post-card:not(.is-unavailable):hover .msgr-post-thumb-overlay { background: rgba(48,20,66,.32); }
+        .msgr-post-view-btn {
+            opacity: 0; transform: translateY(4px);
+            transition: opacity .18s ease, transform .18s ease;
+        }
+        .msgr-post-card:not(.is-unavailable):hover .msgr-post-view-btn { opacity: 1; transform: translateY(0); }
+
+        .msgr-post-caption { padding: 10px 12px 11px; background: transparent; }
+        .msgr-post-caption .headline {
+            font-size: 13px; font-weight: 500; line-height: 1.35; color: #ffffff;
+            display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .msgr-post-caption .subline {
+            font-size: 11px; color: #EDE0F5; margin-top: 3px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .msgr-post-source-row {
+            display: flex; align-items: center; gap: 6px;
+            margin-top: 8px; padding-top: 8px;
+            border-top: 1px solid rgba(255,255,255,.18);
+        }
+        .msgr-post-source-row .src-icon {
+            width: 16px; height: 16px; border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; background: rgba(255,255,255,.20);
+        }
+        .msgr-post-source-row .src-icon i { font-size: 9px; color: #fff; }
+        .msgr-post-source-row span {
+            font-size: 11px; font-weight: 500; color: #EDE0F5;
         }
     </style>
 
@@ -2488,6 +2749,77 @@ new class extends Component {
                                             <div class="flex gap-1.5 justify-end">
                                                 <button wire:click="cancelEdit" class="text-xs px-3 py-1.5 rounded-lg border border-[#ddd3e8] text-[#666666] hover:bg-[#f5f5f5] transition font-semibold cursor-pointer">Cancel</button>
                                                 <button wire:click="saveEdit" class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold hover:opacity-90 transition cursor-pointer" style="background:#6b2490;">Save</button>
+                                            </div>
+                                        </div>
+
+                                        {{-- ══ SHARED JOB / EVENT PREVIEW CARD ══
+                                             Rendered whenever body carries a
+                                             [[JOB:id]] or [[EVENT:TYPE:id]] marker
+                                             — mirrors director/director-messenger.blade.php
+                                             card design. Falls back to a dimmed
+                                             "unavailable" state if the source
+                                             job/event was removed. ── --}}
+                                        @elseif($msg['post_preview'])
+                                        @php
+                                            $pp          = $msg['post_preview'];
+                                            $ppAvailable = $pp['available'] ?? true;
+                                            $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
+                                        @endphp
+                                        <div wire:click.stop="toggleToolbar({{ $msg['id'] }})"
+                                             class="msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
+                                            <div class="msgr-post-thumb">
+                                                @if($ppAvailable)
+                                                    @if(! empty($pp['image']))
+                                                    <img src="{{ $pp['image'] }}" alt="{{ $pp['title'] }}"
+                                                         onerror="this.onerror=null;this.parentElement.querySelector('img').remove();">
+                                                    @elseif($ppIsEvent)
+                                                    <div class="msgr-post-thumb-gradient">
+                                                        <i class="fa-solid fa-calendar-days"></i>
+                                                    </div>
+                                                    @else
+                                                    <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="{{ $pp['title'] }}">
+                                                    @endif
+                                                @else
+                                                <div class="msgr-post-thumb-placeholder">
+                                                    <i class="fa-solid {{ $pp['type'] === 'job' ? 'fa-briefcase' : 'fa-calendar-xmark' }}"></i>
+                                                </div>
+                                                @endif
+
+                                                @if(! $ppAvailable)
+                                                <span class="msgr-post-tag unavailable-tag">Unavailable</span>
+                                                @endif
+
+                                                <div class="msgr-post-overlay-strip">
+                                                    <p>
+                                                        @if($ppAvailable)
+                                                            <span class="accent">{{ $pp['type'] === 'job' ? 'Now Hiring' : 'Save the Date' }}:</span> {{ $pp['title'] }}
+                                                        @else
+                                                            <span class="accent">{{ $pp['type'] === 'job' ? 'Job Posting' : 'Event' }}:</span> No longer available
+                                                        @endif
+                                                    </p>
+                                                </div>
+
+                                                @if($ppAvailable)
+                                                <div class="msgr-post-thumb-overlay">
+                                                    <a href="{{ $pp['url'] }}" wire:navigate @click.stop
+                                                       class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#4a1863] text-xs font-bold shadow-md inline-flex items-center gap-1.5">
+                                                        <i class="fa-solid fa-eye"></i>View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}
+                                                    </a>
+                                                </div>
+                                                @endif
+                                            </div>
+
+                                            <div class="msgr-post-caption">
+                                                <p class="headline">{{ $pp['title'] }}</p>
+                                                @if($pp['subtitle'])
+                                                <p class="subline">{{ $pp['subtitle'] }}</p>
+                                                @endif
+                                                <div class="msgr-post-source-row">
+                                                    <span class="src-icon">
+                                                        <i class="fa-solid fa-graduation-cap"></i>
+                                                    </span>
+                                                    <span>PHILCST</span>
+                                                </div>
                                             </div>
                                         </div>
                                         @else
