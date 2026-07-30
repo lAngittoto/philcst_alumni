@@ -167,20 +167,50 @@ new class extends Component {
     {
         $now = \Carbon\Carbon::now('UTC');
 
-        $affected = AdminEvent::withoutTrashed()
+        // ── Case 1: the event date has already passed entirely without
+        //    ever being approved — nothing left to prepare for. ──────────
+        $pastDue = AdminEvent::withoutTrashed()
             ->where('status', 'PENDING')
             ->where('event_date', '<=', $now)
             ->get(['id', 'title', 'organizer_id']);
 
-        if ($affected->isEmpty()) return;
+        if ($pastDue->isNotEmpty()) {
+            AdminEvent::withoutTrashed()
+                ->where('status', 'PENDING')
+                ->where('event_date', '<=', $now)
+                ->update([
+                    'status'         => 'REJECTED',
+                    'review_remarks' => 'Auto-rejected: event date has already passed without approval.',
+                ]);
+        }
 
-        AdminEvent::withoutTrashed()
+        // ── Case 2: real-world prep-time rule — a proposed event needs at
+        //    least 1 day's lead time to actually get ready for (venue,
+        //    materials, alumni notice, etc). If it's still PENDING with
+        //    less than 24 hours left before it starts, approving it now
+        //    would leave the organizer no real time to prepare, so it
+        //    auto-rejects instead of quietly slipping past the deadline
+        //    unapproved. This runs BEFORE it actually passes (Case 1
+        //    above already covers "already happened"), so the cutoff here
+        //    is strictly "still upcoming, but under 24h away". ──────────
+        $prepCutoff = $now->copy()->addDay();
+
+        $tooLateToPrep = AdminEvent::withoutTrashed()
             ->where('status', 'PENDING')
-            ->where('event_date', '<=', $now)
-            ->update([
-                'status'         => 'REJECTED',
-                'review_remarks' => 'Auto-rejected: event date has already passed without approval.',
-            ]);
+            ->where('event_date', '>', $now)
+            ->where('event_date', '<=', $prepCutoff)
+            ->get(['id', 'title', 'organizer_id']);
+
+        if ($tooLateToPrep->isNotEmpty()) {
+            AdminEvent::withoutTrashed()
+                ->where('status', 'PENDING')
+                ->where('event_date', '>', $now)
+                ->where('event_date', '<=', $prepCutoff)
+                ->update([
+                    'status'         => 'REJECTED',
+                    'review_remarks' => 'Auto-rejected: less than 24 hours remained before the event with no approval yet. Events need at least 1 day of lead time to prepare (venue, materials, alumni notice, etc.) — please resubmit with a later date.',
+                ]);
+        }
     }
 
     private function autoCompleteExpiredEvents(): void
@@ -519,11 +549,12 @@ new class extends Component {
         abort_unless(auth()->user()->role === 'director', 403);
         $event = app(AdminEventController::class)->getEvent($id);
 
-        $checkDate = $event->event_end_date ?? $event->event_date;
-        if ($checkDate->isPast()) {
-            $datePH = $event->event_date->setTimezone('Asia/Manila')->format('M d, Y');
+        $checkDate  = $event->event_date;
+        $prepCutoff = \Carbon\Carbon::now('UTC')->addDay();
+        if ($checkDate->lessThanOrEqualTo($prepCutoff)) {
+            $datePH = $event->event_date->setTimezone('Asia/Manila')->format('M d, Y g:i A');
             $this->dispatch('flash-message', type: 'error',
-                message: "Cannot approve — event date ({$datePH}) has already passed. Please edit the event date to a future date first before approving.");
+                message: "Need to update date — event date ({$datePH}) is too close or has already passed. Please chat the coordinator to update the event date before approving.");
             return;
         }
 
@@ -537,12 +568,13 @@ new class extends Component {
     {
         abort_unless(auth()->user()->role === 'director', 403);
         if ($this->approveEventId) {
-            $event     = app(AdminEventController::class)->getEvent($this->approveEventId);
-            $checkDate = $event->event_end_date ?? $event->event_date;
-            if ($checkDate->isPast()) {
-                $datePH = $event->event_date->setTimezone('Asia/Manila')->format('M d, Y');
+            $event      = app(AdminEventController::class)->getEvent($this->approveEventId);
+            $checkDate  = $event->event_date;
+            $prepCutoff = \Carbon\Carbon::now('UTC')->addDay();
+            if ($checkDate->lessThanOrEqualTo($prepCutoff)) {
+                $datePH = $event->event_date->setTimezone('Asia/Manila')->format('M d, Y g:i A');
                 $this->dispatch('flash-message', type: 'error',
-                    message: "Cannot approve — event date ({$datePH}) has already passed.");
+                    message: "Need to update date — event date ({$datePH}) is too close or has already passed.");
                 $this->showApproveModal  = false;
                 $this->approveEventId    = null;
                 $this->approveEventTitle = '';
@@ -799,10 +831,38 @@ new class extends Component {
 .m-in  { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
 .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
 
+.scroll-c {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+}
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ══ MOBILE: full-screen View/Post/Edit modals — same fix as Manage Job.
+   Locks the modal to a real 100dvh (falls back to 100vh) instead of relying
+   on the flex children to compute their own height, which is what was
+   breaking scroll on phones (0-height flex child = nothing to scroll). ══ */
+@media (max-width: 1023px) {
+    .fs-in {
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+    }
+    /* The View Event modal's LEFT info pane (photo, date, venue, contact,
+       status card) had no height cap on mobile, so it could grow tall
+       enough to push the description/notes below out of the scrollable
+       area, or fight the outer scroll container for space. Capping it
+       keeps the whole-modal scroll (used on mobile — see the
+       `overflow-y-auto lg:overflow-hidden` wrapper) predictable. */
+    .dir-view-info-pane {
+        max-height: 50vh;
+        max-height: 50dvh;
+    }
+}
 
 select.tw-select-arrow {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
@@ -869,7 +929,7 @@ select.tw-select-arrow {
      x-transition:leave="transition ease-in duration-200"
      x-transition:leave-start="opacity-100"
      x-transition:leave-end="opacity-0 translate-x-8"
-     class="fixed top-5 right-4 sm:right-6 z-[100] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-xs sm:max-w-sm border w-full"
+     class="fixed top-5 right-4 sm:right-6 z-[10020] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl max-w-xs sm:max-w-sm border w-full"
      :class="{'bg-white border-emerald-300 text-emerald-800':type==='success','bg-white border-blue-300 text-blue-800':type==='info','bg-white border-amber-300 text-amber-800':type==='warning','bg-white border-red-300 text-red-800':type==='error'}"
      style="display:none">
     <div class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -1032,6 +1092,8 @@ select.tw-select-arrow {
                             $isRejected  = $event->status === 'REJECTED';
                             $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                             $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
+                            $rowCheckDate  = $event->event_date;
+                            $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
                         @endphp
                         <tr class="bg-white cursor-pointer transition-colors duration-100 hover:bg-[#f5f0fa]"
                             wire:click="viewEvent({{ $event->id }})"
@@ -1099,12 +1161,20 @@ select.tw-select-arrow {
                                     @endif
 
                                     @if($isPending)
-                                        <button wire:click.stop="confirmApprove({{ $event->id }})"
-                                                data-dir-action data-tip="Approve"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
-                                            <i class="fas fa-check"></i>
-                                        </button>
+                                        @if($rowDateExpired)
+                                            <span data-dir-action data-tip="Need to update date"
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
+                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                <i class="fas fa-check"></i>
+                                            </span>
+                                        @else
+                                            <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    data-dir-action data-tip="Approve"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
+                                                <i class="fas fa-check"></i>
+                                            </button>
+                                        @endif
                                         <button wire:click.stop="confirmReject({{ $event->id }})"
                                                 data-dir-action data-tip="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
@@ -1114,12 +1184,20 @@ select.tw-select-arrow {
                                     @endif
 
                                     @if($isRejected)
-                                        <button wire:click.stop="confirmApprove({{ $event->id }})"
-                                                data-dir-action data-tip="Re-Approve"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
-                                            <i class="fas fa-rotate-left"></i>
-                                        </button>
+                                        @if($rowDateExpired)
+                                            <span data-dir-action data-tip="Need to update date"
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
+                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                <i class="fas fa-rotate-left"></i>
+                                            </span>
+                                        @else
+                                            <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    data-dir-action data-tip="Re-Approve"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
+                                                <i class="fas fa-rotate-left"></i>
+                                            </button>
+                                        @endif
                                     @endif
 
                                 </div>
@@ -1139,6 +1217,8 @@ select.tw-select-arrow {
                         $isRejected  = $event->status === 'REJECTED';
                         $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                         $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
+                        $rowCheckDate  = $event->event_date;
+                        $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
                     @endphp
                     <div class="dir-mrow" wire:key="dir-event-mrow-{{ $event->id }}" wire:click="viewEvent({{ $event->id }})" data-dir-row>
                         <span class="text-xs font-semibold text-purple-400 shrink-0 pt-0.5">{{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}</span>
@@ -1194,12 +1274,20 @@ select.tw-select-arrow {
                                     @endif
 
                                     @if($isPending)
-                                        <button wire:click.stop="confirmApprove({{ $event->id }})"
-                                                aria-label="Approve"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
-                                            <i class="fas fa-check"></i>
-                                        </button>
+                                        @if($rowDateExpired)
+                                            <span aria-label="Need to update date"
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
+                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                <i class="fas fa-check"></i>
+                                            </span>
+                                        @else
+                                            <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    aria-label="Approve"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
+                                                <i class="fas fa-check"></i>
+                                            </button>
+                                        @endif
                                         <button wire:click.stop="confirmReject({{ $event->id }})"
                                                 aria-label="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
@@ -1209,12 +1297,20 @@ select.tw-select-arrow {
                                     @endif
 
                                     @if($isRejected)
-                                        <button wire:click.stop="confirmApprove({{ $event->id }})"
-                                                aria-label="Re-Approve"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
-                                            <i class="fas fa-rotate-left"></i>
-                                        </button>
+                                        @if($rowDateExpired)
+                                            <span aria-label="Need to update date"
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
+                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                <i class="fas fa-rotate-left"></i>
+                                            </span>
+                                        @else
+                                            <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    aria-label="Re-Approve"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
+                                                <i class="fas fa-rotate-left"></i>
+                                            </button>
+                                        @endif
                                     @endif
                                 </div>
                             </div>
@@ -1331,7 +1427,7 @@ select.tw-select-arrow {
 
 {{-- ══ APPROVE CONFIRM MODAL ══ --}}
 @if($showApproveModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelApprove">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b border-emerald-100 bg-emerald-50">
@@ -1377,7 +1473,7 @@ select.tw-select-arrow {
 
 {{-- ══ REJECT CONFIRM MODAL ══ --}}
 @if($showRejectModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelReject">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b border-red-100 bg-red-50">
@@ -1426,7 +1522,7 @@ select.tw-select-arrow {
 
 {{-- ══ EDIT EVENT — FULL SCREEN (matching organizer form style) ══ --}}
 @if($showFormModal)
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+<div class="fixed inset-0 z-[100] flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeFormModal()">
 
     {{-- Header --}}
@@ -1831,9 +1927,12 @@ select.tw-select-arrow {
     $postedByLabel = $ev->organizer
         ? $ev->organizer->name . ' · ' . $ev->organizer->department
         : ($updatedByDisplay ?: 'Director');
+
+    $approveCheckDate = $ev->event_date;
+    $eventDateExpired = $approveCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
 @endphp
 
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-hidden fs-in"
+<div class="fixed inset-0 z-[100] flex flex-col bg-gray-50 overflow-hidden fs-in"
      @keydown.escape.window="$wire.closeViewModal()">
 
     <div class="flex items-center justify-between px-4 sm:px-6 py-3 flex-shrink-0 shadow-md"
@@ -1862,7 +1961,7 @@ select.tw-select-arrow {
             @if($isPending)
                 <div class="relative inline-flex group">
                     <button wire:click="confirmReject({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-red-500/30 border border-red-300/40 hover:bg-red-500/50"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
                             aria-label="Reject">
                         <i class="fas fa-xmark text-white text-sm"></i>
                     </button>
@@ -1871,9 +1970,21 @@ select.tw-select-arrow {
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                     </div>
                 </div>
+                @if($eventDateExpired)
+                <div class="relative inline-flex group">
+                    <span class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/15 cursor-not-allowed"
+                          aria-label="Need to update date">
+                        <i class="fas fa-check text-white/50 text-sm"></i>
+                    </span>
+                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                        Need to update date
+                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                    </div>
+                </div>
+                @else
                 <div class="relative inline-flex group">
                     <button wire:click="confirmApprove({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-emerald-500/30 border border-emerald-300/40 hover:bg-emerald-500/50"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
                             aria-label="Approve">
                         <i class="fas fa-check text-white text-sm"></i>
                     </button>
@@ -1882,12 +1993,25 @@ select.tw-select-arrow {
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                     </div>
                 </div>
+                @endif
             @endif
 
             @if($isRejected)
+                @if($eventDateExpired)
+                <div class="relative inline-flex group">
+                    <span class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/15 cursor-not-allowed"
+                          aria-label="Need to update date">
+                        <i class="fas fa-rotate-left text-white/50 text-sm"></i>
+                    </span>
+                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                        Need to update date
+                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                    </div>
+                </div>
+                @else
                 <div class="relative inline-flex group">
                     <button wire:click="confirmApprove({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-emerald-500/30 border border-emerald-300/40 hover:bg-emerald-500/50"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
                             aria-label="Re-Approve">
                         <i class="fas fa-rotate-left text-white text-sm"></i>
                     </button>
@@ -1896,6 +2020,7 @@ select.tw-select-arrow {
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                     </div>
                 </div>
+                @endif
             @endif
 
             <div class="relative inline-flex group">
@@ -1912,9 +2037,9 @@ select.tw-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scroll-c">
 
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white lg:overflow-y-auto scroll-c">
+        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white lg:overflow-y-auto scroll-c dir-view-info-pane">
 
             @if($hasPhoto)
             <div class="w-full px-5 pt-5 pb-3 flex-shrink-0">
@@ -1963,28 +2088,32 @@ select.tw-select-arrow {
                 </div>
                 @endif
 
-                @if($ev->target_participants)
-                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#333333]">Open For</p>
-                    <p class="text-base font-bold text-[#333333]">{{ $ev->target_participants }}</p>
-                </div>
-                @endif
+                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 flex flex-col gap-2.5">
 
-                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-[10px] font-bold uppercase tracking-widest mb-1 text-[#333333]">{{ $ev->organizer ? 'Coordinator' : 'Posted By' }}</p>
-                    <p class="text-base font-bold text-[#333333]">{{ $postedByLabel }}</p>
-                </div>
-
-                @if($ev->contact_person || $ev->contact_email || $ev->contact_phone)
-                <div class="p-4 rounded-xl bg-gray-50 border border-gray-200">
-                    <p class="text-[10px] font-bold uppercase tracking-widest mb-2 text-[#333333]">Contact</p>
-                    <div class="flex flex-col gap-1.5">
-                        @if($ev->contact_person)<p class="text-base font-bold text-[#333333]">{{ $ev->contact_person }}</p>@endif
-                        @if($ev->contact_email)<p class="text-sm font-medium text-[#333333]">{{ $ev->contact_email }}</p>@endif
-                        @if($ev->contact_phone)<p class="text-sm font-medium text-[#333333]">{{ $ev->contact_phone }}</p>@endif
+                    @if($ev->target_participants)
+                    <div>
+                        <p class="text-[9px] font-bold uppercase tracking-widest mb-0.5 text-[#333333]">Open For</p>
+                        <p class="text-sm font-bold text-[#333333]">{{ $ev->target_participants }}</p>
                     </div>
+                    @endif
+
+                    <div class="{{ $ev->target_participants ? 'pt-2 border-t border-gray-200' : '' }}">
+                        <p class="text-[9px] font-bold uppercase tracking-widest mb-0.5 text-[#333333]">{{ $ev->organizer ? 'Coordinator' : 'Posted By' }}</p>
+                        <p class="text-sm font-bold text-[#333333]">{{ $postedByLabel }}</p>
+                    </div>
+
+                    @if($ev->contact_person || $ev->contact_email || $ev->contact_phone)
+                    <div class="pt-2 border-t border-gray-200">
+                        <p class="text-[9px] font-bold uppercase tracking-widest mb-1 text-[#333333]">Contact</p>
+                        <div class="flex flex-col gap-1">
+                            @if($ev->contact_person)<p class="text-sm font-bold text-[#333333]">{{ $ev->contact_person }}</p>@endif
+                            @if($ev->contact_email)<p class="text-xs font-medium text-[#333333]">{{ $ev->contact_email }}</p>@endif
+                            @if($ev->contact_phone)<p class="text-xs font-medium text-[#333333]">{{ $ev->contact_phone }}</p>@endif
+                        </div>
+                    </div>
+                    @endif
+
                 </div>
-                @endif
 
                 <div class="p-4 rounded-xl border {{ $isCompleted ? 'bg-green-50 border-green-200' : ($isApproved ? 'bg-emerald-50 border-emerald-200' : ($isPending ? 'bg-amber-50 border-amber-200' : 'bg-orange-50 border-orange-200')) }}">
                     @if($isCompleted)
@@ -1996,11 +2125,19 @@ select.tw-select-arrow {
                         @if($ev->review_remarks)<p class="text-sm italic mt-1 text-[#555555]">"{{ $ev->review_remarks }}"</p>@endif
                     @elseif($isPending)
                         <p class="text-base font-bold text-[#333333]">Awaiting Review</p>
-                        <p class="text-sm font-medium mt-0.5 text-[#333333]">Use the Approve / Reject buttons above.</p>
+                        @if($eventDateExpired)
+                            <p class="text-sm font-semibold mt-0.5 text-[#333333]">Need to update date. Please chat the coordinator to update the event date before this can be approved.</p>
+                        @else
+                            <p class="text-sm font-medium mt-0.5 text-[#333333]">Use the Approve / Reject buttons above.</p>
+                        @endif
                     @else
                         <p class="text-base font-bold text-[#333333]">Rejected</p>
                         @if($ev->review_remarks)<p class="text-sm font-medium mt-0.5 text-[#333333]"><strong>Reason:</strong> {{ $ev->review_remarks }}</p>@endif
-                        <p class="text-sm font-semibold mt-1 text-[#333333]">Coordinator may edit and resubmit.</p>
+                        @if($eventDateExpired)
+                            <p class="text-sm font-semibold mt-1 text-[#333333]">Need to update date. Please chat the coordinator to update the event date before this can be re-approved.</p>
+                        @else
+                            <p class="text-sm font-semibold mt-1 text-[#333333]">Coordinator may edit and resubmit.</p>
+                        @endif
                     @endif
                 </div>
 

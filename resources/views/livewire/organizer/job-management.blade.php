@@ -92,8 +92,10 @@ new class extends Component {
     public string $shareCollege     = '';
     public string $sharePhotoUrl    = '';
 
-    public array $shareAvailableRooms = [];   // [['id'=>, 'label'=>, 'type'=>], ...]
+    public array $shareAvailableRooms = [];   // [['id'=>, 'label'=>, 'type'=>, 'department'=>], ...]
     public array $shareTargetRoomIds  = [];   // checkbox-bound selected room ids (as strings)
+    public array $shareAutoRoomIds    = [];   // room ids auto-checked because they match the job's target college(s)
+    public array $shareTargetCollegesList = []; // parsed target_college list used for the "Auto-selected for" banner
 
     private array $expLevelOrder = [
         'No Experience Required',
@@ -1021,9 +1023,41 @@ public function openEditModal(int $id): void
         $this->sharePhotoUrl    = $this::jobImageUrl($job->job_image ?? null);
 
         $this->loadShareableRooms();
-        $this->shareTargetRoomIds = [];
+        $this->computeAutoSelectedShareRooms();
 
         $this->showShareModal   = true;
+    }
+
+    /**
+     * ── Auto-select the chats that match this job's target audience ──
+     * Jobs target one or more colleges via target_college (comma-separated,
+     * e.g. "College of Engineering,College of Business" / blank = the
+     * organizer's own college). Pre-checks each targeted college's
+     * college-wide room plus its course "All Batches" rooms, mirroring the
+     * batch/course auto-select already used by Event Management's Share to
+     * Message Hub. Staff Chat is never auto-selected. The organizer can
+     * still freely check/uncheck before hitting Share.
+     */
+    private function computeAutoSelectedShareRooms(): void
+    {
+        $raw      = $this->shareCollege !== '' ? $this->shareCollege : ($this->organizerCollege ?? '');
+        $colleges = array_values(array_filter(array_map('trim', explode(',', $raw))));
+
+        $this->shareTargetCollegesList = $colleges;
+
+        $matched = [];
+        if (!empty($colleges)) {
+            foreach ($this->shareAvailableRooms as $r) {
+                if (($r['type'] ?? '') === 'staff') continue;
+                if (in_array(($r['type'] ?? ''), ['college', 'course'], true)
+                    && in_array(($r['department'] ?? ''), $colleges, true)) {
+                    $matched[] = (string) $r['id'];
+                }
+            }
+        }
+
+        $this->shareAutoRoomIds   = $matched;
+        $this->shareTargetRoomIds = $matched;
     }
 
     public function closeShareModal(): void
@@ -1042,6 +1076,8 @@ public function openEditModal(int $id): void
         $this->sharePhotoUrl      = '';
         $this->shareAvailableRooms = [];
         $this->shareTargetRoomIds  = [];
+        $this->shareAutoRoomIds    = [];
+        $this->shareTargetCollegesList = [];
     }
 
     // ── "Share to Alumni Batch Chats" — posts the job recap as a chat
@@ -1057,7 +1093,7 @@ public function openEditModal(int $id): void
         // Staff Chat (directors + coordinators)
         $staffRoom = DB::table('chat_rooms')->where('course_code', '__director__')->first(['id']);
         if ($staffRoom) {
-            $rooms[] = ['id' => (int) $staffRoom->id, 'label' => 'Staff Chat', 'type' => 'staff'];
+            $rooms[] = ['id' => (int) $staffRoom->id, 'label' => 'Staff Chat', 'type' => 'staff', 'department' => ''];
         }
 
         if ($college) {
@@ -1070,7 +1106,7 @@ public function openEditModal(int $id): void
                 })
                 ->first(['id']);
             if ($collegeRoom) {
-                $rooms[] = ['id' => (int) $collegeRoom->id, 'label' => $college . ' · College-Wide', 'type' => 'college'];
+                $rooms[] = ['id' => (int) $collegeRoom->id, 'label' => $college . ' · College-Wide', 'type' => 'college', 'department' => $college];
             }
 
             $collegeCourseCodes = \App\Models\Course::where('college', $college)->pluck('code')->toArray();
@@ -1083,7 +1119,7 @@ public function openEditModal(int $id): void
                     ->get(['id', 'course_code']);
 
                 foreach ($courseRooms as $r) {
-                    $rooms[] = ['id' => (int) $r->id, 'label' => strtoupper($r->course_code) . ' · All Batches', 'type' => 'course'];
+                    $rooms[] = ['id' => (int) $r->id, 'label' => strtoupper($r->course_code) . ' · All Batches', 'type' => 'course', 'department' => $college];
                 }
 
                 // Per-batch GCs
@@ -1094,7 +1130,7 @@ public function openEditModal(int $id): void
                     ->get(['id', 'course_code', 'batch', 'name']);
 
                 foreach ($batchRooms as $r) {
-                    $rooms[] = ['id' => (int) $r->id, 'label' => $r->name ?: (strtoupper($r->course_code) . ' · Batch ' . $r->batch), 'type' => 'batch'];
+                    $rooms[] = ['id' => (int) $r->id, 'label' => $r->name ?: (strtoupper($r->course_code) . ' · Batch ' . $r->batch), 'type' => 'batch', 'department' => $college];
                 }
             }
         }
@@ -1143,28 +1179,14 @@ public function openEditModal(int $id): void
             return;
         }
 
-        $dl = $this->shareDeadline
-            ? \Carbon\Carbon::parse($this->shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y')
-            : null;
+        $org = auth()->user()?->organizer;
 
-        $org     = auth()->user()?->organizer;
-        $orgName = auth()->user()?->name ?? 'Organizer';
-
-        $lines   = [];
-        $lines[] = "📢 Job Opportunity — Posted by {$orgName}";
-        $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-        $lines[] = "🎯 {$this->shareJobTitle}";
-        $lines[] = "🏢 {$this->shareCompany}";
-        if ($this->shareLocation)  $lines[] = "📍 {$this->shareLocation}";
-        if ($this->shareEmpType)   $lines[] = "💼 {$this->shareEmpType}";
-        if ($this->shareExpLevel)  $lines[] = "📊 {$this->shareExpLevel}";
-        if ($this->shareSalary)    $lines[] = "💰 {$this->shareSalary}";
-        if ($dl)                   $lines[] = "📅 Deadline: {$dl}";
-        if ($this->shareCollege)   $lines[] = "🏫 For: {$this->shareCollege}";
-        $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-        $lines[] = "👀 Check it out on the Alumni Portal → " . $this->jobsBaseUrl();
-
-        $body = implode("\n", $lines);
+        // ── Card marker only — mirrors Event Management's [[EVENT:TYPE:id]]
+        //    marker. The chat views (chat-alumni.blade.php /
+        //    director-messenger.blade.php) must resolve [[JOB:id]] into a
+        //    rich preview card (photo, title, company, deadline, View Job
+        //    button) instead of the old wall of plain emoji text. ─────────
+        $body = '[[JOB:' . $this->shareJobId . ']]';
         $now  = now();
 
         $inserts = array_map(fn($roomId) => [
@@ -1180,8 +1202,11 @@ public function openEditModal(int $id): void
         DB::table('chat_messages')->insert($inserts);
 
         $count = count($roomIds);
-        $this->shareTargetRoomIds = [];
         $this->dispatch('flash-message', type: 'success', message: "Job shared to {$count} chat" . ($count === 1 ? '' : 's') . "!");
+
+        // Close the whole Share Job Posting modal right after a successful
+        // share — no need to make the organizer manually close it.
+        $this->closeShareModal();
     }
 
     public function jobsBaseUrl(): string
@@ -3275,33 +3300,43 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                     <div x-show="open" x-cloak
                          x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
-                         x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-                         @if(!empty($shareAvailableRooms))
-                         x-data="{
-                             ids: {{ json_encode(array_values(array_map(fn($id) => (string) $id, collect($shareAvailableRooms)->pluck('id')->toArray()))) }},
-                             get allSelected() {
-                                 return this.ids.length > 0 && this.ids.every(id => $wire.shareTargetRoomIds.includes(id));
-                             },
-                             toggleAll() {
-                                 $wire.shareTargetRoomIds = this.allSelected ? [] : [...this.ids];
-                             }
-                         }"
-                         @endif>
+                         x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
                         @if(empty($shareAvailableRooms))
                             <p class="px-3 py-3 text-[11px]" style="color:#333333;">No chats available to share to yet.</p>
                         @else
+                            @php
+                                $shareAllIds = collect($shareAvailableRooms)->pluck('id')->map(fn($id) => (string) $id)->toArray();
+                                $shareAllSelected = !empty($shareAllIds) && empty(array_diff($shareAllIds, $shareTargetRoomIds));
+
+                                $shareTargetLabel = !empty($shareTargetCollegesList)
+                                    ? implode(', ', $shareTargetCollegesList)
+                                    : '';
+                            @endphp
+
+                            @if($shareTargetLabel !== '' && !empty($shareAutoRoomIds))
+                            <div class="mx-3 mt-2.5 mb-0.5 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style="background:#F5F0FA;">
+                                <i class="fas fa-wand-magic-sparkles text-[10px]" style="color:#7a3f91;"></i>
+                                <span class="text-[10.5px] leading-snug" style="color:#5c2d7a;">
+                                    Auto-selected for this job's target: <span class="font-bold">{{ $shareTargetLabel }}</span>
+                                </span>
+                            </div>
+                            @endif
+
                             <label class="flex items-center gap-2.5 px-3 py-2 border-t border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
-                                <input type="checkbox" @click="toggleAll()" :checked="allSelected"
+                                <input type="checkbox" wire:click="toggleSelectAllShareRooms"
+                                       wire:key="share-select-all-{{ $shareAllSelected ? 'on' : 'off' }}"
+                                       @checked($shareAllSelected)
                                        class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
                                 <span class="text-[11px] font-bold uppercase tracking-wide" style="color:#7a3f91;">Select All</span>
                             </label>
 
                             <div class="max-h-40 overflow-y-auto scroll-c border-t border-gray-100">
                                 @foreach($shareAvailableRooms as $r)
-                                    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100">
-                                        <input type="checkbox" wire:model="shareTargetRoomIds" value="{{ $r['id'] }}"
+                                    @php $isAutoRoom = in_array((string) $r['id'], $shareAutoRoomIds, true); @endphp
+                                    <label class="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors duration-100 {{ $isAutoRoom ? 'bg-[#FAF7FD]' : '' }}">
+                                        <input type="checkbox" wire:model.live="shareTargetRoomIds" value="{{ $r['id'] }}"
                                                class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
-                                        <span class="text-xs truncate" style="color:#333333;">{{ $r['label'] }}</span>
+                                        <span class="text-xs truncate flex-1" style="color:#333333;">{{ $r['label'] }}</span>
                                     </label>
                                 @endforeach
                             </div>
@@ -3312,7 +3347,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white text-xs font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
                                         style="background:#7a3f91;" onmouseover="this.style.background='#6a3280'" onmouseout="this.style.background='#7a3f91'">
                                     <span wire:loading.remove wire:target="shareToAlumniChats">
-                                        <i class="fas fa-paper-plane text-[11px]"></i> Share (<span x-text="$wire.shareTargetRoomIds.length"></span>)
+                                        <i class="fas fa-paper-plane text-[11px]"></i> Share ({{ count($shareTargetRoomIds) }})
                                     </span>
                                     <span wire:loading wire:target="shareToAlumniChats">
                                         <i class="fas fa-spinner fa-spin text-[11px]"></i> Sharing…

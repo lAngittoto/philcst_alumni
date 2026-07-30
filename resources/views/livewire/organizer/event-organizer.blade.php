@@ -1083,7 +1083,9 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $count = count($targetIds);
         $this->dispatch('flash-message', type: 'success', message: 'Shared to ' . $count . ' chat' . ($count === 1 ? '' : 's') . '.');
 
-        $this->shareTargetRoomIds = [];
+        // Close the whole Share Event modal right after a successful share
+        // — no need to make the organizer manually close it.
+        $this->closeShareModal();
     }
 
     /**
@@ -3063,12 +3065,6 @@ select.tw-select-arrow {
                                         <input type="checkbox" wire:model.live="shareTargetRoomIds" value="{{ $r['id'] }}"
                                                class="w-3.5 h-3.5 rounded accent-[#7a3f91] cursor-pointer flex-shrink-0">
                                         <span class="text-xs truncate flex-1" style="color:#333333;">{{ $r['label'] }}</span>
-                                        @if(($r['batch'] ?? 0) > 0)
-                                        <span class="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style="background:#EDE0F5;color:#5c2d7a;">Batch {{ $r['batch'] }}</span>
-                                        @endif
-                                        @if($isAutoRoom)
-                                        <span class="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0" style="background:#7a3f91;color:#fff;">Suggested</span>
-                                        @endif
                                     </label>
                                 @endforeach
                             </div>

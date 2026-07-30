@@ -1268,11 +1268,18 @@ new class extends Component {
     {
         $this->authorizeRole();
         $job = JobPosting::findOrFail($id);
+
+        if ($job->status === 'ACTIVE') {
+            $this->dispatch('flash-message', type: 'error',
+                message: "Cannot delete — \"{$job->job_title}\" is still Active. Deactivate it first before deleting.");
+            return;
+        }
+
         $this->deleteJobId     = $id;
         $this->deleteJobTitle  = $job->job_title;
         $this->showDeleteModal = true;
         // NOTE: intentionally NOT closing showEditModal/showViewModal — the
-        // delete modal stacks on top (z-[60] > z-50).
+        // delete modal stacks on top (z-[110] > z-[100]).
     }
 
     public function executeDelete(): void
@@ -1289,6 +1296,15 @@ new class extends Component {
         if (!$this->deleteJobId) { $this->showDeleteModal = false; return; }
 
         $job = JobPosting::findOrFail($this->deleteJobId);
+
+        if ($job->status === 'ACTIVE') {
+            $this->dispatch('flash-message', type: 'error',
+                message: "Cannot delete — \"{$job->job_title}\" is still Active. Deactivate it first before deleting.");
+            $this->showDeleteModal = false;
+            $this->deleteJobId     = null;
+            $this->deleteJobTitle  = '';
+            return;
+        }
 
         $wasDirectorJob = is_null($job->organizer_id);
 
@@ -1587,10 +1603,40 @@ new class extends Component {
 .m-in  { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
 .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
 
+.scroll-c {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+}
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: transparent; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ══ MOBILE: full-screen View/Edit/Post modals — force real height so the
+   inner .scroll-c panes can actually compute a scrollable overflow.
+   Root cause of "can't scroll job details on mobile": iOS Safari/Chrome
+   sometimes report 100dvh/100vh differently once the address bar
+   collapses/expands mid-scroll, and a flex child with only min-h-0 (no
+   explicit height) can end up with 0 measurable height at first paint,
+   which makes overflow-y:auto have nothing to scroll. Locking the modal
+   to 100dvh (with 100vh fallback) and letting flex children size off
+   that fixed number keeps the scroll region reliably scrollable. ══ */
+@media (max-width: 1023px) {
+    .fs-in {
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+    }
+    /* Cap the job-details LEFT info pane so it can't eat all the modal's
+       height on mobile — this is what freed the description/qualifications
+       panel below to actually become scrollable on phones. */
+    .dir-view-info-pane {
+        max-height: 45vh;
+        max-height: 45dvh;
+    }
+}
 
 select.tw-select-arrow {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
@@ -2154,10 +2200,10 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     DELETE CONFIRM MODAL — z-[60], stacks above Edit/View modal
+     DELETE CONFIRM MODAL — z-[110], stacks above Edit/View modal
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showDeleteModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelDelete">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b border-red-100 bg-red-50">
@@ -2203,10 +2249,10 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     RESTORE CONFIRM MODAL — z-[60]
+     RESTORE CONFIRM MODAL — z-[110]
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showRestoreModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelRestore">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b {{ $restoreWillActivate ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50' }}">
@@ -2260,11 +2306,11 @@ select.tw-select-arrow {
 
 
 {{-- ════════════════════════════════════════════════════════════════════════
-     ACTIVATE / DEACTIVATE CONFIRM MODAL — z-[60]
+     ACTIVATE / DEACTIVATE CONFIRM MODAL — z-[110]
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showConfirmModal)
 @php $confirmIsActivating = $confirmAction === 'ACTIVE'; @endphp
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelConfirm">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b {{ $confirmIsActivating ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50' }}">
@@ -2321,7 +2367,7 @@ select.tw-select-arrow {
      POST JOB — FULL SCREEN 3-COLUMN
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showPostModal)
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+<div class="fixed inset-0 z-[100] flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closePostModal()">
 
     {{-- Top Bar --}}
@@ -2731,7 +2777,7 @@ select.tw-select-arrow {
     // Auto-editable the moment the job is INACTIVE — no manual toggle.
     $editModeAllowed       = $editingJob && !$editJobIsActive;
 @endphp
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+<div class="fixed inset-0 z-[100] flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
      x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }"
      x-effect="editMode = {{ $editModeAllowed ? 'true' : 'false' }}">
@@ -2757,21 +2803,21 @@ select.tw-select-arrow {
                 @if(!$editJobIsActive)
                     @if($editJobDeadlinePassed)
                         <div class="activate-disabled-wrap" data-tip="Update deadline to activate">
-                            <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed opacity-40 bg-emerald-500/10 border border-emerald-500/25">
-                                <i class="fas fa-circle-play text-emerald-300 text-sm"></i>
+                            <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
+                                <i class="fas fa-circle-play text-white/50 text-sm"></i>
                             </span>
                         </div>
                     @else
                         <button wire:click="confirmToggle({{ $editingJobId }})" type="button"
-                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20">
-                            <i class="fas fa-circle-play text-emerald-300 text-sm"></i>
+                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24">
+                            <i class="fas fa-circle-play text-white text-sm"></i>
                             <span class="mtip">Activate</span>
                         </button>
                     @endif
                 @else
                     <button wire:click="confirmToggle({{ $editingJobId }})" type="button"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-amber-400/12 border border-amber-400/25 hover:bg-amber-400/22">
-                        <i class="fas fa-circle-pause text-amber-300 text-sm"></i>
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24">
+                        <i class="fas fa-circle-pause text-white text-sm"></i>
                         <span class="mtip">Deactivate</span>
                     </button>
                 @endif
@@ -2784,22 +2830,30 @@ select.tw-select-arrow {
                     </button>
                 @endif
 
-                <button wire:click="confirmDelete({{ $editingJobId }})" type="button"
-                        class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-red-500/10 border border-red-400/25 hover:bg-red-500/20">
-                    <i class="fas fa-trash text-red-300 text-sm"></i>
-                    <span class="mtip">Delete</span>
-                </button>
+                @if($editJobIsActive)
+                    <div class="activate-disabled-wrap" data-tip="Deactivate first to delete">
+                        <span class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
+                            <i class="fas fa-trash text-white/50 text-sm"></i>
+                            <span class="mtip">Deactivate first to delete</span>
+                        </span>
+                    </div>
+                @else
+                    <button wire:click="confirmDelete({{ $editingJobId }})" type="button"
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24">
+                        <i class="fas fa-trash text-white text-sm"></i>
+                        <span class="mtip">Delete</span>
+                    </button>
+                @endif
             @endif
 
             <button wire:click="closeEditModal" type="button"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60"
                     wire:target="closeEditModal,saveEditJob"
-                    class="modal-top-btn relative inline-flex items-center gap-1.5 px-3 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none text-white text-xs font-semibold">
-                <span wire:loading wire:target="closeEditModal,saveEditJob"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                <span wire:loading.remove wire:target="closeEditModal,saveEditJob"><i class="fas fa-xmark text-xs"></i></span>
-                <span wire:loading.remove wire:target="closeEditModal,saveEditJob">Close</span>
-                <span wire:loading wire:target="closeEditModal,saveEditJob">Closing…</span>
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
+                <span wire:loading wire:target="closeEditModal,saveEditJob"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
+                <span wire:loading.remove wire:target="closeEditModal,saveEditJob"><i class="fas fa-xmark text-white text-sm"></i></span>
+                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
@@ -3282,7 +3336,7 @@ select.tw-select-arrow {
     $viewJobImgUrl    = $this::jobImageUrl($job->job_image ?? null);
     $organizerName    = $job->organizer?->name ?? null;
 @endphp
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-50 fs-in overflow-hidden"
+<div class="fixed inset-0 z-[100] flex flex-col bg-gray-50 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeViewModal()">
 
     <div class="flex items-center justify-between px-6 py-3 flex-shrink-0 shadow-md"
@@ -3305,11 +3359,20 @@ select.tw-select-arrow {
                 </button>
             @endif
             @if(!$isOrgDeletedView)
-                <button type="button" wire:click="confirmDelete({{ $job->id }})"
-                        class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-red-500/15 border border-red-300/30 hover:bg-red-500/25">
-                    <i class="fas fa-trash text-white text-sm"></i>
-                    <span class="mtip">Delete</span>
-                </button>
+                @if($isActiveView)
+                    <div class="activate-disabled-wrap" data-tip="Deactivate first to delete">
+                        <span class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
+                            <i class="fas fa-trash text-white/50 text-sm"></i>
+                            <span class="mtip">Deactivate first to delete</span>
+                        </span>
+                    </div>
+                @else
+                    <button type="button" wire:click="confirmDelete({{ $job->id }})"
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24">
+                        <i class="fas fa-trash text-white text-sm"></i>
+                        <span class="mtip">Delete</span>
+                    </button>
+                @endif
             @endif
             <button wire:click="closeViewModal" type="button"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22">
@@ -3333,7 +3396,14 @@ select.tw-select-arrow {
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c">
+        {{-- On mobile this panel must NOT be flex-shrink-0 with unconstrained
+             height — that let it grow to fit all its content (photo, badges,
+             company, location, deadline, etc.) and starve the details panel
+             below of any space, which is why "Job Description / Qualifications
+             / How to Apply" couldn't be scrolled into view on phones. Now it's
+             capped to 45% of the available height on mobile and scrolls
+             independently; lg: reverts to the original fixed 380px sidebar. --}}
+        <div class="w-full lg:w-[380px] flex flex-col shrink lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 bg-white overflow-y-auto scroll-c dir-view-info-pane">
 
             <div class="mx-3 mt-3 mb-0 flex-shrink-0 rounded-xl overflow-hidden" style="height:160px;">
                 <img src="{{ $viewJobImgUrl }}" alt="{{ $job->job_title }}" class="w-full h-full object-cover"
@@ -3429,7 +3499,7 @@ select.tw-select-arrow {
             </div>
         </div>
 
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
+        <div class="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-gray-50">
             <div class="flex-shrink-0 px-4 py-2.5 bg-white border-b border-gray-200">
                 <div class="flex flex-wrap gap-2 items-center">
                     <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-50 border border-blue-100 text-blue-700"><i class="fas fa-clock text-[10px]"></i> {{ $job->employment_type }}</span>

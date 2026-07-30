@@ -249,18 +249,33 @@ new class extends Component {
             }
 
             if ($event) {
-                $when  = $event->event_date ?? null;
-                $image = $event->photo_url ?? null;
+                $when     = $event->event_date ?? null;
+                $endWhen  = $event->event_end_date ?? null;
+                $image    = $event->photo_url ?? null;
+
+                // ── Real-world logic: an event card should say "Completed"
+                //    once it has actually happened, not "Save the Date"
+                //    forever. Prefer the explicit status column when the
+                //    underlying model tracks one (OrganizerEvent does —
+                //    PENDING/APPROVED/REJECTED/COMPLETED); otherwise fall
+                //    back to comparing event_end_date (or event_date if no
+                //    end date was set) against the current time, which
+                //    works the same way for AdminEvent too. ──────────────
+                $eventStatus  = strtoupper((string) ($event->status ?? ''));
+                $isCompleted  = $eventStatus === 'COMPLETED'
+                    || ($endWhen && Carbon::parse($endWhen)->isPast())
+                    || (! $endWhen && $when && Carbon::parse($when)->isPast());
 
                 return [
-                    'type'       => 'event',
-                    'id'         => $id,
-                    'event_type' => $type,
-                    'title'      => $event->title ?? 'Event',
-                    'subtitle'   => $when ? Carbon::parse($when)->format('M d, Y') : ($event->venue ?? ''),
-                    'image'      => $image,
-                    'url'        => $this->eventsUrl($id, $type),
-                    'available'  => true,
+                    'type'         => 'event',
+                    'id'           => $id,
+                    'event_type'   => $type,
+                    'title'        => $event->title ?? 'Event',
+                    'subtitle'     => $when ? Carbon::parse($when)->format('M d, Y') : ($event->venue ?? ''),
+                    'image'        => $image,
+                    'url'          => $this->eventsUrl($id, $type),
+                    'available'    => true,
+                    'is_completed' => $isCompleted,
                 ];
             }
 
@@ -846,13 +861,15 @@ new class extends Component {
             $isCurrentRoom = ($staffRoomRow->id === $this->roomId);
             $lastReadAt    = Cache::get($self->lastReadCacheKey($staffRoomRow->id));
 
+            // ── Unread reflects "new activity in this room since I last
+            //    opened it" — it does NOT exclude the coordinator's own
+            //    sends (sharing an event/job, or a regular message). If
+            //    the room's last-read watermark is older than the latest
+            //    message, the room shows unread, full stop. ──────────────
             $hasUnread = false;
             if (! $isCurrentRoom && $latest !== null) {
-                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $this->coordinatorId);
-                if (! $isMySelf) {
-                    $hasUnread = $lastReadAt === null
-                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
-                }
+                $hasUnread = $lastReadAt === null
+                    || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
 
             $matchesSearch = $search === ''
@@ -947,11 +964,8 @@ new class extends Component {
 
             $hasUnread = false;
             if (! $isCurrentRoom && $latest !== null) {
-                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $this->coordinatorId);
-                if (! $isMySelf) {
-                    $hasUnread = $lastReadAt === null
-                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
-                }
+                $hasUnread = $lastReadAt === null
+                    || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
 
             // ── FIX: always render the clean human label, NEVER the raw
@@ -1062,11 +1076,8 @@ new class extends Component {
 
             $hasUnread = false;
             if (! $isCurrentRoom && $latest !== null) {
-                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $self->coordinatorId);
-                if (! $isMySelf) {
-                    $hasUnread = $lastReadAt === null
-                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
-                }
+                $hasUnread = $lastReadAt === null
+                    || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
 
             $label         = strtoupper($r->course_code) . ' · All Batches GC';
@@ -1160,11 +1171,8 @@ new class extends Component {
 
             $hasUnread = false;
             if (! $isCurrentRoom && $latest !== null) {
-                $isMySelf = ($latest->sender_type === 'organizer' && (int)$latest->sender_id === $self->coordinatorId);
-                if (! $isMySelf) {
-                    $hasUnread = $lastReadAt === null
-                        || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
-                }
+                $hasUnread = $lastReadAt === null
+                    || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
 
             $matchesSearch = $search === ''
@@ -2764,6 +2772,7 @@ new class extends Component {
                                             $pp          = $msg['post_preview'];
                                             $ppAvailable = $pp['available'] ?? true;
                                             $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
+                                            $ppCompleted = $ppIsEvent && ($pp['is_completed'] ?? false);
                                         @endphp
                                         <div wire:click.stop="toggleToolbar({{ $msg['id'] }})"
                                              class="msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
@@ -2787,12 +2796,18 @@ new class extends Component {
 
                                                 @if(! $ppAvailable)
                                                 <span class="msgr-post-tag unavailable-tag">Unavailable</span>
+                                                @elseif($ppCompleted)
+                                                <span class="msgr-post-tag" style="background:rgba(5,150,105,.92);">Completed</span>
                                                 @endif
 
                                                 <div class="msgr-post-overlay-strip">
                                                     <p>
                                                         @if($ppAvailable)
-                                                            <span class="accent">{{ $pp['type'] === 'job' ? 'Now Hiring' : 'Save the Date' }}:</span> {{ $pp['title'] }}
+                                                            @if($ppIsEvent)
+                                                                <span class="accent">{{ $ppCompleted ? 'Completed' : 'Save the Date' }}:</span> {{ $pp['title'] }}
+                                                            @else
+                                                                <span class="accent">Now Hiring:</span> {{ $pp['title'] }}
+                                                            @endif
                                                         @else
                                                             <span class="accent">{{ $pp['type'] === 'job' ? 'Job Posting' : 'Event' }}:</span> No longer available
                                                         @endif

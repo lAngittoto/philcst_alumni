@@ -50,7 +50,28 @@
             border: none !important;
         }
 
-        .bell-badge { pointer-events: none; }
+        .bell-badge {
+            pointer-events: none;
+            transition: transform 0.15s ease;
+        }
+        /* ── Smooth ambient pulse ring around the unread badge ──
+           Purely additive/decorative: a soft expanding ring behind the
+           badge dot so new-notification state reads as "alive" without
+           being distracting (slow, subtle, no color harshness). */
+        .bell-badge::after {
+            content: '';
+            position: absolute;
+            inset: -3px;
+            border-radius: 9999px;
+            background: rgba(239, 68, 68, 0.45);
+            z-index: -1;
+            animation: dir-badge-pulse 2.2s ease-out infinite;
+        }
+        @keyframes dir-badge-pulse {
+            0%   { transform: scale(1);   opacity: 0.55; }
+            70%  { transform: scale(1.9); opacity: 0; }
+            100% { transform: scale(1.9); opacity: 0; }
+        }
         .dir-notif-item { cursor: pointer; position: relative; }
 
         .dir-notif-close-wrap {
@@ -150,17 +171,17 @@
 
         .dir-nav-link {
             position: relative;
-            transition: background-color 0.2s ease, transform 0.15s ease;
+            transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
         }
         .dir-nav-link:not(.is-active):hover {
-            background: #FAF6FE;
+            background: #FAFAFC;
         }
         .dir-nav-link:not(.is-active):hover .dir-nav-icon {
             transform: scale(1.07);
         }
         .dir-nav-link.is-active {
-            background: #F3EBFA;
-            border: 1px solid #E0CFEE;
+            background: #FAFAFC;
+            border: 1px solid #E8E0F0; /* overridden per-link via inline border-color */
         }
         .dir-nav-icon { transition: transform 0.2s ease; }
 
@@ -1009,57 +1030,80 @@
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
                         'pattern' => 'director/dashboard*',
+                        'color'   => '#7A3F91', // purple (brand default)
                     ],
                     [
                         'route'   => 'director.coordinator/management',
                         'icon'    => 'users-gear',
                         'label'   => 'Coordinator Management',
                         'pattern' => 'director/coordinator/management*',
+                        'color'   => '#D97706', // amber
                     ],
                     [
                         'route'   => 'director.event/management',
                         'icon'    => 'calendar-check',
                         'label'   => 'Events Overview',
                         'pattern' => 'director/event/management*',
+                        'color'   => '#059669', // emerald
                     ],
                     [
                         'route'   => 'director.job/management',
                         'icon'    => 'briefcase',
                         'label'   => 'Jobs Overview',
                         'pattern' => 'director/job/management*',
+                        'color'   => '#0284C7', // sky blue
                     ],
                     [
                         'route'   => 'director.director/messenger',
                         'icon'    => 'comments',
                         'label'   => 'Chat Room',
                         'pattern' => 'director/messenger*',
+                        'color'   => '#DB2777', // pink/rose
                     ],
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
-                @php $isActive = request()->is($link['pattern']); @endphp
+                @php
+                    $isActive  = request()->is($link['pattern']);
+                    $linkColor = $link['color'] ?? '#7A3F91';
+
+                    // Build a very light tint of the link color for the
+                    // "active" icon-box background ring, so each module's
+                    // active state still reads as that module's color
+                    // instead of falling back to flat purple/white.
+                    $hex = ltrim($linkColor, '#');
+                    if (strlen($hex) === 3) {
+                        $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+                    }
+                    $r = hexdec(substr($hex, 0, 2));
+                    $g = hexdec(substr($hex, 2, 2));
+                    $b = hexdec(substr($hex, 4, 2));
+                @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
                    @click="window.__dirSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
                    class="dir-nav-link {{ $isActive ? 'is-active' : '' }}
-                          flex items-center px-4 py-3 rounded-xl group">
+                          flex items-center px-4 py-3 rounded-xl group"
+                   @if($isActive) style="border-color: rgba({{ $r }},{{ $g }},{{ $b }},0.28);" @endif>
 
                     <div class="dir-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
-                         style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
-                                box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
+                         style="background-color:{{ $isActive ? '#FFFFFF' : "rgba({$r},{$g},{$b},0.10)" }};
+                                color:{{ $linkColor }};
+                                box-shadow:{{ $isActive ? "0 2px 6px rgba({$r},{$g},{$b},0.25)" : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px]
-                                 {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
+                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px]"
+                          style="color:{{ $isActive ? $linkColor : '#3A3A3A' }};
+                                 font-weight:{{ $isActive ? '700' : '500' }};">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
                         <span class="dir-active-dot dir-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
-                              style="background:#7A3F91;"></span>
+                              style="background:{{ $linkColor }};"></span>
                     @endif
                 </a>
             @endforeach
@@ -1272,10 +1316,29 @@
                         }
                     ">
 
-                    {{-- Icon --}}
+                    {{-- Icon — tinted per notification type, matching the sidebar's
+                         per-module color coding (coordinator=amber, event=green,
+                         job=blue, message=pink, alumni=orange, default=purple) --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
-                        <i class="fas text-[#7A3F91]"
+                         :style="{
+                            background: (
+                                notif.icon === 'users-gear' ? 'linear-gradient(135deg,#FDECD2,#FBD9A5)' :
+                                (notif.icon === 'calendar-check' || notif.icon === 'calendar' || notif.icon === 'calendar-days') ? 'linear-gradient(135deg,#D6F2E4,#B7E8CC)' :
+                                notif.icon === 'briefcase' ? 'linear-gradient(135deg,#D3EAFB,#AEDCF7)' :
+                                notif.icon === 'comments' ? 'linear-gradient(135deg,#FBD9E9,#F7B8D6)' :
+                                (notif.icon === 'user-group' || notif.icon === 'user-plus') ? 'linear-gradient(135deg,#FCE6C7,#F8D19A)' :
+                                'linear-gradient(135deg,#EDE9F8,#DDD5F0)'
+                            ),
+                            color: (
+                                notif.icon === 'users-gear' ? '#B45309' :
+                                (notif.icon === 'calendar-check' || notif.icon === 'calendar' || notif.icon === 'calendar-days') ? '#047857' :
+                                notif.icon === 'briefcase' ? '#0369A1' :
+                                notif.icon === 'comments' ? '#BE185D' :
+                                (notif.icon === 'user-group' || notif.icon === 'user-plus') ? '#B45309' :
+                                '#7A3F91'
+                            )
+                         }">
+                        <i class="fas"
                            :class="'fa-' + (notif.icon || 'bell')"
                            style="font-size:15px;"></i>
                     </div>
@@ -1315,7 +1378,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:linear-gradient(135deg,#D97706,#B45309);">
                                     COORDINATOR
                                 </span>
 
@@ -1345,7 +1408,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:linear-gradient(135deg,#DB2777,#BE185D);">
                                     MESSAGE
                                 </span>
 
