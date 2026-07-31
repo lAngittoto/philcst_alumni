@@ -17,7 +17,7 @@
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
-        #admin-bell-btn {
+        .admin-bell-btn {
             background: transparent !important;
             border: none !important;
             outline: none !important;
@@ -28,12 +28,10 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            align-self: flex-end;
-            margin-bottom: 10px;
         }
-        #admin-bell-btn:hover,
-        #admin-bell-btn:focus,
-        #admin-bell-btn:active {
+        .admin-bell-btn:hover,
+        .admin-bell-btn:focus,
+        .admin-bell-btn:active {
             background: transparent !important;
             outline: none !important;
             box-shadow: none !important;
@@ -427,12 +425,14 @@
     //  PANEL POSITIONING
     // ─────────────────────────────────────────────────────────────────────────
     function positionAdminPanel() {
-        var btn   = document.getElementById('admin-bell-btn');
+        var isDesktop = window.innerWidth >= 1024;
+        var btn   = document.getElementById(isDesktop ? 'admin-bell-btn' : 'admin-bell-btn-mobile');
+        if (!btn) btn = document.getElementById('admin-bell-btn') || document.getElementById('admin-bell-btn-mobile');
         var panel = document.getElementById('admin-notif-panel');
         var aside = document.querySelector('aside');
         if (!btn || !panel) return;
         var btnRect = btn.getBoundingClientRect();
-        if (aside && window.innerWidth >= 1024) {
+        if (aside && isDesktop) {
             var asideRect = aside.getBoundingClientRect();
             panel.style.left  = (asideRect.right + 12) + 'px';
             panel.style.top   = (btnRect.bottom  + 8)  + 'px';
@@ -806,37 +806,6 @@
                 </p>
             </div>
 
-            {{-- Bell Button --}}
-            <button
-                id="admin-bell-btn"
-                type="button"
-                @click.stop="$store.adminNotifs && $store.adminNotifs.toggle(); positionAdminPanel();"
-                title="Notifications"
-                aria-label="Open notifications">
-
-                <i class="fas fa-bell"
-                   :class="$store.adminNotifs && $store.adminNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
-                          --fa-animation-duration:4s;
-                          --fa-animation-iteration-count:infinite;
-                          pointer-events:none;"></i>
-
-                <span
-                    x-show="$store.adminNotifs && $store.adminNotifs.unread > 0"
-                    x-cloak
-                    x-transition:enter="transition ease-out duration-200"
-                    x-transition:enter-start="opacity-0 scale-0"
-                    x-transition:enter-end="opacity-100 scale-100"
-                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
-                           bg-red-500 text-white text-[9px] font-black
-                           flex items-center justify-center px-1 leading-none
-                           shadow-md ring-2 ring-white"
-                    x-text="$store.adminNotifs && $store.adminNotifs.unread > 99
-                                ? '99+'
-                                : ($store.adminNotifs ? $store.adminNotifs.unread : 0)">
-                </span>
-            </button>
-
             {{-- Mobile close --}}
             <button @click="open = false"
                     class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
@@ -854,48 +823,56 @@
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
                         'pattern' => 'admin/dashboard*',
+                        'color'   => '#7A3F91',
                     ],
                     [
                         'route'   => 'user.management',
                         'icon'    => 'users',
                         'label'   => 'User Management',
                         'pattern' => 'user/management*',
+                        'color'   => '#7A3F91',
                     ],
                     [
                         'route'   => 'employment.tracking',
                         'icon'    => 'chart-line',
                         'label'   => 'Employment Tracking',
                         'pattern' => 'employment/tracking*',
+                        'color'   => '#D97706',
                     ],
                     [
                         'route'   => 'admin.yearbook',
                         'icon'    => 'book-open',
                         'label'   => 'Yearbook',
                         'pattern' => 'yearbook*',
+                        'color'   => '#0284C7',
                     ],
                     [
                         'route'   => 'job.posts',
                         'icon'    => 'briefcase',
                         'label'   => 'Job Posts',
                         'pattern' => 'job/posts*',
+                        'color'   => '#059669',
                     ],
                     [
                         'route'   => 'events',
                         'icon'    => 'calendar-check',
                         'label'   => 'Events',
                         'pattern' => 'events*',
+                        'color'   => '#059669',
                     ],
                     [
                         'route'   => 'audit.logs',
                         'icon'    => 'clipboard-list',
                         'label'   => 'Audit Logs',
                         'pattern' => 'audit/logs*',
+                        'color'   => '#374151',
                     ],
                     [
                         'route'   => 'course',
                         'icon'    => 'clipboard-list',
                         'label'   => 'Courses',
                         'pattern' => 'course*',
+                        'color'   => '#7A3F91',
                     ],
                 ];
             @endphp
@@ -912,17 +889,19 @@
 
                     <div class="w-10 h-10 flex items-center justify-center rounded-lg
                                 transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         style="background-color:{{ $isActive ? '#EDE9F8' : '#F9F7FC' }};color:#7A3F91;">
+                         style="background-color:{{ $isActive ? $link['color'].'1F' : '#F9F7FC' }};color:{{ $link['color'] }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
                     <span class="font-medium tracking-wide flex-1
-                                 {{ $isActive ? 'text-[#7A3F91] font-semibold' : 'text-[#333333]' }}">
+                                 {{ $isActive ? 'font-semibold' : 'text-[#333333]' }}"
+                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
-                        <span class="ml-auto w-1.5 h-5 rounded-full bg-[#7A3F91] opacity-70 shrink-0"></span>
+                        <span class="ml-auto w-1.5 h-5 rounded-full shrink-0 opacity-70"
+                              style="background:{{ $link['color'] }};"></span>
                     @endif
                 </a>
             @endforeach
@@ -960,7 +939,75 @@
                 </div>
             </button>
             <h2 class="text-lg font-bold text-[#333333]">Admin Portal</h2>
-            <div class="w-10"></div>
+
+            {{-- Bell Button (mobile) --}}
+            <button
+                id="admin-bell-btn-mobile"
+                type="button"
+                class="admin-bell-btn"
+                @click.stop="$store.adminNotifs && $store.adminNotifs.toggle(); positionAdminPanel();"
+                title="Notifications"
+                aria-label="Open notifications">
+
+                <i class="fas fa-bell"
+                   :class="$store.adminNotifs && $store.adminNotifs.unread > 0 ? 'fa-shake' : ''"
+                   style="font-size:19px; color:#7A3F91;
+                          --fa-animation-duration:4s;
+                          --fa-animation-iteration-count:infinite;
+                          pointer-events:none;"></i>
+
+                <span
+                    x-show="$store.adminNotifs && $store.adminNotifs.unread > 0"
+                    x-cloak
+                    x-transition:enter="transition ease-out duration-200"
+                    x-transition:enter-start="opacity-0 scale-0"
+                    x-transition:enter-end="opacity-100 scale-100"
+                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                           bg-red-500 text-white text-[9px] font-black
+                           flex items-center justify-center px-1 leading-none
+                           shadow-md ring-2 ring-white"
+                    x-text="$store.adminNotifs && $store.adminNotifs.unread > 99
+                                ? '99+'
+                                : ($store.adminNotifs ? $store.adminNotifs.unread : 0)">
+                </span>
+            </button>
+        </header>
+
+        {{-- Desktop top bar --}}
+        <header class="hidden lg:flex items-center justify-end h-24 px-8 bg-white border-b border-[#E8E0F0]
+                       shrink-0 z-30">
+
+            {{-- Bell Button (desktop) --}}
+            <button
+                id="admin-bell-btn"
+                type="button"
+                class="admin-bell-btn"
+                @click.stop="$store.adminNotifs && $store.adminNotifs.toggle(); positionAdminPanel();"
+                title="Notifications"
+                aria-label="Open notifications">
+
+                <i class="fas fa-bell"
+                   :class="$store.adminNotifs && $store.adminNotifs.unread > 0 ? 'fa-shake' : ''"
+                   style="font-size:20px; color:#7A3F91;
+                          --fa-animation-duration:4s;
+                          --fa-animation-iteration-count:infinite;
+                          pointer-events:none;"></i>
+
+                <span
+                    x-show="$store.adminNotifs && $store.adminNotifs.unread > 0"
+                    x-cloak
+                    x-transition:enter="transition ease-out duration-200"
+                    x-transition:enter-start="opacity-0 scale-0"
+                    x-transition:enter-end="opacity-100 scale-100"
+                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                           bg-red-500 text-white text-[9px] font-black
+                           flex items-center justify-center px-1 leading-none
+                           shadow-md ring-2 ring-white"
+                    x-text="$store.adminNotifs && $store.adminNotifs.unread > 99
+                                ? '99+'
+                                : ($store.adminNotifs ? $store.adminNotifs.unread : 0)">
+                </span>
+            </button>
         </header>
 
         {{-- Page content --}}
@@ -1068,10 +1115,25 @@
                         }
                     ">
 
-                    {{-- Icon --}}
+                    {{-- Icon (color-coded per notification type) --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         style="background:linear-gradient(135deg,#EDE9F8,#DDD5F0);">
-                        <i class="fas text-[#7A3F91]"
+                         :style="{
+                             background: (
+                                 notif.icon === 'chart-line' ? 'linear-gradient(135deg,#FDECD2,#FBDBAA)' :
+                                 (notif.icon === 'book-open' ? 'linear-gradient(135deg,#D6ECFB,#B7DEF7)' :
+                                 ((notif.icon === 'briefcase' || notif.icon === 'calendar-check') ? 'linear-gradient(135deg,#D6F3E7,#B6E8D2)' :
+                                 (notif.title === 'Audit Log Update' ? 'linear-gradient(135deg,#E5E7EB,#D1D5DB)' :
+                                 'linear-gradient(135deg,#EDE9F8,#DDD5F0)')))
+                             ),
+                             color: (
+                                 notif.icon === 'chart-line' ? '#B45309' :
+                                 (notif.icon === 'book-open' ? '#0369A1' :
+                                 ((notif.icon === 'briefcase' || notif.icon === 'calendar-check') ? '#047857' :
+                                 (notif.title === 'Audit Log Update' ? '#374151' :
+                                 '#7A3F91')))
+                             )
+                         }">
+                        <i class="fas"
                            :class="'fa-' + (notif.icon || 'bell')"
                            style="font-size:15px;"></i>
                     </div>

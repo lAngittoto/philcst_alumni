@@ -18,7 +18,6 @@ new class extends Component {
 
     public string $activeRole   = 'all';
     public string $search       = '';
-    public string $statusFilter = '';
     public string $activeModal  = '';
 
     public string $dFn='', $dMn='', $dLn='', $dSfx='';
@@ -52,37 +51,24 @@ new class extends Component {
     public function mount(): void {
         $filter = session()->pull('admin_alumni_filter', '');
         if ($filter) {
-            $this->activeRole   = 'alumni';
-            $this->statusFilter = match($filter) {
-                'verified'   => 'VERIFIED',
-                'pending'    => 'PENDING',
-                'this_month' => '',
-                default      => '',
-            };
+            $this->activeRole = 'alumni';
         }
         $tab = session()->pull('admin_users_tab', '');
         if ($tab) {
-            $this->activeRole   = $tab;
-            $this->statusFilter = session()->pull('admin_users_status', '');
+            $this->activeRole = $tab;
         }
+        session()->forget('admin_users_status');
     }
 
     private function perPage(): int
     {
-        return match($this->activeRole) {
-            'alumni'                    => 100,
-            'director', 'coordinator',
-            'registrar'                 => 10,
-            default                     => 20,
-        };
+        return 100;
     }
 
-    public function updatingSearch(): void       { $this->currentPage = 1; }
-    public function updatingStatusFilter(): void { $this->currentPage = 1; }
+    public function updatingSearch(): void { $this->currentPage = 1; }
 
-    public function switchTab(string $r, string $status = ''): void {
+    public function switchTab(string $r): void {
         $this->activeRole   = $r;
-        $this->statusFilter = $status;
         $this->search       = '';
         $this->currentPage  = 1;
     }
@@ -147,6 +133,7 @@ new class extends Component {
                 DB::raw("{$st} as computed_status"),
                 DB::raw("COALESCE(al.student_id,'')          as student_id"),
                 DB::raw("COALESCE(al.email,'')               as record_email"),
+                DB::raw("COALESCE(dir.email,'')               as director_email"),
                 DB::raw("COALESCE(org.id_number,'')          as id_number"),
                 DB::raw("COALESCE(org.department,'')         as department"),
                 DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
@@ -165,9 +152,6 @@ new class extends Component {
             $t = '%'.$this->search.'%';
             $q->where(fn($s) => $s->where('users.name','like',$t)->orWhere('users.email','like',$t));
         }
-        if ($this->statusFilter)
-            $q->whereRaw("{$st} = ?", [$this->statusFilter]);
-
         $q->orderBy('users.created_at', 'desc');
 
         $pp    = $this->perPage();
@@ -329,6 +313,14 @@ new class extends Component {
         } elseif ($r->role === 'alumni') {
             $this->ueId   = $id;
             $this->ueName = $r->name;
+        } elseif ($r->role === 'director') {
+            $this->ueEmail = $r->director_email ?? '';
+            $this->ueId    = $id;
+            $this->ueName  = $r->name;
+        } elseif ($r->role === 'registrar') {
+            $this->ueEmail = $r->email ?? '';
+            $this->ueId    = $id;
+            $this->ueName  = $r->name;
         }
         if (in_array($r->role, ['registrar','admin'])) {
             $this->cpId   = $id;
@@ -341,8 +333,12 @@ new class extends Component {
         $this->vPhotoSave = true;
         try {
             if (!$this->vPhoto) { $this->flash('error', 'Please select a photo to upload.'); return; }
+            $role   = $this->vData['role'] ?? '';
+            if (!in_array($role, ['director', 'registrar'])) {
+                $this->flash('error', 'Profile photo can only be uploaded for Directors and Registrars.');
+                return;
+            }
             $this->validate(['vPhoto' => 'image|mimes:jpg,jpeg,png,gif,webp|max:2048']);
-            $role   = $this->vData['role'];
             $userId = $this->vData['id'];
             $folder = match($role) {
                 'alumni'    => 'alumni-photos',
@@ -377,23 +373,46 @@ new class extends Component {
             if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $this->ueErrors = ['general' => ['Please enter a valid email address.']]; return;
             }
-            $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
-            if ($duplicate) {
-                $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another alumni account."]]; return;
+            $role = $this->vData['role'] ?? '';
+
+            if ($role === 'director') {
+                $duplicate = DB::table('director')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another director account."]]; return;
+                }
+                DB::table('director')->where('user_id', $this->ueId)
+                    ->update(['email' => $email, 'updated_at' => now()]);
+                if ($this->vData) $this->vData['director_email'] = $email;
+            } elseif ($role === 'registrar') {
+                $duplicate = DB::table('users')->where('email', $email)->where('id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another account."]]; return;
+                }
+                DB::table('users')->where('id', $this->ueId)
+                    ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
+                if ($this->vData) $this->vData['email'] = $email;
+            } else {
+                $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another alumni account."]]; return;
+                }
+                DB::table('alumni')->where('user_id', $this->ueId)
+                    ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
+                if ($this->vData) $this->vData['record_email'] = $email;
             }
-            DB::table('alumni')->where('user_id', $this->ueId)
-                ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
-            if ($this->vData) $this->vData['record_email'] = $email;
             $this->ueErrors = [];
 
-            // ── DISPATCH: alumni email updated notification ──────────────────
+            // ── DISPATCH: user email updated notification ──────────────────
             $this->dispatch('__admin-user-email-rich', [
                 'uid'   => $this->ueId,
                 'name'  => $this->ueName,
                 'email' => $email,
             ]);
 
-            $this->flash('success', "Email updated for {$this->ueName}. They will be required to reset their password on next login.");
+            $msg = $role === 'director'
+                ? "Email updated for {$this->ueName}."
+                : "Email updated for {$this->ueName}. They will be required to reset their password on next login.";
+            $this->flash('success', $msg);
         } catch (\Illuminate\Database\QueryException $e) {
             $this->ueErrors = ($e->errorInfo[1] ?? null) === 1062
                 ? ['general' => ['That email is already in use by another alumni account.']]
@@ -490,9 +509,11 @@ new class extends Component {
         return asset('storage/alumni-photos/default.png');
     }
 
-    public function displayEmail(string $role, string $email, string $recordEmail): string {
+    public function displayEmail(string $role, string $email, string $recordEmail, string $directorEmail = ''): string {
         if ($role === 'alumni')
             return ($recordEmail && !str_contains($recordEmail,'@pending.local')) ? $recordEmail : '—';
+        if ($role === 'director')
+            return $directorEmail ?: '—';
         return str_ends_with($email, '.internal') ? '—' : $email;
     }
 
@@ -816,28 +837,6 @@ select.mu-filter-input.mu-active {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            @if($activeRole === 'alumni')
-                <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
-                    <option value="">All Statuses</option>
-                    <option value="VERIFIED">Verified</option>
-                    <option value="PENDING">Pending</option>
-                </select>
-            @elseif($activeRole === 'all')
-                <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
-                    <option value="">All Statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="VERIFIED">Verified</option>
-                    <option value="PENDING">Pending</option>
-                    <option value="INACTIVE">Inactive</option>
-                </select>
-            @else
-                <select wire:model.live="statusFilter" class="mu-filter-input {{ $statusFilter ? 'mu-active' : '' }}">
-                    <option value="">All Statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="INACTIVE">Inactive</option>
-                </select>
-            @endif
-
             <button wire:click="switchTab('all')"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
                            bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer"
@@ -854,11 +853,10 @@ select.mu-filter-input.mu-active {
             @if($pu->items->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff;"
                  wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="switchTab,search,statusFilter,goToPage,nextPage,previousPage">
+                 wire:target="switchTab,search,goToPage,nextPage,previousPage">
                 <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10" style="color:#000000;">#</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#000000;">User</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#000000;">Identifier</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#000000;">Email</th>
@@ -871,7 +869,6 @@ select.mu-filter-input.mu-active {
                         @foreach($pu->items as $index => $u)
                         @php
                             $rowStatus  = $u->computed_status ?? $u->user_status ?? 'ACTIVE';
-                            $rowNum     = ($pu->currentPage - 1) * $pu->perPage + $index + 1;
                             $identifier = match($u->role) {
                                 'alumni'    => $u->student_id ?: '—',
                                 'organizer' => $u->id_number  ?: '—',
@@ -882,9 +879,6 @@ select.mu-filter-input.mu-active {
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
                             wire:key="mu-row-{{ $u->id }}" data-mu-row>
-                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
-                            </td>
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-3">
                                     <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $u->name }}"
@@ -903,7 +897,7 @@ select.mu-filter-input.mu-active {
                             </td>
                             <td class="px-4 py-3.5 hidden lg:table-cell">
                                 <p class="text-sm truncate max-w-[200px]" style="color:#000000;">
-                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '') }}
+                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '', $u->director_email ?? '') }}
                                 </p>
                             </td>
                             <td class="px-4 py-3.5 text-center">
@@ -934,13 +928,13 @@ select.mu-filter-input.mu-active {
                 </div>
                 <div>
                     <p class="font-semibold text-base" style="color:#000000;">
-                        {{ ($search || $statusFilter) ? 'No users match your filters' : 'No users found' }}
+                        {{ $search ? 'No users match your filters' : 'No users found' }}
                     </p>
                     <p class="text-sm mt-1" style="color:#000000;">
-                        {{ ($search || $statusFilter) ? 'Try clearing your filters to see all users.' : 'No users are registered in this category yet.' }}
+                        {{ $search ? 'Try clearing your filters to see all users.' : 'No users are registered in this category yet.' }}
                     </p>
                 </div>
-                @if($search || $statusFilter)
+                @if($search)
                 <button wire:click="switchTab('all')"
                         class="px-4 py-2 rounded-xl text-sm font-bold text-white transition cursor-pointer"
                         style="background-color:#7a3f91;">
@@ -960,7 +954,7 @@ select.mu-filter-input.mu-active {
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $pu->from }}&ndash;{{ $pu->to }}</strong>
                 of <strong class="text-white font-bold">{{ $pu->total }}</strong> users
-                @if($statusFilter || $search)
+                @if($search)
                     <span class="text-white/60 text-xs ml-1">(filtered)</span>
                 @endif
             </p>
@@ -1030,7 +1024,7 @@ select.mu-filter-input.mu-active {
     $isDir    = $vRole === 'director';
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
-    $canPhoto = in_array($vRole, ['alumni','organizer','director','registrar']);
+    $canPhoto = in_array($vRole, ['director','registrar']);
     $canToggle= in_array($vRole, ['director','registrar']);
 
     if ($isDir)
@@ -1190,10 +1184,6 @@ select.mu-filter-input.mu-active {
                     </div>
                     @endforeach
                 </div>
-                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Email Address</p>
-                    <p class="text-sm font-semibold break-all" style="color:#000000;">{{ $vd['director_email'] ?: '—' }}</p>
-                </div>
             </div>
             @endif
 
@@ -1233,15 +1223,26 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- UPDATE EMAIL — Alumni --}}
-            @if($isAlumni)
+            {{-- UPDATE EMAIL — Alumni / Director / Registrar --}}
+            @if($isAlumni || $isDir || $isReg)
+            @php
+                $ueCurrent = match(true) {
+                    $isAlumni => (!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null,
+                    $isDir    => $vd['director_email'] ?: null,
+                    $isReg    => $vd['email'] ?: null,
+                    default   => null,
+                };
+                $ueNote = $isDir
+                    ? 'This is the director\'s contact email. It is not used to log in.'
+                    : 'Updating the email will require the account to reset their password on next login.';
+            @endphp
             <div class="border-t border-[#E8E0F0] pt-5">
                 <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Email Address</p>
                 <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] mb-3">
                     <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
                     <p class="text-sm font-semibold break-all" style="color:#000000;">
-                        @if(!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local'))
-                            {{ $vd['record_email'] }}
+                        @if($ueCurrent)
+                            {{ $ueCurrent }}
                         @else
                             <span class="italic" style="color:#000000;">Not set</span>
                         @endif
@@ -1271,10 +1272,11 @@ select.mu-filter-input.mu-active {
                 </div>
                 <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
                     <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">Updating the email will require the alumni to reset their password on next login.</p>
+                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">{{ $ueNote }}</p>
                 </div>
             </div>
             @endif
+
 
             {{-- CHANGE PASSWORD — Registrar / Admin --}}
             @if($isReg || $isAdmin)

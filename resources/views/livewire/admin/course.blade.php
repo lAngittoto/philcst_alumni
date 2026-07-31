@@ -194,7 +194,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-6 max-w-screen-2xl mx-auto" style="height:90vh;">
+<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-6 max-w-screen-2xl mx-auto h-full min-h-0">
 
 <style>
 [x-cloak] { display: none !important; }
@@ -246,7 +246,7 @@ new class extends Component {
         </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 items-start flex-1 min-h-0">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 flex-1 min-h-0 items-start">
 
         {{-- ── Add / Edit Form ──────────────────────────────────────── --}}
         <div class="lg:col-span-2">
@@ -350,8 +350,9 @@ new class extends Component {
         </div>
 
         {{-- ── Course List ─────────────────────────────────────────── --}}
-        <div class="lg:col-span-3 h-full min-h-0 flex flex-col">
-            <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden flex flex-col flex-1 min-h-0">
+        <div class="lg:col-span-3" style="max-height: 620px;">
+            <div class="bg-white rounded-2xl shadow-sm border border-[#E8E0F0] overflow-hidden flex flex-col"
+                 style="max-height: 620px;">
 
                 {{-- Card Header --}}
                 <div class="px-5 py-3.5 border-b border-[#E8E0F0] flex items-center justify-between shrink-0"
