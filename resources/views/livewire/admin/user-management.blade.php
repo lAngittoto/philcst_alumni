@@ -521,10 +521,29 @@ new class extends Component {
         if (str_ends_with($email, '.internal')) return explode('@', $email)[0];
         return $name ?: explode('@', $email)[0];
     }
+
+    /**
+     * Wraps every case-insensitive occurrence of the current search term
+     * inside $text with a highlighted <mark> span. Safe against XSS:
+     * $text is HTML-escaped first, then the highlight markup is injected —
+     * so this must always be output with {!! !!} in the view, never {{ }}.
+     */
+    public function highlightText(?string $text): string {
+        $safe = e($text ?? '');
+        $term = trim($this->search);
+        if ($term === '') return $safe;
+
+        $escapedTerm = preg_quote(e($term), '/');
+        return preg_replace(
+            '/(' . $escapedTerm . ')/i',
+            '<mark class="mu-search-highlight">$1</mark>',
+            $safe
+        );
+    }
 };
 ?>
 
-<div class="flex flex-col" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col mu-page-root" style="height:90vh; overflow:hidden;">
 
 <style>
 .mu-filter-input {
@@ -560,6 +579,12 @@ select.mu-filter-input.mu-active {
 }
 @media (max-width: 768px) { .mu-stat-grid { grid-template-columns: 1fr 1fr; } }
 
+/* ── Mobile: let the whole layout use more of the real viewport height ── */
+@media (max-width: 640px) {
+    .mu-page-root { height: 96vh !important; max-height: 96vh !important; }
+    .mu-main-layout { height: calc(96vh - 90px) !important; max-height: calc(96vh - 90px) !important; }
+}
+
 .mu-stat-card {
     background: #ffffff;
     border: 1px solid #E8E0F0;
@@ -587,6 +612,13 @@ select.mu-filter-input.mu-active {
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
     flex: 1; min-height: 0;
 }
+
+/* ── Mobile: give the table far more of the viewport, shrink the
+     surrounding chrome (stat cards, header) so the table reads full-length
+     instead of a short strip with a fixed page scroll underneath. ── */
+@media (max-width: 640px) {
+    .mu-table-block { min-height: 60vh; }
+}
 .mu-table-block-filter {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.6rem 0.875rem; flex-shrink: 0;
@@ -606,49 +638,19 @@ select.mu-filter-input.mu-active {
 }
 .mu-tbl-row:hover { background-color: #f5f0fa !important; }
 
-/* ── Hover tooltip ── */
-#mu-hover-tip {
-    position: fixed;
-    background: #1a1a1a;
-    color: #ffffff;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .07em;
-    text-transform: uppercase;
-    padding: 7px 14px 7px 10px;
-    border-radius: 8px;
-    white-space: nowrap;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .12s ease;
-    z-index: 99999;
-    box-shadow: 0 6px 24px rgba(0,0,0,.40);
-    transform: translate(14px, -120%);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-#mu-hover-tip.visible { opacity: 1; }
-#mu-hover-tip::after {
-    content: '';
-    position: absolute;
-    top: 100%; left: 18px;
-    border: 5px solid transparent;
-    border-top-color: #1a1a1a;
-}
-#mu-hover-tip .tip-dot {
-    width: 20px; height: 20px;
-    background: rgba(255,255,255,0.15);
-    border-radius: 5px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    font-size: 10px;
-}
-
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ── Search / filter loading progress bar (same pattern as Event Organizer) ── */
+.mu-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
+.mu-filter-progress-bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
+    animation: muFilterProgress 1s ease-in-out infinite;
+}
+@keyframes muFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
 
 .mu-tab-pill {
     display: inline-flex; align-items: center; gap: 0.375rem;
@@ -692,13 +694,16 @@ select.mu-filter-input.mu-active {
     text-transform: uppercase;
     white-space: nowrap;
 }
-</style>
 
-{{-- Row hover tooltip --}}
-<div id="mu-hover-tip">
-    <span class="tip-dot"><i class="fas fa-eye"></i></span>
-    <span>View &amp; Edit Details</span>
-</div>
+/* ── Search match highlight ── */
+.mu-search-highlight {
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-weight: 700;
+    border-radius: 3px;
+    padding: 0 2px;
+}
+</style>
 
 {{-- FLASH TOAST --}}
 <div
@@ -726,7 +731,7 @@ select.mu-filter-input.mu-active {
 </div>
 
 {{-- MAIN LAYOUT --}}
-<div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full mu-main-layout" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow:hidden;">
 
     {{-- PAGE HEADER --}}
     <div class="flex items-center gap-4 flex-shrink-0">
@@ -807,7 +812,8 @@ select.mu-filter-input.mu-active {
     <div class="mu-table-block min-h-0">
 
         {{-- FILTER BAR --}}
-        <div class="mu-table-block-filter flex flex-wrap gap-2 items-center">
+        <div class="mu-table-block-filter flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="switchTab,search,goToPage,nextPage,previousPage">
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">Filters</div>
 
@@ -846,13 +852,18 @@ select.mu-filter-input.mu-active {
             </button>
         </div>
 
+        {{-- Filtering / searching / paging progress bar --}}
+        <div class="mu-filter-progress-track flex-shrink-0" wire:loading wire:target="switchTab,search,goToPage,nextPage,previousPage">
+            <div class="mu-filter-progress-bar"></div>
+        </div>
+
         {{-- TABLE --}}
         @php $pu = $this->users; @endphp
         <div class="relative flex-1 min-h-0 flex flex-col">
 
             @if($pu->items->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c" style="background:#fff;"
-                 wire:loading.class="opacity-40 pointer-events-none"
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c transition-opacity duration-200" style="background:#fff;"
+                 wire:loading.class="opacity-60 pointer-events-none"
                  wire:target="switchTab,search,goToPage,nextPage,previousPage">
                 <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
@@ -878,14 +889,14 @@ select.mu-filter-input.mu-active {
                             $roleCss     = $this->roleBadge($u->role);
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
-                            wire:key="mu-row-{{ $u->id }}" data-mu-row>
+                            wire:key="mu-row-{{ $u->id }}">
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-3">
                                     <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $u->name }}"
                                          class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                     <div class="min-w-0">
                                         <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#000000;">
-                                            {{ $u->role === 'admin' ? $this->adminUsername($u->email, $u->name) : $u->name }}
+                                            {!! $this->highlightText($u->role === 'admin' ? $this->adminUsername($u->email, $u->name) : $u->name) !!}
                                         </p>
                                     </div>
                                 </div>
@@ -897,7 +908,7 @@ select.mu-filter-input.mu-active {
                             </td>
                             <td class="px-4 py-3.5 hidden lg:table-cell">
                                 <p class="text-sm truncate max-w-[200px]" style="color:#000000;">
-                                    {{ $this->displayEmail($u->role, $u->email, $u->record_email ?? '', $u->director_email ?? '') }}
+                                    {!! $this->highlightText($this->displayEmail($u->role, $u->email, $u->record_email ?? '', $u->director_email ?? '')) !!}
                                 </p>
                             </td>
                             <td class="px-4 py-3.5 text-center">
@@ -1542,6 +1553,60 @@ select.mu-filter-input.mu-active {
 </div>
 @endif
 
+
+<script>
+(function () {
+    var root = document.currentScript.closest('div') || document.querySelector('[wire\\:id]');
+
+    function findScrollableAncestors(el) {
+        var found = [];
+        var node = el ? el.parentElement : null;
+        while (node && node !== document.body) {
+            var cs = window.getComputedStyle(node);
+            if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 1) {
+                found.push(node);
+            }
+            node = node.parentElement;
+        }
+        return found;
+    }
+
+    var lockedNodes = [];
+    var prevStyles = [];
+
+    function lockScroll() {
+        var scrollEl = document.querySelector('[wire\\:id]') || document.body;
+        var ancestors = findScrollableAncestors(scrollEl);
+
+        [document.documentElement, document.body].concat(ancestors).forEach(function (node) {
+            if (lockedNodes.indexOf(node) !== -1) return;
+            prevStyles.push([node, node.style.overflow, node.style.overflowY]);
+            node.style.overflow = 'hidden';
+            node.style.overflowY = 'hidden';
+            lockedNodes.push(node);
+        });
+    }
+
+    function restore() {
+        prevStyles.forEach(function (entry) {
+            entry[0].style.overflow = entry[1];
+            entry[0].style.overflowY = entry[2];
+        });
+        lockedNodes = [];
+        prevStyles = [];
+        document.removeEventListener('livewire:navigating', restore);
+        window.removeEventListener('beforeunload', restore);
+    }
+
+    lockScroll();
+    // Re-check shortly after mount in case the parent layout renders async
+    setTimeout(lockScroll, 150);
+    setTimeout(lockScroll, 500);
+
+    document.addEventListener('livewire:navigating', restore);
+    window.addEventListener('beforeunload', restore);
+})();
+</script>
 
 <script>
 (function () {

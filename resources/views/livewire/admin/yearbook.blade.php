@@ -242,7 +242,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col h-full min-h-0" style="overflow:hidden;">
 
 <style>
 /* ── Card hover ── */
@@ -443,7 +443,7 @@ new class extends Component {
 </style>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full flex-1 min-h-0" style="overflow:hidden;">
 
     {{-- ══ PAGE HEADER ══ --}}
     <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
@@ -461,10 +461,6 @@ new class extends Component {
             <span class="yb-adm-chip">
                 <i class="fas fa-graduation-cap text-[10px]"></i>
                 {{ number_format($this->totalAlumni) }} Alumni
-            </span>
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide self-start sm:self-center">
-                <i class="fas fa-shield-halved text-purple-600 text-[10px]"></i>
-                Admin Control Panel
             </span>
         </div>
     </div>

@@ -392,7 +392,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col h-full min-h-0" style="overflow: hidden;">
 
 <style>
 @keyframes admModalIn {
@@ -410,6 +410,43 @@ new class extends Component {
 .adm-scroll::-webkit-scrollbar-track { background: #eeeeee; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb { background: #cccccc; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ── Search / filter loading progress bar (same pattern as Event Organizer / User Management) ── */
+.adm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
+.adm-filter-progress-bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
+    animation: admFilterProgress 1s ease-in-out infinite;
+}
+@keyframes admFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* ── Table container height — mirrors .dir-table-card on Manage Event (Director) ── */
+.adm-table-card { display: flex; flex-direction: column; min-height: 0; height: 58vh; max-height: 58vh; }
+
+@media (max-width: 640px) {
+    .adm-table-card {
+        border-radius: 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+    }
+}
+
+/* ══ Mobile stacked card row — mirrors .dir-mrow on Manage Event (Director) ══ */
+.adm-mrow {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #fff;
+    border-bottom: 1px solid #F0ECF5;
+    padding: 12px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: background .08s ease;
+}
+.adm-mrow:active { background: #F7F4FA; }
 
 select.adm-select-arrow {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23111111' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
@@ -462,14 +499,14 @@ select.adm-select-arrow {
 }
 .vw-value {
     font-size: 0.875rem;
-    font-weight: 700;
+    font-weight: 600;
     color: #111111;
     line-height: 1.5;
 }
 .vw-subvalue {
     font-size: 0.75rem;
-    font-weight: 600;
-    color: #111111;
+    font-weight: 400;
+    color: #555555;
     margin-top: 2px;
 }
 .vw-chip {
@@ -493,8 +530,9 @@ select.adm-select-arrow {
 }
 .vw-body-box {
     font-size: 0.875rem;
+    font-weight: 400;
     line-height: 1.8;
-    color: #111111;
+    color: #333333;
     white-space: pre-wrap;
     background: #ffffff;
     border: 1.5px solid #e0e0e0;
@@ -547,21 +585,23 @@ select.adm-select-arrow {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ── PAGE HEADER ── --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-calendar-days text-white text-lg"></i>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-calendar-days text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#111111]">Event Monitoring</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#111111]">Review and monitor all event submissions across colleges.</p>
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Event Monitoring</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    Review and monitor submissions across
+                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                        <i class="fas fa-building-columns text-[9px]"></i>
+                        all colleges
+                    </span>
+                </p>
             </div>
         </div>
-        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide self-start sm:self-center">
-            <i class="fas fa-shield-halved text-purple-600 text-[10px]"></i>
-            Admin Control Panel
-        </span>
     </div>
 
     {{-- ── STAT CARDS ── --}}
@@ -613,10 +653,11 @@ select.adm-select-arrow {
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 65vh; max-height: 65vh; overflow: hidden;">
+    <div class="adm-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterSort,filterCollege">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
@@ -705,23 +746,32 @@ select.adm-select-arrow {
             </select>
         </div>
 
+        {{-- Filtering / searching progress bar --}}
+        <div class="adm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterSort,filterCollege">
+            <div class="adm-filter-progress-bar"></div>
+        </div>
+
         {{-- ── TABLE WRAPPER ── --}}
         <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
 
             @if($this->events->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white">
-                <table class="w-full bg-white border-collapse">
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
+                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterSort,filterCollege">
+                {{-- ── DESKTOP / TABLET: table view ── --}}
+                <table class="w-full bg-white border-collapse hidden md:table table-fixed">
+                    <colgroup>
+                        <col style="width:32%;"><col style="width:20%;"><col style="width:22%;"><col style="width:14%;"><col style="width:12%;">
+                    </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #e0e0e0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest w-10 text-[#111111]">#</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-[#111111]">Event Title</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest hidden md:table-cell text-[#111111]">Date &amp; Time</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest hidden lg:table-cell text-[#111111]">Coordinator</th>
-                            <th class="px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-[#111111]">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest w-24 text-[#111111]"></th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-[#f0f0f0]">
+                    <tbody class="divide-y divide-[#F5F5F5]">
                         @foreach($this->events as $index => $event)
                         @php
                             $isCompleted = $event->status === 'COMPLETED';
@@ -736,18 +786,14 @@ select.adm-select-arrow {
                             wire:key="adm-event-row-{{ $event->id }}"
                             data-adm-row>
 
-                            <td class="px-4 py-3.5 text-xs font-bold text-purple-400 text-center">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $event->title }}</p>
+                                <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $eventDate->diffForHumans() }}</p>
                             </td>
 
-                            <td class="px-4 py-3.5 max-w-[230px]">
-                                <p class="font-bold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $event->title }}</p>
-                                <p class="text-xs mt-0.5 text-[#111111]">{{ $eventDate->diffForHumans() }}</p>
-                            </td>
-
-                            <td class="px-4 py-3.5 hidden md:table-cell whitespace-nowrap">
-                                <p class="text-sm font-bold text-[#111111]">{{ $eventDate->format('M d, Y') }}</p>
-                                <p class="text-xs mt-0.5 font-semibold text-[#111111]">
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+                                <p class="text-sm font-semibold text-[#111111] truncate">{{ $eventDate->format('M d, Y') }}</p>
+                                <p class="text-xs mt-0.5 text-[#555555] truncate">
                                     {{ $eventDate->format('g:i A') }}
                                     @if($event->event_end_date)
                                         &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}
@@ -755,9 +801,9 @@ select.adm-select-arrow {
                                 </p>
                             </td>
 
-                            <td class="px-4 py-3.5 hidden lg:table-cell max-w-[160px]">
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
                                 @if($event->organizer)
-                                    <p class="text-sm font-bold text-[#111111] truncate">{{ $event->organizer->name }}</p>
+                                    <p class="text-sm font-semibold text-[#111111] truncate">{{ $event->organizer->name }}</p>
                                     <p class="text-xs mt-0.5 text-[#7a3f91] font-semibold truncate">{{ $event->organizer->department }}</p>
                                 @else
                                     <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-bold whitespace-nowrap">
@@ -766,35 +812,37 @@ select.adm-select-arrow {
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5 text-center">
+                            <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
                                 @if($isCompleted)
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
                                         <i class="fas fa-flag-checkered text-[9px] mr-1"></i>Completed
                                     </span>
                                 @elseif($isApproved)
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
                                         <i class="fas fa-circle-check text-[9px] mr-1"></i>Approved
                                     </span>
                                 @elseif($isPending)
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
                                         <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
                                     </span>
                                 @else
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
                                         <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
                                     </span>
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5">
-                                <div class="flex items-center justify-end gap-1.5" @click.stop>
+                            <td class="px-4 sm:px-5 py-4 text-center">
+                                <div class="flex items-center justify-center gap-1.5" @click.stop>
                                     @if($isApproved || $isCompleted)
                                         <button wire:click.stop="openShareModal({{ $event->id }})"
                                                 data-adm-action data-tip="Share"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-bold transition cursor-pointer
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
                                                        bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
                                             <i class="fas fa-share-nodes"></i>
                                         </button>
+                                    @else
+                                        <span class="text-xs text-[#bbbbbb]">&mdash;</span>
                                     @endif
                                 </div>
                             </td>
@@ -802,6 +850,60 @@ select.adm-select-arrow {
                         @endforeach
                     </tbody>
                 </table>
+
+                {{-- ── MOBILE: stacked card list ── --}}
+                <div class="block md:hidden">
+                    @foreach($this->events as $index => $event)
+                    @php
+                        $isCompleted = $event->status === 'COMPLETED';
+                        $isApproved  = $event->status === 'APPROVED';
+                        $isPending   = $event->status === 'PENDING';
+                        $isRejected  = $event->status === 'REJECTED';
+                        $eventDate   = $event->event_date->setTimezone('Asia/Manila');
+                        $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
+                    @endphp
+                    <div class="adm-mrow" wire:click="viewEvent({{ $event->id }})" wire:key="adm-event-mrow-{{ $event->id }}">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-2">
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $event->title }}</p>
+                                @if($isCompleted)
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-green-200 bg-green-50 text-green-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-flag-checkered text-[8px] mr-1"></i>Completed
+                                    </span>
+                                @elseif($isApproved)
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-circle-check text-[8px] mr-1"></i>Approved
+                                    </span>
+                                @elseif($isPending)
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-hourglass-half text-[8px] mr-1"></i>Pending
+                                    </span>
+                                @else
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-circle-xmark text-[8px] mr-1"></i>Rejected
+                                    </span>
+                                @endif
+                            </div>
+                            <p class="text-xs mt-1 text-[#666666]">
+                                {{ $eventDate->format('M d, Y · g:i A') }}
+                            </p>
+                            <div class="flex items-center justify-between mt-2">
+                                <p class="text-xs text-[#7a3f91] font-semibold truncate">
+                                    {{ $event->organizer?->name ?? 'Alumni Director' }}
+                                </p>
+                                @if($isApproved || $isCompleted)
+                                    <button wire:click.stop="openShareModal({{ $event->id }})"
+                                            aria-label="Share"
+                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer flex-shrink-0
+                                                   bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400">
+                                        <i class="fas fa-share-nodes"></i>
+                                    </button>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                    @endforeach
+                </div>
             </div>
 
             @else
@@ -965,10 +1067,10 @@ select.adm-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden adm-scroll">
 
         {{-- LEFT PANEL — white bg, vw-field cards --}}
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e0e0e0] overflow-y-auto adm-scroll" style="background:#ffffff;">
+        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e0e0e0] overflow-visible lg:overflow-y-auto adm-scroll" style="background:#ffffff;">
 
             {{-- Photo / gradient placeholder --}}
             @if($hasPhoto)
@@ -1068,16 +1170,10 @@ select.adm-select-arrow {
         </div>
 
         {{-- RIGHT PANEL — light gray bg (#f2f2f2) --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden" style="background:#f2f2f2;">
+        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden" style="background:#f2f2f2;">
 
-            {{-- Chips strip + RSVP — white bg for contrast --}}
+            {{-- RSVP summary — white bg for contrast --}}
             <div class="flex-shrink-0 px-5 py-3 border-b border-[#e0e0e0]" style="background:#ffffff;">
-                <div class="flex flex-wrap gap-2 items-center mb-2.5">
-                    <span class="vw-chip {{ $vStatusColor }}">{{ $vStatusLabel }}</span>
-                    @if($ev->target_participants)
-                        <span class="vw-chip">{{ Str::limit($ev->target_participants, 40) }}</span>
-                    @endif
-                </div>
                 @if($totalRsvp > 0)
                     <div class="flex items-center gap-2 flex-wrap">
                         <div class="flex flex-col items-center px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl min-w-[64px]">
@@ -1102,7 +1198,7 @@ select.adm-select-arrow {
             </div>
 
             {{-- Scrollable body sections --}}
-            <div class="flex-1 min-h-0 overflow-y-auto adm-scroll px-5 py-5 flex flex-col gap-5" style="background:#f2f2f2;">
+            <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto adm-scroll px-5 py-5 flex flex-col gap-5" style="background:#f2f2f2;">
 
                 @if($ev->description)
                 <div>
@@ -1424,6 +1520,57 @@ select.adm-select-arrow {
 @endif
 
 </div>
+
+<script>
+(function () {
+    function findScrollableAncestors(el) {
+        var found = [];
+        var node = el ? el.parentElement : null;
+        while (node && node !== document.body) {
+            var cs = window.getComputedStyle(node);
+            if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 1) {
+                found.push(node);
+            }
+            node = node.parentElement;
+        }
+        return found;
+    }
+
+    var lockedNodes = [];
+    var prevStyles = [];
+
+    function lockScroll() {
+        var scrollEl = document.querySelector('[wire\\:id]') || document.body;
+        var ancestors = findScrollableAncestors(scrollEl);
+
+        [document.documentElement, document.body].concat(ancestors).forEach(function (node) {
+            if (lockedNodes.indexOf(node) !== -1) return;
+            prevStyles.push([node, node.style.overflow, node.style.overflowY]);
+            node.style.overflow = 'hidden';
+            node.style.overflowY = 'hidden';
+            lockedNodes.push(node);
+        });
+    }
+
+    function restore() {
+        prevStyles.forEach(function (entry) {
+            entry[0].style.overflow = entry[1];
+            entry[0].style.overflowY = entry[2];
+        });
+        lockedNodes = [];
+        prevStyles = [];
+        document.removeEventListener('livewire:navigating', restore);
+        window.removeEventListener('beforeunload', restore);
+    }
+
+    lockScroll();
+    setTimeout(lockScroll, 150);
+    setTimeout(lockScroll, 500);
+
+    document.addEventListener('livewire:navigating', restore);
+    window.addEventListener('beforeunload', restore);
+})();
+</script>
 
 <script>
 (function () {

@@ -388,7 +388,7 @@ new class extends Component {
                                 <p class="font-semibold text-[#333333] text-xl font-mono leading-tight uppercase">
                                     {{ $c['code'] }}
                                 </p>
-                                <p class="text-[#333333] text-xl font-normal mt-0.5 leading-snug truncate max-w-xs">
+                                <p class="text-[#333333] text-xl font-normal mt-0.5 leading-snug break-words">
                                     {{ $c['name'] }}
                                 </p>
                             </div>

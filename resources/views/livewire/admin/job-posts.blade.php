@@ -431,7 +431,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col h-full min-h-0" style="overflow: hidden;">
 
 <style>
 @keyframes admModalIn {
@@ -449,6 +449,28 @@ new class extends Component {
 .adm-scroll::-webkit-scrollbar-track { background: #eeeeee; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb { background: #cccccc; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+/* ── Search / filter loading progress bar (same pattern as Event Organizer / User Management) ── */
+.adm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
+.adm-filter-progress-bar {
+    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
+    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
+    animation: admFilterProgress 1s ease-in-out infinite;
+}
+@keyframes admFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
+
+/* ── Table container height — locked, no page-level scroll ── */
+.adm-table-card { display: flex; flex-direction: column; min-height: 0; height: 58vh; max-height: 58vh; }
+
+@media (max-width: 640px) {
+    .adm-table-card {
+        border-radius: 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+    }
+}
 
 select.adm-select-arrow {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23111111' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
@@ -510,14 +532,14 @@ select.adm-select-arrow {
 }
 .vw-value {
     font-size: 0.875rem;
-    font-weight: 700;
+    font-weight: 600;
     color: #111111;
     line-height: 1.5;
 }
 .vw-subvalue {
     font-size: 0.75rem;
-    font-weight: 600;
-    color: #111111;
+    font-weight: 400;
+    color: #555555;
     margin-top: 2px;
 }
 
@@ -547,8 +569,9 @@ select.adm-select-arrow {
 /* Right panel body text box — light gray bg, black text */
 .vw-body-box {
     font-size: 0.875rem;
+    font-weight: 400;
     line-height: 1.8;
-    color: #111111;
+    color: #333333;
     white-space: pre-wrap;
     background: #ffffff;
     border: 1.5px solid #e0e0e0;
@@ -610,10 +633,6 @@ select.adm-select-arrow {
                 <p class="text-xs leading-relaxed mt-0.5 text-[#111111]">Monitor and review all job listings across colleges.</p>
             </div>
         </div>
-        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide self-start sm:self-center">
-            <i class="fas fa-shield-halved text-purple-600 text-[10px]"></i>
-            Admin Control Panel
-        </span>
     </div>
 
     {{-- ── STAT CARDS ── --}}
@@ -667,10 +686,11 @@ select.adm-select-arrow {
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-shrink-0" style="height: 65vh; max-height: 65vh; overflow: hidden;">
+    <div class="adm-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
@@ -783,15 +803,20 @@ select.adm-select-arrow {
             </select>
         </div>
 
+        {{-- Filtering / searching progress bar --}}
+        <div class="adm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterType,filterCollege">
+            <div class="adm-filter-progress-bar"></div>
+        </div>
+
         {{-- ── TABLE WRAPPER ── --}}
         <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
 
             @if($this->jobPostings->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white">
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
+                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege">
                 <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #e0e0e0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest w-10 text-[#111111]">#</th>
                             <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-[#111111]">Job Title</th>
                             <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest hidden lg:table-cell text-[#111111]">Coordinator</th>
                             <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest hidden md:table-cell text-[#111111]">Type</th>
@@ -816,10 +841,6 @@ select.adm-select-arrow {
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="admjob-row-{{ $job->id }}"
                             data-admjob-row>
-
-                            <td class="px-4 py-3.5 text-xs font-bold text-purple-400 text-center">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
-                            </td>
 
                             <td class="px-4 py-3.5 max-w-[230px]">
                                 <p class="font-bold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $job->job_title }}</p>
@@ -1051,10 +1072,10 @@ select.adm-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden adm-scroll">
 
         {{-- LEFT PANEL — white bg, white field cards --}}
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e0e0e0] overflow-y-auto adm-scroll" style="background:#ffffff;">
+        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e0e0e0] overflow-visible lg:overflow-y-auto adm-scroll" style="background:#ffffff;">
 
             <div class="mx-4 mt-4 mb-0 flex-shrink-0 rounded-xl overflow-hidden" style="height:150px;">
                 <img src="{{ $vJobImgUrl }}" alt="{{ $vj->job_title }}"
@@ -1138,24 +1159,10 @@ select.adm-select-arrow {
         </div>
 
         {{-- RIGHT PANEL — light gray bg (#f2f2f2), black text, white body boxes --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden" style="background:#f2f2f2;">
-
-            {{-- Chips strip — white bg for contrast --}}
-            <div class="flex-shrink-0 px-5 py-3 border-b border-[#e0e0e0]" style="background:#ffffff;">
-                <div class="flex flex-wrap gap-2 items-center">
-                    <span class="vw-chip">{{ $vj->employment_type }}</span>
-                    <span class="vw-chip">{{ $vj->experience_level }}</span>
-                    @if($vIsUrgent)
-                        <span class="vw-chip" style="color:#ea580c;">{{ $vDaysLeft === 0 ? 'Closing today' : ($vDaysLeft === 1 ? '1 day left' : $vDaysLeft.' days left') }}</span>
-                    @endif
-                    @if($vIsExp)
-                        <span class="vw-chip" style="color:#dc2626;">Deadline Passed</span>
-                    @endif
-                </div>
-            </div>
+        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden" style="background:#f2f2f2;">
 
             {{-- Scrollable body sections --}}
-            <div class="flex-1 min-h-0 overflow-y-auto adm-scroll px-5 py-5 flex flex-col gap-5" style="background:#f2f2f2;">
+            <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto adm-scroll px-5 py-5 flex flex-col gap-5" style="background:#f2f2f2;">
 
                 @if($vj->description)
                 <div>
@@ -1429,6 +1436,57 @@ select.adm-select-arrow {
 @endif
 
 </div>
+
+<script>
+(function () {
+    function findScrollableAncestors(el) {
+        var found = [];
+        var node = el ? el.parentElement : null;
+        while (node && node !== document.body) {
+            var cs = window.getComputedStyle(node);
+            if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 1) {
+                found.push(node);
+            }
+            node = node.parentElement;
+        }
+        return found;
+    }
+
+    var lockedNodes = [];
+    var prevStyles = [];
+
+    function lockScroll() {
+        var scrollEl = document.querySelector('[wire\\:id]') || document.body;
+        var ancestors = findScrollableAncestors(scrollEl);
+
+        [document.documentElement, document.body].concat(ancestors).forEach(function (node) {
+            if (lockedNodes.indexOf(node) !== -1) return;
+            prevStyles.push([node, node.style.overflow, node.style.overflowY]);
+            node.style.overflow = 'hidden';
+            node.style.overflowY = 'hidden';
+            lockedNodes.push(node);
+        });
+    }
+
+    function restore() {
+        prevStyles.forEach(function (entry) {
+            entry[0].style.overflow = entry[1];
+            entry[0].style.overflowY = entry[2];
+        });
+        lockedNodes = [];
+        prevStyles = [];
+        document.removeEventListener('livewire:navigating', restore);
+        window.removeEventListener('beforeunload', restore);
+    }
+
+    lockScroll();
+    setTimeout(lockScroll, 150);
+    setTimeout(lockScroll, 500);
+
+    document.addEventListener('livewire:navigating', restore);
+    window.addEventListener('beforeunload', restore);
+})();
+</script>
 
 <script>
 (function () {
