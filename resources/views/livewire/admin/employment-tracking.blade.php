@@ -310,8 +310,8 @@ new class extends Component {
     public function refreshAll(): void
     {
         $this->computeStats();
+        $this->refreshCompareOptionsList();
         $this->buildAllCharts();
-        $this->buildCompareOptions();
     }
 
     public function computeStats(): void
@@ -533,15 +533,35 @@ new class extends Component {
         ]);
     }
 
-    public function buildCompareOptions(): void
+    private function computeCompareOptionsList(): array
     {
         if ($this->compareMode === 'college') {
-            $this->compareOptions = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values()->toArray();
+            return DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values()->toArray();
         } elseif ($this->compareMode === 'course') {
-            $this->compareOptions = DB::table('courses')->orderBy('code')->pluck('code')->toArray();
-        } else {
-            $this->compareOptions = DB::table('alumni')->whereNull('deleted_at')->distinct()->orderBy('batch', 'desc')->pluck('batch')->toArray();
+            return DB::table('courses')->orderBy('code')->pluck('code')->toArray();
         }
+        return DB::table('alumni')->whereNull('deleted_at')->distinct()->orderBy('batch', 'desc')->pluck('batch')->toArray();
+    }
+
+    /**
+     * Refreshes the dropdown option list only (e.g. a new college/course/batch
+     * may have appeared). Does NOT touch the person's current compareA/compareB
+     * selection — called on every filter change via refreshAll(), so it must
+     * never wipe an in-progress comparison.
+     */
+    private function refreshCompareOptionsList(): void
+    {
+        $this->compareOptions = $this->computeCompareOptionsList();
+    }
+
+    /**
+     * Full reset — used only when the compare MODE itself changes
+     * (college/course/batch), since the previous A/B selections no longer
+     * make sense under the new mode.
+     */
+    public function buildCompareOptions(): void
+    {
+        $this->compareOptions = $this->computeCompareOptionsList();
         $this->compareA = '';
         $this->compareB = '';
         $this->chartCompareSideBySide = '{}';
@@ -581,7 +601,7 @@ new class extends Component {
     $activeSelect  = 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold';
     $selectArrow   = "background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.6rem center;background-size:1.25em 1.25em;";
 
-    $statCard      = 'bg-white border border-[#E8E0F0] rounded-xl px-3.5 py-3 flex flex-row items-center gap-3 cursor-pointer transition-all duration-150 hover:border-[#c4b5d4] hover:shadow-[0_3px_10px_rgba(122,63,145,0.10)]';
+    $statCard      = 'bg-white border border-[#E8E0F0] rounded-xl px-3.5 py-3 flex flex-row items-center gap-3 transition-all duration-150';
     $statIcon      = 'w-[46px] h-[46px] rounded-xl flex items-center justify-center flex-shrink-0';
 
     $chartCard     = 'bg-white border border-[#E8E0F0] rounded-2xl overflow-hidden shadow-[0_1px_4px_rgba(0,0,0,0.04)]';
@@ -637,7 +657,7 @@ new class extends Component {
                     aria-label="Compare Tool">
                 <i class="fa-solid fa-code-compare text-[0.95rem]"></i>
             </button>
-            <span class="absolute bottom-[calc(100%+8px)] right-0 whitespace-nowrap bg-[#1a0a2e] text-white text-[0.72rem] font-semibold px-2.5 py-[5px] rounded-lg pointer-events-none opacity-0 translate-y-1 transition-all duration-150 z-[99] shadow-[0_4px_12px_rgba(0,0,0,0.25)] group-hover:opacity-100 group-hover:translate-y-0 after:content-[''] after:absolute after:top-full after:right-[10px] after:border-[5px] after:border-transparent after:border-t-[#1a0a2e]">
+            <span class="absolute top-[calc(100%+8px)] right-0 whitespace-nowrap bg-[#1a0a2e] text-white text-[0.72rem] font-semibold px-2.5 py-[5px] rounded-lg pointer-events-none opacity-0 -translate-y-1 transition-all duration-150 z-[99] shadow-[0_4px_12px_rgba(0,0,0,0.25)] group-hover:opacity-100 group-hover:translate-y-0 after:content-[''] after:absolute after:bottom-full after:right-[10px] after:border-[5px] after:border-transparent after:border-b-[#1a0a2e]">
                 Compare Tool
             </span>
         </div>
@@ -731,7 +751,7 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ── STAT CARDS (Emp Rate removed · Local/Abroad now clickable) ── --}}
+    {{-- ── STAT CARDS (view-only, Emp Rate removed) ── --}}
     <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0"
          wire:loading.class="{{ $wireFade }}"
          wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
@@ -741,7 +761,7 @@ new class extends Component {
         @endphp
 
         {{-- Total --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','all')" title="View all alumni">
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#6d2f84] to-[#9b59b6]">
                 <i class="fas fa-users text-white text-[1.15rem]"></i>
             </div>
@@ -753,7 +773,7 @@ new class extends Component {
         </div>
 
         {{-- Employed --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','employed')" title="View Employed">
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#027a4f] to-[#059669]">
                 <i class="fas fa-briefcase text-white text-[1.15rem]"></i>
             </div>
@@ -765,7 +785,7 @@ new class extends Component {
         </div>
 
         {{-- Self-Employed --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','self_employed')" title="View Self-Employed">
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#1a4db5] to-[#2563eb]">
                 <i class="fas fa-store text-white text-[1.15rem]"></i>
             </div>
@@ -777,7 +797,7 @@ new class extends Component {
         </div>
 
         {{-- Unemployed --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','unemployed')" title="View Unemployed">
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#b55a05] to-[#d97706]">
                 <i class="fas fa-circle-pause text-white text-[1.15rem]"></i>
             </div>
@@ -789,7 +809,7 @@ new class extends Component {
         </div>
 
         {{-- Not Filled --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('status','not_filled')" title="View Not Filled">
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#4b5563] to-[#6b7280]">
                 <i class="fas fa-circle-question text-white text-[1.15rem]"></i>
             </div>
@@ -800,8 +820,8 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Local — now clickable --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('location','local')" title="View Local">
+        {{-- Local --}}
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#0d7377] to-[#14b8a6]">
                 <i class="fas fa-house text-white text-[1.15rem]"></i>
             </div>
@@ -812,8 +832,8 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Abroad / OFW — now clickable --}}
-        <div class="{{ $statCard }}" onclick="window.admDispatchModal('location','abroad')" title="View Abroad / OFW">
+        {{-- Abroad / OFW --}}
+        <div class="{{ $statCard }}">
             <div class="{{ $statIcon }} bg-gradient-to-br from-[#b84c05] to-[#f97316]">
                 <i class="fas fa-plane-departure text-white text-[1.15rem]"></i>
             </div>
@@ -831,13 +851,12 @@ new class extends Component {
          wire:loading.class="{{ $wireFade }}"
          wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
 
-        <div class="{{ $chartCard }} cursor-pointer transition-shadow duration-150 hover:border-[#e9d5ff] hover:shadow-[0_4px_18px_rgba(122,63,145,0.12)] group" title="Click a segment to view alumni">
-            <div class="{{ $chartHead }} group-hover:bg-[#f5effc]">
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
                 <div class="flex items-center gap-2">
                     <div class="{{ $chartDot }}"></div>
                     <span class="{{ $chartTtl }}">Employment Status</span>
                 </div>
-                <i class="fa-solid fa-arrow-pointer text-xs text-[#999999] opacity-50"></i>
             </div>
             <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
                 <canvas id="admChartStatus"></canvas>
@@ -856,13 +875,12 @@ new class extends Component {
             </div>
         </div>
 
-        <div class="{{ $chartCard }} cursor-pointer transition-shadow duration-150 hover:border-[#e9d5ff] hover:shadow-[0_4px_18px_rgba(122,63,145,0.12)] group" title="Click green for Related only">
-            <div class="{{ $chartHead }} group-hover:bg-[#f5effc]">
+        <div class="{{ $chartCard }}">
+            <div class="{{ $chartHead }}">
                 <div class="flex items-center gap-2">
                     <div class="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></div>
                     <span class="{{ $chartTtl }}">Job-Course Relevance</span>
                 </div>
-                <i class="fa-solid fa-arrow-pointer text-xs text-[#999999] opacity-50"></i>
             </div>
             <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
                 <canvas id="admChartRelevance"></canvas>
@@ -1370,9 +1388,14 @@ new class extends Component {
             @endif
         </div>
 
-        <div class="flex-1 overflow-y-auto"
+        <div id="admModalScrollWrap" class="flex-1 overflow-y-auto relative"
              wire:loading.class="{{ $wireFade }}"
              wire:target="openEmploymentModal,updatedModalBatch,updatedModalSearch">
+
+            <div id="admScrollDirIndicator"
+                 class="fixed left-1/2 -translate-x-1/2 z-[70] w-9 h-9 rounded-full bg-[#1a0a2e]/85 backdrop-blur-sm text-white flex items-center justify-center shadow-[0_4px_14px_rgba(0,0,0,0.3)] opacity-0 pointer-events-none transition-opacity duration-200">
+                <i class="fa-solid fa-arrow-down text-sm"></i>
+            </div>
 
             @if(count($modalAlumni) > 0)
             <table class="w-full border-collapse">
@@ -1510,11 +1533,6 @@ new class extends Component {
     var batchAll   = null;
     var registry   = {};
 
-    window.admDispatchModal = function(filterType, filter) {
-        if (filter === 'all') return;
-        if (window.Livewire) Livewire.dispatch('openEmploymentModal', { filterType: filterType, filter: filter });
-    };
-
     function loadChartJs(cb){
         if(window.Chart){ cb(); return; }
         var s = document.createElement('script');
@@ -1554,15 +1572,40 @@ new class extends Component {
         if(noData) noData.style.display = isEmpty ? 'flex' : 'none';
     }
 
-    function donut(id, data, clickHandler){
+    function donut(id, data){
         if(!data || !data.labels) return;
         var empty = allZero(data.data);
         toggleNoData(id, empty);
         if(empty){ kill(id); return; }
         var c = document.getElementById(id); if(!c) return;
-        kill(id);
+
+        // Ask Chart.js itself (not just our local registry) whether this
+        // canvas already has a live chart attached. Two overlapping
+        // initAll() calls (e.g. from a fast double-commit) can otherwise
+        // race: both see registry[id] as unset and both try to create a
+        // new Chart on the same canvas, which throws "Canvas is already
+        // in use". Chart.getChart() is Chart.js's own source of truth.
+        var existing = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(c) : null;
+
+        if(existing){
+            registry[id] = existing;
+            existing.data.labels = data.labels;
+            existing.data.datasets[0].data = data.data;
+            existing.data.datasets[0].backgroundColor = data.colors;
+            existing.update('active');
+            return;
+        }
+
+        if(registry[id]){
+            // Our registry thinks a chart exists but Chart.js doesn't know
+            // about it anymore (already destroyed elsewhere) — drop the
+            // stale reference before creating a fresh one.
+            delete registry[id];
+        }
+
         var opts = {
             responsive: true, maintainAspectRatio: false, cutout: '66%',
+            events: ['mousemove','mouseout','touchstart','touchmove'],
             plugins: {
                 legend: {
                     position: 'bottom', onClick: function(){},
@@ -1575,7 +1618,6 @@ new class extends Component {
                 }}}
             }
         };
-        if(typeof clickHandler === 'function') opts.onClick = clickHandler;
         registry[id] = new Chart(c, {
             type: 'doughnut',
             data: { labels: data.labels, datasets: [{ data: data.data, backgroundColor: data.colors, borderWidth:2, borderColor:'#fff', hoverOffset:8 }] },
@@ -1739,27 +1781,52 @@ new class extends Component {
         nn.addEventListener('click',function(){ if(!batchAll)return; var mx=batchAll.labels.length-BATCH_PAGE; batchIdx=Math.min(mx,batchIdx+BATCH_PAGE); drawBatch(batchAll,batchIdx); });
     }
 
-    function dispatchModal(filterType, filter){
-        if(window.Livewire) Livewire.dispatch('openEmploymentModal',{filterType:filterType,filter:filter});
+    // ── Scroll direction indicator (Alumni modal table) ──────────────────────
+    var scrollDirState = { lastY: 0, hideTimer: null, bound: false };
+
+    function bindScrollDirIndicator(){
+        var wrap = document.getElementById('admModalScrollWrap');
+        var indicator = document.getElementById('admScrollDirIndicator');
+        if(!wrap || !indicator) return;
+        if(wrap._admScrollBound) return;
+        wrap._admScrollBound = true;
+
+        scrollDirState.lastY = wrap.scrollTop;
+
+        wrap.addEventListener('scroll', function(){
+            var currentY = wrap.scrollTop;
+            var goingDown = currentY > scrollDirState.lastY;
+            var goingUp   = currentY < scrollDirState.lastY;
+            scrollDirState.lastY = currentY;
+
+            if(!goingDown && !goingUp) return;
+
+            var rect = wrap.getBoundingClientRect();
+            indicator.style.top = Math.round(rect.top + rect.height/2 - 18) + 'px';
+
+            var icon = indicator.querySelector('i');
+            if(goingDown){
+                icon.className = 'fa-solid fa-arrow-down text-sm';
+            } else {
+                icon.className = 'fa-solid fa-arrow-up text-sm';
+            }
+            indicator.classList.remove('opacity-0');
+            indicator.classList.add('opacity-100');
+
+            clearTimeout(scrollDirState.hideTimer);
+            scrollDirState.hideTimer = setTimeout(function(){
+                indicator.classList.remove('opacity-100');
+                indicator.classList.add('opacity-0');
+            }, 650);
+        }, { passive: true });
     }
 
     function initAll(){
         var d = bridge(); if(!d) return;
 
-        donut('admChartStatus', d.status, function(event, elements){
-            if(!elements||!elements.length) return;
-            var statusMap=['employed','self_employed','unemployed','not_filled'];
-            var filter=statusMap[elements[0].index];
-            if(filter) dispatchModal('status', filter);
-        });
-
+        donut('admChartStatus', d.status);
         donut('admChartLocation', d.location);
-
-        donut('admChartRelevance', d.relevance, function(event, elements){
-            var isGreen = elements && elements.length>0 && elements[0].index===0;
-            dispatchModal('relevance', isGreen?'yes':'yes_partial');
-        });
-
+        donut('admChartRelevance', d.relevance);
         donut('admChartUnemployed', d.unemployed);
         donut('admChartEmpType',    d.emptype);
         donut('admChartEduStatus',  d.edu);
@@ -1776,6 +1843,7 @@ new class extends Component {
             drawBatch(batchAll, batchIdx);
         }
         bindBatchNav();
+        bindScrollDirIndicator();
 
         if(d.compare && d.compare.labelA && d.compare.labelB){
             groupedBar('admChartCompareFs', d.compare);

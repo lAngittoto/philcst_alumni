@@ -242,57 +242,45 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col h-full min-h-0" style="overflow:hidden;">
+<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-adm-root-height"
+     x-data="{
+        setAvailHeight() {
+            const rect = this.$el.getBoundingClientRect();
+            const bottomSafe = 8;
+            const avail = window.innerHeight - rect.top - bottomSafe;
+            this.$el.style.setProperty('--yb-adm-avail-h', avail + 'px');
+        }
+     }"
+     x-init="
+        setAvailHeight();
+        window.addEventListener('resize', () => setAvailHeight());
+        window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
+     ">
 
 <style>
 /* ── Card hover ── */
-.yb-adm-card {
-    transition: border-color .15s ease, box-shadow .15s ease;
-}
-.yb-adm-card:hover {
-    border-color: #c49ed8 !important;
-    box-shadow: 0 4px 14px rgba(122,63,145,.14);
-}
+.yb-adm-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
+.yb-adm-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
 
 /* ── Badges ── */
 .yb-adm-section-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 14px;
-    border-radius: 9999px;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: .02em;
-    background: #F3E8FF;
-    color: #7A3F91;
-    border: 1.5px solid #D8B4FE;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 14px; border-radius: 9999px;
+    font-size: 12px; font-weight: 700; letter-spacing: .02em;
+    background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
 }
 .yb-adm-batch-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 10px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    background: #F3E8FF;
-    color: #7A3F91;
-    border: 1.5px solid #D8B4FE;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700;
+    background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
 }
 .yb-adm-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 12px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .04em;
-    background: rgba(122,63,145,.10);
-    color: #7A3F91;
-    border: 1px solid rgba(122,63,145,.22);
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 12px; border-radius: 9999px;
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    background: rgba(122,63,145,.10); color: #7A3F91;
+    border: 1px solid rgba(122,63,145,.22); white-space: nowrap;
 }
 
 /* ── Scrollbar ── */
@@ -301,10 +289,29 @@ new class extends Component {
 .yb-adm-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Loading overlay ── */
-.yb-adm-loading-overlay {
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
+/* ── Filtering progress bar (thin animated bar under the filter row,
+     replaces the old blocking overlay — same pattern as the
+     organizer-facing yearbook) ── */
+.yb-adm-filter-progress-track {
+    height: 2px;
+    width: 100%;
+    overflow: hidden;
+    background: transparent;
+    position: relative;
+    flex-shrink: 0;
+}
+.yb-adm-filter-progress-bar {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 40%;
+    border-radius: 99px;
+    background: #7A3F91;
+    animation: ybAdmFilterProgress 1s ease-in-out infinite;
+}
+@keyframes ybAdmFilterProgress {
+    0%   { left: -40%; }
+    100% { left: 100%; }
 }
 
 @keyframes ybAdmFadeUp {
@@ -316,15 +323,11 @@ new class extends Component {
 /* ── Filter inputs ── */
 .yb-adm-search-input {
     padding: 0.5rem 0.75rem 0.5rem 2.25rem;
-    border: 1px solid #E8E0F0;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    background: #fff;
-    color: #333333;
+    border: 1px solid #E8E0F0; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500;
+    background: #fff; color: #333333;
     transition: border-color .15s, box-shadow .15s;
-    outline: none;
-    width: 100%;
+    outline: none; width: 100%;
 }
 .yb-adm-search-input::placeholder { color: #999999; font-weight: 400; }
 .yb-adm-search-input:hover  { border-color: #c4b5d4; }
@@ -332,25 +335,17 @@ new class extends Component {
 
 /* ── Dropdown trigger ── */
 .yb-adm-dd-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+    display: inline-flex; align-items: center; gap: 6px;
     padding: 0.5rem 2.25rem 0.5rem 0.75rem;
-    border: 1px solid #E8E0F0;
-    border-radius: 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-    background: #fff;
-    color: #333333;
-    cursor: pointer;
-    white-space: nowrap;
+    border: 1px solid #E8E0F0; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500;
+    background: #fff; color: #333333;
+    cursor: pointer; white-space: nowrap;
     transition: border-color .15s, box-shadow .15s;
-    outline: none;
-    user-select: none;
+    outline: none; user-select: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
-    background-repeat: no-repeat;
-    background-size: 1.25em 1.25em;
+    background-repeat: no-repeat; background-size: 1.25em 1.25em;
 }
 .yb-adm-dd-btn:hover  { border-color: #c4b5d4; }
 .yb-adm-dd-btn.active { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); color: #7a3f91; }
@@ -358,114 +353,132 @@ new class extends Component {
 
 /* ── Dropdown panel ── */
 .yb-adm-dd-panel {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 100%;
-    max-height: 224px;
-    overflow-y: auto;
-    background: #fff;
-    border: 1.5px solid #E8E0F0;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(122,63,145,.13);
-    z-index: 600;
-    padding: 4px;
-    scrollbar-width: thin;
-    scrollbar-color: #d4b8e8 transparent;
+    position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 224px; overflow-y: auto;
+    background: #fff; border: 1.5px solid #E8E0F0;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
+    z-index: 600; padding: 4px;
+    scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
 }
 .yb-adm-dd-panel::-webkit-scrollbar       { width: 4px; }
 .yb-adm-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
-
 .yb-adm-dd-item {
-    display: block;
-    width: 100%;
-    padding: 6px 12px;
-    border-radius: 7px;
-    text-align: left;
-    font-size: 12px;
-    font-weight: 600;
-    color: #333333;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background .12s, color .12s;
+    display: block; width: 100%; padding: 6px 12px;
+    border-radius: 7px; text-align: left;
+    font-size: 12px; font-weight: 600; color: #333333;
+    background: transparent; border: none; cursor: pointer;
+    white-space: nowrap; transition: background .12s, color .12s;
 }
 .yb-adm-dd-item:hover { background: #F5F0FA; color: #7A3F91; }
 .yb-adm-dd-item.sel   { background: #F0E6F8; color: #7A3F91; }
 
-/* ── Table block ── */
+/* ── Main block ── */
 .yb-adm-table-block {
-    display: flex;
-    flex-direction: column;
-    border-radius: 1rem;
-    overflow: hidden;
+    display: flex; flex-direction: column;
+    border-radius: 1rem; overflow: hidden;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    flex: 1;
-    min-height: 0;
+    flex: 1; min-height: 0;
 }
 .yb-adm-filter-bar {
-    background: #F5F5F5;
-    border-bottom: 1px solid #E8E0F0;
-    padding: 0.6rem 0.875rem;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 50;
-    overflow: visible;
+    background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
+    padding: 0.6rem 0.875rem; flex-shrink: 0;
+    position: relative; z-index: 50; overflow: visible;
 }
 .yb-adm-pagination-bar {
     flex-shrink: 0;
     background: linear-gradient(to right, #7a3f91, #9b59b6);
-    padding: 0 1rem;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    border-top: 1px solid rgba(122,63,145,.3);
+    padding: 0 1rem; min-height: 48px;
+    display: flex; align-items: center;
+    justify-content: space-between; gap: 0.5rem;
+    flex-wrap: wrap; border-top: 1px solid rgba(122,63,145,.3);
+    /* Safety net: always pinned to the bottom of the table block,
+       so it can never end up scrolled out of view, no matter how
+       tall the card area ends up being. */
+    position: sticky;
+    bottom: 0;
+    z-index: 30;
 }
-
-/* ── Pagination buttons ── */
 .yb-adm-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 32px; height: 32px; padding: 0 10px;
-    border-radius: 8px; font-size: 12px; font-weight: 700;
-    transition: all .15s;
+    border-radius: 8px; font-size: 12px; font-weight: 700; transition: all .15s;
 }
 .yb-adm-pg-active { background: #fff; color: #7a3f91; }
 .yb-adm-pg-nav    { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.25); }
 .yb-adm-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .yb-adm-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
+/* ── Root height ─────────────────────────────────────────
+   Desktop: reserve 180px for surrounding layout chrome.
+   Mobile: instead of guessing a fixed px offset for the
+   topbar, --yb-adm-avail-h is measured live via Alpine
+   (window.innerHeight - element's actual top offset), so the
+   block always fits exactly under whatever topbar height the
+   layout actually has, on any device. Falls back to the
+   100dvh calc if JS hasn't run yet.
+──────────────────────────────────────────────────────── */
+.yb-adm-root-height {
+    height: calc(100vh - 180px);
+    max-height: calc(100vh - 180px);
+    overflow: hidden;
+}
+
+/* ── Mobile responsiveness ── */
+@media (max-width: 640px) {
+    .yb-adm-filter-bar { gap: 8px; }
+}
+
+@media (max-width: 767px) {
+    html, body { overflow: hidden !important; }
+
+    .yb-adm-root-height {
+        height: var(--yb-adm-avail-h, 100dvh) !important;
+        max-height: var(--yb-adm-avail-h, 100dvh) !important;
+        overflow: hidden !important;
+    }
+
+    .yb-adm-mobile-subtitle { display: none; }
+    .yb-adm-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
+    .yb-adm-mobile-title { font-size: 1rem !important; }
+
+    .yb-adm-filter-bar { padding: 0.45rem 0.65rem; }
+    .yb-adm-dd-btn, .yb-adm-search-input { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+
+    .yb-adm-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
+    .yb-adm-pagination-bar p { font-size: 11px; }
+
+    .yb-adm-pagination-bar {
+        padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
+    }
+}
+
 [x-cloak] { display: none !important; }
 </style>
 
-{{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full flex-1 min-h-0" style="overflow:hidden;">
-
     {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-book-open text-white text-lg"></i>
+    <div class="flex flex-col gap-3 flex-shrink-0">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-4">
+                <div class="yb-adm-mobile-header-icon w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
+                     style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                    <i class="fas fa-book-open text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="yb-adm-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
+                    <p class="yb-adm-mobile-subtitle text-xs leading-relaxed mt-0.5" style="color:#555555;">All Colleges &amp; Courses</p>
+                </div>
             </div>
-            <div>
-                <h1 class="text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                <p class="text-xs leading-relaxed mt-0.5" style="color:#555555;">All Colleges &amp; Courses</p>
+            <div class="flex items-center gap-2">
+                <span class="yb-adm-chip">
+                    <i class="fas fa-graduation-cap text-[10px]"></i>
+                    {{ number_format($this->totalAlumni) }} Alumni
+                </span>
             </div>
-        </div>
-        <div class="flex items-center gap-2">
-            <span class="yb-adm-chip">
-                <i class="fas fa-graduation-cap text-[10px]"></i>
-                {{ number_format($this->totalAlumni) }} Alumni
-            </span>
         </div>
     </div>
 
-    {{-- ══ UNIFIED BLOCK ══ --}}
+    {{-- ══ UNIFIED BLOCK — filter + cards + pagination ══ --}}
     <div class="yb-adm-table-block">
 
         {{-- ── FILTER BAR ── --}}
@@ -590,32 +603,21 @@ new class extends Component {
             </div>
         </div>
 
+        {{-- Filtering progress bar — thin animated bar under the filter row,
+             much friendlier on small screens than a blocking overlay. --}}
+        <div class="yb-adm-filter-progress-track" wire:loading wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
+            <div class="yb-adm-filter-progress-bar"></div>
+        </div>
+
         {{-- ── SCROLLABLE CARDS AREA ── --}}
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
              x-data="{ showTop: false }">
 
             <div id="yb-admin-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="yb-adm-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-4"
-                 wire:loading.class="opacity-40 pointer-events-none"
+                 class="yb-adm-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4"
+                 wire:loading.class="opacity-50"
                  wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
-
-                {{-- Loading overlay --}}
-                <div wire:loading
-                     wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
-                     class="yb-adm-loading-overlay absolute inset-0 z-20 flex items-center justify-center"
-                     style="background:rgba(243,244,246,.75);">
-                    <div class="flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-xl border bg-white"
-                         style="border-color:#E8E0F0;">
-                        <svg class="animate-spin w-4 h-4" style="color:#7A3F91;"
-                             xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10"
-                                    stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                        </svg>
-                        <span class="text-xs font-semibold" style="color:#7A3F91;">Loading alumni…</span>
-                    </div>
-                </div>
 
                 @if($this->totalFiltered > 0)
                 <div class="yb-adm-grid-wrap space-y-6">
@@ -625,10 +627,8 @@ new class extends Component {
                         <div class="flex items-center gap-2 mb-3 px-1">
                             <span class="yb-adm-section-badge">
                                 <i class="fas fa-bookmark" style="font-size:10px;"></i>
+
                                 {{ $group['courseName'] }}
-                            </span>
-                            <span class="text-xs font-semibold ml-auto shrink-0" style="color:#c0a0d8;">
-                                {{ $group['members']->count() }} shown
                             </span>
                         </div>
 
@@ -715,7 +715,7 @@ new class extends Component {
         @endphp
         <div class="yb-adm-pagination-bar">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
-                Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
+                Showing <strong class="text-white font-bold">{{ number_format($from) }}–{{ number_format($to) }}</strong>
                 of <strong class="text-white font-bold">{{ number_format($total) }}</strong>
                 alumni
                 @if($search || $batch || $course)
@@ -763,7 +763,5 @@ new class extends Component {
         </div>
 
     </div>{{-- /yb-adm-table-block --}}
-
-</div>{{-- /main layout --}}
 
 </div>{{-- /root --}}

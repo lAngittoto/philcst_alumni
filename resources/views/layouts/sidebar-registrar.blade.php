@@ -312,6 +312,21 @@
             .reg-logout-spinner {
                 margin-right: 0 !important;
             }
+
+            /* ── Modal-open state below 1024px: sidebar is `fixed` here
+                 (not `lg:static`), so the desktop rule above (which shrinks
+                 width to 0) doesn't apply — the sidebar would otherwise
+                 keep sitting fixed on top of the modal at z-[9995], with
+                 its purple header bar overlapping the modal. Force it
+                 fully off-screen instead, same idea as the closed state,
+                 and disable the transition so it disappears instantly
+                 rather than sliding out from behind the modal overlay. ── */
+            .reg-sidebar.is-modal-hidden {
+                transform: translateX(-100%) !important;
+                transition: none !important;
+                pointer-events: none;
+                box-shadow: none;
+            }
         }
 
         /* ════════════════════════════════════════════════════════

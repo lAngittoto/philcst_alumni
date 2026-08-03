@@ -318,7 +318,7 @@ new class extends Component {
             $this->ueId    = $id;
             $this->ueName  = $r->name;
         } elseif ($r->role === 'registrar') {
-            $this->ueEmail = $r->email ?? '';
+            $this->ueEmail = $r->name ?? '';
             $this->ueId    = $id;
             $this->ueName  = $r->name;
         }
@@ -369,11 +369,42 @@ new class extends Component {
     public function saveUpdateEmail(): void {
         $this->ueErrors = []; $this->ueSave = true;
         try {
+            $role = $this->vData['role'] ?? '';
+
+            if ($role === 'registrar') {
+                $uname = trim($this->ueEmail);
+                if ($uname === '') {
+                    $this->ueErrors = ['general' => ['Please enter a username.']]; return;
+                }
+                if (!preg_match('/^[a-zA-Z0-9._-]+$/', $uname)) {
+                    $this->ueErrors = ['general' => ['Username can only contain letters, numbers, dots, dashes, and underscores.']]; return;
+                }
+                $loginEmail = $uname . '@registrar.internal';
+                $duplicate = DB::table('users')->where('email', $loginEmail)->where('id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The username \"{$uname}\" is already taken. Please choose a different one."]]; return;
+                }
+                DB::table('users')->where('id', $this->ueId)
+                    ->update(['email' => $loginEmail, 'password_changed_at' => null, 'updated_at' => now()]);
+                if ($this->vData) $this->vData['email'] = $loginEmail;
+
+                $this->ueErrors = [];
+
+                // ── DISPATCH: user email updated notification ──────────────────
+                $this->dispatch('__admin-user-email-rich', [
+                    'uid'   => $this->ueId,
+                    'name'  => $this->ueName,
+                    'email' => $loginEmail,
+                ]);
+
+                $this->flash('success', "Username updated for {$this->ueName}. They will be required to reset their password on next login.");
+                return;
+            }
+
             $email = trim($this->ueEmail);
             if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $this->ueErrors = ['general' => ['Please enter a valid email address.']]; return;
             }
-            $role = $this->vData['role'] ?? '';
 
             if ($role === 'director') {
                 $duplicate = DB::table('director')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
@@ -383,14 +414,6 @@ new class extends Component {
                 DB::table('director')->where('user_id', $this->ueId)
                     ->update(['email' => $email, 'updated_at' => now()]);
                 if ($this->vData) $this->vData['director_email'] = $email;
-            } elseif ($role === 'registrar') {
-                $duplicate = DB::table('users')->where('email', $email)->where('id', '!=', $this->ueId)->exists();
-                if ($duplicate) {
-                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another account."]]; return;
-                }
-                DB::table('users')->where('id', $this->ueId)
-                    ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
-                if ($this->vData) $this->vData['email'] = $email;
             } else {
                 $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
                 if ($duplicate) {
@@ -514,6 +537,8 @@ new class extends Component {
             return ($recordEmail && !str_contains($recordEmail,'@pending.local')) ? $recordEmail : '—';
         if ($role === 'director')
             return $directorEmail ?: '—';
+        if ($role === 'registrar')
+            return '';
         return str_ends_with($email, '.internal') ? '—' : $email;
     }
 
@@ -679,6 +704,14 @@ select.mu-filter-input.mu-active {
 }
 .mu-close-tooltip:hover::after, .mu-close-tooltip:hover::before { opacity: 1; }
 
+/* ── Profile modal body: scroll still works (wheel/swipe/keys), scrollbar
+     track just isn't drawn, so the full-screen view reads as scroll-free ── */
+.mu-vp-scroll {
+    scrollbar-width: none;      /* Firefox */
+    -ms-overflow-style: none;   /* old Edge / IE */
+}
+.mu-vp-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; } /* Chrome/Safari/new Edge */
+
 /* ── Role badge — status style ── */
 .mu-role-badge {
     display: inline-flex;
@@ -773,7 +806,7 @@ select.mu-filter-input.mu-active {
             <div class="mu-stat-text">
                 <div class="mu-stat-num">{{ number_format($s['alumni']) }}</div>
                 <div class="mu-stat-lbl">Total Alumni</div>
-                <div class="mu-stat-sub">{{ number_format($s['alumniVerified']) }} verified · {{ number_format($s['alumniPending']) }} pending</div>
+                <div class="mu-stat-sub">{{ number_format($s['alumniVerified']) }} complete · {{ number_format($s['alumniPending']) }} pending</div>
             </div>
         </div>
         <div class="mu-stat-card">
@@ -823,7 +856,7 @@ select.mu-filter-input.mu-active {
                     ['alumni','Alumni','fa-graduation-cap'],
                     ['director','Directors','fa-user-tie'],
                     ['coordinator','Coordinators','fa-users-gear'],
-                    ['registrar','Registrars','fa-user-clock'],
+                    ['registrar','Registrar','fa-user-clock'],
                 ] as [$tab,$lbl,$ico])
                 <button wire:click="switchTab('{{ $tab }}')"
                         class="mu-tab-pill {{ $activeRole===$tab ? 'mu-tab-active' : 'mu-tab-inactive' }}">
@@ -870,7 +903,6 @@ select.mu-filter-input.mu-active {
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#000000;">User</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#000000;">Identifier</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell" style="color:#000000;">Email</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Role</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Status</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#000000;">Joined</th>
@@ -892,8 +924,10 @@ select.mu-filter-input.mu-active {
                             wire:key="mu-row-{{ $u->id }}">
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-3">
+                                    @unless($u->role === 'registrar')
                                     <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $u->name }}"
                                          class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
+                                    @endunless
                                     <div class="min-w-0">
                                         <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#000000;">
                                             {!! $this->highlightText($u->role === 'admin' ? $this->adminUsername($u->email, $u->name) : $u->name) !!}
@@ -906,11 +940,6 @@ select.mu-filter-input.mu-active {
                                     {{ $identifier }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3.5 hidden lg:table-cell">
-                                <p class="text-sm truncate max-w-[200px]" style="color:#000000;">
-                                    {!! $this->highlightText($this->displayEmail($u->role, $u->email, $u->record_email ?? '', $u->director_email ?? '')) !!}
-                                </p>
-                            </td>
                             <td class="px-4 py-3.5 text-center">
                                 <span class="mu-role-badge {{ $roleCss }}">
                                     {{ $roleDisplay }}
@@ -918,7 +947,7 @@ select.mu-filter-input.mu-active {
                             </td>
                             <td class="px-4 py-3.5 text-center">
                                 <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border {{ $this->statusBadge($rowStatus) }}">
-                                    {{ $rowStatus }}
+                                    {{ $rowStatus === 'VERIFIED' ? 'COMPLETE' : $rowStatus }}
                                 </span>
                             </td>
                             <td class="px-4 py-3.5 text-center hidden xl:table-cell">
@@ -1035,7 +1064,7 @@ select.mu-filter-input.mu-active {
     $isDir    = $vRole === 'director';
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
-    $canPhoto = in_array($vRole, ['director','registrar']);
+    $canPhoto = in_array($vRole, ['director']);
     $canToggle= in_array($vRole, ['director','registrar']);
 
     if ($isDir)
@@ -1052,19 +1081,18 @@ select.mu-filter-input.mu-active {
         $headerSub = $vd['record_email'];
     elseif ($isDir && !empty($vd['director_email']))
         $headerSub = $vd['director_email'];
+    elseif ($isReg)
+        $headerSub = !empty($vd['email']) ? explode('@', $vd['email'])[0] : '';
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
-<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4"
+<div class="fixed inset-0 z-50"
+     style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);"
      @keydown.escape.window="$wire.closeModal()">
-    <div class="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]"
-         style="max-height:95vh;"
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
-         x-transition:enter-end="opacity-100 scale-100 translate-y-0">
+    <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
 
-        <div class="flex items-center justify-between px-5 py-4 flex-shrink-0" style="background:#7A3F91;">
-            <div class="flex items-center gap-3">
+        <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <div class="flex items-center gap-3 min-w-0">
                 @if($vPhoto)
                     <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
                          class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
@@ -1072,126 +1100,171 @@ select.mu-filter-input.mu-active {
                     <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
                          class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
                 @endif
-                <div>
-                    <p class="font-semibold text-white text-sm leading-snug uppercase">{{ $headerName }}</p>
-                    <p class="text-xs text-white/70 mt-0.5">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
+                <div class="min-w-0">
+                    <p class="font-semibold text-white text-sm leading-snug uppercase truncate">{{ $headerName }}</p>
+                    <p class="text-xs text-white/70 mt-0.5 truncate">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
                 </div>
             </div>
             <button wire:click="closeModal"
-                    class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                    class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
                 <i class="fa-solid fa-xmark text-base"></i>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-5 scroll-c"
-             style="scrollbar-width:thin;scrollbar-color:#d9c9e8 #F9F7FC;">
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3 mu-vp-scroll max-w-4xl mx-auto w-full">
 
-            {{-- Badges --}}
-            <div class="flex flex-wrap gap-2 items-center">
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $this->roleBadge($vRole) }}">
-                    {{ $this->roleLabel($vRole) }}
-                </span>
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $this->statusBadge($vStatus) }}">
-                    {{ $vStatus }}
-                </span>
-                <span class="text-xs font-semibold ml-auto" style="color:#000000;">
-                    <i class="fa-regular fa-calendar mr-1"></i>
-                    Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
-                </span>
-            </div>
-
-            {{-- PHOTO UPLOAD --}}
-            @if($canPhoto)
-            <div class="rounded-xl overflow-hidden border border-[#E8E0F0]">
-                <div class="px-4 py-2.5 border-b border-[#E8E0F0] flex items-center gap-2" style="background:#F9F7FC;">
-                    <i class="fas fa-camera text-xs" style="color:#7A3F91;"></i>
-                    <p class="text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Profile Photo</p>
-                </div>
-                <div class="p-4">
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4"
-                         x-data="{ dragging: false }"
-                         @dragover.prevent="dragging=true"
-                         @dragleave.prevent="dragging=false"
-                         @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                        <label for="vPhotoInput"
-                               :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-[#E8E0F0] bg-[#F9F7FC] hover:border-[#7A3F91]'"
-                               class="flex-1 flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all w-full">
-                            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background:#ede9f6;">
-                                <i class="fas fa-cloud-arrow-up text-sm" style="color:#7A3F91;"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm font-semibold" style="color:#000000;">Click or drag &amp; drop to upload</p>
-                                <p class="text-xs mt-0.5 font-semibold" style="color:#000000;">JPG, PNG, GIF, WEBP — max 2 MB</p>
-                            </div>
-                            <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                        </label>
+            {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
+            <div class="bg-white rounded-xl border border-[#E8E0F0] p-3 flex items-start gap-4">
+                @unless($isReg)
+                <div class="flex flex-col items-center gap-1.5 shrink-0"
+                     x-data="{ dragging: false }"
+                     @if($canPhoto)
+                     @dragover.prevent="dragging=true"
+                     @dragleave.prevent="dragging=false"
+                     @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])"
+                     @endif>
+                    <label @if($canPhoto) for="vPhotoInput" @endif class="relative group {{ $canPhoto ? 'cursor-pointer' : '' }}">
                         @if($vPhoto)
-                        <div class="flex flex-col items-center gap-2 flex-shrink-0">
-                            <div class="w-16 h-16 rounded-xl overflow-hidden shadow-md ring-2 ring-[#7A3F91]/30">
-                                <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
-                            </div>
-                            <button wire:click="savePhoto" wire:loading.attr="disabled" wire:target="savePhoto"
-                                    class="w-full px-3 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
-                                    style="background:#7A3F91;">
-                                <span wire:loading wire:target="savePhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                                <span wire:loading.remove wire:target="savePhoto"><i class="fas fa-check text-xs"></i> Save</span>
-                            </button>
-                            <button wire:click="$set('vPhoto', null)"
-                                    class="w-full px-3 py-1 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition" style="color:#000000;">Cancel</button>
-                        </div>
+                            <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
+                                 class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#7A3F91]/30" :class="dragging ? 'ring-[#7A3F91]' : ''">
+                        @else
+                            <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
+                                 class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
                         @endif
+                        @if($canPhoto)
+                        <div class="absolute inset-0 rounded-xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <i class="fas fa-camera text-white text-xs"></i>
+                        </div>
+                        <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
+                        @endif
+                    </label>
+                    @if($canPhoto)
+                    <p class="text-[9px] font-semibold uppercase tracking-wide text-center leading-tight" style="color:#8a8a8a;">Hover to<br>change</p>
+                    @endif
+                    @if($vPhoto)
+                    <div class="flex flex-col items-center gap-1 w-14">
+                        <button wire:click="savePhoto" wire:loading.attr="disabled" wire:target="savePhoto"
+                                class="w-full px-1.5 py-1 rounded-lg text-[10px] font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
+                                style="background:#7A3F91;">
+                            <span wire:loading wire:target="savePhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="savePhoto"><i class="fas fa-check text-xs"></i> Save</span>
+                        </button>
+                        <button wire:click="$set('vPhoto', null)"
+                                class="w-full px-1.5 py-1 rounded-lg text-[10px] font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition" style="color:#000000;">Cancel</button>
                     </div>
-                    <div wire:loading wire:target="vPhoto" class="mt-2 flex items-center gap-2 text-xs font-medium" style="color:#7A3F91;">
+                    @endif
+                    <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-[10px] font-medium" style="color:#7A3F91;">
                         <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
                     </div>
-                    @error('vPhoto')<p class="mt-2 text-xs text-red-600 flex items-center gap-1.5"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
+                    @error('vPhoto')<p class="text-[10px] text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
+                </div>
+                @endunless
+
+                <div class="min-w-0 flex-1">
+                    <p class="text-base font-bold uppercase leading-tight" style="color:#000000;">{{ $headerName }}</p>
+
+                    @if($isAlumni)
+                        <p class="text-xs font-medium mt-0.5" style="color:#555;">{{ $vd['student_id'] ?: '—' }}</p>
+                        <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span class="text-xs font-bold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</span>
+                            <span style="color:#c9c9c9;">&middot;</span>
+                            <span class="text-xs font-bold" style="color:#000000;">Batch {{ $vd['batch'] ?: '—' }}</span>
+                            <span style="color:#c9c9c9;">&middot;</span>
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border {{ $vStatus === 'VERIFIED' ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-amber-700 border-amber-300 bg-amber-50' }}">
+                                {{ $vStatus === 'VERIFIED' ? 'COMPLETE' : 'PENDING' }}
+                            </span>
+                        </div>
+                    @else
+                        <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $this->roleBadge($vRole) }}">
+                                {{ $this->roleLabel($vRole) }}
+                            </span>
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $this->statusBadge($vStatus) }}">
+                                {{ $vStatus }}
+                            </span>
+                        </div>
+                    @endif
+
+                    @unless($isReg)
+                    <p class="text-xs mt-1" style="color:#333;">{{ $headerSub ?: '—' }}</p>
+                    @endunless
+
+                    <p class="text-[10px] font-semibold mt-1" style="color:#8a8a8a;">
+                        <i class="fa-regular fa-calendar mr-1"></i>
+                        Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
+                    </p>
                 </div>
             </div>
-            @endif
 
-            {{-- ALUMNI INFO --}}
+            {{-- ALUMNI: STUDENT ID + STUDENT'S NAME --}}
             @if($isAlumni)
-            <div>
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Student Information</p>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
-                    @foreach([
-                        ['First Name',    $vd['alumni_first_name']  ?? '—'],
-                        ['Middle Initial',$vd['alumni_middle_name'] ?? '—'],
-                        ['Last Name',     $vd['alumni_last_name']   ?? '—'],
-                        ['Suffix',        $vd['alumni_suffix']      ?? '—'],
-                        ['Student ID',    $vd['student_id']         ?? '—'],
-                        ['Batch',         $vd['batch']              ?? '—'],
-                        ['Course Code',   $vd['course_code']        ?? '—'],
-                    ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
-                        <p class="text-sm font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                    <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                        <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Student ID</p>
                     </div>
-                    @endforeach
+                    <div class="p-3">
+                        <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                            <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Student ID</p>
+                            <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
+                        </div>
+                    </div>
                 </div>
-                @if(!empty($vd['course_name']))
-                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Course</p>
-                    <p class="text-sm font-semibold" style="color:#000000;">{{ $vd['course_name'] }}</p>
+
+                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                    <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                        <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Student's Name</p>
+                    </div>
+                    <div class="p-3 grid grid-cols-2 gap-2">
+                        @foreach([
+                            ['Last Name',    $vd['alumni_last_name']   ?? ''],
+                            ['Given Name',   $vd['alumni_first_name']  ?? ''],
+                            ['Middle Name',  $vd['alumni_middle_name'] ?? ''],
+                            ['Ext.',         $vd['alumni_suffix']      ?? ''],
+                        ] as [$lbl,$val])
+                        <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                            <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
+                            <p class="text-xs font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+                        </div>
+                        @endforeach
+                    </div>
                 </div>
-                @endif
+            </div>
+
+            {{-- ALUMNI: PROGRAM --}}
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Program</p>
+                </div>
+                <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Code</p>
+                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</p>
+                    </div>
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Name</p>
+                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_name'] ?: '—' }}</p>
+                    </div>
+                </div>
             </div>
             @endif
 
             {{-- DIRECTOR INFO --}}
             @if($isDir)
-            <div>
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Director Information</p>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Director Information</p>
+                </div>
+                <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
                     @foreach([
                         ['First Name',  $vd['first_name']  ?? '—'],
                         ['Middle Name', $vd['middle_name'] ?? '—'],
                         ['Last Name',   $vd['last_name']   ?? '—'],
                         ['Suffix',      $vd['suffix']      ?? '—'],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
-                        <p class="text-sm font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
+                        <p class="text-xs font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -1200,149 +1273,213 @@ select.mu-filter-input.mu-active {
 
             {{-- COORDINATOR INFO --}}
             @if($isOrg)
-            <div>
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Coordinator Details</p>
-                <div class="grid grid-cols-2 gap-2">
-                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Teacher ID</p>
-                        <p class="text-sm font-bold font-mono" style="color:#000000;">{{ $vd['id_number'] ?: '—' }}</p>
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Coordinator Details</p>
+                </div>
+                <div class="p-3 grid grid-cols-2 gap-2">
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Teacher ID</p>
+                        <p class="text-xs font-bold font-mono" style="color:#000000;">{{ $vd['id_number'] ?: '—' }}</p>
                     </div>
-                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">College / Dept</p>
-                        <p class="text-sm font-semibold" style="color:#000000;">{{ $vd['department'] ?: '—' }}</p>
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">College / Dept</p>
+                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['department'] ?: '—' }}</p>
                     </div>
                 </div>
             </div>
             @endif
 
-            {{-- REGISTRAR / ADMIN INFO --}}
-            @if($isReg || $isAdmin)
-            <div>
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Account Details</p>
-                <div class="grid grid-cols-2 gap-2">
-                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Username</p>
-                        <p class="text-sm font-bold font-mono" style="color:#000000;">
+            {{-- ADMIN INFO --}}
+            @if($isAdmin)
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Account Details</p>
+                </div>
+                <div class="p-3 grid grid-cols-2 gap-2">
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Username</p>
+                        <p class="text-xs font-bold font-mono" style="color:#000000;">
                             {{ $this->adminUsername($vd['email'], $vd['name']) }}
                         </p>
                     </div>
-                    <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Role</p>
-                        <p class="text-sm font-semibold" style="color:#000000;">{{ $this->roleLabel($vRole) }}</p>
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Role</p>
+                        <p class="text-xs font-semibold" style="color:#000000;">{{ $this->roleLabel($vRole) }}</p>
                     </div>
                 </div>
             </div>
             @endif
 
-            {{-- UPDATE EMAIL — Alumni / Director / Registrar --}}
-            @if($isAlumni || $isDir || $isReg)
+            {{-- UPDATE USERNAME — Registrar --}}
+            @if($isReg)
             @php
-                $ueCurrent = match(true) {
-                    $isAlumni => (!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null,
-                    $isDir    => $vd['director_email'] ?: null,
-                    $isReg    => $vd['email'] ?: null,
-                    default   => null,
-                };
+                $currentUsername = $vd['name'] ?? null;
+            @endphp
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Username</p>
+                </div>
+                <div class="p-3">
+                    <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fef2f2;border:1px solid #fecaca;">
+                        <i class="fas fa-triangle-exclamation text-red-500 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#991b1b;">
+                            This is the registrar's login username — this account has no separate email, only a username. Changing it takes effect immediately: their old username/password stops working right away, and no notification is sent automatically. Give them the new username and a new password yourself.
+                        </p>
+                    </div>
+                    @if(count($ueErrors))
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                        @foreach($ueErrors as $msgs)
+                            @foreach($msgs as $msg)
+                            <p class="text-xs text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            @endforeach
+                        @endforeach
+                    </div>
+                    @endif
+                    <div class="flex gap-2">
+                        <div class="relative flex-1">
+                            <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                            <input wire:model.defer="ueEmail" type="text" placeholder="New username…"
+                                   class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                        </div>
+                        <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                style="background:#7A3F91;">
+                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-xs"></i> Update</span>
+                        </button>
+                    </div>
+                    <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">After you update this, log in with the new username uses whatever password is currently set — set a new one below if needed.</p>
+                    </div>
+                </div>
+            </div>
+            @endif
+
+            {{-- UPDATE EMAIL — Alumni / Director --}}
+            @if($isAlumni || $isDir)
+            @php
+                $ueCurrent = $isAlumni
+                    ? ((!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null)
+                    : ($vd['director_email'] ?: null);
                 $ueNote = $isDir
                     ? 'This is the director\'s contact email. It is not used to log in.'
                     : 'Updating the email will require the account to reset their password on next login.';
             @endphp
-            <div class="border-t border-[#E8E0F0] pt-5">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Email Address</p>
-                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] mb-3">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
-                    <p class="text-sm font-semibold break-all" style="color:#000000;">
-                        @if($ueCurrent)
-                            {{ $ueCurrent }}
-                        @else
-                            <span class="italic" style="color:#000000;">Not set</span>
-                        @endif
-                    </p>
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Email Address</p>
                 </div>
-                @if(count($ueErrors))
-                <div class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                    @foreach($ueErrors as $msgs)
-                        @foreach($msgs as $msg)
-                        <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
-                        @endforeach
-                    @endforeach
-                </div>
-                @endif
-                <div class="flex gap-2">
-                    <div class="relative flex-1">
-                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                        <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                               class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                <div class="p-3">
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0] mb-2.5">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
+                        <p class="text-xs font-semibold break-all" style="color:#000000;">
+                            @if($ueCurrent)
+                                {{ $ueCurrent }}
+                            @else
+                                <span class="italic" style="color:#000000;">Not set</span>
+                            @endif
+                        </p>
                     </div>
-                    <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                            class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
-                            style="background:#7A3F91;">
-                        <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                        <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-xs"></i> Update</span>
-                    </button>
-                </div>
-                <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                    <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">{{ $ueNote }}</p>
+                    @if(count($ueErrors))
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                        @foreach($ueErrors as $msgs)
+                            @foreach($msgs as $msg)
+                            <p class="text-xs text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            @endforeach
+                        @endforeach
+                    </div>
+                    @endif
+                    <div class="flex gap-2">
+                        <div class="relative flex-1">
+                            <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                            <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
+                                   class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                        </div>
+                        <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                style="background:#7A3F91;">
+                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-xs"></i> Update</span>
+                        </button>
+                    </div>
+                    <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">{{ $ueNote }}</p>
+                    </div>
                 </div>
             </div>
             @endif
 
-
             {{-- CHANGE PASSWORD — Registrar / Admin --}}
             @if($isReg || $isAdmin)
-            <div class="border-t border-[#E8E0F0] pt-5">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Change Password</p>
-                @if(count($cpErrs))
-                <div class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                    @foreach($cpErrs as $msgs)
-                        @foreach($msgs as $msg)
-                        <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Change Password</p>
+                </div>
+                <div class="p-3">
+                    @if(count($cpErrs))
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                        @foreach($cpErrs as $msgs)
+                            @foreach($msgs as $msg)
+                            <p class="text-xs text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            @endforeach
                         @endforeach
-                    @endforeach
-                </div>
-                @endif
-                <div class="grid grid-cols-2 gap-2 mb-2">
-                    <input wire:model.defer="cpNew" type="password" placeholder="New password (min. 8)"
-                           class="mu-filter-input w-full" autocomplete="new-password">
-                    <input wire:model.defer="cpConfirm" type="password" placeholder="Confirm new password"
-                           class="mu-filter-input w-full" autocomplete="new-password">
-                </div>
-                <button wire:click="saveChangePassword" wire:loading.attr="disabled" wire:target="saveChangePassword"
-                        class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5"
-                        style="background:#7A3F91;">
-                    <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin text-xs"></i> Saving…</span>
-                    <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-key text-xs"></i> Update Password</span>
-                </button>
-                <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                    <i class="fas fa-rotate-left text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">After saving, the user will be required to change their password on next login.</p>
+                    </div>
+                    @endif
+                    <div class="grid grid-cols-2 gap-1.5 mb-1.5">
+                        <input wire:model.defer="cpNew" type="password" placeholder="New password (min. 8)"
+                               class="mu-filter-input w-full" autocomplete="new-password">
+                        <input wire:model.defer="cpConfirm" type="password" placeholder="Confirm new password"
+                               class="mu-filter-input w-full" autocomplete="new-password">
+                    </div>
+                    <button wire:click="saveChangePassword" wire:loading.attr="disabled" wire:target="saveChangePassword"
+                            class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5"
+                            style="background:#7A3F91;">
+                        <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin text-xs"></i> Saving…</span>
+                        <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-key text-xs"></i> Update Password</span>
+                    </button>
+                    <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-rotate-left text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
+                            @if($isReg)
+                                This is set as their actual login password right away — they can log in with it immediately using their current username. No reset link is sent, so give them this password directly.
+                            @else
+                                After saving, the user will be required to change their password on next login.
+                            @endif
+                        </p>
+                    </div>
                 </div>
             </div>
             @endif
 
             {{-- ACTIVATE / DEACTIVATE --}}
             @if($canToggle)
-            <div class="border-t border-[#E8E0F0] pt-5">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">Account Status</p>
-                @if($vStatus === 'ACTIVE')
-                <button wire:click="confirmToggle({{ $vd['id'] }}, 'deactivate')"
-                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition hover:opacity-90"
-                        style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
-                    <i class="fas fa-ban text-xs"></i> Deactivate Account
-                </button>
-                @else
-                <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
-                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition hover:opacity-90"
-                        style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;">
-                    <i class="fas fa-circle-check text-xs"></i> Activate Account
-                </button>
-                @endif
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Account Status</p>
+                </div>
+                <div class="p-3">
+                    @if($vStatus === 'ACTIVE')
+                    <button wire:click="confirmToggle({{ $vd['id'] }}, 'deactivate')"
+                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90"
+                            style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
+                        <i class="fas fa-ban text-xs"></i> Deactivate Account
+                    </button>
+                    @else
+                    <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
+                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90"
+                            style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;">
+                        <i class="fas fa-circle-check text-xs"></i> Activate Account
+                    </button>
+                    @endif
+                </div>
             </div>
             @endif
 
         </div>{{-- /scroll --}}
-    </div>
+    </div>{{-- /panel --}}
 </div>
 @endif
 
