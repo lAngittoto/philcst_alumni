@@ -90,6 +90,117 @@
             border-bottom-color: #1a1a1a;
         }
         .admin-notif-close-wrap:hover .admin-notif-close-tip { opacity: 1; }
+        @media (max-width: 1023px) {
+            .admin-notif-close-tip { display: none !important; }
+        }
+
+        /* ════════════════════════════════════════════════════════
+           NOTIFICATION PANEL — desktop dropdown, mobile FULL SCREEN
+        ════════════════════════════════════════════════════════ */
+        #admin-notif-panel {
+            max-width: calc(100vw - 16px);
+        }
+        @media (max-width: 1023px) {
+            #admin-notif-panel {
+                position: fixed !important;
+                inset: 0 !important;
+                top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                bottom: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 100% !important;
+                min-height: 100% !important;
+                max-height: 100% !important;
+                border-radius: 0 !important;
+                border: none !important;
+            }
+            #admin-notif-panel .admin-notif-list-scroll {
+                max-height: calc(100vh - 190px) !important;
+            }
+        }
+        /* ════════════════════════════════════════════════════════
+           SIDEBAR COLLAPSE (desktop only)
+        ════════════════════════════════════════════════════════ */
+        .admin-collapsible-text {
+            opacity: 1;
+            max-width: 220px;
+            overflow: hidden;
+            white-space: nowrap;
+            transition: opacity 0.2s ease, max-width 0.2s ease;
+        }
+        .admin-nav-section-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .admin-section-label {
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            color: #9A8AA8;
+        }
+        .admin-collapse-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 7px;
+            background: #F3EBFA;
+            border: none;
+            color: #7A3F91;
+            cursor: pointer;
+            font-size: 10px;
+            flex-shrink: 0;
+            transition: background-color 0.15s ease, transform 0.15s ease;
+        }
+        .admin-collapse-icon-btn:hover { background: #E9D8F5; }
+        .admin-collapse-icon-btn:active { transform: scale(0.88); }
+        .admin-collapse-icon-btn i { pointer-events: none; }
+
+        @media (min-width: 1024px) {
+            #admin-sidebar-aside.is-collapsed {
+                width: 5rem !important;
+                min-width: 5rem !important;
+            }
+            #admin-sidebar-aside.is-collapsed .admin-collapsible-text {
+                opacity: 0;
+                max-width: 0;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+                pointer-events: none;
+            }
+            #admin-sidebar-aside.is-collapsed .admin-sidebar-header {
+                justify-content: center;
+                padding-left: 0;
+                padding-right: 0;
+            }
+            #admin-sidebar-aside.is-collapsed nav a {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            #admin-sidebar-aside.is-collapsed nav a > div:first-child {
+                margin-right: 0 !important;
+            }
+            #admin-sidebar-aside.is-collapsed .admin-nav-section-row {
+                justify-content: center;
+                padding: 0 0.25rem;
+            }
+            #admin-sidebar-aside.is-collapsed .admin-nav-active-dot {
+                display: none !important;
+            }
+            #admin-sidebar-aside.is-collapsed form button[type="submit"] {
+                padding-left: 0.9rem;
+                padding-right: 0.9rem;
+            }
+            #admin-sidebar-aside.is-collapsed form button[type="submit"] i {
+                margin-right: 0 !important;
+            }
+        }
     </style>
 
     <script>
@@ -103,7 +214,6 @@
         'admin.yearbook':       '/yearbook',
         'job.posts':            '/job/posts',
         'events':               '/events',
-        'audit.logs':           '/audit/logs',
         'course':               '/course',
     };
 
@@ -194,10 +304,6 @@
                             n.icon === 'calendar-check' ||
                             n.icon === 'calendar'
                         );
-                        var isAuditEvent = (
-                            rawDedup.startsWith('audit-log::') ||
-                            (n.icon === 'clipboard-list' && n.title === 'Audit Log Update')
-                        );
                         var isCourseEvent = (
                             rawDedup.startsWith('course::') ||
                             (n.icon === 'clipboard-list' && n.title === 'Course Update')
@@ -216,7 +322,6 @@
                         else if (isPendingEvent)     { groupKey = rawDedup; }
                         else if (isApprovedEvent)    { groupKey = rawDedup; }
                         else if (isEventEvent)       { groupKey = 'event_day::' + day; }
-                        else if (isAuditEvent)       { groupKey = 'audit_day::' + day; }
                         else if (isCourseEvent)      { groupKey = 'course_day::' + day; }
                         else { groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id); }
 
@@ -232,7 +337,6 @@
                             else if (isYearbookEvent)    { g.title = 'Yearbook Update'; }
                             else if (isJobUpdateEvent)   { g.title = 'Job Posting Update'; }
                             else if (isEventEvent)       { g.title = 'Event Update'; }
-                            else if (isAuditEvent)       { g.title = 'Audit Log Update'; }
                             else if (isCourseEvent)      { g.title = 'Course Update'; }
                         } else {
                             map.set(groupKey, Object.assign({}, n, {
@@ -249,7 +353,6 @@
                                      : isPendingEvent      ? (n.title || 'New Event Submitted')
                                      : isApprovedEvent     ? (n.title || 'Event Approved')
                                      : isEventEvent        ? (n.title || 'Event Update')
-                                     : isAuditEvent        ? (n.title || 'Audit Log Update')
                                      : isCourseEvent       ? (n.title || 'Course Update')
                                      : n.title,
                                 icon:  isUserCreatedEvent  ? 'user-tie'
@@ -263,7 +366,6 @@
                                      : isPendingEvent      ? 'calendar-day'
                                      : isApprovedEvent     ? 'calendar-check'
                                      : isEventEvent        ? 'calendar-check'
-                                     : isAuditEvent        ? 'clipboard-list'
                                      : isCourseEvent       ? 'clipboard-list'
                                      : (n.icon || 'bell'),
                                 // Carry flags so the template knows what kind of row this is
@@ -422,26 +524,17 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  PANEL POSITIONING
+    //  PANEL POSITIONING — desktop only (mobile is handled entirely by CSS, full screen)
     // ─────────────────────────────────────────────────────────────────────────
     function positionAdminPanel() {
-        var isDesktop = window.innerWidth >= 1024;
-        var btn   = document.getElementById(isDesktop ? 'admin-bell-btn' : 'admin-bell-btn-mobile');
-        if (!btn) btn = document.getElementById('admin-bell-btn') || document.getElementById('admin-bell-btn-mobile');
+        if (window.innerWidth < 1024) return;
+        var btn   = document.getElementById('admin-bell-btn');
         var panel = document.getElementById('admin-notif-panel');
-        var aside = document.querySelector('aside');
         if (!btn || !panel) return;
         var btnRect = btn.getBoundingClientRect();
-        if (aside && isDesktop) {
-            var asideRect = aside.getBoundingClientRect();
-            panel.style.left  = (asideRect.right + 12) + 'px';
-            panel.style.top   = (btnRect.bottom  + 8)  + 'px';
-            panel.style.width = '400px';
-        } else {
-            panel.style.left  = '8px';
-            panel.style.top   = (btnRect.bottom + 8) + 'px';
-            panel.style.width = (window.innerWidth - 16) + 'px';
-        }
+        panel.style.left  = (btnRect.right - 400) + 'px';
+        panel.style.top   = (btnRect.bottom + 8) + 'px';
+        panel.style.width = '400px';
     }
     window.positionAdminPanel = positionAdminPanel;
 
@@ -721,19 +814,6 @@
             });
         });
 
-        // ── audit ────────────────────────────────────────────────────────────
-        window.addEventListener('admin-audit-logged', function (e) {
-            var d = _adminDetail(e);
-            _saveAdminNotif({
-                icon:       'clipboard-list',
-                title:      'Audit Log Update',
-                message:    (d.action || 'A new action') + ' was recorded in the audit log.',
-                link_route: 'audit.logs',
-                link_label: 'View Audit Logs',
-                dedup_key:  'audit-log::' + (d.id || Math.floor(Date.now() / 60000)),
-            });
-        });
-
         // ── course ────────────────────────────────────────────────────────────
         window.addEventListener('admin-course-updated', function (e) {
             var d = _adminDetail(e);
@@ -764,7 +844,13 @@
 
 <body
     class="antialiased"
-    x-data="{ open: false }"
+    x-data="{
+        open: false,
+        sidebarCollapsed: false,
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+        }
+    }"
     @click="$store.adminNotifs && $store.adminNotifs.open && $store.adminNotifs.close()">
 
 @php
@@ -783,21 +869,23 @@
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
         @click="open = false"
-        class="fixed inset-0 z-40 bg-black/50 lg:hidden">
+        class="fixed inset-0 bg-black/50 lg:hidden"
+        style="z-index: 9990;">
     </div>
 
     {{-- ══ SIDEBAR ══ --}}
     <aside
-        :class="open ? 'translate-x-0' : '-translate-x-full'"
-        class="fixed inset-y-0 left-0 z-50 w-72 min-w-[18rem] transform transition-transform duration-300
+        id="admin-sidebar-aside"
+        :class="[open ? 'translate-x-0' : '-translate-x-full', sidebarCollapsed ? 'is-collapsed' : '']"
+        class="fixed inset-y-0 left-0 w-72 min-w-[18rem] transform transition-all duration-300
                shadow-2xl lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
-        style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
+        style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0; z-index: 9991;">
 
         {{-- Sidebar header --}}
-        <div class="flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
+        <div class="admin-sidebar-header flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
 
-            <div class="text-left min-w-0 flex-1 pr-2">
+            <div class="admin-collapsible-text text-left min-w-0 flex-1 pr-2">
                 <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
                     Admin<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
                 </h1>
@@ -815,6 +903,19 @@
 
         {{-- Navigation --}}
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+
+            <div class="admin-nav-section-row">
+                <p class="admin-section-label admin-collapsible-text">MENU</p>
+
+                <button type="button"
+                        @click.stop="toggleSidebar()"
+                        :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                        class="admin-collapse-icon-btn hidden lg:flex">
+                    <i class="fas"
+                       :class="{ 'fa-angles-right': sidebarCollapsed, 'fa-angles-left': !sidebarCollapsed }"
+                       style="font-size:11px;line-height:1;"></i>
+                </button>
+            </div>
 
             @php
                 $sidebarLinks = [
@@ -861,13 +962,6 @@
                         'color'   => '#059669',
                     ],
                     [
-                        'route'   => 'audit.logs',
-                        'icon'    => 'clipboard-list',
-                        'label'   => 'Audit Logs',
-                        'pattern' => 'audit/logs*',
-                        'color'   => '#374151',
-                    ],
-                    [
                         'route'   => 'course',
                         'icon'    => 'clipboard-list',
                         'label'   => 'Courses',
@@ -881,6 +975,7 @@
                 @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
+                   title="{{ $link['label'] }}"
                    @click="window.__adminSidebarNotifsMarkRead('{{ $link['route'] }}')"
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
                           {{ $isActive
@@ -893,14 +988,14 @@
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="font-medium tracking-wide flex-1
+                    <span class="admin-collapsible-text font-medium tracking-wide flex-1
                                  {{ $isActive ? 'font-semibold' : 'text-[#333333]' }}"
                           style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
-                        <span class="ml-auto w-1.5 h-5 rounded-full shrink-0 opacity-70"
+                        <span class="admin-nav-active-dot ml-auto w-1.5 h-5 rounded-full shrink-0 opacity-70"
                               style="background:{{ $link['color'] }};"></span>
                     @endif
                 </a>
@@ -912,10 +1007,12 @@
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit"
+                        title="Logout"
                         class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
                                transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
                         style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                    <i class="fa-solid fa-right-from-bracket mr-2"></i> Logout
+                    <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                    <span class="admin-collapsible-text">Logout</span>
                 </button>
             </form>
         </div>
@@ -1084,7 +1181,7 @@
     </div>
 
     {{-- Scrollable notification list --}}
-    <div class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+    <div class="admin-notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
         <template x-if="$store.adminNotifs && $store.adminNotifs.items.length === 0">
             <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
@@ -1094,7 +1191,7 @@
                 </div>
                 <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
                 <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
-                    User, employment, yearbook, job,<br>event, audit, and course updates will appear here.
+                    User, employment, yearbook, job,<br>event, and course updates will appear here.
                 </p>
             </div>
         </template>
@@ -1122,15 +1219,13 @@
                                  notif.icon === 'chart-line' ? 'linear-gradient(135deg,#FDECD2,#FBDBAA)' :
                                  (notif.icon === 'book-open' ? 'linear-gradient(135deg,#D6ECFB,#B7DEF7)' :
                                  ((notif.icon === 'briefcase' || notif.icon === 'calendar-check') ? 'linear-gradient(135deg,#D6F3E7,#B6E8D2)' :
-                                 (notif.title === 'Audit Log Update' ? 'linear-gradient(135deg,#E5E7EB,#D1D5DB)' :
-                                 'linear-gradient(135deg,#EDE9F8,#DDD5F0)')))
+                                 'linear-gradient(135deg,#EDE9F8,#DDD5F0)'))
                              ),
                              color: (
                                  notif.icon === 'chart-line' ? '#B45309' :
                                  (notif.icon === 'book-open' ? '#0369A1' :
                                  ((notif.icon === 'briefcase' || notif.icon === 'calendar-check') ? '#047857' :
-                                 (notif.title === 'Audit Log Update' ? '#374151' :
-                                 '#7A3F91')))
+                                 '#7A3F91'))
                              )
                          }">
                         <i class="fas"
@@ -1281,16 +1376,6 @@
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#059669,#047857);">
                                     EVENT
-                                </span>
-
-                                {{-- Audit badge --}}
-                                <span
-                                    x-show="notif.icon === 'clipboard-list' && notif.title === 'Audit Log Update' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#374151,#1f2937);">
-                                    AUDIT
                                 </span>
 
                                 {{-- Course badge --}}

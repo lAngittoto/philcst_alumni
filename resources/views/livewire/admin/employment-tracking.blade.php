@@ -13,12 +13,6 @@ new class extends Component {
     public string $filterCourse  = '';
     public string $filterStatus  = '';
 
-    // ── Comparison Mode ───────────────────────────────────────────────────────
-    public string $compareMode       = 'college';
-    public string $compareA          = '';
-    public string $compareB          = '';
-    public bool   $compareFullscreen = false;
-
     // ── Detail Modal ──────────────────────────────────────────────────────────
     public bool   $modalOpen       = false;
     public string $modalTitle      = '';
@@ -49,16 +43,12 @@ new class extends Component {
     public string $chartEmpTypeData       = '{}';
     public string $chartCareerPathData    = '{}';
     public string $chartEduStatusData     = '{}';
-    public string $chartCompareSideBySide = '{}';
     public string $chartUnemployedData    = '{}';
 
     // ── Meta lists ────────────────────────────────────────────────────────────
     public array $batches  = [];
     public array $colleges = [];
     public array $courses  = [];
-
-    // ── Compare panel entity lists ────────────────────────────────────────────
-    public array $compareOptions = [];
 
     public function mount(): void
     {
@@ -310,7 +300,6 @@ new class extends Component {
     public function refreshAll(): void
     {
         $this->computeStats();
-        $this->refreshCompareOptionsList();
         $this->buildAllCharts();
     }
 
@@ -480,109 +469,6 @@ new class extends Component {
             'colors' => ['#f59e0b', '#9ca3af'],
         ]);
 
-        $this->buildCompareChart();
-    }
-
-    private function buildCompareChart(): void
-    {
-        if (!$this->compareA || !$this->compareB) { $this->chartCompareSideBySide = '{}'; return; }
-
-        $getStats = function (string $key): array {
-            $empQ  = DB::table('alumni as a')->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')->whereNull('a.deleted_at')->whereNull('et.deleted_at');
-            $baseQ = DB::table('alumni as a')->whereNull('a.deleted_at');
-
-            if ($this->compareMode === 'college') {
-                $codes = DB::table('courses')->where('college', $key)->pluck('code');
-                $empQ->whereIn('a.course_code', $codes);
-                $baseQ->whereIn('a.course_code', $codes);
-            } elseif ($this->compareMode === 'course') {
-                $empQ->where('a.course_code', $key);
-                $baseQ->where('a.course_code', $key);
-            } else {
-                $empQ->where('a.batch', $key);
-                $baseQ->where('a.batch', $key);
-            }
-
-            if ($this->filterBatch && $this->compareMode !== 'batch') {
-                $empQ->where('a.batch', $this->filterBatch);
-                $baseQ->where('a.batch', $this->filterBatch);
-            }
-
-            $total      = (clone $baseQ)->count();
-            $employed   = (clone $empQ)->where('et.employment_status', 'employed')->count();
-            $self_emp   = (clone $empQ)->where('et.employment_status', 'self_employed')->count();
-            $unemployed = (clone $empQ)->where('et.employment_status', 'unemployed')->count();
-            $local      = (clone $empQ)->where('et.work_location', 'local')->count();
-            $abroad     = (clone $empQ)->where('et.work_location', 'abroad')->count();
-            $related    = (clone $empQ)->where('et.course_relevance', 'yes')->count();
-
-            return compact('total', 'employed', 'self_emp', 'unemployed', 'local', 'abroad', 'related');
-        };
-
-        $aStats = $getStats($this->compareA);
-        $bStats = $getStats($this->compareB);
-
-        $this->chartCompareSideBySide = json_encode([
-            'labelA'     => $this->compareA,
-            'labelB'     => $this->compareB,
-            'categories' => ['Employed', 'Self-Employed', 'Unemployed', 'Local', 'Abroad', 'Course-Related'],
-            'dataA'      => [$aStats['employed'], $aStats['self_emp'], $aStats['unemployed'], $aStats['local'], $aStats['abroad'], $aStats['related']],
-            'dataB'      => [$bStats['employed'], $bStats['self_emp'], $bStats['unemployed'], $bStats['local'], $bStats['abroad'], $bStats['related']],
-            'totalA'     => $aStats['total'],
-            'totalB'     => $bStats['total'],
-        ]);
-    }
-
-    private function computeCompareOptionsList(): array
-    {
-        if ($this->compareMode === 'college') {
-            return DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values()->toArray();
-        } elseif ($this->compareMode === 'course') {
-            return DB::table('courses')->orderBy('code')->pluck('code')->toArray();
-        }
-        return DB::table('alumni')->whereNull('deleted_at')->distinct()->orderBy('batch', 'desc')->pluck('batch')->toArray();
-    }
-
-    /**
-     * Refreshes the dropdown option list only (e.g. a new college/course/batch
-     * may have appeared). Does NOT touch the person's current compareA/compareB
-     * selection — called on every filter change via refreshAll(), so it must
-     * never wipe an in-progress comparison.
-     */
-    private function refreshCompareOptionsList(): void
-    {
-        $this->compareOptions = $this->computeCompareOptionsList();
-    }
-
-    /**
-     * Full reset — used only when the compare MODE itself changes
-     * (college/course/batch), since the previous A/B selections no longer
-     * make sense under the new mode.
-     */
-    public function buildCompareOptions(): void
-    {
-        $this->compareOptions = $this->computeCompareOptionsList();
-        $this->compareA = '';
-        $this->compareB = '';
-        $this->chartCompareSideBySide = '{}';
-    }
-
-    public function resetCompare(): void           { $this->compareA = ''; $this->compareB = ''; $this->chartCompareSideBySide = '{}'; }
-    public function toggleCompareFullscreen(): void { $this->compareFullscreen = !$this->compareFullscreen; }
-
-    public function updatedCompareMode(): void { $this->buildCompareOptions(); }
-    public function updatedCompareA(): void    { $this->buildCompareChart(); }
-    public function updatedCompareB(): void    { $this->buildCompareChart(); }
-
-    public function updatedFilterBatch(): void   { $this->refreshAll(); }
-    public function updatedFilterCollege(): void { $this->filterCourse = ''; $this->refreshAll(); }
-    public function updatedFilterCourse(): void  { $this->refreshAll(); }
-    public function updatedFilterStatus(): void  { $this->refreshAll(); }
-
-    public function clearFilters(): void
-    {
-        $this->filterBatch = $this->filterCollege = $this->filterCourse = $this->filterStatus = '';
-        $this->refreshAll();
     }
 
     public function with(): array { return []; }
@@ -597,7 +483,7 @@ new class extends Component {
 
 @php
     $inputBase     = 'border border-[#E8E0F0] rounded-lg text-sm font-medium bg-white text-[#333333] px-3 py-2 outline-none transition-colors duration-150 placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10';
-    $selectBase    = $inputBase . ' appearance-none cursor-pointer pr-9 bg-no-repeat';
+    $selectBase    = $inputBase . ' appearance-none cursor-pointer pr-9 bg-no-repeat max-w-[190px] truncate';
     $activeSelect  = 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold';
     $selectArrow   = "background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.6rem center;background-size:1.25em 1.25em;";
 
@@ -616,17 +502,10 @@ new class extends Component {
 
     $statusPill    = 'inline-flex items-center gap-1 px-[9px] py-[3px] rounded-full text-[0.71rem] font-semibold border whitespace-nowrap';
 
-    $modePillBase  = 'inline-flex items-center gap-1.5 px-3.5 py-[7px] border-[1.5px] border-[#E8E0F0] rounded-full text-[0.8rem] font-semibold text-[#666666] cursor-pointer transition-colors duration-150 bg-white hover:border-[#7a3f91] hover:bg-purple-100 hover:text-[#7a3f91]';
-    $modePillActive= 'border-[#7a3f91] bg-purple-100 text-[#7a3f91]';
-
     $thBase        = 'px-3.5 py-2.5 text-left text-[0.72rem] font-semibold uppercase tracking-[0.06em] text-[#666666] whitespace-nowrap first:pl-6 last:pr-6 last:text-right';
     $tdBase        = 'px-3.5 py-[11px] align-middle first:pl-6 last:pr-6';
 
     $wireFade      = 'opacity-40 pointer-events-none transition-opacity duration-200';
-
-    $catIconBg = ['bg-emerald-100','bg-blue-100','bg-amber-100','bg-teal-100','bg-orange-100','bg-purple-100'];
-    $catIconTx = ['text-emerald-600','text-blue-600','text-amber-600','text-teal-600','text-orange-600','text-[#7a3f91]'];
-    $catFillBg = ['bg-emerald-500','bg-blue-500','bg-amber-500','bg-teal-500','bg-orange-500','bg-[#7a3f91]'];
 @endphp
 
 <div class="flex flex-col h-[90vh] overflow-hidden">
@@ -645,116 +524,15 @@ new class extends Component {
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Analytics</h1>
                 <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">
-                    System-wide employment intelligence &amp; comparison tool
+                    System-wide employment intelligence
                 </p>
             </div>
         </div>
 
-        {{-- Compare Button — icon only + tooltip --}}
-        <div class="relative inline-flex group">
-            <button wire:click="toggleCompareFullscreen"
-                    class="w-10 h-10 inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-[#7a3f91] to-[#9b59b6] text-white border-none cursor-pointer shadow-[0_2px_8px_rgba(122,63,145,0.35)] transition-all duration-150 flex-shrink-0 hover:opacity-90 hover:shadow-[0_4px_16px_rgba(122,63,145,0.45)] hover:-translate-y-px"
-                    aria-label="Compare Tool">
-                <i class="fa-solid fa-code-compare text-[0.95rem]"></i>
-            </button>
-            <span class="absolute top-[calc(100%+8px)] right-0 whitespace-nowrap bg-[#1a0a2e] text-white text-[0.72rem] font-semibold px-2.5 py-[5px] rounded-lg pointer-events-none opacity-0 -translate-y-1 transition-all duration-150 z-[99] shadow-[0_4px_12px_rgba(0,0,0,0.25)] group-hover:opacity-100 group-hover:translate-y-0 after:content-[''] after:absolute after:bottom-full after:right-[10px] after:border-[5px] after:border-transparent after:border-b-[#1a0a2e]">
-                Compare Tool
-            </span>
-        </div>
-    </div>
-
-    {{-- ── FILTER BAR ── --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-[0_1px_4px_rgba(0,0,0,0.06)] min-h-0 flex-shrink-0"
-         wire:loading.class="{{ $wireFade }}"
-         wire:target="updatedFilterBatch,updatedFilterCollege,updatedFilterCourse,updatedFilterStatus,clearFilters">
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 relative z-50 overflow-visible flex flex-wrap gap-2 items-center">
-
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
-                Filters
-            </div>
-
-            <select wire:model.live="filterBatch" style="{{ $selectArrow }}"
-                    class="{{ $selectBase }} {{ $filterBatch ? $activeSelect : '' }}">
-                <option value="">All Batches</option>
-                @foreach($batches as $b)
-                    <option value="{{ $b }}">Batch {{ $b }}</option>
-                @endforeach
-            </select>
-
-            <select wire:model.live="filterCollege" style="{{ $selectArrow }}"
-                    class="{{ $selectBase }} {{ $filterCollege ? $activeSelect : '' }}">
-                <option value="">All Colleges</option>
-                @foreach($colleges as $c)
-                    <option value="{{ $c }}">{{ $c }}</option>
-                @endforeach
-            </select>
-
-            @if($filterCollege)
-            <select wire:model.live="filterCourse" style="{{ $selectArrow }}"
-                    class="{{ $selectBase }} {{ $filterCourse ? $activeSelect : '' }}">
-                <option value="">All Courses in College</option>
-                @foreach($courses as $c)
-                    @if($c['college'] === $filterCollege)
-                        <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
-                    @endif
-                @endforeach
-            </select>
-            @else
-            <select wire:model.live="filterCourse" style="{{ $selectArrow }}"
-                    class="{{ $selectBase }} {{ $filterCourse ? $activeSelect : '' }}">
-                <option value="">All Courses</option>
-                @foreach($courses as $c)
-                    <option value="{{ $c['code'] }}">{{ $c['code'] }}</option>
-                @endforeach
-            </select>
-            @endif
-
-            <select wire:model.live="filterStatus" style="{{ $selectArrow }}"
-                    class="{{ $selectBase }} {{ $filterStatus ? $activeSelect : '' }}">
-                <option value="">All Status</option>
-                <option value="employed">Employed</option>
-                <option value="self_employed">Self-Employed</option>
-                <option value="unemployed">Unemployed</option>
-                <option value="not_filled">Not Filled</option>
-            </select>
-
-            @if($filterBatch || $filterCollege || $filterCourse || $filterStatus)
-                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-purple-100 text-[#7a3f91] border border-purple-200">
-                    <i class="fa-solid fa-filter text-[9px]"></i> Filtered view
-                </span>
-            @endif
-
-            <button wire:click="clearFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="clearFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer text-[#333333]">
-                <span wire:loading.remove wire:target="clearFilters">
-                    <i class="fa-solid fa-rotate-left text-sm"></i>
-                </span>
-                <span wire:loading wire:target="clearFilters">
-                    <svg class="animate-spin w-3.5 h-3.5 text-[#7A3F91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-
-            <div class="ml-auto" wire:loading wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
-                <svg class="animate-spin w-3.5 h-3.5 text-[#7a3f91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-            </div>
-        </div>
     </div>
 
     {{-- ── STAT CARDS (view-only, Emp Rate removed) ── --}}
-    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0"
-         wire:loading.class="{{ $wireFade }}"
-         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+    <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0">
 
         @php
             $fillRate = $totalAlumni > 0 ? round($totalFilled/$totalAlumni*100) : 0;
@@ -847,9 +625,7 @@ new class extends Component {
     </div>
 
     {{-- ── ROW 1 — Status / Location / Relevance / Unemployed Reason ── --}}
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0"
-         wire:loading.class="{{ $wireFade }}"
-         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0">
 
         <div class="{{ $chartCard }}">
             <div class="{{ $chartHead }}">
@@ -906,9 +682,7 @@ new class extends Component {
     </div>
 
     {{-- ── ROW 2 — Emp Type / Career Path / Education / Top Courses ── --}}
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0"
-         wire:loading.class="{{ $wireFade }}"
-         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0">
 
         <div class="{{ $chartCard }}">
             <div class="{{ $chartHead }}">
@@ -961,9 +735,7 @@ new class extends Component {
     </div>
 
     {{-- ── ROW 3 — By Batch + By College ── --}}
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-shrink-0"
-         wire:loading.class="{{ $wireFade }}"
-         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-shrink-0">
 
         <div class="{{ $chartCard }}">
             <div class="{{ $chartHead }}">
@@ -1009,9 +781,7 @@ new class extends Component {
     </div>
 
     {{-- ── INSIGHTS / RANKINGS ── --}}
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-shrink-0"
-         wire:loading.class="{{ $wireFade }}"
-         wire:target="filterBatch,filterCollege,filterCourse,filterStatus,clearFilters">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-shrink-0">
 
         @php
             $allColleges = collect($colleges)->map(function($col) {
@@ -1052,7 +822,7 @@ new class extends Component {
                 </div>
                 <i class="fa-solid fa-trophy text-sm text-amber-500"></i>
             </div>
-            <div class="p-4 space-y-0">
+            <div class="p-4 space-y-0 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]" style="height:220px;">
                 @forelse($allColleges->take(6) as $i => $col)
                 @php
                     $medals    = ['🥇','🥈','🥉'];
@@ -1091,7 +861,7 @@ new class extends Component {
                 </div>
                 <i class="fa-solid fa-graduation-cap text-sm text-blue-500"></i>
             </div>
-            <div class="p-4 space-y-0">
+            <div class="p-4 space-y-0 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]" style="height:220px;">
                 @php $maxCourse = $topCourses->max('cnt') ?: 1; @endphp
                 @forelse($topCourses as $i => $c)
                 <div class="{{ $rankRow }}">
@@ -1120,7 +890,7 @@ new class extends Component {
                 </div>
                 <i class="fa-solid fa-calendar-check text-sm text-amber-500"></i>
             </div>
-            <div class="p-4 space-y-0">
+            <div class="p-4 space-y-0 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]" style="height:220px;">
                 @php $maxBatch = $topBatches->max('cnt') ?: 1; @endphp
                 @forelse($topBatches as $i => $b)
                 <div class="{{ $rankRow }}">
@@ -1139,187 +909,8 @@ new class extends Component {
 
     </div>
 
-</div>{{-- /main layout --}}
+</div>{{-- /inner scroll container (NOT the component root — root div closes at end of file) --}}
 
-{{-- ══ COMPARE FULLSCREEN MODAL ══ --}}
-@if($compareFullscreen)
-<div class="fixed inset-0 z-[60] bg-[rgba(27,6,46,0.55)] backdrop-blur-md flex items-center justify-center p-4 animate-[admFadeIn_0.2s_ease_both]"
-     @keydown.escape.window="$wire.toggleCompareFullscreen()">
-    <div class="bg-white rounded-[20px] w-full max-w-[960px] max-h-[94vh] flex flex-col overflow-hidden shadow-[0_24px_80px_rgba(74,25,110,0.22)] animate-[admSlideUp_0.22s_cubic-bezier(0.4,0,0.2,1)_both]">
-
-        {{-- Header --}}
-        <div class="bg-gradient-to-br from-[#7a3f91] to-[#5c2d6e] px-6 py-[18px] flex items-center gap-3 flex-shrink-0">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/[0.18]">
-                <i class="fa-solid fa-code-compare text-white text-base"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-                <p class="text-base font-semibold text-white leading-tight">Compare Tool</p>
-                <p class="text-xs text-white/60 font-normal mt-0.5">
-                    {{ $compareMode === 'college' ? 'By College' : ($compareMode === 'course' ? 'By Course' : 'By Batch Year') }}
-                    @if($compareA && $compareB) &mdash; {{ $compareA }} vs {{ $compareB }} @endif
-                </p>
-            </div>
-            <div class="flex items-center gap-2 flex-shrink-0">
-                @if($compareA && $compareB)
-                <button wire:click="resetCompare"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-white/15 text-white border border-white/25">
-                    <i class="fa-solid fa-rotate-left text-xs"></i> Reset
-                </button>
-                @endif
-                <button wire:click="toggleCompareFullscreen"
-                        class="w-9 h-9 rounded-xl flex items-center justify-center transition bg-white/[0.12] text-white/80 border border-white/20">
-                    <i class="fa-solid fa-xmark text-base"></i>
-                </button>
-            </div>
-        </div>
-
-        {{-- Body --}}
-        <div class="flex-1 overflow-y-auto p-6 [&::-webkit-scrollbar]:w-[5px] [&::-webkit-scrollbar-thumb]:bg-[#d4b8e8] [&::-webkit-scrollbar-thumb]:rounded-full">
-
-            {{-- Mode pills --}}
-            <div class="flex flex-wrap gap-2 mb-5">
-                <label class="{{ $modePillBase }} {{ $compareMode==='college' ? $modePillActive : '' }}">
-                    <input wire:model.live="compareMode" type="radio" value="college" class="sr-only">
-                    <i class="fa-solid fa-building-columns text-xs"></i> By College
-                </label>
-                <label class="{{ $modePillBase }} {{ $compareMode==='course' ? $modePillActive : '' }}">
-                    <input wire:model.live="compareMode" type="radio" value="course" class="sr-only">
-                    <i class="fa-solid fa-book text-xs"></i> By Course
-                </label>
-                <label class="{{ $modePillBase }} {{ $compareMode==='batch' ? $modePillActive : '' }}">
-                    <input wire:model.live="compareMode" type="radio" value="batch" class="sr-only">
-                    <i class="fa-solid fa-calendar text-xs"></i> By Batch Year
-                </label>
-            </div>
-
-            {{-- Entity selectors --}}
-            <div class="flex flex-wrap items-center gap-3 mb-6 p-4 rounded-2xl bg-[#f9f7fc] border-[1.5px] border-purple-200">
-                <div class="flex-1 min-w-[160px]">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-1.5 text-[#333333]">
-                        <i class="fa-solid fa-a text-xs mr-1 text-[#7a3f91]"></i> Entity A
-                    </p>
-                    <select wire:model.live="compareA" style="{{ $selectArrow }}" class="{{ $selectBase }} w-full">
-                        <option value="">Select…</option>
-                        @foreach($compareOptions as $opt)
-                            <option value="{{ $opt }}">{{ $opt }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="w-9 h-9 rounded-full bg-[#7a3f91] text-white text-[0.75rem] font-bold flex items-center justify-center flex-shrink-0 shadow-[0_2px_10px_rgba(122,63,145,0.35)] mt-5">VS</div>
-                <div class="flex-1 min-w-[160px]">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-1.5 text-[#333333]">
-                        <i class="fa-solid fa-b text-xs mr-1 text-blue-500"></i> Entity B
-                    </p>
-                    <select wire:model.live="compareB" style="{{ $selectArrow }}" class="{{ $selectBase }} w-full">
-                        <option value="">Select…</option>
-                        @foreach($compareOptions as $opt)
-                            @if($opt !== $compareA)
-                                <option value="{{ $opt }}">{{ $opt }}</option>
-                            @endif
-                        @endforeach
-                    </select>
-                </div>
-            </div>
-
-            @if($compareA && $compareB && $chartCompareSideBySide !== '{}')
-            @php
-                $cmpFs    = json_decode($chartCompareSideBySide, true);
-                $totalAFs = $cmpFs['totalA'] ?? 0;
-                $totalBFs = $cmpFs['totalB'] ?? 0;
-                $dAFs     = $cmpFs['dataA'] ?? [];
-                $dBFs     = $cmpFs['dataB'] ?? [];
-                $catsFs   = $cmpFs['categories'] ?? [];
-                $catIconsFs = ['fa-briefcase','fa-store','fa-circle-pause','fa-house','fa-plane-departure','fa-graduation-cap'];
-            @endphp
-
-            {{-- Totals --}}
-            <div class="grid grid-cols-2 gap-4 mb-6 p-4 rounded-2xl bg-[#f4f3f8]">
-                <div class="text-center p-3 bg-white rounded-xl border border-purple-200">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-1 text-[#7a3f91]">{{ $cmpFs['labelA'] ?? '' }}</p>
-                    <p class="text-3xl font-black text-[#333333]">{{ number_format($totalAFs) }}</p>
-                    <p class="text-xs mt-0.5 text-[#666666]">total alumni</p>
-                </div>
-                <div class="text-center p-3 bg-white rounded-xl border border-blue-200">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-1 text-blue-500">{{ $cmpFs['labelB'] ?? '' }}</p>
-                    <p class="text-3xl font-black text-[#333333]">{{ number_format($totalBFs) }}</p>
-                    <p class="text-xs mt-0.5 text-[#666666]">total alumni</p>
-                </div>
-            </div>
-
-            {{-- Category breakdown --}}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                @foreach($catsFs as $idx => $cat)
-                @php
-                    $vAFs    = $dAFs[$idx] ?? 0;
-                    $vBFs    = $dBFs[$idx] ?? 0;
-                    $maxVFs  = max($vAFs, $vBFs, 1);
-                    $pctAFs  = round($vAFs / $maxVFs * 100);
-                    $pctBFs  = round($vBFs / $maxVFs * 100);
-                    $winFs   = $vAFs > $vBFs ? 'A' : ($vBFs > $vAFs ? 'B' : null);
-                    $iconBgFs = $catIconBg[$idx] ?? 'bg-purple-100';
-                    $iconTxFs = $catIconTx[$idx] ?? 'text-[#7a3f91]';
-                    $fillBgFs = $catFillBg[$idx] ?? 'bg-[#7a3f91]';
-                    $iconFs   = $catIconsFs[$idx] ?? 'fa-circle';
-                @endphp
-                <div class="p-4 rounded-xl border border-purple-100 bg-[#faf7ff]">
-                    <div class="flex items-center gap-2 mb-3">
-                        <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 {{ $iconBgFs }} {{ $iconTxFs }}">
-                            <i class="fa-solid {{ $iconFs }} text-xs"></i>
-                        </div>
-                        <span class="text-sm font-semibold flex-1 text-[#333333]">{{ $cat }}</span>
-                        @if($winFs === 'A')
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-purple-100 text-[#7a3f91] border-purple-200">
-                                <i class="fa-solid fa-chevron-up text-[9px]"></i> {{ $cmpFs['labelA'] ?? 'A' }}
-                            </span>
-                        @elseif($winFs === 'B')
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-blue-100 text-blue-600 border-blue-200">
-                                <i class="fa-solid fa-chevron-up text-[9px]"></i> {{ $cmpFs['labelB'] ?? 'B' }}
-                            </span>
-                        @else
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border bg-gray-100 text-gray-500 border-gray-200">Tied</span>
-                        @endif
-                    </div>
-                    <div class="space-y-2">
-                        <div>
-                            <div class="flex justify-between mb-1">
-                                <span class="text-xs font-semibold text-[#7a3f91]">{{ $cmpFs['labelA'] ?? 'A' }}</span>
-                                <span class="text-sm font-semibold text-[#333333]">{{ $vAFs }}</span>
-                            </div>
-                            <div class="{{ $progTrack }}" style="height:7px;">
-                                <div class="{{ $progFill }} {{ $fillBgFs }}" style="width:{{ $pctAFs }}%;height:7px;border-radius:99px;"></div>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="flex justify-between mb-1">
-                                <span class="text-xs font-semibold text-blue-500">{{ $cmpFs['labelB'] ?? 'B' }}</span>
-                                <span class="text-sm font-semibold text-[#333333]">{{ $vBFs }}</span>
-                            </div>
-                            <div class="{{ $progTrack }}" style="height:7px;">
-                                <div class="{{ $progFill }} {{ $fillBgFs }} opacity-45" style="width:{{ $pctBFs }}%;height:7px;border-radius:99px;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                @endforeach
-            </div>
-
-            {{-- Chart --}}
-            <div wire:ignore style="height:280px;">
-                <canvas id="admChartCompareFs"></canvas>
-            </div>
-
-            @else
-            <div class="flex flex-col items-center justify-center py-20 text-[#666666]">
-                <i class="fa-solid fa-code-compare text-5xl mb-4 opacity-20"></i>
-                <p class="text-base font-semibold">Choose two {{ $compareMode === 'college' ? 'colleges' : ($compareMode === 'course' ? 'courses' : 'batch years') }} above to compare.</p>
-                <p class="text-sm mt-1 opacity-60">Select Entity A and Entity B from the dropdowns above.</p>
-            </div>
-            @endif
-
-        </div>{{-- /fs-body --}}
-    </div>{{-- /fs-panel --}}
-</div>
-@endif
 
 {{-- ══ EMPLOYMENT DETAIL MODAL ══ --}}
 @if($modalOpen)
@@ -1419,7 +1010,7 @@ new class extends Component {
                         $sbd = match($sk) { 'employed'=>'border-emerald-600/30','self_employed'=>'border-[#7a3f91]/30','unemployed'=>'border-amber-600/30', default=>'border-gray-400/30' };
                         $si  = match($sk) { 'employed'=>'fa-briefcase','self_employed'=>'fa-store','unemployed'=>'fa-circle-pause', default=>'fa-circle-question' };
                     @endphp
-                    <tr class="border-b border-[#f3f0f9] transition-colors duration-100 hover:bg-[#faf7ff]">
+                    <tr wire:key="modal-alum-{{ $alum['id'] ?? $i }}" class="border-b border-[#f3f0f9] transition-colors duration-100 hover:bg-[#faf7ff]">
                         <td class="{{ $tdBase }}">
                             <span class="text-sm font-semibold text-[#666666]">{{ str_pad($i+1,2,'0',STR_PAD_LEFT) }}</span>
                         </td>
@@ -1519,7 +1110,6 @@ new class extends Component {
      data-emptype="{{ $chartEmpTypeData }}"
      data-career="{{ $chartCareerPathData }}"
      data-edu="{{ $chartEduStatusData }}"
-     data-compare="{{ $chartCompareSideBySide }}"
      data-unemployed="{{ $chartUnemployedData }}">
 </div>
 
@@ -1555,13 +1145,22 @@ new class extends Component {
                 emptype:    JSON.parse(el.getAttribute('data-emptype')    || 'null'),
                 career:     JSON.parse(el.getAttribute('data-career')     || 'null'),
                 edu:        JSON.parse(el.getAttribute('data-edu')        || 'null'),
-                compare:    JSON.parse(el.getAttribute('data-compare')    || 'null'),
                 unemployed: JSON.parse(el.getAttribute('data-unemployed') || 'null'),
             };
         } catch(e){ return null; }
     }
 
-    function kill(id){ if(registry[id]){ registry[id].destroy(); delete registry[id]; } }
+    function kill(id){
+        // Ask Chart.js itself first — our local registry can go stale if a
+        // chart was destroyed/replaced through another path (e.g. an
+        // overlapping initAll() run). Trusting only registry[id] is what let
+        // hbar()/polar()/groupedBar() throw "Canvas is already in use".
+        var c = document.getElementById(id);
+        var existing = (c && typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(c) : null;
+        if(existing){ existing.destroy(); }
+        else if(registry[id]){ registry[id].destroy(); }
+        delete registry[id];
+    }
     function allZero(arr){ return !arr || arr.every(function(v){ return !v || v===0; }); }
 
     function toggleNoData(canvasId, isEmpty){
@@ -1602,6 +1201,19 @@ new class extends Component {
             // stale reference before creating a fresh one.
             delete registry[id];
         }
+
+        // Belt-and-suspenders: even though Chart.getChart(c) returned
+        // nothing above, Livewire's DOM morphing can occasionally leave a
+        // canvas element marked as "in use" internally by Chart.js without
+        // a live entry in Chart.getChart()'s registry (e.g. when the
+        // canvas node itself gets replaced/recreated mid-render). Calling
+        // kill(id) here is a no-op if the canvas is genuinely free, but it
+        // guarantees any lingering instance tied to this element is torn
+        // down before we ever call "new Chart()" — this is what fixes the
+        // "Canvas is already in use" crash that donut() alone didn't guard
+        // against (unlike hbar()/polar()/groupedBar(), which already kill()
+        // unconditionally before creating).
+        kill(id);
 
         var opts = {
             responsive: true, maintainAspectRatio: false, cutout: '66%',
@@ -1727,27 +1339,6 @@ new class extends Component {
         });
     }
 
-    function groupedBar(id, data){
-        if(!data || !data.labelA || !data.labelB) return;
-        var c = document.getElementById(id); if(!c) return;
-        kill(id);
-        registry[id] = new Chart(c, {
-            type:'bar',
-            data:{ labels:data.categories, datasets:[
-                { label:data.labelA, data:data.dataA, backgroundColor:'rgba(122,63,145,.8)', borderColor:'#7a3f91', borderWidth:1, borderRadius:4 },
-                { label:data.labelB, data:data.dataB, backgroundColor:'rgba(59,130,246,.7)',  borderColor:'#3b82f6', borderWidth:1, borderRadius:4 },
-            ]},
-            options:{
-                responsive:true, maintainAspectRatio:false, animation:{duration:300},
-                plugins:{ legend:{ position:'top', align:'end', onClick:function(){}, labels:{font:{size:11,weight:'600'},color:'#333',padding:12,usePointStyle:true} } },
-                scales:{
-                    x:{ grid:{display:false}, ticks:{font:{size:10,weight:'600'},color:'#333'} },
-                    y:{ grid:{color:'#f3f4f6'}, ticks:{font:{size:10},color:'#9ca3af',precision:0}, beginAtZero:true }
-                }
-            }
-        });
-    }
-
     function sliceBatch(data, start){
         var end = start + BATCH_PAGE;
         return { labels:data.labels.slice(start,end), employed:data.employed.slice(start,end), self_emp:data.self_emp.slice(start,end), unemployed:data.unemployed.slice(start,end) };
@@ -1821,35 +1412,62 @@ new class extends Component {
         }, { passive: true });
     }
 
+    var initAllRunning = false;
+    var initAllQueued  = false;
+
     function initAll(){
+        // Guard against overlapping runs: Livewire.hook('commit', ...) fires
+        // on every filter change / poll tick, each
+        // scheduling initAll() via requestAnimationFrame. If two of those
+        // land close together, both can start before the first one's Chart
+        // constructors finish, and two "new Chart()" calls race on the same
+        // canvas. Instead of running concurrently, queue the second run and
+        // replay it once the first is done.
+        if(initAllRunning){ initAllQueued = true; return; }
+        initAllRunning = true;
+
+        try{
+            runInitAll();
+        } finally {
+            initAllRunning = false;
+            if(initAllQueued){
+                initAllQueued = false;
+                requestAnimationFrame(initAll);
+            }
+        }
+    }
+
+    function runInitAll(){
         var d = bridge(); if(!d) return;
 
-        donut('admChartStatus', d.status);
-        donut('admChartLocation', d.location);
-        donut('admChartRelevance', d.relevance);
-        donut('admChartUnemployed', d.unemployed);
-        donut('admChartEmpType',    d.emptype);
-        donut('admChartEduStatus',  d.edu);
-        hbar( 'admChartCourse',     d.course);
-        polar('admChartCareerPath', d.career);
-
-        if(d.college && d.college.labels){
-            stackedBarH('admChartCollege', d.college.labels, d.college.employed, d.college.self_emp, d.college.unemployed);
+        function safe(fn){
+            try { fn(); } catch(e){ console.warn('[employment-tracking] chart render skipped:', e); }
         }
 
-        if(d.batch && d.batch.labels){
-            var changed = !batchAll || JSON.stringify(d.batch.labels)!==JSON.stringify(batchAll.labels);
-            if(changed){ batchAll=d.batch; batchIdx=Math.max(0,batchAll.labels.length-BATCH_PAGE); kill('admChartBatch'); }
-            drawBatch(batchAll, batchIdx);
-        }
-        bindBatchNav();
-        bindScrollDirIndicator();
+        safe(function(){ donut('admChartStatus', d.status); });
+        safe(function(){ donut('admChartLocation', d.location); });
+        safe(function(){ donut('admChartRelevance', d.relevance); });
+        safe(function(){ donut('admChartUnemployed', d.unemployed); });
+        safe(function(){ donut('admChartEmpType',    d.emptype); });
+        safe(function(){ donut('admChartEduStatus',  d.edu); });
+        safe(function(){ hbar( 'admChartCourse',     d.course); });
+        safe(function(){ polar('admChartCareerPath', d.career); });
 
-        if(d.compare && d.compare.labelA && d.compare.labelB){
-            groupedBar('admChartCompareFs', d.compare);
-        } else {
-            kill('admChartCompareFs');
-        }
+        safe(function(){
+            if(d.college && d.college.labels){
+                stackedBarH('admChartCollege', d.college.labels, d.college.employed, d.college.self_emp, d.college.unemployed);
+            }
+        });
+
+        safe(function(){
+            if(d.batch && d.batch.labels){
+                var changed = !batchAll || JSON.stringify(d.batch.labels)!==JSON.stringify(batchAll.labels);
+                if(changed){ batchAll=d.batch; batchIdx=Math.max(0,batchAll.labels.length-BATCH_PAGE); kill('admChartBatch'); }
+                drawBatch(batchAll, batchIdx);
+            }
+        });
+        safe(bindBatchNav);
+        safe(bindScrollDirIndicator);
     }
 
     loadChartJs(function(){
@@ -1861,7 +1479,6 @@ new class extends Component {
 
         document.addEventListener('livewire:navigated', function(){
             kill('admChartBatch'); kill('admChartCollege');
-            kill('admChartCompareFs');
             requestAnimationFrame(initAll);
         });
 

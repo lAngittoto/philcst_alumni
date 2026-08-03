@@ -916,7 +916,20 @@ new #[Layout('app')] class extends Component {
         } catch(e){ return null; }
     }
 
-    function kill(id){ if(registry[id]){ registry[id].destroy(); delete registry[id]; } }
+    function kill(id){
+        // Ask Chart.js itself first. Our local `registry` object gets
+        // wiped and recreated every time this <script> block re-executes
+        // (e.g. on wire:navigate swapping in fresh page HTML), but Chart.js
+        // still remembers a chart attached to a canvas element from a
+        // PREVIOUS run — registry[id] alone can't see that. Trusting only
+        // the local registry is what let bar() throw "Canvas is already
+        // in use" during navigation.
+        var c = document.getElementById(id);
+        var existing = (c && typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(c) : null;
+        if(existing){ existing.destroy(); }
+        else if(registry[id]){ registry[id].destroy(); }
+        delete registry[id];
+    }
     function allZero(arr){ return !arr || arr.every(function(v){ return !v || v === 0; }); }
 
     function bar(id, data){
@@ -971,7 +984,31 @@ new #[Layout('app')] class extends Component {
         });
     }
 
+    var initAllRunning = false;
+    var initAllQueued  = false;
+
     function initAll(){
+        // Guard against overlapping runs: the Livewire commit hook and the
+        // livewire:navigated listener can both schedule initAll() via
+        // requestAnimationFrame close together (e.g. right after a
+        // wire:navigate page swap), letting two "new Chart()" calls race
+        // on the same canvas. Queue the second run instead of letting it
+        // run concurrently.
+        if(initAllRunning){ initAllQueued = true; return; }
+        initAllRunning = true;
+
+        try{
+            runInitAll();
+        } finally {
+            initAllRunning = false;
+            if(initAllQueued){
+                initAllQueued = false;
+                requestAnimationFrame(initAll);
+            }
+        }
+    }
+
+    function runInitAll(){
         var d = bridge(); if(!d) return;
         bar('adm_barEmpSnapshot',    d.empSnapshot);
         bar('adm_barEventsSnapshot', d.eventsSnapshot);
