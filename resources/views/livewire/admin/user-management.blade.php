@@ -293,6 +293,12 @@ new class extends Component {
                 DB::raw("COALESCE(dir.last_name,'')         as last_name"),
                 DB::raw("COALESCE(dir.suffix,'')            as suffix"),
                 DB::raw("COALESCE(dir.email,'')             as director_email"),
+                DB::raw("(CASE
+                    WHEN users.role='alumni'    THEN al.email_updated_at
+                    WHEN users.role='director'  THEN dir.email_updated_at
+                    WHEN users.role='registrar' THEN users.email_updated_at
+                    ELSE NULL
+                END) as email_updated_at"),
                 DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
             ])
             ->leftJoin('alumni as al','al.user_id','=','users.id')
@@ -327,6 +333,14 @@ new class extends Component {
             $this->cpName = $r->name;
         }
         $this->activeModal = 'viewProfile';
+    }
+
+    public function ueCooldownDaysLeft(): int {
+        $last = $this->vData['email_updated_at'] ?? null;
+        if (!$last) return 0;
+        $elapsedDays = now()->diffInDays(\Carbon\Carbon::parse($last));
+        $remaining   = 30 - $elapsedDays;
+        return $remaining > 0 ? (int) ceil($remaining) : 0;
     }
 
     public function savePhoto(): void {
@@ -371,6 +385,13 @@ new class extends Component {
         try {
             $role = $this->vData['role'] ?? '';
 
+            $cooldownDays = $this->ueCooldownDaysLeft();
+            if ($cooldownDays > 0) {
+                $label = $role === 'registrar' ? 'username' : 'email';
+                $this->ueErrors = ['general' => ["This account's {$label} was updated recently. Please wait {$cooldownDays} more day" . ($cooldownDays === 1 ? '' : 's') . " before changing it again."]];
+                return;
+            }
+
             if ($role === 'registrar') {
                 $uname = trim($this->ueEmail);
                 if ($uname === '') {
@@ -385,16 +406,16 @@ new class extends Component {
                     $this->ueErrors = ['general' => ["The username \"{$uname}\" is already taken. Please choose a different one."]]; return;
                 }
                 DB::table('users')->where('id', $this->ueId)
-                    ->update(['email' => $loginEmail, 'password_changed_at' => null, 'updated_at' => now()]);
-                if ($this->vData) $this->vData['email'] = $loginEmail;
+                    ->update(['email' => $loginEmail, 'password_changed_at' => null, 'email_updated_at' => now(), 'updated_at' => now()]);
+                if ($this->vData) { $this->vData['email'] = $loginEmail; $this->vData['email_updated_at'] = now(); }
 
                 $this->ueErrors = [];
 
-                // ── DISPATCH: user email updated notification ──────────────────
-                $this->dispatch('__admin-user-email-rich', [
-                    'uid'   => $this->ueId,
-                    'name'  => $this->ueName,
-                    'email' => $loginEmail,
+                // ── DISPATCH: username updated notification ─────────────────────
+                $this->dispatch('__admin-user-username-rich', [
+                    'uid'      => $this->ueId,
+                    'name'     => $this->ueName,
+                    'username' => $uname,
                 ]);
 
                 $this->flash('success', "Username updated for {$this->ueName}. They will be required to reset their password on next login.");
@@ -412,24 +433,25 @@ new class extends Component {
                     $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another director account."]]; return;
                 }
                 DB::table('director')->where('user_id', $this->ueId)
-                    ->update(['email' => $email, 'updated_at' => now()]);
-                if ($this->vData) $this->vData['director_email'] = $email;
+                    ->update(['email' => $email, 'email_updated_at' => now(), 'updated_at' => now()]);
+                if ($this->vData) { $this->vData['director_email'] = $email; $this->vData['email_updated_at'] = now(); }
             } else {
                 $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
                 if ($duplicate) {
                     $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another alumni account."]]; return;
                 }
                 DB::table('alumni')->where('user_id', $this->ueId)
-                    ->update(['email' => $email, 'password_changed_at' => null, 'updated_at' => now()]);
-                if ($this->vData) $this->vData['record_email'] = $email;
+                    ->update(['email' => $email, 'password_changed_at' => null, 'email_updated_at' => now(), 'updated_at' => now()]);
+                if ($this->vData) { $this->vData['record_email'] = $email; $this->vData['email_updated_at'] = now(); }
             }
             $this->ueErrors = [];
 
-            // ── DISPATCH: user email updated notification ──────────────────
+            // ── DISPATCH: email updated notification ─────────────────────────
             $this->dispatch('__admin-user-email-rich', [
                 'uid'   => $this->ueId,
                 'name'  => $this->ueName,
                 'email' => $email,
+                'role'  => $role,
             ]);
 
             $msg = $role === 'director'
@@ -1086,8 +1108,8 @@ select.mu-filter-input.mu-active {
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
-<div class="fixed inset-0 z-50"
-     style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);"
+<div class="fixed inset-0"
+     style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
      @keydown.escape.window="$wire.closeModal()">
     <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
 
@@ -1315,6 +1337,7 @@ select.mu-filter-input.mu-active {
             @if($isReg)
             @php
                 $currentUsername = $vd['name'] ?? null;
+                $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
@@ -1327,6 +1350,14 @@ select.mu-filter-input.mu-active {
                             This is the registrar's login username — this account has no separate email, only a username. Changing it takes effect immediately: their old username/password stops working right away, and no notification is sent automatically. Give them the new username and a new password yourself.
                         </p>
                     </div>
+                    @if($ueCooldown > 0)
+                    <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
+                        <i class="fas fa-lock text-xs mt-0.5 shrink-0" style="color:#7A3F91;"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#7A3F91;">
+                            Username was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
+                        </p>
+                    </div>
+                    @endif
                     @if(count($ueErrors))
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
                         @foreach($ueErrors as $msgs)
@@ -1340,13 +1371,15 @@ select.mu-filter-input.mu-active {
                         <div class="relative flex-1">
                             <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="text" placeholder="New username…"
-                                   class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                                   @if($ueCooldown > 0) disabled @endif
+                                   class="mu-filter-input w-full {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
                         </div>
                         <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                @if($ueCooldown > 0) disabled @endif
+                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
                                 style="background:#7A3F91;">
                             <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-xs"></i> Update</span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-xs"></i> Update</span>
                         </button>
                     </div>
                     <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
@@ -1366,6 +1399,7 @@ select.mu-filter-input.mu-active {
                 $ueNote = $isDir
                     ? 'This is the director\'s contact email. It is not used to log in.'
                     : 'Updating the email will require the account to reset their password on next login.';
+                $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
@@ -1382,6 +1416,14 @@ select.mu-filter-input.mu-active {
                             @endif
                         </p>
                     </div>
+                    @if($ueCooldown > 0)
+                    <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
+                        <i class="fas fa-lock text-xs mt-0.5 shrink-0" style="color:#7A3F91;"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#7A3F91;">
+                            Email was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
+                        </p>
+                    </div>
+                    @endif
                     @if(count($ueErrors))
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
                         @foreach($ueErrors as $msgs)
@@ -1395,13 +1437,15 @@ select.mu-filter-input.mu-active {
                         <div class="relative flex-1">
                             <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                   class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                                   @if($ueCooldown > 0) disabled @endif
+                                   class="mu-filter-input w-full {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
                         </div>
                         <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                @if($ueCooldown > 0) disabled @endif
+                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
                                 style="background:#7A3F91;">
                             <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-xs"></i> Update</span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-xs"></i> Update</span>
                         </button>
                     </div>
                     <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
@@ -1488,7 +1532,8 @@ select.mu-filter-input.mu-active {
      CREATE DIRECTOR MODAL
      ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'createDirector')
-<div class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
+<div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
+     style="z-index:9995;"
      @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl w-full max-w-xl my-4 flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]">
 
@@ -1646,7 +1691,8 @@ select.mu-filter-input.mu-active {
      TOGGLE CONFIRM MODAL
      ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'toggleConfirm' && $tId)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm"
+     style="z-index:9996;"
      @keydown.escape.window="$wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-[#E8E0F0]"
          x-transition:enter="transition ease-out duration-150"

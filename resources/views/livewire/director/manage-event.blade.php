@@ -610,6 +610,13 @@ new class extends Component {
             // ── Refresh director bell so approved events clear from pending count ──
             $this->dispatch('dir-notif-refresh');
 
+            // ── Notify admin: forwarded via the admin events page's JS bridge ──
+            $this->dispatch('admin-event-approved-notify', [
+                'id'        => $this->approveEventId,
+                'title'     => $this->approveEventTitle,
+                'submitter' => $event->organizer->name ?? 'Alumni Director',
+            ]);
+
             $this->dispatch('flash-message', type: 'success', message: "'{$this->approveEventTitle}' approved!");
             $this->dispatch('event-management-updated', id: $this->approveEventId, title: $this->approveEventTitle, action: 'approved');
         }

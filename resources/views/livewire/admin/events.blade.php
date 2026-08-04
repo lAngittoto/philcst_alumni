@@ -1030,7 +1030,7 @@ select.adm-select-arrow {
 @endphp
 
 {{-- Outer wrapper: light gray overall bg --}}
-<div class="fixed inset-0 z-50 flex flex-col overflow-hidden adm-fs-in" style="background:#f2f2f2;"
+<div class="fixed inset-0 flex flex-col overflow-hidden adm-fs-in" style="background:#f2f2f2;z-index:9995;"
      @keydown.escape.window="$wire.closeViewModal()">
 
     {{-- Purple header bar --}}
@@ -1267,7 +1267,8 @@ select.adm-select-arrow {
 @endphp
 
 <div wire:ignore
-     class="fixed inset-0 z-[70] overflow-hidden"
+     class="fixed inset-0 overflow-hidden"
+     style="z-index:9997;"
      x-data="{
          open: false,
          copied: false, fbCopied: false, messengerCopied: false, fbCopyFailed: false,

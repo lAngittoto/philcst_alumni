@@ -164,8 +164,11 @@
 
         @media (min-width: 1024px) {
             #admin-sidebar-aside.is-collapsed {
-                width: 5rem !important;
-                min-width: 5rem !important;
+                width: 0 !important;
+                min-width: 0 !important;
+                border-right-width: 0 !important;
+                overflow: hidden !important;
+                pointer-events: none;
             }
             #admin-sidebar-aside.is-collapsed .admin-collapsible-text {
                 opacity: 0;
@@ -267,12 +270,13 @@
                         var isUserCreatedEvent  = rawDedup.startsWith('user-created::');
                         var isUserToggledEvent  = rawDedup.startsWith('user-toggled::');
                         var isUserEmailEvent    = rawDedup.startsWith('user-email::');
+                        var isUserUsernameEvent = rawDedup.startsWith('user-username::');
 
                         // Generic user management update (still groups by day)
                         var isUserEvent = (
                             rawDedup.startsWith('user-management::') ||
                             n.icon === 'users'
-                        ) && !isUserCreatedEvent && !isUserToggledEvent && !isUserEmailEvent;
+                        ) && !isUserCreatedEvent && !isUserToggledEvent && !isUserEmailEvent && !isUserUsernameEvent;
 
                         var isEmploymentEvent = (
                             rawDedup.startsWith('employment-tracking::') ||
@@ -291,9 +295,6 @@
                             rawDedup.startsWith('job-management::') ||
                             (!isNewJobEvent && n.icon === 'briefcase')
                         );
-
-                        // NEW EVENT SUBMITTED (pending review) — dedup prefix: event-pending::
-                        var isPendingEvent = rawDedup.startsWith('event-pending::');
 
                         // EVENT APPROVED — dedup prefix: event-approved::
                         var isApprovedEvent = rawDedup.startsWith('event-approved::');
@@ -314,12 +315,12 @@
                         if (isUserCreatedEvent)      { groupKey = rawDedup; }           // per-creation, no collapsing
                         else if (isUserToggledEvent) { groupKey = rawDedup; }           // per-toggle, no collapsing
                         else if (isUserEmailEvent)   { groupKey = rawDedup; }           // per-email-update, no collapsing
+                        else if (isUserUsernameEvent){ groupKey = rawDedup; }           // per-username-update, no collapsing
                         else if (isUserEvent)         { groupKey = 'user_day::' + day; }
                         else if (isEmploymentEvent)  { groupKey = 'employment_day::' + day; }
                         else if (isYearbookEvent)    { groupKey = 'yearbook_day::' + day; }
                         else if (isNewJobEvent)      { groupKey = rawDedup; }
                         else if (isJobUpdateEvent)   { groupKey = 'job_update_day::' + day; }
-                        else if (isPendingEvent)     { groupKey = rawDedup; }
                         else if (isApprovedEvent)    { groupKey = rawDedup; }
                         else if (isEventEvent)       { groupKey = 'event_day::' + day; }
                         else if (isCourseEvent)      { groupKey = 'course_day::' + day; }
@@ -344,13 +345,13 @@
                                 _ids:  [n.id],
                                 title: isUserCreatedEvent  ? (n.title || 'New Director Created')
                                      : isUserToggledEvent  ? (n.title || 'Account Status Changed')
-                                     : isUserEmailEvent    ? (n.title || 'Alumni Email Updated')
+                                     : isUserEmailEvent    ? (n.title || 'Email Updated')
+                                     : isUserUsernameEvent ? (n.title || 'Username Updated')
                                      : isUserEvent         ? (n.title || 'User Management Update')
                                      : isEmploymentEvent   ? (n.title || 'Employment Tracking Update')
                                      : isYearbookEvent     ? (n.title || 'Yearbook Update')
                                      : isNewJobEvent       ? (n.title || 'New Job Posting')
                                      : isJobUpdateEvent    ? (n.title || 'Job Posting Update')
-                                     : isPendingEvent      ? (n.title || 'New Event Submitted')
                                      : isApprovedEvent     ? (n.title || 'Event Approved')
                                      : isEventEvent        ? (n.title || 'Event Update')
                                      : isCourseEvent       ? (n.title || 'Course Update')
@@ -358,23 +359,23 @@
                                 icon:  isUserCreatedEvent  ? 'user-tie'
                                      : isUserToggledEvent  ? 'circle-check'
                                      : isUserEmailEvent    ? 'envelope'
+                                     : isUserUsernameEvent ? 'user-pen'
                                      : isUserEvent         ? 'users'
                                      : isEmploymentEvent   ? 'chart-line'
                                      : isYearbookEvent     ? 'book-open'
                                      : isNewJobEvent       ? 'briefcase'
                                      : isJobUpdateEvent    ? 'briefcase'
-                                     : isPendingEvent      ? 'calendar-day'
                                      : isApprovedEvent     ? 'calendar-check'
                                      : isEventEvent        ? 'calendar-check'
                                      : isCourseEvent       ? 'clipboard-list'
                                      : (n.icon || 'bell'),
                                 // Carry flags so the template knows what kind of row this is
                                 _isNewJob:        isNewJobEvent,
-                                _isPendingEvent:  isPendingEvent,
                                 _isApprovedEvent: isApprovedEvent,
                                 _isUserCreated:   isUserCreatedEvent,
                                 _isUserToggled:   isUserToggledEvent,
                                 _isUserEmail:     isUserEmailEvent,
+                                _isUserUsername:  isUserUsernameEvent,
                             }));
                         }
                     });
@@ -591,7 +592,6 @@
     //
     //  job-posted::   = brand-new job post      → separate row per job
     //  job-management:: = edits/updates         → grouped by day
-    //  event-pending::  = new event submitted   → separate row per event
     //  event-approved:: = event approved        → separate row per event
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstAdminNotifListeners) {
@@ -649,7 +649,7 @@
         // dedup_key: user-created::{uid} — separate row per creation, never grouped.
         // Message: "Full Name account has been created. (Username: username)"
         window.addEventListener('__admin-user-created-rich', function (e) {
-            var d = e.detail;
+            var d = _adminDetail(e);
             if (!d || !d.uid) return;
             _saveAdminNotif({
                 icon:       'user-tie',
@@ -667,7 +667,7 @@
         // dedup_key: user-toggled::{uid}::{minute} — separate row per action.
         // Message: "Full Name has been activated/deactivated. (Director)"
         window.addEventListener('__admin-user-toggled-rich', function (e) {
-            var d = e.detail;
+            var d = _adminDetail(e);
             if (!d || !d.uid) return;
             var actionLabel = d.action === 'activate' ? 'activated' : 'deactivated';
             var roleLabel   = d.role
@@ -684,21 +684,43 @@
             });
         });
 
-        // ── ALUMNI EMAIL UPDATED ──────────────────────────────────────────────
+        // ── EMAIL UPDATED (Alumni / Director) ────────────────────────────────
         // Fired by manage-users.blade.php via __admin-user-email-rich.
         // dedup_key: user-email::{uid}::{minute} — separate row per update.
         // Message: "Full Name email has been updated. New email: newemail@x.com"
         window.addEventListener('__admin-user-email-rich', function (e) {
-            var d = e.detail;
+            var d = _adminDetail(e);
             if (!d || !d.uid) return;
+            var roleLabel = d.role
+                ? d.role.charAt(0).toUpperCase() + d.role.slice(1)
+                : 'Alumni';
             _saveAdminNotif({
                 icon:       'envelope',
-                title:      'Alumni Email Updated',
-                message:    (d.name || 'An alumni') + ' email has been updated.'
-                            + (d.email ? ' New email: ' + d.email : ''),
+                title:      'Email Updated',
+                message:    (d.name || 'A user') + ' email has been updated.'
+                            + (d.email ? ' New email: ' + d.email : '')
+                            + ' (' + roleLabel + ')',
                 link_route: 'user.management',
                 link_label: 'View Users',
                 dedup_key:  'user-email::' + d.uid + '::' + Math.floor(Date.now() / 60000),
+            });
+        });
+
+        // ── USERNAME UPDATED (Registrar) ─────────────────────────────────────
+        // Fired by manage-users.blade.php via __admin-user-username-rich.
+        // dedup_key: user-username::{uid}::{minute} — separate row per update.
+        // Message: "Full Name username has been updated. New username: jdelacruz2024"
+        window.addEventListener('__admin-user-username-rich', function (e) {
+            var d = _adminDetail(e);
+            if (!d || !d.uid) return;
+            _saveAdminNotif({
+                icon:       'user-pen',
+                title:      'Username Updated',
+                message:    (d.name || 'A registrar') + ' username has been updated.'
+                            + (d.username ? ' New username: ' + d.username : ''),
+                link_route: 'user.management',
+                link_label: 'View Users',
+                dedup_key:  'user-username::' + d.uid + '::' + Math.floor(Date.now() / 60000),
             });
         });
 
@@ -770,20 +792,6 @@
                 link_route: 'job.posts',
                 link_label: 'View Jobs',
                 dedup_key:  'job-posted::' + d.id,
-            });
-        });
-
-        // ── NEW EVENT SUBMITTED (pending review) ────────────────────────────
-        window.addEventListener('__admin-event-pending-rich', function (e) {
-            var d = e.detail;
-            if (!d || !d.id) return;
-            _saveAdminNotif({
-                icon:       'calendar-day',
-                title:      'New Event Submitted',
-                message:    d.message,
-                link_route: 'events',
-                link_label: 'View Events',
-                dedup_key:  'event-pending::' + d.id,
             });
         });
 
@@ -1018,6 +1026,18 @@
         </div>
     </aside>
 
+    {{-- Floating expand button — only visible when sidebar is fully collapsed --}}
+    <button type="button"
+            x-show="sidebarCollapsed"
+            x-cloak
+            @click.stop="toggleSidebar()"
+            title="Expand sidebar"
+            class="hidden lg:flex fixed items-center justify-center w-8 h-8 rounded-r-lg
+                   transition hover:bg-[#E9D8F5]"
+            style="top: 1.75rem; left: 0; background:#F3EBFA; color:#7A3F91; z-index: 9992; border:1px solid #E8E0F0; border-left:none;">
+        <i class="fas fa-angles-right" style="font-size:11px;line-height:1;"></i>
+    </button>
+
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
@@ -1245,11 +1265,11 @@
                                 <span
                                     x-show="Number(notif.count) > 1
                                             && !notif._isNewJob
-                                            && !notif._isPendingEvent
                                             && !notif._isApprovedEvent
                                             && !notif._isUserCreated
                                             && !notif._isUserToggled
-                                            && !notif._isUserEmail"
+                                            && !notif._isUserEmail
+                                            && !notif._isUserUsername"
                                     x-cloak
                                     class="inline-flex items-center justify-center
                                            min-w-[22px] h-5 rounded-full px-1.5
@@ -1298,6 +1318,16 @@
                                     EMAIL
                                 </span>
 
+                                {{-- USERNAME UPDATED badge (purple) --}}
+                                <span
+                                    x-show="notif._isUserUsername && !notif.read"
+                                    x-cloak
+                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
+                                           background:linear-gradient(135deg,#7A3F91,#5e2f72);">
+                                    USERNAME
+                                </span>
+
                                 {{-- NEW JOB badge (green) --}}
                                 <span
                                     x-show="notif._isNewJob && !notif.read"
@@ -1306,16 +1336,6 @@
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
                                            background:linear-gradient(135deg,#059669,#047857);">
                                     NEW JOB
-                                </span>
-
-                                {{-- PENDING EVENT badge (amber) --}}
-                                <span
-                                    x-show="notif._isPendingEvent && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#d97706,#b45309);">
-                                    PENDING
                                 </span>
 
                                 {{-- APPROVED EVENT badge (green) --}}
