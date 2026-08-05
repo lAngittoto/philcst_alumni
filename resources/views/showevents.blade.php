@@ -7,6 +7,10 @@
     use App\Models\AdminEvent;
     use Illuminate\Support\Facades\Storage;
 
+    $totalUpcomingCount = AdminEvent::where('status', 'APPROVED')
+        ->where('event_date', '>=', now())
+        ->count();
+
     $events = AdminEvent::where('status', 'APPROVED')
         ->where('event_date', '>=', now())
         ->with('organizer')
@@ -18,6 +22,8 @@
         ->orderBy('event_date')
         ->take(3)
         ->get();
+
+    $hasMoreEvents = $totalUpcomingCount > 3;
 
     $eventsJson = [];
     foreach ($events as $e) {
@@ -79,6 +85,8 @@
         white-space: nowrap;
         z-index: 99999;
         transform: translate(14px, 14px);
+        display: flex;
+        align-items: center;
     }
     #ev-global-tooltip.visible { opacity: 1; }
 
@@ -116,39 +124,67 @@
         #ev-global-tooltip { display: none !important; }
         .ev-close-btn-wrap .ev-close-tip { display: none !important; }
     }
+
+    /* ── Bounce reveal — same as home/about pages ── */
+    .reveal-bounce {
+        opacity: 0;
+        transform: translateY(28px) scale(0.90);
+        transition: opacity 0.65s cubic-bezier(0.34, 1.56, 0.64, 1),
+                    transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .reveal-bounce.is-visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+
+    /* ── Glassy cards — same true glass look as home/about pages ── */
+    .glass-card {
+        position: relative;
+        background: linear-gradient(135deg, rgba(255,255,255,0.35), rgba(255,255,255,0.10));
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1.5px solid rgba(255, 255, 255, 0.55);
+        box-shadow: 0 8px 32px 0 rgba(122, 63, 145, 0.15),
+                    inset 0 1px 1px 0 rgba(255, 255, 255, 0.6);
+    }
+
+    /* Event cards now use the glass look instead of solid white */
+    .ev-card.glass-card:hover {
+        box-shadow: 0 12px 36px rgba(122, 63, 145, 0.20),
+                    inset 0 1px 1px 0 rgba(255, 255, 255, 0.6);
+    }
 </style>
 
-<main class="w-full overflow-x-hidden bg-gray-100">
+<main class="w-full overflow-x-hidden bg-white">
 
     {{-- ══ HERO ══ --}}
     <div class="relative bg-white px-6 py-16 text-center sm:py-24">
         <div class="mx-auto max-w-3xl">
-            <span class="mb-4 inline-block font-sans text-xs font-semibold tracking-widest text-primary uppercase"
-                  data-aos="fade-down" data-aos-duration="600">
+            <span class="mb-4 inline-block font-sans text-xs font-semibold tracking-widest text-primary uppercase reveal-bounce" data-reveal>
                 Alumni Events
             </span>
-            <h1 class="mb-4 font-sans text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight"
-                style="color: var(--text-dark);"
-                data-aos="fade-up" data-aos-delay="100" data-aos-duration="700">
+            <h1 class="mb-4 font-sans text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight reveal-bounce"
+                style="color: var(--text-dark);" data-reveal style="transition-delay:0.1s">
                 Upcoming <span class="text-primary">Gatherings</span><br class="hidden sm:block">& Reunions
             </h1>
-            <p class="mx-auto mb-6 max-w-md font-sans text-base sm:text-lg leading-relaxed"
-               style="color: var(--text-dark);"
-               data-aos="fade-up" data-aos-delay="200" data-aos-duration="700">
+            <p class="mx-auto mb-6 max-w-md font-sans text-base sm:text-lg leading-relaxed reveal-bounce"
+               style="color: var(--text-dark); transition-delay:0.2s" data-reveal>
                 Stay connected with your alma mater. Join events made just for you.
             </p>
-            <div class="mx-auto h-1 w-12 bg-primary" data-aos="fade-up" data-aos-delay="300"></div>
+            <div class="mx-auto h-1 w-12 bg-primary reveal-bounce" style="transition-delay:0.3s" data-reveal></div>
         </div>
-        <svg class="absolute bottom-0 left-0 w-full" viewBox="0 0 1200 120" preserveAspectRatio="none" style="height:50px;">
-            <path d="M0,40 Q300,80 600,40 T1200,40 L1200,120 L0,120 Z" fill="#f3f4f6"></path>
-        </svg>
+    </div>
+
+    {{-- ══ SUBTLE DIVIDER (same style as home/about) ══ --}}
+    <div class="px-6 bg-white">
+        <div class="max-w-5xl mx-auto border-t-2 border-[#e0e0e0]"></div>
     </div>
 
     {{-- ══ EVENTS SECTION ══ --}}
     <div class="mx-auto max-w-7xl px-5 py-12 sm:px-6 md:py-16 lg:px-8">
 
         @if($events->isEmpty())
-            <div class="py-28 text-center" data-aos="fade-up" data-aos-duration="700">
+            <div class="py-28 text-center reveal-bounce" data-reveal>
                 <div class="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-purple-100">
                     <i class="fa-solid fa-calendar-xmark text-3xl text-primary"></i>
                 </div>
@@ -159,20 +195,21 @@
             </div>
         @else
 
-            <div class="mb-10 flex items-center gap-4" data-aos="fade-right" data-aos-duration="500">
-                <div class="h-px flex-1 bg-gray-300"></div>
+            <div class="mb-10 flex items-center gap-4 reveal-bounce" data-reveal>
+                <div class="h-px flex-1 bg-[#e0e0e0]"></div>
                 <span class="whitespace-nowrap font-sans text-xs font-semibold tracking-widest text-primary uppercase">
                     Latest Events
                 </span>
-                <div class="h-px flex-1 bg-gray-300"></div>
+                <div class="h-px flex-1 bg-[#e0e0e0]"></div>
             </div>
 
             {{-- ── 3 CARDS MAX ── --}}
             <div class="mb-10 grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3" id="ev-grid-main">
                 @foreach($events as $i => $event)
                 @php $d = $i * 80; @endphp
-                <div class="ev-card group relative flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
-                     data-aos="fade-up" data-aos-delay="{{ $d }}" data-aos-duration="600"
+                <div class="ev-card glass-card group relative flex flex-col overflow-hidden rounded-2xl reveal-bounce"
+                     style="transition-delay: {{ $d / 1000 }}s"
+                     data-reveal
                      onclick="evOpenModal({{ $event->id }})">
 
                     @if(!empty($event->photo_url))
@@ -202,13 +239,36 @@
                 @endforeach
             </div>
 
+            {{-- ── LOGIN TO VIEW MORE (shown only when more than 3 upcoming events exist) ── --}}
+            @if($hasMoreEvents)
+            <div class="glass-card reveal-bounce rounded-2xl px-6 py-8 sm:px-10 sm:py-10 flex flex-col sm:flex-row items-center gap-6 border-2"
+                 style="border-color: rgba(122,63,145,0.3);" data-reveal>
+                <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-purple-100">
+                    <i class="fa-solid fa-lock text-2xl text-primary"></i>
+                </div>
+                <div class="flex-1 text-center sm:text-left">
+                    <p class="text-base font-bold uppercase tracking-wide mb-1" style="color: var(--text-dark);">
+                        There's more happening
+                    </p>
+                    <p class="text-sm leading-relaxed" style="color:#333333;">
+                        Login to your alumni account to view all upcoming events and gatherings.
+                    </p>
+                </div>
+                <a href="{{ route('login') }}"
+                   class="shrink-0 inline-flex items-center gap-2 rounded-xl bg-[#7a3f91] px-6 py-3 text-sm font-bold uppercase tracking-widest text-white transition-all duration-200 hover:bg-[#5e2f72] active:scale-95">
+                    Login to View More
+                    <i class="fa-solid fa-arrow-right text-xs"></i>
+                </a>
+            </div>
+            @endif
+
         @endif
     </div>
 
 </main>
 
 {{-- Global cursor-follow tooltip (desktop only) --}}
-<div id="ev-global-tooltip">View Details</div>
+<div id="ev-global-tooltip"><i class="fa-solid fa-eye" style="margin-right:5px;"></i>View Details</div>
 
 
 {{-- ══════════════════════════════════════════════════════════════
@@ -239,7 +299,7 @@
     </div>
 
     {{-- ─── Body ──────────────────────────────────────────────── --}}
-    <div class="flex-1 overflow-hidden bg-gray-50">
+    <div class="flex-1 overflow-hidden bg-white">
         <div class="h-full grid grid-cols-1 lg:grid-cols-5">
 
             {{-- ── LEFT: Image + Title/Date/Info ── --}}
@@ -417,6 +477,32 @@ function evCloseModal() {
 document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') evCloseModal();
 });
+</script>
+
+<script>
+    function initRevealBounce() {
+        const bounceTargets = document.querySelectorAll('.reveal-bounce[data-reveal]');
+        const bounceObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('is-visible');
+                } else {
+                    entry.target.classList.remove('is-visible');
+                }
+            });
+        }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
+
+        bounceTargets.forEach((el) => {
+            bounceObserver.observe(el);
+            const rect = el.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                el.classList.add('is-visible');
+            }
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', initRevealBounce);
+    document.addEventListener('livewire:navigated', initRevealBounce);
 </script>
 
 @include('layouts.footer')

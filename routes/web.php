@@ -22,7 +22,7 @@ use Livewire\Volt\Volt;
 // ===================================
 Route::get('/', fn() => view('home'));
 Route::get('/about', fn() => view('about'));
-Route::get('/showevents', fn() => view('showevents'));
+Route::get('/latest-events', fn() => view('showevents'));
 
 // ===================================
 // Public Job Detail Route (used for sharing)

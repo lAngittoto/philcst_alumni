@@ -14,6 +14,29 @@
     ::-webkit-scrollbar-track { background: #FFFFFF; }
     ::-webkit-scrollbar-thumb { background: #333333; border-radius: 10px; }
 
+    /* Bounce reveal — same as home page cards, reusable on any text/div */
+    .reveal-bounce {
+        opacity: 0;
+        transform: translateY(28px) scale(0.90);
+        transition: opacity 0.65s cubic-bezier(0.34, 1.56, 0.64, 1),
+                    transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .reveal-bounce.is-visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+
+    /* Glassy cards — same true glass look as home page feature cards */
+    .glass-card {
+        position: relative;
+        background: linear-gradient(135deg, rgba(255,255,255,0.35), rgba(255,255,255,0.10));
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1.5px solid rgba(255, 255, 255, 0.55);
+        box-shadow: 0 8px 32px 0 rgba(122, 63, 145, 0.15),
+                    inset 0 1px 1px 0 rgba(255, 255, 255, 0.6);
+    }
+
     /* Timeline */
     .timeline-item { display: flex; gap: 1.5rem; align-items: flex-start; }
     .timeline-dot {
@@ -52,22 +75,22 @@
     <section class="pt-16 px-6 bg-white">
         <div class="max-w-5xl mx-auto">
 
-            <div class="text-center mb-12" data-aos="fade-up" data-aos-duration="800">
-                <h2 class="font-sans font-bold text-3xl md:text-4xl uppercase leading-tight text-[#333333]">
+            <div class="text-center mb-12 reveal-bounce" data-reveal>
+                <h2 class="font-sans font-bold text-3xl md:text-4xl uppercase leading-tight text-[#7a3f91]">
                     Mission &amp; Vision
                 </h2>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
 
-                <div class="bg-[#FAFAFA] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="0">
+                <div class="glass-card rounded-2xl p-8 reveal-bounce" data-reveal style="transition-delay:0s">
                     <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-4">Mission</span>
                     <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
                         PhilCST provides quality education to students who are imbued with strong moral character through a well-balanced research and community oriented learning environment that develops critical thinking for maximum development of an individual's talents and capabilities.
                     </p>
                 </div>
 
-                <div class="bg-[#FAFAFA] border-2 border-[#e0e0e0] rounded-2xl p-8" data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
+                <div class="glass-card rounded-2xl p-8 reveal-bounce" data-reveal style="transition-delay:0.15s">
                     <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-4">Vision</span>
                     <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed">
                         PhilCST envisions to produce graduates fully equipped with knowledge, values, and skills, and who are globally competitive in their profession ever ready to render quality services.
@@ -87,15 +110,14 @@
     <section class="py-12 pb-24 px-6 bg-white">
         <div class="max-w-5xl mx-auto">
 
-            <div class="mb-10" data-aos="fade-up" data-aos-duration="800">
+            <div class="mb-10 reveal-bounce" data-reveal>
                 <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-3">Our Heritage</span>
                 <h2 class="font-sans font-bold text-3xl md:text-5xl uppercase leading-tight text-[#333333]">
                     History &amp;<br><span class="text-[#7a3f91]">Foundation</span>
                 </h2>
             </div>
 
-            <div class="bg-[#FAFAFA] border-l-4 border-[#7a3f91] rounded-r-xl p-8 mb-12"
-                 data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
+            <div class="glass-card border-l-4 border-[#7a3f91] rounded-r-xl p-8 mb-12 reveal-bounce" data-reveal>
                 <p class="font-sans font-normal text-xl text-[#333333] italic leading-relaxed m-0">
                     "The Philippine College of Science and Technology is a private, non-sectarian institution of higher learning — established as a beacon of hope after one of the most devastating disasters in Pangasinan's history."
                 </p>
@@ -104,7 +126,7 @@
             {{-- Timeline --}}
             <div class="mb-16">
 
-                <div class="timeline-item" data-aos="fade-up" data-aos-duration="700" data-aos-delay="0">
+                <div class="timeline-item reveal-bounce" data-reveal style="transition-delay:0s">
                     <div class="timeline-connector">
                         <div class="timeline-dot"></div>
                         <div style="flex:1; width:2px; background:#e0e0e0; margin-top:8px;"></div>
@@ -120,7 +142,7 @@
                     </div>
                 </div>
 
-                <div class="timeline-item" data-aos="fade-up" data-aos-duration="700" data-aos-delay="100">
+                <div class="timeline-item reveal-bounce" data-reveal style="transition-delay:0.1s">
                     <div class="timeline-connector">
                         <div class="timeline-dot"></div>
                         <div style="flex:1; width:2px; background:#e0e0e0; margin-top:8px;"></div>
@@ -136,7 +158,7 @@
                     </div>
                 </div>
 
-                <div class="timeline-item" data-aos="fade-up" data-aos-duration="700" data-aos-delay="200">
+                <div class="timeline-item reveal-bounce" data-reveal style="transition-delay:0.2s">
                     <div class="timeline-connector">
                         <div class="timeline-dot"></div>
                         <div style="flex:1; width:2px; background:#e0e0e0; margin-top:8px;"></div>
@@ -152,7 +174,7 @@
                     </div>
                 </div>
 
-                <div class="timeline-item" data-aos="fade-up" data-aos-duration="700" data-aos-delay="300">
+                <div class="timeline-item reveal-bounce" data-reveal style="transition-delay:0.3s">
                     <div class="timeline-connector">
                         <div class="timeline-dot"></div>
                     </div>
@@ -170,14 +192,14 @@
             </div>
 
             {{-- Photos below all text --}}
-            <div class="photo-grid" data-aos="fade-up" data-aos-duration="1000">
+            <div class="photo-grid reveal-bounce" data-reveal>
                 <div class="photo-main">
                     <img src="{{ asset('images/school.jpg') }}" alt="PhilCST Main Campus">
                 </div>
                 <div class="photo-side">
                     <img src="{{ asset('images/school-1.jpg') }}" alt="PhilCST Campus">
                 </div>
-                <div class="photo-side bg-[#FAFAFA] flex items-center justify-center">
+                <div class="photo-side glass-card flex items-center justify-center">
                     <div class="text-center">
                         <p class="font-sans font-bold text-5xl text-[#7a3f91] m-0">1995</p>
                         <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#333333] block mt-3">Year Established</span>
@@ -192,15 +214,14 @@
     <section class="py-24 px-6 bg-[#FAFAFA]">
         <div class="max-w-5xl mx-auto">
 
-            <div class="mb-10" data-aos="fade-up" data-aos-duration="800">
+            <div class="mb-10 reveal-bounce" data-reveal>
                 <span class="font-sans font-bold text-sm uppercase tracking-[0.35em] text-[#7a3f91] block mb-3">Continuing Legacy</span>
                 <h2 class="font-sans font-bold text-3xl md:text-5xl uppercase leading-tight text-[#333333]">
                     A Tradition of <br><span class="text-[#7a3f91]">Excellence Continues</span>
                 </h2>
             </div>
 
-            <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed"
-               data-aos="fade-up" data-aos-duration="800" data-aos-delay="100">
+            <p class="font-sans font-normal text-xl text-[#333333] leading-relaxed reveal-bounce" data-reveal>
                 The Philippine College of Science and Technology (PhilCST) is a premier higher education institution in the North. Renowned for its unwavering commitment to high-quality education and comprehensive student development, PhilCST stands out as a leader in the region. With innovative academic programs, groundbreaking research initiatives, and robust partnerships with industry, it empowers students to thrive in their chosen careers. By focusing on science and technology, PhilCST is dedicated to shaping skilled professionals who are well-equipped to drive progress and contribute meaningfully to national development and beyond.
             </p>
 
@@ -208,6 +229,40 @@
     </section>
 
 </div>
+
+<script>
+    function initRevealBounce() {
+        const bounceTargets = document.querySelectorAll('.reveal-bounce[data-reveal]');
+        const bounceObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('is-visible');
+                } else {
+                    entry.target.classList.remove('is-visible');
+                }
+            });
+        }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
+
+        bounceTargets.forEach((el) => {
+            bounceObserver.observe(el);
+            // Safety net: if element is already within/near the viewport
+            // right when we start observing (e.g. after a Livewire SPA
+            // navigation where the section is instantly on screen),
+            // reveal it immediately instead of waiting for a scroll event.
+            const rect = el.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                el.classList.add('is-visible');
+            }
+        });
+    }
+
+    // Normal full page load
+    document.addEventListener('DOMContentLoaded', initRevealBounce);
+
+    // Livewire / wire:navigate SPA-style navigation doesn't re-fire
+    // DOMContentLoaded, so re-init after every navigation as well.
+    document.addEventListener('livewire:navigated', initRevealBounce);
+</script>
 
 @include('layouts.footer')
 
