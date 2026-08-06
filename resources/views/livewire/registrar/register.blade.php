@@ -185,7 +185,7 @@ new class extends Component {
                 'password' => Hash::make($tmpPass),
             ]);
 
-            Alumni::create([
+            $newAlumni = Alumni::create([
                 'user_id'             => $user->id,
                 'first_name'          => trim($this->regFirstName),
                 'middle_initial'      => $mid ?: null,
@@ -203,7 +203,12 @@ new class extends Component {
             ]);
 
             $this->successMsg = "Alumni '{$fullName}' has been registered successfully.";
-            $this->dispatch('alumni-registered', name: $fullName, id: $paddedId);
+            // NOTE: dispatch the alumni's real primary key (id), NOT the
+            // padded student_id string. The notification panel's "jump to
+            // this alumni in the table and highlight it" feature filters
+            // on Alumni.id, so passing student_id here silently breaks
+            // that highlight for every alumni registered through this form.
+            $this->dispatch('alumni-registered', name: $fullName, id: $newAlumni->id);
             $this->resetForm();
 
         } catch (\Exception $e) {
@@ -458,7 +463,9 @@ public function closeImportModal(): void
                 $hashedPasswords[$job['sid']] = password_hash($plain, PASSWORD_BCRYPT, ['cost' => 4]);
             }
 
-            DB::transaction(function () use ($jobs, $now, $hashedPasswords) {
+            $insertedStudentIds = [];
+
+            DB::transaction(function () use ($jobs, $now, $hashedPasswords, &$insertedStudentIds) {
                 foreach (array_chunk($jobs, 500) as $chunkIdx => $chunk) {
                     $userRows    = [];
                     $loginEmails = [];
@@ -517,6 +524,9 @@ public function closeImportModal(): void
                     if (!empty($alumniRows)) {
                         DB::table('alumni')->insert($alumniRows);
                         $this->importSuccessCount += count($alumniRows);
+                        foreach ($alumniRows as $row) {
+                            $insertedStudentIds[] = $row['student_id'];
+                        }
                     }
                     $this->importProgress = min(
                         $this->importTotal,
@@ -525,6 +535,15 @@ public function closeImportModal(): void
                 }
             });
 
+            // Mass DB::table()->insert() doesn't return generated ids, so we
+            // look the new rows back up by student_id (unique) to get their
+            // real Alumni.id — that's what the notification panel's
+            // "highlight this alumni in the table" feature needs; the
+            // student_id itself won't match against Alumni.id there.
+            $insertedIds = !empty($insertedStudentIds)
+                ? Alumni::whereIn('student_id', $insertedStudentIds)->pluck('id')->all()
+                : [];
+
             $this->importProgress = $this->importTotal;
             $this->importStatus   = 'Done';
             $this->importStep     = 'done';
@@ -532,7 +551,7 @@ public function closeImportModal(): void
             $this->importFile     = null;
             Log::info("Alumni import: {$this->importSuccessCount} inserted, {$this->importFailCount} errors, {$this->importDuplicateCount} duplicates.");
 
-            $this->dispatch('alumni-imported', count: $this->importSuccessCount);
+            $this->dispatch('alumni-imported', count: $this->importSuccessCount, ids: $insertedIds);
 
         } catch (\Exception $e) {
             Log::error('Import error: ' . $e->getMessage());

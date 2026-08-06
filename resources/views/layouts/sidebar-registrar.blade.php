@@ -8,6 +8,23 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
     @livewireStyles
     <style>
+        /* Hide Livewire's default wire:navigate progress bar (nprogress) —
+           the thin blue line at the very top of the browser viewport.
+           This is Livewire's OWN built-in indicator, separate from any
+           custom bar in this file, so it must be killed here explicitly. */
+        #livewire-navigate-progress-bar,
+        .livewire-progress-bar,
+        nprogress,
+        #nprogress,
+        #nprogress .bar,
+        #nprogress .spinner,
+        #nprogress .peg {
+            display: none !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            pointer-events: none !important;
+        }
+
         [x-cloak] { display: none !important; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -15,62 +32,8 @@
         .bell-badge { pointer-events: none; }
 
         /* ════════════════════════════════════════════════════════
-           LIVEWIRE LOADING BAR (blue, top of viewport)
-           FIX: this is now a STATIC element that is the very first
-           child of <body> (see markup below) instead of an element
-           that JS creates/moves around at runtime. wire:navigate
-           morphs the DOM in place on every navigation, and an
-           element that only exists because JS injected it could get
-           dropped or displaced mid-morph — that was the cause of the
-           bar looking "putol" (cut off / disappearing) inside the
-           registrar layout. A static element that's always present
-           in the template can't be lost that way; JS below only
-           toggles its width/opacity, never creates or moves it.
-           position:fixed + inset + a very high z-index also means it
-           always draws across the FULL viewport width, above the
-           sidebar, never clipped by it.
-        ════════════════════════════════════════════════════════ */
-        #lw-loading-bar {
-            position: fixed;
-            top: 0; left: 0; right: 0;
-            width: 0%;
-            height: 3px;
-            background: #2563EB;
-            box-shadow: 0 0 8px rgba(37,99,235,0.6);
-            z-index: 2147483647;
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        /* ════════════════════════════════════════════════════════
            SIDEBAR
         ════════════════════════════════════════════════════════ */
-
-        /*
-         * FIX SUMMARY (collapse button)
-         * ---------------------------------------------------------------
-         * 1. No localStorage for sidebar collapse state anymore. Plain
-         *    in-memory Alpine boolean (`sidebarCollapsed: false`), set
-         *    directly in x-data with no read from storage at boot and no
-         *    $watch writing to storage. That removes any chance of a
-         *    stale/previously-saved value being out of sync with the
-         *    current markup on page load.
-         * 2. The collapse icon (<< / >>) now uses Alpine's OBJECT class
-         *    syntax — :class="{ 'fa-angles-right': sidebarCollapsed,
-         *    'fa-angles-left': !sidebarCollapsed }" — instead of a string
-         *    ternary. The object form makes Alpine explicitly add/remove
-         *    exactly one of the two classes on every reactive update, so
-         *    there's never a case where both classes (or neither) end up
-         *    applied at once. That was the actual cause of the icon
-         *    sometimes pointing the "wrong way": the old string ternary
-         *    could leave a stale class behind when merged with any
-         *    static class on the same element.
-         * 3. Only `width`/`min-width` are transitioned on the sidebar
-         *    itself; text/labels transition `opacity` + fade instantly
-         *    via `display:none` (unchanged), so there is nothing else
-         *    competing for animation timing — one click, one state,
-         *    settles immediately.
-         */
         .reg-sidebar {
             background: #FFFFFF;
             border-right: 1px solid #E5E5E5;
@@ -82,6 +45,24 @@
                 border-color 0.25s ease;
         }
         .reg-hamburger-line { background: #7A3F91; }
+
+        /* ── Brand header icon mark ─────────────────────────────
+           A registrar/records "badge" mark: an open book-with-
+           checkmark reads immediately as "official student records",
+           distinct from the generic gauge/user icons used in nav. */
+        .reg-brand-mark {
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: linear-gradient(155deg, #7A3F91 0%, #5A2270 100%);
+            box-shadow: 0 3px 10px rgba(90,34,112,0.28);
+            color: #fff;
+            font-size: 19px;
+        }
 
         .reg-nav-link {
             position: relative;
@@ -95,6 +76,13 @@
         .reg-nav-link:not(.is-active):hover .reg-nav-icon { transform: scale(1.05); }
         .reg-nav-link.is-active { background: #7A3F91; }
 
+        /* ── Color-coded nav icons ───────────────────────────────
+           Each destination gets its own accent so the sidebar can be
+           scanned by color, not just by reading labels. Colors carry
+           meaning: blue = overview/data, purple = people, green =
+           adding/growth, amber = tracking/movement. When a link is
+           active, its icon chip flips to solid brand purple so the
+           active state still reads as one unmistakable signal. */
         .reg-nav-icon {
             width: 38px;
             height: 38px;
@@ -104,11 +92,14 @@
             justify-content: center;
             flex-shrink: 0;
             margin-right: 0.9rem;
-            transition: transform 0.2s ease;
-            background: #F0E9F6;
-            color: #7A3F91;
+            transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
         }
-        .reg-nav-link.is-active .reg-nav-icon { background: #FFFFFF; color: #7A3F91; }
+        .reg-nav-icon.clr-dashboard  { background: #DBEAFE; color: #2563EB; }
+        .reg-nav-icon.clr-alumni     { background: #EDE9FE; color: #7C3AED; }
+        .reg-nav-icon.clr-register   { background: #DCFCE7; color: #16A34A; }
+        .reg-nav-icon.clr-employment { background: #FEF3C7; color: #C08A00; }
+
+        .reg-nav-link.is-active .reg-nav-icon { background: #FFFFFF; color: #7A3F91 !important; }
 
         .reg-nav-label {
             font-weight: 600;
@@ -127,9 +118,6 @@
             flex-shrink: 0;
         }
 
-        /* ── MENU label row + inline collapse icon-button ─────────
-           The label and the collapse toggle sit on the SAME row,
-           label on the left, tiny icon-only button on the right. ── */
         .reg-nav-section-row {
             display: flex;
             align-items: center;
@@ -146,7 +134,6 @@
             opacity: 0.45;
         }
 
-        /* Icon-only collapse toggle — sits right next to "MENU" */
         .reg-collapse-icon-btn {
             display: flex;
             align-items: center;
@@ -164,13 +151,7 @@
         }
         .reg-collapse-icon-btn:hover { background: #E4D3F0; }
         .reg-collapse-icon-btn:active { transform: scale(0.88); }
-        .reg-collapse-icon-btn i {
-            /* icon swap is driven purely by the object :class binding
-               below — no separate fade/transition on the icon itself,
-               so the arrow direction can never visually lag behind the
-               sidebar's actual collapsed/expanded state */
-            pointer-events: none;
-        }
+        .reg-collapse-icon-btn i { pointer-events: none; }
 
         /* Logout */
         .reg-logout-btn {
@@ -208,7 +189,7 @@
         @keyframes reg-spin { to { transform: rotate(360deg); } }
         .reg-logout-text-swap { display: inline-flex; align-items: center; }
 
-        /* Top bar bell (single source of truth, replaces old sidebar bell) */
+        /* ── Top bar bell ── */
         .reg-topbar-bell {
             background: transparent !important;
             border: none !important;
@@ -227,6 +208,28 @@
             background: transparent !important;
             outline: none !important;
             box-shadow: none !important;
+        }
+
+        /* ── Bell "wave" alert — a soft expanding ring pulse behind the
+           bell, running continuously as long as there is at least one
+           unread notification. Distinct from the existing fa-shake
+           icon wiggle: the ring is the "something needs attention"
+           signal, the shake is just the icon's own accent motion. ── */
+        .reg-bell-wave {
+            position: absolute;
+            inset: -6px;
+            border-radius: 50%;
+            border: 2px solid #DC2626;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .reg-bell-wave.is-active {
+            animation: reg-bell-wave-pulse 2s ease-out infinite;
+        }
+        @keyframes reg-bell-wave-pulse {
+            0%   { transform: scale(0.7); opacity: 0.55; }
+            70%  { transform: scale(1.55); opacity: 0; }
+            100% { transform: scale(1.55); opacity: 0; }
         }
 
         /* ── Collapsed state (desktop only, manual << >> toggle) ── */
@@ -261,12 +264,12 @@
             .reg-sidebar.is-collapsed .reg-logout-spinner {
                 margin-right: 0 !important;
             }
+            .reg-sidebar.is-collapsed .reg-brand-mark {
+                width: 40px;
+                height: 40px;
+                font-size: 16px;
+            }
 
-            /* ── Modal-open state: sidebar fully closes (not just collapses),
-                 so it never covers/overlaps modal content on desktop.
-                 FIX: transition is disabled here so the sidebar disappears
-                 instantly instead of sliding/animating away, which used to
-                 visually compete with the modal's own pop-in animation. ── */
             .reg-sidebar.is-modal-hidden {
                 width: 0 !important;
                 min-width: 0 !important;
@@ -285,7 +288,6 @@
         @media (max-width: 1023px) {
             .reg-sidebar { box-shadow: 0 0 60px rgba(0,0,0,0.18); }
 
-            /* ── Icon-only nav on mobile: hide labels, section titles, active dots ── */
             .reg-nav-label,
             .reg-nav-section-label,
             .reg-nav-dot,
@@ -300,7 +302,6 @@
                 margin-right: 0;
             }
 
-            /* ── Icon-only logout button on mobile ── */
             .reg-logout-btn {
                 gap: 0;
                 padding: 0.9rem;
@@ -313,14 +314,6 @@
                 margin-right: 0 !important;
             }
 
-            /* ── Modal-open state below 1024px: sidebar is `fixed` here
-                 (not `lg:static`), so the desktop rule above (which shrinks
-                 width to 0) doesn't apply — the sidebar would otherwise
-                 keep sitting fixed on top of the modal at z-[9995], with
-                 its purple header bar overlapping the modal. Force it
-                 fully off-screen instead, same idea as the closed state,
-                 and disable the transition so it disappears instantly
-                 rather than sliding out from behind the modal overlay. ── */
             .reg-sidebar.is-modal-hidden {
                 transform: translateX(-100%) !important;
                 transition: none !important;
@@ -330,7 +323,10 @@
         }
 
         /* ════════════════════════════════════════════════════════
-           NOTIFICATIONS PANEL — item layout + colored icon chips
+           NOTIFICATIONS PANEL — item layout + icon chips
+           All accents unified to purple (brand color) — no more
+           per-category blue/green tints, which made items feel like
+           unrelated widgets instead of one consistent list.
         ════════════════════════════════════════════════════════ */
         .notif-item {
             display: flex;
@@ -338,12 +334,24 @@
             gap: 12px;
             padding: 14px 18px;
             cursor: pointer;
-            border-bottom: 1px solid #F3EEF8;
+            border-bottom: 2px solid #C9B8DC;
             transition: background .12s ease;
         }
         .notif-item:last-child { border-bottom: none; }
         .notif-item:hover { background: #FAF7FC; }
-        .notif-item.is-read { background: #FCFBFD; }
+
+        /* Unread = pure white + left accent bar. Read = light gray fill,
+           no accent bar — so the two states are unmistakably different
+           at a glance instead of blending together. */
+        .notif-item.is-unread {
+            background: #FFFFFF;
+            border-left: 4px solid #7A3F91;
+        }
+        .notif-item.is-read {
+            background: #EDEDED;
+            border-left: 4px solid transparent;
+        }
+        .notif-item.is-read:hover { background: #E4E4E4; }
 
         .notif-icon-wrap {
             width: 38px;
@@ -354,11 +362,31 @@
             justify-content: center;
             flex-shrink: 0;
             font-size: 14px;
+            background: #EDE0F5;
+            color: #7A3F91;
         }
-        .notif-icon-alumni  { background: #EDE9FE; color: #7C3AED; }
-        .notif-icon-import  { background: #DBEAFE; color: #2563EB; }
-        .notif-icon-chat    { background: #DCFCE7; color: #16A34A; }
-        .notif-icon-default { background: #F3E8FF; color: #7A3F91; }
+
+        /* Bulk Import items get a blue accent so they read as a
+           distinct category from the purple New Alumni items. */
+        .notif-icon-wrap.notif-icon-import {
+            background: #DBEAFE;
+            color: #2563EB;
+        }
+        .notif-tag-import {
+            background: #DBEAFE !important;
+            color: #2563EB !important;
+        }
+
+        /* Read state: icon fades to a muted glass instead of losing its
+           color entirely. Import keeps its blue tint even when read. */
+        .notif-item.is-read .notif-icon-wrap {
+            background: rgba(122,63,145,0.10) !important;
+            color: rgba(122,63,145,0.55) !important;
+        }
+        .notif-item.is-read .notif-icon-wrap.notif-icon-import {
+            background: rgba(37,99,235,0.10) !important;
+            color: rgba(37,99,235,0.55) !important;
+        }
 
         .notif-body { flex: 1; min-width: 0; }
 
@@ -368,12 +396,15 @@
             gap: 6px;
             flex-wrap: wrap;
         }
+
+        /* Dark gray instead of pure black — readable without feeling
+           overly heavy/bold. */
         .notif-title-text {
             font-size: .85rem;
-            font-weight: 700;
-            color: #1a1a1a;
+            font-weight: 600;
+            color: #262626;
         }
-        .notif-title-text.is-read { font-weight: 600; color: #666666; }
+        .notif-title-text.is-read { font-weight: 500; color: #333333; }
 
         .notif-tag {
             font-size: .6rem;
@@ -383,10 +414,9 @@
             padding: 2px 7px;
             border-radius: 999px;
             white-space: nowrap;
+            background: #EDE0F5;
+            color: #7A3F91;
         }
-        .notif-tag-alumni { background: #EDE9FE; color: #7C3AED; }
-        .notif-tag-import { background: #DBEAFE; color: #2563EB; }
-        .notif-tag-chat   { background: #DCFCE7; color: #16A34A; }
 
         .notif-count-badge {
             font-size: .65rem;
@@ -407,7 +437,7 @@
 
         .notif-message-text {
             font-size: .8rem;
-            color: #555555;
+            color: #4D4D4D;
             line-height: 1.45;
             margin-top: 2px;
         }
@@ -418,12 +448,11 @@
             gap: 5px;
             margin-top: 6px;
             font-size: .68rem;
-            color: #aaaaaa;
-            font-weight: 500;
+            color: #333333;
+            font-weight: 600;
         }
         .notif-time-row i { font-size: .62rem; }
 
-        /* ── Read/Unread section divider ─────────────────────────── */
         .notif-divider {
             display: flex;
             align-items: center;
@@ -442,11 +471,13 @@
             font-weight: 800;
             letter-spacing: .08em;
             text-transform: uppercase;
-            color: #B9A6C7;
+            color: #9B85AC;
             white-space: nowrap;
         }
 
-        /* ── Mobile: notification panel goes true full-screen ────── */
+        /* ── Mobile notification panel — full screen ──────────────
+           Claims the entire viewport on mobile so there's maximum
+           room to read notifications comfortably. ── */
         @media (max-width: 1023px) {
             #notif-panel {
                 top: 0 !important;
@@ -455,23 +486,27 @@
                 bottom: 0 !important;
                 width: 100% !important;
                 height: 100% !important;
-                min-height: 100% !important;
-                max-height: 100% !important;
+                max-height: 100dvh !important;
+                min-height: 0 !important;
                 border-radius: 0 !important;
                 border: none !important;
+            }
+            #notif-list {
+                max-height: calc(100dvh - 150px) !important;
             }
         }
     </style>
 
     <script>
     // ─────────────────────────────────────────────────────────────────────────
-    //  ROUTE MAP
+    //  ROUTE MAP — resolved server-side via route(), so this can never drift
+    //  out of sync with routes/web.php the way a hardcoded string map can.
     // ─────────────────────────────────────────────────────────────────────────
     window.__registrarRouteMap = {
-        'registrar.alumni':              '/registrar/alumni',
-        'registrar.dashboard':           '/registrar/dashboard',
-        'registrar.employment.tracking': '/registrar/employment/tracking',
-        'registrar.alumni.register':     '/registrar/alumni/register',
+        'registrar.alumni':              @json(route('registrar.alumni')),
+        'registrar.dashboard':           @json(route('registrar.dashboard')),
+        'registrar.employment.tracking': @json(route('registrar.employment.tracking')),
+        'registrar.alumni.register':     @json(route('registrar.alumni.register')),
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -550,6 +585,7 @@
                     })
                     .forEach(function (n) {
                         var rawDedup = n.dedup_key || '';
+                        var nAlumniIds = Array.isArray(n.alumni_ids) ? n.alumni_ids : [];
                         var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
                             ? n.updated_at
                             : n.created_at;
@@ -587,6 +623,9 @@
                             g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
+                            if (nAlumniIds.length) {
+                                g.alumni_ids = (g.alumni_ids || []).concat(nAlumniIds);
+                            }
                             if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
                                 g.created_at = nTimestamp;
                             }
@@ -605,6 +644,7 @@
                                 count:      Number(n.count) || 1,
                                 _ids:       [n.id],
                                 _roomName:  n._roomName || '',
+                                alumni_ids: nAlumniIds.slice(),
                                 created_at: nTimestamp || n.created_at,
                                 title: isChatMsg      ? (n.title || 'New Chat Message')
                                      : isAlumniEvent  ? 'New Alumni Registered'
@@ -724,20 +764,18 @@
     });
 
     document.addEventListener('livewire:navigated', function () {
-        setTimeout(function () {
-            if (!window.Alpine || typeof Alpine.store !== 'function') return;
-            var s = Alpine.store('notifs');
-            if (s) {
-                if (s._pollTimer) clearInterval(s._pollTimer);
-                s._pollTimer = null;
-                s.open  = false;
-                s.init();
-            } else {
-                Alpine.store('notifs', window.__makeNotifsStore());
-                var newStore = Alpine.store('notifs');
-                if (newStore) newStore.init();
-            }
-        }, 150);
+        if (!window.Alpine || typeof Alpine.store !== 'function') return;
+        var s = Alpine.store('notifs');
+        if (s) {
+            if (s._pollTimer) clearInterval(s._pollTimer);
+            s._pollTimer = null;
+            s.open  = false;
+            s.init();
+        } else {
+            Alpine.store('notifs', window.__makeNotifsStore());
+            var newStore = Alpine.store('notifs');
+            if (newStore) newStore.init();
+        }
     });
 
     ;(function immediateBootOnSpaNavigation() {
@@ -773,7 +811,7 @@
             panel.style.width = '400px';
         }
         // Mobile: the CSS media query (#notif-panel !important rules)
-        // fully owns full-screen layout — no inline overrides needed here.
+        // fully owns bottom-sheet layout — no inline overrides needed here.
     }
     window.positionPanel = positionPanel;
     window.addEventListener('resize', function () {
@@ -826,24 +864,42 @@
         window.addEventListener('alumni-registered', function (e) {
             var d = _detail(e);
             _saveNotif({
-                icon:       'user-graduate',
-                title:      'New Alumni Registered',
-                message:    (d.name || 'Alumni') + ' (ID: ' + (d.id || '—') + ') has been registered and is now verified.',
-                link_route: 'registrar.alumni',
-                link_label: 'View Alumni',
-                dedup_key:  'registered',
+                icon:        'user-graduate',
+                title:       'New Alumni Registered',
+                message:     (d.name || 'Alumni') + ' (ID: ' + (d.id || '—') + ') has been registered and is now verified.',
+                link_route:  'registrar.alumni',
+                link_label:  'View Alumni',
+                dedup_key:   'registered',
+                alumni_ids:  d.id ? [d.id] : [],
+                // ✅ Needed so the backend can rebuild the grouped message
+                //    (e.g. "Fernandos and 1 other have been registered...")
+                //    on the 2nd+ registration of the same day, instead of
+                //    only ever showing whichever alumni registered last.
+                alumni_name: d.name || 'Alumni',
             });
         });
 
         window.addEventListener('alumni-imported', function (e) {
             var d = _detail(e);
+            // ✅ A bulk import fires this event exactly once for the whole
+            //    batch (not once per row), so there's nothing for the
+            //    backend's same-day dedup/merge to group against on this
+            //    call alone. Build the full "N record(s) imported" message
+            //    here in JS using the batch's own count so it's correct
+            //    immediately, then still send alumni_ids so the "view"
+            //    click can highlight every imported row, and dedup_key so
+            //    a second import later today still merges/increments
+            //    correctly instead of creating a separate notif.
+            var importedCount = Number(d.count) || 0;
+            var ids = Array.isArray(d.ids) ? d.ids : [];
             _saveNotif({
                 icon:       'file-import',
                 title:      'Bulk Import Complete',
-                message:    (d.count || 0) + ' alumni record(s) imported successfully via CSV/Excel.',
+                message:    importedCount + ' alumni record(s) imported successfully via CSV/Excel.',
                 link_route: 'registrar.alumni',
                 link_label: 'View Alumni',
                 dedup_key:  'imported',
+                alumni_ids: ids,
             });
         });
 
@@ -874,75 +930,36 @@
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  LIVEWIRE BLUE LOADING BAR (top of viewport, shows during navigate/requests)
-    //  FIX: the bar element (#lw-loading-bar) is now a STATIC element that
-    //  lives directly in the blade markup as the very first child of <body>
-    //  (see below), instead of being created/injected by this script at
-    //  runtime. This script now only ever LOOKS UP the existing element by
-    //  id and toggles its width/opacity — it never creates it and never
-    //  moves it around the DOM. That's what was causing the bar to render
-    //  "putol" (broken/cut off) in the registrar layout: the previous
-    //  version had a syntax/structural bug in ensureBar() and relied on
-    //  dynamically appending the bar to <body> on every run, which could
-    //  race with Livewire's wire:navigate DOM morph.
+    //  FASTER NAV LINK CLICKS — prefetch on hover/touchstart
+    //  FIX: sidebar links only started loading the next page's data the
+    //  instant they were clicked. Livewire's wire:navigate supports
+    //  prefetching a page on hover so by the time the click actually
+    //  lands, the response is already back (or nearly there) — this
+    //  wires that up for every sidebar link without needing to touch
+    //  the wire:navigate directive itself (Livewire fires this from a
+    //  plain mouseenter/touchstart using its own internal prefetch).
     // ─────────────────────────────────────────────────────────────────────────
-    (function () {
-        var hideTimer = null;
-        var creepTimer = null;
-
-        function ensureBar() {
-            return document.getElementById('lw-loading-bar');
+    document.addEventListener('livewire:init', function () {
+        function prefetchOnIntent(el) {
+            var done = false;
+            function go() {
+                if (done) return;
+                done = true;
+                try {
+                    if (window.Livewire && typeof Livewire.navigate === 'function' && Livewire.navigate.prefetch) {
+                        Livewire.navigate.prefetch(el.href);
+                    } else if (window.Alpine && el.href) {
+                        // Fallback: warm the HTTP cache for the target URL.
+                        fetch(el.href, { headers: { 'X-Livewire-Navigate-Prefetch': 'true' } }).catch(function(){});
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            el.addEventListener('mouseenter', go, { passive: true });
+            el.addEventListener('touchstart', go, { passive: true });
+            el.addEventListener('focus', go, { passive: true });
         }
-
-        function start() {
-            var b = ensureBar();
-            if (!b) return;
-            clearTimeout(hideTimer);
-            clearInterval(creepTimer);
-            // Hard reset — don't trust any leftover inline state.
-            b.style.transition = 'none';
-            b.style.opacity = '1';
-            b.style.width = '0%';
-            void b.offsetWidth; // force reflow
-            b.style.transition = 'width 0.4s ease-out, opacity 0.2s ease';
-            b.style.width = '30%';
-
-            // Keep gently creeping forward (never reaching 90%) for as long
-            // as the request takes, so the bar is always visibly moving
-            // instead of sitting frozen at 75% on slow requests.
-            var current = 30;
-            creepTimer = setInterval(function () {
-                current += (90 - current) * 0.12;
-                if (current < 90) b.style.width = current + '%';
-            }, 400);
-        }
-
-        function finish() {
-            var b = ensureBar();
-            if (!b) return;
-            clearInterval(creepTimer);
-            b.style.transition = 'width 0.25s ease';
-            b.style.width = '100%';
-            hideTimer = setTimeout(function () {
-                b.style.transition = 'opacity 0.3s ease';
-                b.style.opacity = '0';
-                setTimeout(function () {
-                    b.style.transition = 'none';
-                    b.style.width = '0%';
-                }, 300);
-            }, 200);
-        }
-
-        document.addEventListener('livewire:navigating', start);
-        document.addEventListener('livewire:navigated', finish);
-        document.addEventListener('livewire:init', function () {
-            document.addEventListener('livewire:request', start);
-            Livewire.hook('request', function ({ succeed, fail }) {
-                succeed(function () { finish(); });
-                fail(function () { finish(); });
-            });
-        });
-    })();
+        document.querySelectorAll('.reg-nav-link[href]').forEach(prefetchOnIntent);
+    });
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
@@ -953,18 +970,10 @@
           loggingOut: false
       }">
 
-{{-- Blue Livewire loading bar — STATIC placeholder, always the very first
-     element in <body>. Fixed positioning + top:0/left:0/right:0 means it
-     always spans the FULL viewport width and sits above the sidebar
-     (z-index 2147483647), so it can never be cut off/"putol" by the
-     sidebar or by any DOM morph during wire:navigate. The script above
-     only toggles this element's width/opacity — it never creates or
-     relocates it. --}}
-<div id="lw-loading-bar"></div>
 
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
 
-    {{-- Mobile overlay — hidden entirely while a modal is open, same as the sidebar --}}
+    {{-- Mobile overlay --}}
     <div x-show="sidebarOpen && !($store.modal && $store.modal.open)"
          x-cloak
          x-transition:enter="transition opacity-ease-out duration-300"
@@ -988,8 +997,11 @@
                   lg:translate-x-0 lg:static lg:inset-0
                   flex flex-col h-full text-[#333333] shrink-0">
 
-        {{-- Sidebar Header --}}
-        <div class="flex items-center justify-center lg:justify-start h-24 px-2 lg:px-5 border-b border-[#E5E5E5] shrink-0">
+        {{-- Sidebar Header — brand mark + wordmark --}}
+        <div class="flex items-center gap-3 justify-center lg:justify-start h-24 px-2 lg:px-5 border-b border-[#E5E5E5] shrink-0">
+            <div class="reg-brand-mark">
+                <i class="fa-solid fa-book-bookmark"></i>
+            </div>
             <div class="min-w-0 hidden lg:block reg-brand-text">
                 <p class="text-[15px] uppercase tracking-[0.18em] font-extrabold text-[#7A3F91] leading-none">
                     PHILCST
@@ -1006,13 +1018,6 @@
             <div class="reg-nav-section-row">
                 <p class="reg-nav-section-label">MENU</p>
 
-                {{-- Collapse/expand toggle button.
-                     :class uses Alpine's OBJECT syntax so exactly one of
-                     the two icon classes is ever applied — never both,
-                     never neither, and never a stale leftover class from
-                     the previous state. This is what makes the arrow
-                     direction always match `sidebarCollapsed` on the very
-                     first click, every time. --}}
                 <button type="button"
                         @click="sidebarCollapsed = !sidebarCollapsed"
                         :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
@@ -1024,11 +1029,17 @@
             </div>
 
             @php
+                // FIX: each link now carries a `color` key mapped to a
+                // .clr-* class on its icon chip, so the sidebar can be
+                // scanned by color as well as label — blue for the
+                // overview/data view, purple for the people directory,
+                // green for the "add new" action, amber for tracking
+                // movement over time.
                 $sidebarLinks = [
-                    ['route' => 'registrar.dashboard',           'icon' => 'gauge-high',  'label' => 'Dashboard'],
-                    ['route' => 'registrar.alumni',              'icon' => 'users',        'label' => 'Alumni Records'],
-                    ['route' => 'registrar.alumni.register',     'icon' => 'user-plus',    'label' => 'Register Alumni'],
-                    ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',   'label' => 'Employment Tracking'],
+                    ['route' => 'registrar.dashboard',           'icon' => 'gauge-high', 'label' => 'Dashboard',            'color' => 'clr-dashboard'],
+                    ['route' => 'registrar.alumni',              'icon' => 'users',       'label' => 'Alumni Records',       'color' => 'clr-alumni'],
+                    ['route' => 'registrar.alumni.register',     'icon' => 'user-plus',   'label' => 'Register Alumni',      'color' => 'clr-register'],
+                    ['route' => 'registrar.employment.tracking', 'icon' => 'chart-line',  'label' => 'Employment Tracking',  'color' => 'clr-employment'],
                 ];
             @endphp
             @foreach($sidebarLinks as $link)
@@ -1038,7 +1049,7 @@
                    title="{{ $link['label'] }}"
                    @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}'); sidebarOpen = false;"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
-                    <div class="reg-nav-icon">
+                    <div class="reg-nav-icon {{ $link['color'] }}">
                         <i class="fa-solid fa-{{ $link['icon'] }}"></i>
                     </div>
                     <span class="reg-nav-label">{{ $link['label'] }}</span>
@@ -1094,17 +1105,21 @@
             </button>
             <span class="hidden lg:block"></span>
 
-            {{-- Notifications bell (single source of truth for the whole layout) --}}
+            {{-- Notifications bell --}}
             <button
                 id="bell-btn"
                 type="button"
-                @click.stop="$store.notifs && $store.notifs.toggle(); positionPanel();"
+                @click.stop="positionPanel(); $store.notifs && $store.notifs.toggle();"
                 title="Notifications"
                 aria-label="Open notifications"
                 class="reg-topbar-bell">
+                {{-- FIX: expanding "wave" ring behind the bell — pulses
+                     continuously whenever there's at least one unread
+                     notification, instead of only the icon's own shake. --}}
+                <span class="reg-bell-wave" :class="$store.notifs && $store.notifs.unread > 0 ? 'is-active' : ''"></span>
                 <i class="bell-icon fas fa-bell"
                    :class="$store.notifs && $store.notifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
+                   style="font-size:20px; color:#7A3F91; position:relative;
                           --fa-animation-duration:4s;
                           --fa-animation-iteration-count:infinite;
                           pointer-events:none;"></i>
@@ -1141,13 +1156,12 @@
     id="notif-panel"
     x-show="$store.notifs && $store.notifs.open"
     x-cloak
-    x-effect="if ($store.notifs && $store.notifs.open) $nextTick(() => positionPanel())"
-    x-transition:enter="transition ease-out duration-200"
-    x-transition:enter-start="opacity-0 scale-95 -translate-y-2"
+    x-transition:enter="transition ease-out duration-100"
+    x-transition:enter-start="opacity-0 scale-[0.98] -translate-y-1"
     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave="transition ease-in duration-75"
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
-    x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
+    x-transition:leave-end="opacity-0 scale-[0.98] -translate-y-1"
     @click.stop
     style="
         position: fixed;
@@ -1235,14 +1249,30 @@
                     </div>
                 <div
                     class="notif-item"
-                    :class="notif.read ? 'is-read' : 'is-unread'"
+                    :class="[
+                        notif.read ? 'is-read' : 'is-unread',
+                        !notif.read
+                            ? (notif.icon === 'user-graduate' ? 'clr-alumni'
+                               : notif.icon === 'file-import' ? 'clr-import'
+                               : notif.icon === 'comment-dots' ? 'clr-chat'
+                               : 'clr-default')
+                            : ''
+                    ]"
                     @click.stop="
                         $store.notifs.markRead(notif);
                         $store.notifs.close();
-                        if (notif.link_route) {
-                            const url = window.__registrarRouteMap[notif.link_route] || '/registrar/alumni';
-                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                        const base = (notif.link_route && window.__registrarRouteMap[notif.link_route])
+                            || '/registrar/alumni';
+                        let ids = Array.isArray(notif.alumni_ids) ? notif.alumni_ids.filter(Boolean) : [];
+                        if (!ids.length && notif.message) {
+                            // Fallback for notifications saved before the alumni_ids
+                            // column existed: pull any '(ID: 12345)' numbers straight
+                            // out of the message text instead.
+                            const found = Array.from(notif.message.matchAll(/\(ID:\s*(\d+)\)/g)).map(m => Number(m[1]));
+                            if (found.length) ids = found;
                         }
+                        const url = ids.length ? (base + '?highlight=' + ids.join(',')) : base;
+                        window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                     ">
 
                     <div class="notif-icon-wrap"
@@ -1301,7 +1331,7 @@
 
     {{-- Panel Footer --}}
     <div style="background:#F7F7F5; border-top:0.5px solid #E0D8ED; padding:10px 18px; text-align:center; flex-shrink:0;">
-        <p style="font-size:11px; color:#BBBBBB; font-weight:400; letter-spacing:0.01em;">
+        <p style="font-size:11px; color:#666666; font-weight:400; letter-spacing:0.01em;">
             Select a notification to view details and mark as read.
         </p>
     </div>

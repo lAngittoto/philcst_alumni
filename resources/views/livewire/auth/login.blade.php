@@ -153,6 +153,22 @@ new #[Layout('app')] class extends Component {
         } catch (\Throwable) {}
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // FIX: The "Verifying" state was only bound to wire:target="login", so
+    // it cleared the instant the PHP login() method finished — but
+    // redirectRoute(..., navigate: true) then still has to perform a
+    // separate client-side wire:navigate transition to actually leave the
+    // page. That created a visible gap: spinner stops, form reappears for
+    // a beat, THEN the page jumps to the dashboard. Dispatching this event
+    // tells Alpine (see x-data below) to keep showing a full-card loading
+    // overlay all the way through that handoff, so it reads as one
+    // continuous transition instead of "stop, then suddenly navigate".
+    // ─────────────────────────────────────────────────────────────────────
+    private function keepLoadingThroughRedirect(): void
+    {
+        $this->dispatch('login-redirecting');
+    }
+
     public function login(): void
     {
         $this->validate([
@@ -241,10 +257,12 @@ new #[Layout('app')] class extends Component {
             if ($organizer->password_changed_at === null) {
                 session()->forget(['pending_password_plain', 'password_reset_step']);
                 session()->put('organizer_requires_password_change', true);
+                $this->keepLoadingThroughRedirect();
                 $this->redirectRoute('organizer.change-password', navigate: true);
                 return;
             }
 
+            $this->keepLoadingThroughRedirect();
             $this->redirectRoute('organizer.dashboard', navigate: true);
             return;
         }
@@ -305,15 +323,18 @@ new #[Layout('app')] class extends Component {
                     'alumni_password_reset_step',
                 ]);
                 session()->put('alumni_requires_password_change', true);
+                $this->keepLoadingThroughRedirect();
                 $this->redirectRoute('alumni.change-password', navigate: true);
                 return;
             }
 
             if (!$alumni->isProfileComplete()) {
+                $this->keepLoadingThroughRedirect();
                 $this->redirectRoute('alumni.information', navigate: true);
                 return;
             }
 
+            $this->keepLoadingThroughRedirect();
             $this->redirectRoute('alumni.dashboard', navigate: true);
             return;
         }
@@ -354,6 +375,7 @@ new #[Layout('app')] class extends Component {
             $this->clearAttempts();
             session()->regenerate();
             AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'registrar'], true);
+            $this->keepLoadingThroughRedirect();
             $this->redirectRoute('registrar.dashboard', navigate: true);
             return;
         }
@@ -369,6 +391,7 @@ new #[Layout('app')] class extends Component {
             }
 
             AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'director'], true);
+            $this->keepLoadingThroughRedirect();
             $this->redirectRoute('director.dashboard', navigate: true);
             return;
         }
@@ -384,6 +407,7 @@ new #[Layout('app')] class extends Component {
         RateLimiter::clear($this->throttleKey());
         session()->regenerate();
         AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'admin'], true);
+        $this->keepLoadingThroughRedirect();
         $this->redirectRoute('admin.dashboard', navigate: true);
     }
 
@@ -414,7 +438,8 @@ new #[Layout('app')] class extends Component {
          ever flashing or reloading.
 --}}
 <div class="min-h-screen w-full flex flex-col items-center justify-center p-5 antialiased relative"
-     x-data="{ showGuide: false, forgotLoading: false }">
+     x-data="{ showGuide: false, forgotLoading: false, redirecting: false }"
+     x-on:login-redirecting.window="redirecting = true">
 
     <link rel="preload" as="image" href="{{ asset('images/school-1.jpg') }}">
     <style>
@@ -841,7 +866,38 @@ new #[Layout('app')] class extends Component {
     <div wire:ignore.self
          class="lg-card relative z-10 w-full max-w-[420px] bg-white rounded-2xl shadow-xl mt-14 sm:mt-0 {{ $errors->has('invalid') ? 'lg-shake' : '' }}">
 
-        <div class="px-9 py-9">
+        {{--
+            FIX: once login() succeeds and dispatches 'login-redirecting',
+            this overlay covers the form and STAYS until the browser
+            actually leaves via wire:navigate. Before this, the "Verifying"
+            state lived only on the submit button (wire:loading, tied to
+            the Livewire request) — the instant that request finished, the
+            button reverted to "Sign In" and the form was interactable
+            again for a beat before wire:navigate kicked in, which read as
+            the login "stopping" then suddenly jumping to the dashboard.
+            Now the loading feel is continuous from click to page change.
+
+            NOTE: no x-cloak / fade-in transition here on purpose — the
+            redirect can fire almost instantly, and a fade-in plus x-cloak
+            was causing the browser to skip painting this overlay
+            entirely before the page navigated away, so it never actually
+            appeared. It now shows immediately and solidly (no transparency)
+            the moment "redirecting" flips true.
+        --}}
+        <div x-show="redirecting"
+             class="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-2xl"
+             style="background:#7A3F91;">
+            <span class="flex gap-1.5">
+                <span class="dot1 inline-block w-2.5 h-2.5 bg-white rounded-full"></span>
+                <span class="dot2 inline-block w-2.5 h-2.5 bg-white rounded-full"></span>
+                <span class="dot3 inline-block w-2.5 h-2.5 bg-white rounded-full"></span>
+            </span>
+            <p style="font-family:'Inter',sans-serif; font-size:0.78rem; font-weight:700; letter-spacing:0.16em; text-transform:uppercase; color:#ffffff;">
+                Signing you in
+            </p>
+        </div>
+
+        <div class="px-9 py-9" x-show="!redirecting">
 
             {{-- Brand --}}
             <div class="flex items-center gap-3.5 mb-8">

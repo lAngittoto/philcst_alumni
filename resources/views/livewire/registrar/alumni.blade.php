@@ -29,6 +29,10 @@ new class extends Component {
 
     public string $activeModal = '';
 
+    /** IDs passed via ?highlight=1,2,3 from a notification click — used to
+     *  jump to the correct page and blue-highlight the matching rows. */
+    public array $highlightIds = [];
+
     protected string $paginationTheme = 'tailwind';
 
     public function mount(): void
@@ -43,16 +47,199 @@ new class extends Component {
             $this->alumniBatch = (string) intval($batch);
         }
 
+        $highlight = request()->query('highlight', '');
+        if ($highlight !== '') {
+            $rawValues = collect(explode(',', $highlight))
+                ->map(fn($v) => trim($v))
+                ->filter(fn($v) => $v !== '')
+                ->values()
+                ->all();
+
+            $this->highlightIds = $this->resolveHighlightIds($rawValues);
+
+            if (!empty($this->highlightIds)) {
+                $this->jumpToPageForGroup($this->highlightIds);
+            }
+        }
+
         if (session()->has('success'))
             $this->dispatch('flash-message', type: 'success', message: session()->pull('success'));
         if (session()->has('error'))
             $this->dispatch('flash-message', type: 'error', message: session()->pull('error'));
     }
 
-    public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); }
-    public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); }
-    public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); }
-    public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); }
+    /** Some older/mis-fired notifications carry a value that isn't
+     *  actually the Alumni primary key (e.g. the student_id got passed
+     *  where the id was meant). For each raw value from ?highlight=,
+     *  try it as a real id first; if no alumni has that id, fall back
+     *  to matching it as a student_id instead, so the highlight still
+     *  lands on the correct row either way.
+     *
+     *  Uses two bulk queries total (not one query per id) so this stays
+     *  fast even for a large bulk-import group (e.g. 30 ids at once). */
+    protected function resolveHighlightIds(array $rawValues): array
+    {
+        if (empty($rawValues)) return [];
+
+        $asInts = [];
+        foreach ($rawValues as $raw) {
+            $n = (int) $raw;
+            if ($n > 0) $asInts[$raw] = $n; // keep original string as key for lookup
+        }
+
+        $matchedByPk = !empty($asInts)
+            ? Alumni::whereIn('id', array_values($asInts))->pluck('id')->flip()
+            : collect();
+
+        $resolved     = [];
+        $unmatchedRaw = [];
+
+        foreach ($rawValues as $raw) {
+            $n = $asInts[$raw] ?? null;
+            if ($n !== null && $matchedByPk->has($n)) {
+                $resolved[] = $n;
+            } else {
+                $unmatchedRaw[] = $raw;
+            }
+        }
+
+        if (!empty($unmatchedRaw)) {
+            $byStudentId = Alumni::whereIn('student_id', $unmatchedRaw)
+                ->pluck('id', 'student_id');
+            foreach ($unmatchedRaw as $raw) {
+                if (isset($byStudentId[$raw])) {
+                    $resolved[] = $byStudentId[$raw];
+                }
+            }
+        }
+
+        return array_values(array_unique($resolved));
+    }
+
+    /** For a grouped notification (e.g. "x2" — two alumni registered
+     *  close together), find the page for EACH id and jump to whichever
+     *  page contains the most of them, so as many highlighted rows as
+     *  possible are visible at once instead of only the first id's page. */
+    protected function jumpToPageForGroup(array $alumniIds): void
+    {
+        if (count($alumniIds) === 1) {
+            $this->jumpToPageFor($alumniIds[0]);
+            return;
+        }
+
+        $pageCounts = [];
+        foreach ($alumniIds as $id) {
+            $page = $this->pageFor($id);
+            if ($page === null) continue;
+            $pageCounts[$page] = ($pageCounts[$page] ?? 0) + 1;
+        }
+
+        if (empty($pageCounts)) return;
+
+        arsort($pageCounts); // page with the most matching ids first
+        $bestPage = array_key_first($pageCounts);
+        $this->setPage($bestPage, 'alumniPage');
+    }
+
+    /** Same lookup as jumpToPageFor but returns the page number instead
+     *  of setting it directly, so jumpToPageForGroup can compare pages
+     *  across several ids before deciding where to land. */
+    protected function pageFor(int $alumniId): ?int
+    {
+        $hasActiveFilter = $this->alumniSearch !== ''
+            || $this->alumniBatch !== ''
+            || $this->alumniCourse !== ''
+            || $this->alumniProfileFilter !== 'all';
+
+        $q = Alumni::query();
+
+        if ($hasActiveFilter) {
+            if ($this->alumniSearch) {
+                $term = '%' . $this->alumniSearch . '%';
+                $q->where(fn($s) => $s
+                    ->where('first_name',   'like', $term)
+                    ->orWhere('last_name',  'like', $term)
+                    ->orWhere('student_id', 'like', $term)
+                    ->orWhere('email',      'like', $term));
+            }
+            if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
+            if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
+            if ($this->alumniProfileFilter === 'complete')   $q->where('profile_completed', 1);
+            elseif ($this->alumniProfileFilter === 'incomplete') $q->where('profile_completed', 0);
+
+            $target = Alumni::find($alumniId);
+            if (!$target) return null;
+
+            $position = $q->where(function ($s) use ($target) {
+                    $s->where('course_code', '<', $target->course_code)
+                      ->orWhere(function ($s2) use ($target) {
+                          $s2->where('course_code', $target->course_code)
+                             ->where('last_name', '<', $target->last_name);
+                      })
+                      ->orWhere(function ($s2) use ($target) {
+                          $s2->where('course_code', $target->course_code)
+                             ->where('last_name', $target->last_name)
+                             ->where('first_name', '<', $target->first_name);
+                      })
+                      ->orWhere(function ($s2) use ($target) {
+                          $s2->where('course_code', $target->course_code)
+                             ->where('last_name', $target->last_name)
+                             ->where('first_name', $target->first_name)
+                             ->where('id', '<', $target->id);
+                      });
+                })->count();
+        } else {
+            $target = Alumni::find($alumniId);
+            if (!$target) return null;
+
+            $position = $q->where(function ($s) use ($target) {
+                    $s->where('created_at', '>', $target->created_at)
+                      ->orWhere(function ($s2) use ($target) {
+                          $s2->where('created_at', $target->created_at)
+                             ->where('id', '>', $target->id);
+                      });
+                })->count();
+        }
+
+        $perPage = 100;
+        return intdiv($position, $perPage) + 1;
+    }
+
+    /** Finds which page the given alumni ID falls on (using the SAME
+     *  ordering as alumniRecords()) and jumps the paginator there. */
+    protected function jumpToPageFor(int $alumniId): void
+    {
+        $page = $this->pageFor($alumniId);
+        if ($page !== null) {
+            $this->setPage($page, 'alumniPage');
+        }
+    }
+
+    public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); $this->highlightIds = []; }
+    public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); $this->highlightIds = []; }
+    public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); $this->highlightIds = []; }
+    public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); $this->highlightIds = []; }
+
+    /** Wrappers around WithPagination's page methods that also clear the
+     *  notif-triggered highlight, since manual paging means the user has
+     *  moved on from whatever the notif pointed to. */
+    public function goToAlumniPage(int $page): void
+    {
+        $this->highlightIds = [];
+        $this->setPage($page, 'alumniPage');
+    }
+
+    public function nextAlumniPage(): void
+    {
+        $this->highlightIds = [];
+        $this->nextPage('alumniPage');
+    }
+
+    public function previousAlumniPage(): void
+    {
+        $this->highlightIds = [];
+        $this->previousPage('alumniPage');
+    }
 
     #[Computed]
     public function alumniRecords()
@@ -152,6 +339,16 @@ new class extends Component {
         return $out;
     }
 
+    /** Wraps the WHOLE string in the same blue mark used for search
+     *  matches — used for rows arrived at via a notification click,
+     *  where there's no search term to match against but we still
+     *  want that familiar "here's the match" visual cue on the name. */
+    public function highlightWhole(string $text): string
+    {
+        if (!$text) return e($text);
+        return '<mark class="ar-hl">' . e($text) . '</mark>';
+    }
+
     /**
      * Derive profile completeness from required fields regardless of DB flag.
      * Required: first_name, last_name, middle_initial, student_id, course_code, batch, email
@@ -188,6 +385,7 @@ new class extends Component {
         $this->alumniBatch         = '';
         $this->alumniCourse        = '';
         $this->alumniProfileFilter = 'all';
+        $this->highlightIds        = [];
         $this->resetPage('alumniPage');
     }
 
@@ -1005,14 +1203,18 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                 $item->last_name ?? '', $item->suffix ?? ''
                             );
                         @endphp
-                        <tr class="ar-row bg-white" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
+                        <tr class="ar-row bg-white {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                                          class="w-8 h-8 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false"
                                          onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
                                     <span class="font-semibold text-[#333333] text-sm uppercase truncate block">
-                                        {!! $this->highlight($displayName, $this->alumniSearch) !!}
+                                        @if(in_array($item->id, $highlightIds))
+                                            {!! $this->highlightWhole($displayName) !!}
+                                        @else
+                                            {!! $this->highlight($displayName, $this->alumniSearch) !!}
+                                        @endif
                                     </span>
                                 </div>
                             </td>
@@ -1061,13 +1263,17 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             $item->last_name ?? '', $item->suffix ?? ''
                         );
                     @endphp
-                    <div class="ar-mrow" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
+                    <div class="ar-mrow {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
                         <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                              class="w-10 h-10 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false"
                              onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
                         <div class="flex-1 min-w-0">
                             <p class="font-semibold text-[#333333] text-sm uppercase truncate">
-                                {!! $this->highlight($displayName, $this->alumniSearch) !!}
+                                @if(in_array($item->id, $highlightIds))
+                                    {!! $this->highlightWhole($displayName) !!}
+                                @else
+                                    {!! $this->highlight($displayName, $this->alumniSearch) !!}
+                                @endif
                             </p>
                             <div class="flex items-center gap-1.5 mt-1 flex-wrap">
                                 <span class="font-mono text-[#333333] text-xs font-semibold uppercase">
@@ -1133,25 +1339,25 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 @if($this->alumniRecords->onFirstPage())
                     <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                 @else
-                    <button wire:click="previousPage('alumniPage')" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
+                    <button wire:click="previousAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                 @endif
                 @if($pgStart > 1)
-                    <button wire:click="gotoPage(1,'alumniPage')" class="ar-pg-btn ar-pg-nav">1</button>
+                    <button wire:click="goToAlumniPage(1)" class="ar-pg-btn ar-pg-nav">1</button>
                     @if($pgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                 @endif
                 @for($p = $pgStart; $p <= $pgEnd; $p++)
                     @if($p === $cp)
                         <span class="ar-pg-btn ar-pg-active">{{ $p }}</span>
                     @else
-                        <button wire:click="gotoPage({{ $p }},'alumniPage')" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
+                        <button wire:click="goToAlumniPage({{ $p }})" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
                     @endif
                 @endfor
                 @if($pgEnd < $lastPage)
                     @if($pgEnd < $lastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                    <button wire:click="gotoPage({{ $lastPage }},'alumniPage')" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
+                    <button wire:click="goToAlumniPage({{ $lastPage }})" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
                 @endif
                 @if($this->alumniRecords->hasMorePages())
-                    <button wire:click="nextPage('alumniPage')" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
+                    <button wire:click="nextAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
                 @else
                     <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
                 @endif
@@ -1231,7 +1437,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     $profileIsComplete = $this->isProfileComplete($viewingProfile);
 @endphp
 
-<div class="fixed inset-0 z-50"
+<div class="fixed inset-0 z-[9998]"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);"
      @keydown.escape.window="$wire.closeModal()">
 
@@ -1913,12 +2119,39 @@ compressImage(file, maxW, maxH, quality) {
     bindRows();
     document.addEventListener('livewire:updated', bindRows);
 
+    // ── Fix: the hover tooltip (#ar-hover-tip) is only hidden on
+    //    'mouseleave' or 'click' on a row. When the user arrives at this
+    //    page via SPA navigation (e.g. clicking a notification, which
+    //    calls Livewire.navigate()) instead of a real mousemove/mouseleave
+    //    cycle, the tooltip's 'visible' class can carry over from
+    //    whatever it was showing on the previous page and gets stuck
+    //    displayed at the last known mouse position. Explicitly hide it
+    //    on every navigation lifecycle event so it always starts hidden. ──
+    function hideHoverTip() {
+        if (tip) tip.classList.remove('visible');
+    }
+    hideHoverTip();
+    document.addEventListener('livewire:navigating', hideHoverTip);
+    document.addEventListener('livewire:navigated', hideHoverTip);
+    document.addEventListener('livewire:load', hideHoverTip);
+
+    // ── Auto-scroll to the first highlighted row (arrived from a
+    //    notification click) — runs once per page load, after the
+    //    correct pagination page has already rendered server-side.
+    function scrollToHighlighted() {
+        var row = document.querySelector('.ar-row.is-notif-target, .ar-mrow.is-notif-target');
+        if (!row) return;
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    setTimeout(scrollToHighlighted, 150);
+
     function cleanAlumniPageParam() {
         var url = new URL(window.location.href);
         var changed = false;
         if (url.searchParams.has('alumniPage'))     { url.searchParams.delete('alumniPage');     changed = true; }
         if (url.searchParams.has('profile_filter')) { url.searchParams.delete('profile_filter'); changed = true; }
         if (url.searchParams.has('batch'))          { url.searchParams.delete('batch');          changed = true; }
+        if (url.searchParams.has('highlight'))      { url.searchParams.delete('highlight');      changed = true; }
         if (changed) history.replaceState(null, '', url.pathname + (url.search || ''));
     }
     cleanAlumniPageParam();

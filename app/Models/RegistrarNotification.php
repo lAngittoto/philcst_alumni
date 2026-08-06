@@ -13,6 +13,7 @@ class RegistrarNotification extends Model
         'link_route',
         'link_label',
         'link_params',
+        'alumni_ids',  // ← the alumni this notif is about (single ID or bulk import IDs)
         'read',
         'count',
         'dedup_key',   // ← REQUIRED: must be in fillable or it's always NULL in DB
@@ -20,6 +21,7 @@ class RegistrarNotification extends Model
 
     protected $casts = [
         'link_params' => 'array',
+        'alumni_ids'  => 'array',
         'read'        => 'boolean',
         'count'       => 'integer',
     ];
