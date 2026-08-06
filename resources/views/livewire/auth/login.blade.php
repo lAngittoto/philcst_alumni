@@ -389,9 +389,43 @@ new #[Layout('app')] class extends Component {
 
 }; ?>
 
+{{--
+    FIX: previously the background image lived as an inline
+    background-image style on THIS component's own root <div>. That div is
+    exactly what wire:navigate swaps/morphs on every route change (login →
+    change-password/dashboard, and back again via the browser Back
+    button). Every time that swap happened, the browser had to repaint the
+    background from scratch — which is what showed up as: the "Verifying"
+    button staying stuck instead of the page actually moving on, and the
+    background flashing blank then reloading when navigating Back into
+    this page.
+
+    Fix has two parts:
+      1. Preload the image as early as possible so it's already sitting in
+         the browser's cache by the time this div paints — no network
+         fetch needed on the swap.
+      2. Move the actual background onto <body> via a scoped <style> tag,
+         emitted from INSIDE this component's single root div (Volt/
+         Livewire requires exactly one root element — a <link>/<style> as
+         a sibling before the div would break that). <body> itself is NOT
+         part of what wire:navigate replaces (only the component region
+         is), so once the browser has painted it once, the background
+         survives every navigation — forward AND Back/Forward — without
+         ever flashing or reloading.
+--}}
 <div class="min-h-screen w-full flex flex-col items-center justify-center p-5 antialiased relative"
-     x-data="{ showGuide: false, forgotLoading: false }"
-     style="background-image: url('{{ asset('images/school-1.jpg') }}'); background-size: cover; background-position: center; background-repeat: no-repeat; background-attachment: fixed;">
+     x-data="{ showGuide: false, forgotLoading: false }">
+
+    <link rel="preload" as="image" href="{{ asset('images/school-1.jpg') }}">
+    <style>
+        body {
+            background-image: url('{{ asset('images/school-1.jpg') }}');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+        }
+    </style>
 
     {{-- Overlay --}}
     <div class="absolute inset-0 bg-black/55 z-0"></div>
@@ -537,7 +571,7 @@ new #[Layout('app')] class extends Component {
             border-radius: 10px;
             border: none;
             cursor: pointer;
-            transition: background 0.2s ease, transform 0.15s ease;
+            transition: background 0.12s ease, transform 0.08s ease;
         }
         .lg-submit:hover:not(:disabled) {
             background: #6B3680;
@@ -567,40 +601,21 @@ new #[Layout('app')] class extends Component {
         }
         .lg-link:hover { color: #111111; }
 
-        /* ── Back button ── */
+        /* ── Back to Home button ── */
         .lg-back-btn {
             position: fixed;
             top: 1.5rem;
             left: 1.5rem;
             z-index: 9999;
+            padding: 0.55rem 1rem;
+            transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
         }
-        .lg-back-tooltip {
-            position: absolute;
-            top: 50%;
-            left: calc(100% + 10px);
-            transform: translateY(-50%) translateX(-4px);
-            white-space: nowrap;
-            font-family: 'Inter', sans-serif;
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: #ffffff;
-            background: #111111;
-            padding: 0.35rem 0.7rem;
-            border-radius: 6px;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s ease, transform 0.2s ease;
+        .lg-back-btn:hover {
+            transform: translateY(-1px);
         }
-        .lg-back-btn:hover .lg-back-tooltip {
-            opacity: 1;
-            transform: translateY(-50%) translateX(0);
-        }
-
-        /* FIX: on mobile there's no real hover state — touch simulates it,
-           which made this tooltip pop up and sometimes get stuck visible.
-           Hide it entirely on small/mobile screens; desktop hover stays. */
         @media (max-width: 640px) {
-            .lg-back-tooltip { display: none !important; }
+            .lg-back-btn span { display: none; }
+            .lg-back-btn { padding: 0.6rem; width: 40px; height: 40px; justify-content: center; }
         }
 
         /* ── Guide modal ── */
@@ -767,10 +782,10 @@ new #[Layout('app')] class extends Component {
             align-items: center;
             justify-content: center;
             gap: 0.5rem;
-            transition: background 0.2s ease, transform 0.15s ease;
+            transition: background 0.12s ease, transform 0.08s ease;
         }
         .guide-close-btn:hover  { background: #6B3680; transform: translateY(-1px); }
-        .guide-close-btn:active { transform: scale(0.985); }
+        .guide-close-btn:active { transform: scale(0.96); }
 
         /* ── MOBILE: full-screen guide modal, no scroll, compact type ── */
         @media (max-width: 640px) {
@@ -804,8 +819,10 @@ new #[Layout('app')] class extends Component {
         }
     </style>
 
-    {{-- Back button — hidden when guide modal is open --}}
+    {{-- Back to Home — hidden when guide modal is open --}}
     <a href="/" wire:navigate
+       x-data="{ loading: false }"
+       @click="loading = true"
        x-show="!showGuide"
        x-transition:enter="transition ease-out duration-200"
        x-transition:enter-start="opacity-0"
@@ -813,10 +830,12 @@ new #[Layout('app')] class extends Component {
        x-transition:leave="transition ease-in duration-150"
        x-transition:leave-start="opacity-100"
        x-transition:leave-end="opacity-0"
-       class="lg-back-btn flex items-center justify-center w-10 h-10 rounded-full border border-white/30 hover:border-white/60 hover:bg-white/10 transition-all duration-200">
-        <i class="fa-solid fa-arrow-left text-white text-sm"></i>
-        <span class="lg-back-tooltip">Back to Home</span>
+       class="lg-back-btn flex items-center gap-2 rounded-full border border-white/30 hover:border-white/60 hover:bg-white/10 transition-all duration-200">
+        <i class="fa-solid fa-circle-notch lg-spin" x-show="loading" x-cloak style="font-size:0.8rem; color:#ffffff;"></i>
+        <i class="fa-solid fa-arrow-left" x-show="!loading" style="font-size:0.8rem; color:#ffffff;"></i>
+        <span style="font-family:'Inter',sans-serif; font-size:0.82rem; font-weight:600; color:#ffffff;">Back to Home</span>
     </a>
+
 
     {{-- ══ LOGIN CARD ══ --}}
     <div wire:ignore.self
@@ -977,7 +996,7 @@ new #[Layout('app')] class extends Component {
 
             {{-- Modal Header --}}
             <div class="guide-modal-header px-8 pt-7 pb-6 border-b border-[#F0F0F0] shrink-0">
-                <p style="font-family:'Inter',sans-serif; font-size:0.62rem; font-weight:700; letter-spacing:0.2em; text-transform:uppercase; color:#333333; margin-bottom:0.3rem;">First-Time Login Guide</p>
+                <p style="font-family:'Inter',sans-serif; font-size:1rem; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; color:#333333; margin-bottom:0.35rem;">First-Time Login Guide</p>
                 <h2 style="font-family:'Inter',sans-serif; font-size:1.2rem; font-weight:700; color:#7A3F91; margin:0; line-height:1.25;">Welcome, Alumni</h2>
                 <p style="font-family:'Inter',sans-serif; font-size:0.875rem; color:#333333; margin:0.3rem 0 0; line-height:1.5;">Follow these steps to access your account for the first time.</p>
             </div>
@@ -1027,8 +1046,8 @@ new #[Layout('app')] class extends Component {
                     <div class="guide-example">
                         <i class="fa-solid fa-circle-check text-green-500 shrink-0" style="font-size:0.8rem;"></i>
                         <span style="font-family:'Inter',sans-serif; font-size:0.875rem; color:#111111;">
-                            Example: last name is "Alford" →
-                            <span class="guide-code">00037801_Al</span>
+                            Example: last name is "Aranda" →
+                            <span class="guide-code">00037801_Ar</span>
                         </span>
                     </div>
                 </div>
@@ -1038,9 +1057,9 @@ new #[Layout('app')] class extends Component {
                     <i class="fa-solid fa-triangle-exclamation flex-shrink-0 mt-0.5" style="font-size:0.8rem; color:#C08A00;"></i>
                     <p class="guide-warning-txt">
                         The 2 letters are <strong>case-sensitive</strong> — first letter uppercase, second lowercase.
-                        Use <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">Al</span>,
-                        not <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">al</span>
-                        or <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">AL</span>.
+                        Use <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">Ar</span>,
+                        not <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">ar</span>
+                        or <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">AR</span>.
                     </p>
                 </div>
 

@@ -343,11 +343,19 @@ new #[Layout('app')] class extends Component {
         $this->clearAllErrors();
         $this->step = 1;
 
-        // Deliberately NOT forgetting SESSION_LOCKED_ID_KEY here — a real,
-        // still-active "too many requests" lock must keep Step 1's send
-        // button disabled even after a full wizard reset. It only clears
-        // itself once it's genuinely expired (see checkAndSyncSendLock()).
-        $this->checkAndSyncSendLock();
+        // FIX: previously this called checkAndSyncSendLock() here, which
+        // read a leftover SESSION_LOCKED_ID_KEY from a PRIOR verified
+        // attempt and could re-show the "Too Many Code Requests" banner on
+        // a now-blank Step 1 form — before the alumni had typed anything
+        // again. The lock is tied to a specific alumni account, not to
+        // "whoever this browser session used to be." A genuinely
+        // still-active lock will correctly reappear the moment the alumni
+        // re-enters and re-matches their Student ID + email in
+        // verifyAndSend() (which re-derives it fresh from that lookup) —
+        // it does not need to be shown proactively on a blank form.
+        session()->forget(self::SESSION_LOCKED_ID_KEY);
+        $this->sendLocked        = false;
+        $this->sendLockedUntilMs = 0;
     }
 
     public function mount(): void
@@ -365,10 +373,20 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // Sync the Step 1 "Request New Code" lockout state unconditionally
-        // — independent of which step we end up landing on below — so it's
-        // always accurate the moment Step 1 is (re)rendered.
-        $this->checkAndSyncSendLock();
+        // FIX: previously this called checkAndSyncSendLock() unconditionally
+        // (or, in an earlier attempt at this fix, conditionally on a
+        // leftover SESSION_LOCKED_ID_KEY) — both still let the "Too Many
+        // Code Requests" banner reappear on a fresh, blank Step 1 form
+        // just because a PRIOR verified attempt had once locked this
+        // browser session, even though the alumni hadn't typed their
+        // Student ID / email again yet. The lock must only become visible
+        // again once the alumni re-enters and re-matches those fields to
+        // that same locked account — see verifyAndSend(), which re-derives
+        // it fresh from the actual lookup. mount() never shows it
+        // proactively.
+        session()->forget(self::SESSION_LOCKED_ID_KEY);
+        $this->sendLocked        = false;
+        $this->sendLockedUntilMs = 0;
 
         $alumniId = session('alumni_forgot_id');
         $step     = session('alumni_forgot_step', 1);
@@ -460,15 +478,16 @@ new #[Layout('app')] class extends Component {
     {
         $this->clearAllErrors();
 
-        // ── "Request New Code" lockout — checked FIRST, before anything
-        //    else, so a locked-out user can't bypass it just by re-typing
-        //    their Student ID / email on Step 1. This mirrors the state
-        //    already shown (disabled button + countdown) on the page.
-        $this->checkAndSyncSendLock();
-        if ($this->sendLocked) {
-            $this->showResendLockedModal = true;
-            return;
-        }
+        // ── "Request New Code" lockout ───────────────────────────────────
+        // FIX: previously this was checked HERE, before the Student ID /
+        // email were even looked at — driven only by a leftover session
+        // key from a PRIOR verified attempt. That meant a locked-out
+        // alumni who went back to a blank Step 1 form saw the "Too Many
+        // Code Requests" banner immediately, before typing anything again.
+        // The lock must only reappear once the alumni re-enters and
+        // re-matches their Student ID + email to that same locked account
+        // — see the real check further below, right after the alumni is
+        // looked up (matches the identity actually submitted this time).
 
         // ── Rate limit ────────────────────────────────────────────────────
         if (RateLimiter::tooManyAttempts($this->rateLimitKey(), 10)) {
@@ -483,18 +502,22 @@ new #[Layout('app')] class extends Component {
         $sid   = trim($this->studentId);
         $email = trim($this->email);
 
+        $hasError = false;
+
         if ($sid === '') {
             $this->studentIdError = 'Please enter your Student ID.';
-            return;
+            $hasError = true;
         }
 
         if ($email === '') {
             $this->emailError = 'Please enter your registered email address.';
-            return;
+            $hasError = true;
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->emailError = 'Please enter a valid email address.';
+            $hasError = true;
         }
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->emailError = 'Please enter a valid email address.';
+        if ($hasError) {
             return;
         }
 
@@ -688,12 +711,16 @@ new #[Layout('app')] class extends Component {
         $this->errorMessage = $this->successMessage = '';
         $trimmed = trim($this->otp);
 
-        if ($trimmed === '' || strlen($trimmed) < 6) {
-            $this->errorMessage = 'Please enter the complete 6-digit verification code.';
+        if ($trimmed === '') {
+            $this->errorMessage = 'Please enter the 6-digit verification code.';
             return;
         }
-        if (!preg_match('/^\d{6}$/', $trimmed)) {
-            $this->errorMessage = 'The code must contain digits only.';
+        if (!ctype_digit($trimmed)) {
+            $this->errorMessage = 'The code must contain numbers only.';
+            return;
+        }
+        if (strlen($trimmed) !== 6) {
+            $this->errorMessage = 'The verification code must be exactly 6 digits.';
             return;
         }
 
@@ -929,7 +956,14 @@ new #[Layout('app')] class extends Component {
         $this->errorMessage   = 'For your security, this password reset session has expired. Please verify your identity again.';
         $this->otpExpiresAtMs = 0;
         $this->step            = 1;
-        $this->checkAndSyncSendLock();
+
+        // FIX: same bug as resetToStep1()/mount() — don't proactively
+        // surface a lock banner from a leftover session key on a form the
+        // alumni is about to fill in blank again. It reappears correctly
+        // once they re-match their Student ID + email in verifyAndSend().
+        session()->forget(self::SESSION_LOCKED_ID_KEY);
+        $this->sendLocked        = false;
+        $this->sendLockedUntilMs = 0;
     }
 }; ?>
 
@@ -1025,8 +1059,6 @@ new #[Layout('app')] class extends Component {
                  x-transition:enter-start="opacity-0 scale-90 translate-y-6"
                  x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                  x-data="sendLockTimer($wire.entangle('sendLockedUntilMs'))">
-                <div class="h-1 w-full" style="background: linear-gradient(90deg, #DC2626, #7A3F91, #DC2626);"></div>
-
                 <div class="px-6 sm:px-8 pt-8 pb-7 space-y-5">
                     <div class="flex justify-center">
                         <div class="relative w-20 h-20">
@@ -1084,7 +1116,7 @@ new #[Layout('app')] class extends Component {
 
             {{-- Step Indicator --}}
             <div class="flex items-center gap-1 sm:gap-0">
-                @foreach ([1 => 'Verify', 2 => 'OTP', 3 => 'Password'] as $num => $label)
+                @foreach ([1 => 'Identity', 2 => 'Verify Code', 3 => 'New Password'] as $num => $label)
                     <div class="flex items-center {{ $num < 3 ? 'flex-1' : '' }}">
                         <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
                             <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 transition-all"
@@ -1131,7 +1163,12 @@ new #[Layout('app')] class extends Component {
                 <div class="space-y-5" x-data="sendLockTimer($wire.entangle('sendLockedUntilMs'))">
                     <div>
                         <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Verify Your Identity</h2>
-                        <p class="text-sm mt-1" style="color: #555555;">Enter your Student ID and registered email to receive a verification code.</p>
+                        <p class="text-sm mt-1" style="color: #555555;">Enter your Student ID and Registered Email below.</p>
+                    </div>
+
+                    <div class="flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg border" style="background:#F8F4FC; border-color:#E3D3EC;">
+                        <i class="fa-solid fa-circle-info flex-shrink-0 mt-0.5 text-sm" style="color:#7A3F91;"></i>
+                        <p class="text-xs font-medium leading-relaxed" style="color:#5B2D6E;">Once verified, we'll automatically send a verification code to your email.</p>
                     </div>
 
                     <div wire:ignore x-show="locked" x-cloak
@@ -1149,6 +1186,13 @@ new #[Layout('app')] class extends Component {
                             <div class="flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg border mb-2" style="background:#FEF2F2; border-color:#FECACA;">
                                 <i class="fa-solid fa-circle-exclamation text-red-500 flex-shrink-0 mt-0.5 text-sm"></i>
                                 <p class="text-xs font-medium text-red-600 leading-relaxed">{{ $studentIdError }}</p>
+                            </div>
+                        @endif
+
+                        @if ($emailError)
+                            <div class="flex items-start gap-2.5 px-3.5 py-2.5 rounded-lg border mb-2" style="background:#FEF2F2; border-color:#FECACA;">
+                                <i class="fa-solid fa-circle-exclamation text-red-500 flex-shrink-0 mt-0.5 text-sm"></i>
+                                <p class="text-xs font-medium text-red-600 leading-relaxed">{{ $emailError }}</p>
                             </div>
                         @endif
 
@@ -1175,13 +1219,6 @@ new #[Layout('app')] class extends Component {
                                    class="fp-fl-input {{ $emailError ? 'fp-fl-error' : '' }}">
                             <label class="fp-fl-label">Registered Email</label>
                         </div>
-
-                        @if ($emailError)
-                            <div class="flex items-start gap-2 mt-1.5">
-                                <i class="fa-solid fa-triangle-exclamation text-red-500 flex-shrink-0 mt-0.5 text-xs"></i>
-                                <p class="text-xs font-medium text-red-600 leading-relaxed">{{ $emailError }}</p>
-                            </div>
-                        @endif
                     </div>
 
                     <button wire:click="verifyAndSend"
@@ -1191,7 +1228,7 @@ new #[Layout('app')] class extends Component {
                             :class="locked ? 'opacity-50 cursor-not-allowed' : ''"
                             class="fp-submit-btn">
                         <span wire:loading.remove wire:target="verifyAndSend" x-show="!locked" class="flex items-center justify-center gap-2">
-                            Send Verification Code
+                            Verify &amp; Send Code
                             <i class="fa-solid fa-paper-plane" style="font-size:0.72rem;"></i>
                         </span>
                         <span x-show="locked" x-cloak class="flex items-center justify-center gap-2">
@@ -1207,11 +1244,18 @@ new #[Layout('app')] class extends Component {
                         </span>
                     </button>
 
-                    <div class="text-center">
+                    <div class="text-center" x-data="{ backLoading: false }">
                         <a href="{{ route('login') }}" wire:navigate
+                           @click="backLoading = true"
                            class="fp-back-link">
-                            <i class="fa-solid fa-arrow-left" style="font-size:0.7rem;"></i>
-                            Back to Login
+                            <span x-show="!backLoading" class="inline-flex items-center gap-1.5">
+                                <i class="fa-solid fa-arrow-left" style="font-size:0.7rem;"></i>
+                                Back to Login
+                            </span>
+                            <span x-show="backLoading" x-cloak class="inline-flex items-center gap-1.5">
+                                <i class="fa-solid fa-circle-notch fp-spin" style="font-size:0.75rem;"></i>
+                                Redirecting…
+                            </span>
                         </a>
                     </div>
                 </div>
@@ -1221,13 +1265,13 @@ new #[Layout('app')] class extends Component {
             @if ($step == 2)
                 <div class="space-y-5" x-data="otpTimer($wire.entangle('otpExpiresAtMs'))">
                     <div>
-                        <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Enter One-Time Password</h2>
-                        <p class="text-sm mt-1" style="color: #555555;">A 6-digit OTP was sent to <strong style="color: #7A3F91;">{{ $maskedEmail }}</strong></p>
+                        <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Verify Your Code</h2>
+                        <p class="text-sm mt-1" style="color: #555555;">A 6-digit code was sent to <strong style="color: #7A3F91;">{{ $maskedEmail }}</strong>. Enter it below and click Confirm.</p>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div wire:ignore class="rounded-lg border p-4 text-center flex flex-col items-center justify-center" style="background: #F8F4FC; border-color: #E8E8E8;">
-                            <p class="text-xs font-semibold uppercase mb-1.5" style="color: #555555; letter-spacing: 0.08em;">OTP Expires In</p>
+                            <p class="text-xs font-semibold uppercase mb-1.5" style="color: #555555; letter-spacing: 0.08em;">Code Expires In</p>
                             <div class="text-3xl sm:text-4xl font-bold font-mono tabular-nums transition-colors duration-300"
                                  style="color: #7A3F91;"
                                  :style="seconds <= 60 ? 'color: #dc2626;' : 'color: #7A3F91;'"
@@ -1235,9 +1279,11 @@ new #[Layout('app')] class extends Component {
                             <p x-show="expired" x-cloak class="text-red-600 text-xs mt-1.5 font-semibold">OTP expired.</p>
                         </div>
 
-                        <div class="flex flex-col justify-center">
-                            <label class="block text-sm font-semibold mb-2" style="color: #333333;">6-Digit OTP</label>
+                        <div class="flex flex-col justify-center" x-data="{ otpLen: {{ strlen(trim($otp)) }} }">
+                            <label class="block text-sm font-semibold mb-2" style="color: #333333;">6-Digit Code</label>
                             <input wire:model="otp"
+                                   wire:keydown.enter="verifyOtp"
+                                   x-on:input="$event.target.value = $event.target.value.replace(/[^0-9]/g, ''); otpLen = $event.target.value.length"
                                    type="text" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
                                    {{ $otpLocked ? 'disabled' : '' }}
                                    placeholder="000000"
@@ -1245,6 +1291,9 @@ new #[Layout('app')] class extends Component {
                                    style="{{ $otpLocked ? 'background:#F5F5F5; border-color:#E8E8E8; color:#999999; cursor:not-allowed;' : 'background:#FFFFFF; border-color:#E8E8E8; color:#333333;' }}"
                                    onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'; if(!this.disabled)this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
                                    onblur="if(!this.disabled)this.style.borderColor='#E8E8E8'; if(!this.disabled)this.style.boxShadow='none';">
+                            <p class="text-xs mt-1.5" :style="otpLen === 6 ? 'color:#059669;' : 'color:#999999;'">
+                                <span x-text="otpLen"></span>/6 digits entered
+                            </p>
                         </div>
                     </div>
 
@@ -1262,17 +1311,13 @@ new #[Layout('app')] class extends Component {
                         <button wire:click="verifyOtp"
                                 wire:loading.attr="disabled"
                                 wire:target="verifyOtp"
-                                x-bind:disabled="expired"
-                                :class="expired ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]'"
+                                x-bind:disabled="expired || otpLen !== 6"
+                                :class="(expired || otpLen !== 6) ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]'"
                                 class="w-full text-white py-3.5 rounded-lg font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
-                                style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                            <span wire:loading.remove wire:target="verifyOtp">Continue</span>
+                                style="background: linear-gradient(135deg, #7A3F91, #6a3080); transition: transform 0.08s ease, opacity 0.12s ease;">
+                            <span wire:loading.remove wire:target="verifyOtp">Confirm OTP</span>
                             <span wire:loading wire:target="verifyOtp" x-cloak class="flex items-center gap-1.5">
-                                <span class="flex gap-0.5">
-                                    <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
-                                    <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
-                                    <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
-                                </span>
+                                <i class="fa-solid fa-circle-notch fp-spin" style="font-size:0.8rem;"></i>
                                 <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Verifying</span>
                             </span>
                         </button>
@@ -1288,7 +1333,7 @@ new #[Layout('app')] class extends Component {
                             :style="canResend ? 'background:#FFFFFF; border-color:#7A3F91; color:#7A3F91;' : 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;'">
                         <span wire:loading.remove wire:target="resendOtp">
                             <span x-show="!canResend" wire:ignore>Resend in <span class="font-bold" x-text="formattedTime"></span></span>
-                            <span x-show="canResend">Request New OTP</span>
+                            <span x-show="canResend">Request New Code</span>
                         </span>
                         <span wire:loading wire:target="resendOtp" x-cloak class="flex items-center gap-1.5">
                             <span class="flex gap-0.5">
@@ -1424,6 +1469,9 @@ new #[Layout('app')] class extends Component {
         .dot2 { animation: dotBounce 1.1s ease-in-out infinite 0.18s; }
         .dot3 { animation: dotBounce 1.1s ease-in-out infinite 0.36s; }
 
+        @keyframes fpSpinAnim { to { transform: rotate(360deg); } }
+        .fp-spin { animation: fpSpinAnim 0.75s linear infinite; }
+
         .fp-fl-group {
             position: relative;
         }
@@ -1518,7 +1566,7 @@ new #[Layout('app')] class extends Component {
             border-radius: 10px;
             border: none;
             cursor: pointer;
-            transition: background 0.2s ease, transform 0.15s ease;
+            transition: background 0.12s ease, transform 0.08s ease;
             display: flex;
             align-items: center;
             justify-content: center;

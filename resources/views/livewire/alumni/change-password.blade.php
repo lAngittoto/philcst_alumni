@@ -558,11 +558,14 @@ new #[Layout('app')] class extends Component {
         $this->errorMessage = $this->successMessage = '';
         $trimmed = trim($this->otp);
 
-        if ($trimmed === '' || strlen($trimmed) < 6) {
-            $this->errorMessage = 'Please enter the complete 6-digit verification code.'; return;
+        if ($trimmed === '') {
+            $this->errorMessage = 'Please enter the 6-digit verification code.'; return;
         }
-        if (!preg_match('/^\d{6}$/', $trimmed)) {
-            $this->errorMessage = 'The code must contain digits only.'; return;
+        if (!ctype_digit($trimmed)) {
+            $this->errorMessage = 'The code must contain numbers only.'; return;
+        }
+        if (strlen($trimmed) !== 6) {
+            $this->errorMessage = 'The verification code must be exactly 6 digits.'; return;
         }
 
         $alumni = $this->getAlumni();
@@ -805,11 +808,7 @@ new #[Layout('app')] class extends Component {
                 class="inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors font-semibold text-sm group">
                 <div class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/30 bg-white/10 group-hover:border-white/60 group-hover:bg-white/20 transition-all shadow-sm">
                     <span wire:loading.remove wire:target="backToLogin"><i class="fa-solid fa-arrow-left text-sm"></i></span>
-                    <span wire:loading wire:target="backToLogin" x-cloak class="flex gap-0.5">
-                        <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
-                        <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
-                        <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
-                    </span>
+                    <span wire:loading wire:target="backToLogin" x-cloak><i class="fa-solid fa-circle-notch fp-spin text-sm"></i></span>
                 </div>
                 <span>Back to Login</span>
             </button>
@@ -897,8 +896,6 @@ new #[Layout('app')] class extends Component {
                  x-transition:enter-start="opacity-0 scale-90 translate-y-6"
                  x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                  x-data="sendLockTimer($wire.entangle('sendLockedUntilMs'))">
-                <div class="h-1 w-full" style="background: linear-gradient(90deg, #DC2626, #7A3F91, #DC2626);"></div>
-
                 <div class="px-6 sm:px-8 pt-8 pb-7 space-y-5">
                     <div class="flex justify-center">
                         <div class="relative w-20 h-20">
@@ -956,7 +953,7 @@ new #[Layout('app')] class extends Component {
 
             {{-- Step Indicator --}}
             @php
-                $steps = ['Send OTP', 'OTP', 'Password'];
+                $steps = ['Email', 'Verify Code', 'New Password'];
             @endphp
             <div class="flex items-center gap-1 sm:gap-0">
                 @foreach ($steps as $idx => $label)
@@ -1097,9 +1094,11 @@ new #[Layout('app')] class extends Component {
                             @endif
                         </div>
 
-                        <div class="flex flex-col justify-center">
+                        <div class="flex flex-col justify-center" x-data="{ otpLen: {{ strlen(trim($otp)) }} }">
                             <label class="block text-sm font-semibold mb-2" style="color: #333333;">6-Digit Code</label>
                             <input wire:model="otp"
+                                   wire:keydown.enter="verifyOtp"
+                                   x-on:input="$event.target.value = $event.target.value.replace(/[^0-9]/g, ''); otpLen = $event.target.value.length"
                                    type="text" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
                                    autocomplete="one-time-code"
                                    {{ $otpLocked ? 'disabled' : '' }}
@@ -1108,6 +1107,9 @@ new #[Layout('app')] class extends Component {
                                    style="{{ $otpLocked ? 'background:#F5F5F5; border-color:#E8E8E8; color:#999999; cursor:not-allowed;' : 'background:#FFFFFF; border-color:#E8E8E8; color:#333333;' }}"
                                    onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'; if(!this.disabled)this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
                                    onblur="if(!this.disabled)this.style.borderColor='#E8E8E8'; if(!this.disabled)this.style.boxShadow='none';">
+                            <p class="text-xs mt-1.5" :style="otpLen === 6 ? 'color:#059669;' : 'color:#999999;'">
+                                <span x-text="otpLen"></span>/6 digits entered
+                            </p>
                         </div>
                     </div>
 
@@ -1125,17 +1127,13 @@ new #[Layout('app')] class extends Component {
                         <button wire:click="verifyOtp"
                                 wire:loading.attr="disabled"
                                 wire:target="verifyOtp"
-                                x-bind:disabled="expired"
-                                :class="expired ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]'"
+                                x-bind:disabled="expired || otpLen !== 6"
+                                :class="(expired || otpLen !== 6) ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]'"
                                 class="w-full text-white py-3.5 rounded-lg font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
-                                style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                            <span wire:loading.remove wire:target="verifyOtp">Verify Code & Continue</span>
+                                style="background: linear-gradient(135deg, #7A3F91, #6a3080); transition: transform 0.08s ease, opacity 0.12s ease;">
+                            <span wire:loading.remove wire:target="verifyOtp">Confirm OTP</span>
                             <span wire:loading wire:target="verifyOtp" x-cloak class="flex items-center gap-1.5">
-                                <span class="flex gap-0.5">
-                                    <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
-                                    <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
-                                    <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
-                                </span>
+                                <i class="fa-solid fa-circle-notch fp-spin" style="font-size:0.8rem;"></i>
                                 <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Verifying</span>
                             </span>
                         </button>
@@ -1304,6 +1302,9 @@ new #[Layout('app')] class extends Component {
         .dot2 { animation: dotBounce 1.1s ease-in-out infinite 0.18s; }
         .dot3 { animation: dotBounce 1.1s ease-in-out infinite 0.36s; }
 
+        @keyframes fpSpinAnim { to { transform: rotate(360deg); } }
+        .fp-spin { animation: fpSpinAnim 0.75s linear infinite; }
+
         /* ── Submit button (same as forgot-password) ── */
         .fp-submit-btn {
             font-family: 'Inter', sans-serif;
@@ -1318,7 +1319,7 @@ new #[Layout('app')] class extends Component {
             border-radius: 10px;
             border: none;
             cursor: pointer;
-            transition: background 0.2s ease, transform 0.15s ease;
+            transition: background 0.12s ease, transform 0.08s ease;
             display: flex;
             align-items: center;
             justify-content: center;
