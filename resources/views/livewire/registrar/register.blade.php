@@ -351,12 +351,15 @@ public function closeImportModal(): void
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            $hasProgram     = in_array('program', $header, true);
-            $hasProgramCode = in_array('program_code', $header, true);
-            if (!$hasProgram && !$hasProgramCode)
-                throw new \Exception('Missing required column: "program".');
+            $hasProgram      = in_array('program', $header, true);
+            $hasProgramsPlur = in_array('programs', $header, true);
+            $hasProgramCode  = in_array('program_code', $header, true);
+            if (!$hasProgram && !$hasProgramsPlur && !$hasProgramCode)
+                throw new \Exception('Missing required column: "programs".');
             if ($hasProgram) {
                 $header[array_search('program', $header)] = 'course';
+            } elseif ($hasProgramsPlur) {
+                $header[array_search('programs', $header)] = 'course';
             } else {
                 $header[array_search('program_code', $header)] = 'course';
             }
@@ -814,8 +817,110 @@ public function closeImportModal(): void
         transition: background .12s; margin-left: auto;
     }
     .reg-picker-action-btn:hover { background: #E4D0F5; }
-    .reg-course-picker { width: 320px; }
+    .reg-course-picker { width: 340px; }
     .reg-year-picker   { width: 268px; }
+
+    /* ── Program trigger: shows code + full program name stacked ── */
+    .reg-dropdown-trigger--program { height: 60px; padding-top: 18px; }
+    .reg-trigger-value-stack {
+        position: absolute;
+        left: 3rem;
+        right: 30px;
+        bottom: 7px;
+        display: flex;
+        flex-direction: column;
+        line-height: 1.15;
+        pointer-events: none;
+        overflow: hidden;
+    }
+    .reg-trigger-value-code {
+        font-size: .95rem;
+        font-weight: 700;
+        color: #111111;
+    }
+    .reg-trigger-value-name {
+        font-size: .68rem;
+        font-weight: 500;
+        color: #888888;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* ── Program picker: search box + list of code/name rows ── */
+    .reg-picker-search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid #F0E6F8;
+        background: #fff;
+    }
+    .reg-picker-search i { font-size: .75rem; color: #aaa; }
+    .reg-picker-search-input {
+        flex: 1;
+        border: none;
+        outline: none;
+        font-size: .82rem;
+        font-weight: 500;
+        color: #333;
+        background: transparent;
+    }
+    .reg-picker-search-input::placeholder { color: #bbb; font-weight: 400; }
+
+    .reg-picker-list-course {
+        max-height: 260px;
+        overflow-y: auto;
+        padding: 6px;
+    }
+    .reg-picker-course-cell {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 9px;
+        border: 1.5px solid transparent;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        transition: background .12s, border-color .12s;
+        margin-bottom: 2px;
+    }
+    .reg-picker-course-cell:hover { background: #F3E8FF; }
+    .reg-picker-course-cell--selected { background: #F3E8FF; border-color: #7A3F91; }
+    .reg-picker-course-code {
+        flex-shrink: 0;
+        font-size: .72rem;
+        font-weight: 800;
+        color: #7A3F91;
+        background: #F0E6F8;
+        padding: 3px 7px;
+        border-radius: 6px;
+        letter-spacing: .02em;
+    }
+    .reg-picker-course-name {
+        flex: 1;
+        font-size: .82rem;
+        font-weight: 500;
+        color: #333;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .reg-picker-course-check {
+        flex-shrink: 0;
+        font-size: .72rem;
+        color: #7A3F91;
+    }
+    .reg-picker-course-empty {
+        padding: 22px 10px;
+        text-align: center;
+        font-size: .78rem;
+        font-weight: 600;
+        color: #aaa;
+    }
+    .reg-picker-course-empty i { margin-right: 5px; }
 
     /* ── Suffix scrollable dropdown ── */
     .reg-suffix-panel {
@@ -1017,12 +1122,19 @@ public function closeImportModal(): void
         white-space: nowrap;
     }
 
-    /* ── Page card ── */
+    /* ── Page card: solid white with soft shadow + visible (non-black) border ── */
     .reg-card {
-        background:#fff;
-        border:1px solid #ECE4F4;
-        border-radius:18px;
-        box-shadow:0 1px 2px rgba(20,10,30,.03), 0 8px 24px rgba(122,63,145,.05);
+        background: rgba(255,255,255,0.92);
+        border: 1.5px solid #D8C6E8;
+        border-radius: 18px;
+        box-shadow: 0 1px 2px rgba(20,10,30,.03), 0 8px 24px rgba(122,63,145,.08);
+        -webkit-backdrop-filter: blur(10px);
+        backdrop-filter: blur(10px);
+    }
+
+    /* Keep form inputs crisp/legible */
+    .fl-input, .reg-dropdown-trigger {
+        background: #fff;
     }
 
     /* ── Success pop (done step) ── */
@@ -1141,9 +1253,11 @@ public function closeImportModal(): void
         <div class="import-btn-wrap">
             <span class="import-btn-tooltip">Import from Excel</span>
             <button wire:click="openImportModal"
-                    class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-white shadow-lg transition hover:shadow-xl shrink-0"
+                    wire:loading.attr="disabled" wire:target="openImportModal"
+                    class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-white shadow-lg transition hover:shadow-xl shrink-0 disabled:opacity-60"
                     style="background:linear-gradient(135deg,#2563EB,#3B82F6);">
-                <i class="fas fa-file-import text-sm"></i>
+                <i class="fas fa-spinner animate-spin text-sm" wire:loading wire:target="openImportModal"></i>
+                <i class="fas fa-file-import text-sm" wire:loading.remove wire:target="openImportModal"></i>
             </button>
         </div>
     </div>
@@ -1328,40 +1442,58 @@ public function closeImportModal(): void
 
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" style="overflow:visible;position:relative;z-index:10;">
 
-                                {{-- Program Code picker --}}
-                                @php $courseCodesJson = $this->courses->pluck('code')->toJson(); @endphp
+                                {{-- Program picker (shows full program name, e.g. "Bachelor of Science in Information Technology") --}}
+                                @php
+                                    $coursesJson = $this->courses->map(fn($c) => [
+                                        'code' => $c->code,
+                                        'name' => $c->name,
+                                    ])->values()->toJson();
+                                @endphp
                                 <div class="reg-dropdown"
                                      x-data="{
                                          open: false,
-                                         allCodes: {{ $courseCodesJson }},
-                                         pageSize: 12,
+                                         allCourses: {{ $coursesJson }},
+                                         pageSize: 6,
                                          pageIndex: 0,
-                                         get totalPages() { return Math.max(1, Math.ceil(this.allCodes.length / this.pageSize)); },
-                                         get pageCodes() { let s = this.pageIndex * this.pageSize; return this.allCodes.slice(s, s + this.pageSize); },
+                                         search: '',
+                                         get filtered() {
+                                             if (!this.search.trim()) return this.allCourses;
+                                             let q = this.search.trim().toLowerCase();
+                                             return this.allCourses.filter(c => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q));
+                                         },
+                                         get totalPages() { return Math.max(1, Math.ceil(this.filtered.length / this.pageSize)); },
+                                         get pageCourses() { let s = this.pageIndex * this.pageSize; return this.filtered.slice(s, s + this.pageSize); },
                                          get rangeLabel() {
-                                             if (!this.allCodes.length) return 'No program codes';
+                                             if (!this.filtered.length) return 'No programs found';
                                              let s = this.pageIndex * this.pageSize;
-                                             let e = Math.min(s + this.pageSize - 1, this.allCodes.length - 1);
-                                             return this.totalPages === 1 ? 'All Program Codes' : this.allCodes[s] + ' - ' + this.allCodes[e];
+                                             let e = Math.min(s + this.pageSize - 1, this.filtered.length - 1);
+                                             return this.totalPages === 1 ? 'All Programs' : (s + 1) + ' - ' + (e + 1) + ' of ' + this.filtered.length;
                                          },
                                          prevPage() { if (this.pageIndex > 0) this.pageIndex--; },
                                          nextPage() { if (this.pageIndex < this.totalPages - 1) this.pageIndex++; },
                                          canPrev() { return this.pageIndex > 0; },
                                          canNext() { return this.pageIndex < this.totalPages - 1; },
                                          toggle() { this.open = !this.open; },
-                                         close()  { this.open = false; },
+                                         close()  { this.open = false; this.search = ''; this.pageIndex = 0; },
                                          select(code) { $wire.set('regCourseCode', code); this.close(); },
-                                         jumpToSelected() { let i = this.allCodes.indexOf($wire.regCourseCode); if (i >= 0) this.pageIndex = Math.floor(i / this.pageSize); }
+                                         jumpToSelected() {
+                                             let i = this.filtered.findIndex(c => c.code === $wire.regCourseCode);
+                                             if (i >= 0) this.pageIndex = Math.floor(i / this.pageSize);
+                                         },
+                                         nameFor(code) { let c = this.allCourses.find(c => c.code === code); return c ? c.name : ''; }
                                      }"
                                      @click.outside="close()">
 
                                     <button type="button"
                                             @click="toggle(); if(open) jumpToSelected()"
                                             :class="{ 'has-value': $wire.regCourseCode !== '', 'open': open }"
-                                            class="reg-dropdown-trigger {{ in_array('course', $fieldErrors) ? 'field-error' : '' }}">
+                                            class="reg-dropdown-trigger reg-dropdown-trigger--program {{ in_array('course', $fieldErrors) ? 'field-error' : '' }}">
                                         <i class="fas fa-book-open reg-trigger-icon"></i>
-                                        <span class="reg-trigger-label">Program Code</span>
-                                        <span class="reg-trigger-value" x-show="$wire.regCourseCode !== ''" x-text="$wire.regCourseCode" style="display:none;"></span>
+                                        <span class="reg-trigger-label" x-show="$wire.regCourseCode === ''">Program</span>
+                                        <span class="reg-trigger-value-stack" x-show="$wire.regCourseCode !== ''" style="display:none;">
+                                            <span class="reg-trigger-value-code" x-text="$wire.regCourseCode"></span>
+                                            <span class="reg-trigger-value-name" x-text="nameFor($wire.regCourseCode)"></span>
+                                        </span>
                                         <i class="fas fa-chevron-down reg-trigger-chevron"></i>
                                     </button>
 
@@ -1373,6 +1505,14 @@ public function closeImportModal(): void
                                          x-transition:leave-start="opacity-100 scale-100"
                                          x-transition:leave-end="opacity-0 scale-95"
                                          class="reg-picker-panel reg-course-picker" style="display:none;">
+
+                                        <div class="reg-picker-search">
+                                            <i class="fas fa-magnifying-glass"></i>
+                                            <input type="text" x-model="search" @input="pageIndex = 0"
+                                                   placeholder="Search program code or name..."
+                                                   class="reg-picker-search-input" @click.stop>
+                                        </div>
+
                                         <div class="reg-picker-header">
                                             <button type="button" @click.stop="prevPage()" :disabled="!canPrev()" class="reg-picker-nav-btn">
                                                 <i class="fas fa-chevron-left" style="font-size:.58rem;"></i>
@@ -1382,16 +1522,22 @@ public function closeImportModal(): void
                                                 <i class="fas fa-chevron-right" style="font-size:.58rem;"></i>
                                             </button>
                                         </div>
-                                        <div class="reg-picker-grid" style="grid-template-columns: repeat(4, 1fr);">
-                                            <template x-for="code in pageCodes" :key="code">
-                                                <button type="button" @click.stop="select(code)"
-                                                        :class="{ 'reg-picker-cell--selected': $wire.regCourseCode === code }"
-                                                        class="reg-picker-cell" x-text="code"></button>
+
+                                        <div class="reg-picker-list-course">
+                                            <template x-for="c in pageCourses" :key="c.code">
+                                                <button type="button" @click.stop="select(c.code)"
+                                                        :class="{ 'reg-picker-course-cell--selected': $wire.regCourseCode === c.code }"
+                                                        class="reg-picker-course-cell">
+                                                    <span class="reg-picker-course-code" x-text="c.code"></span>
+                                                    <span class="reg-picker-course-name" x-text="c.name"></span>
+                                                    <i class="fas fa-check reg-picker-course-check" x-show="$wire.regCourseCode === c.code" style="display:none;"></i>
+                                                </button>
                                             </template>
-                                            <template x-for="i in (pageSize - pageCodes.length)" :key="'e-' + i">
-                                                <div></div>
-                                            </template>
+                                            <div x-show="filtered.length === 0" class="reg-picker-course-empty" style="display:none;">
+                                                <i class="fas fa-circle-exclamation"></i> No matching programs
+                                            </div>
                                         </div>
+
                                         <div class="reg-picker-footer">
                                             <button type="button" @click.stop="select('')" class="reg-picker-clear-btn"
                                                     x-show="$wire.regCourseCode !== ''" style="display:none;">
@@ -1405,14 +1551,23 @@ public function closeImportModal(): void
                                     </div>
                                 </div>
 
-                                {{-- Batch Year picker --}}
+                                {{-- Batch Year picker — capped at 2030 until the calendar actually
+                                     reaches it, then auto-extends by 5-year steps (2035, 2040, ...)
+                                     so it never needs a manual bump later. --}}
                                 <div class="reg-dropdown"
                                      x-data="{
                                          open: false,
-                                         minYear: 1995, maxYear: 3030,
+                                         minYear: 1995,
                                          today: {{ (int) date('Y') }},
                                          pageSize: 12,
                                          pageStart: Math.floor(({{ (int) date('Y') }} - 1995) / 12) * 12 + 1995,
+                                         // Stays at 2030 until we actually reach/pass it, then jumps forward
+                                         // in 5-year steps — so 2026-2030 today, 2031-2035 once it's 2031, etc.
+                                         get maxYear() {
+                                             let base = 2030;
+                                             if (this.today <= base) return base;
+                                             return base + Math.ceil((this.today - base) / 5) * 5;
+                                         },
                                          get pageYears() {
                                              let ys = [];
                                              for (let y = this.pageStart; y < this.pageStart + this.pageSize; y++)
@@ -1503,18 +1658,23 @@ public function closeImportModal(): void
                         {{-- Buttons --}}
                         <div class="flex gap-3 pt-1">
                             <button type="button" wire:click="resetForm"
-                                    wire:loading.attr="disabled" wire:target="registerAlumni"
-                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99]">
-                                <i class="fa-solid fa-arrow-rotate-left mr-1.5"></i>Reset
+                                    wire:loading.attr="disabled" wire:target="registerAlumni,resetForm"
+                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2">
+                                <span wire:loading wire:target="resetForm" class="inline-flex items-center gap-2">
+                                    <i class="fas fa-spinner animate-spin"></i> Resetting...
+                                </span>
+                                <span wire:loading.remove wire:target="resetForm" class="inline-flex items-center gap-2">
+                                    <i class="fa-solid fa-arrow-rotate-left"></i> Reset
+                                </span>
                             </button>
                             <button type="submit"
-                                    wire:loading.attr="disabled" wire:target="registerAlumni"
+                                    wire:loading.attr="disabled" wire:target="registerAlumni,resetForm"
                                     class="flex-1 px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
                                     style="background:#7A3F91;">
-                                <span wire:loading wire:target="registerAlumni">
+                                <span wire:loading wire:target="registerAlumni" class="inline-flex items-center gap-2">
                                     <i class="fas fa-spinner animate-spin"></i> Registering...
                                 </span>
-                                <span wire:loading.remove wire:target="registerAlumni">
+                                <span wire:loading.remove wire:target="registerAlumni" class="inline-flex items-center gap-2">
                                     <i class="fas fa-user-check"></i> Register Alumni
                                 </span>
                             </button>
@@ -1535,8 +1695,14 @@ public function closeImportModal(): void
                         </div>
                         <div class="relative group">
                             <button wire:click="resetForm" type="button"
-                                    class="text-white/70 hover:text-white transition w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/15">
-                                <i class="fas fa-xmark text-sm"></i>
+                                    wire:loading.attr="disabled" wire:target="resetForm"
+                                    class="text-white/70 hover:text-white transition w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/15 disabled:opacity-50">
+                                <span wire:loading wire:target="resetForm">
+                                    <i class="fas fa-spinner animate-spin text-sm"></i>
+                                </span>
+                                <span wire:loading.remove wire:target="resetForm">
+                                    <i class="fas fa-xmark text-sm"></i>
+                                </span>
                             </button>
                             <span class="pointer-events-none absolute top-[calc(100%+6px)] right-0 bg-[#1a1a1a] text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-lg z-50">
                                 Clear errors
@@ -1581,9 +1747,15 @@ public function closeImportModal(): void
             </h2>
             <div class="relative group">
                 <button wire:click="closeImportModal"
+                        wire:loading.attr="disabled" wire:target="closeImportModal"
                         @if($importStep === 'processing') disabled @endif
                         class="w-8 h-8 rounded-xl flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition disabled:opacity-30 disabled:cursor-not-allowed">
-                    <i class="fas fa-xmark text-base"></i>
+                    <span wire:loading wire:target="closeImportModal">
+                        <i class="fas fa-spinner animate-spin text-base"></i>
+                    </span>
+                    <span wire:loading.remove wire:target="closeImportModal">
+                        <i class="fas fa-xmark text-base"></i>
+                    </span>
                 </button>
                 @if($importStep !== 'processing')
                 <span class="pointer-events-none absolute top-[calc(100%+6px)] right-0 bg-[#1a1a1a] text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-lg z-50">
@@ -1595,15 +1767,16 @@ public function closeImportModal(): void
         </div>
 
         {{-- Scrollable body --}}
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 flex flex-col">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 flex flex-col relative">
 
-            {{-- Step Indicator (3 steps only: Upload → Importing → Done) --}}
+            {{-- Step Indicator (3 steps only: Upload → Importing → Done) — hidden during
+                 processing so the loading spinner can truly center in the modal --}}
             @php
                 $stepMap     = ['upload' => 0, 'processing' => 1, 'blocked' => 1, 'done' => 2];
                 $currentStep = $stepMap[$importStep] ?? 0;
                 $stepDefs    = [[0,'1','Upload'],[1,'2','Importing'],[2,'3','Done']];
             @endphp
-            <div class="flex items-center gap-2 shrink-0">
+            <div class="flex items-center gap-2 shrink-0 {{ $importStep === 'processing' ? 'invisible' : '' }}">
                 @foreach($stepDefs as [$idx, $num, $lbl])
                     @php $isActive = $currentStep === $idx; $isDone = $currentStep > $idx; @endphp
                     <div class="flex items-center gap-1.5 {{ $isActive ? 'opacity-100' : ($isDone ? 'opacity-80' : 'opacity-30') }}">
@@ -1633,7 +1806,7 @@ public function closeImportModal(): void
                 @php
                 $reqCols = [
                     'first_name', 'last_name', 'middle_name', 'suffix',
-                    'student_id', 'program',    'batch',       'email',
+                    'student_id', 'programs',   'batch',       'email',
                 ];
                 @endphp
                 <div class="req-col-chips">
@@ -1681,14 +1854,21 @@ public function closeImportModal(): void
             </div>
 
             <button wire:click="closeImportModal"
-                    class="w-full px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99] mt-auto">
-                Cancel
+                    wire:loading.attr="disabled" wire:target="closeImportModal"
+                    class="w-full px-4 py-3 rounded-xl text-base font-bold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99] mt-auto disabled:opacity-60 flex items-center justify-center gap-2">
+                <span wire:loading wire:target="closeImportModal" class="inline-flex items-center gap-2">
+                    <i class="fas fa-spinner animate-spin"></i> Closing...
+                </span>
+                <span wire:loading.remove wire:target="closeImportModal">Cancel</span>
             </button>
 
-            {{-- STEP 2: IMPORTING (auto validates + imports, no confirm button) --}}
+            {{-- STEP 2: IMPORTING (auto validates + imports, no confirm button)
+                 Positioned absolutely over the whole body so the spinner sits dead-center
+                 in the modal, regardless of the (now-hidden) step indicator above it. --}}
             @elseif($importStep === 'processing')
 
-            <div wire:init="processImport" class="py-8 text-center m-auto">
+            <div class="absolute inset-0 flex items-center justify-center p-5">
+            <div wire:init="processImport" class="py-8 text-center">
                 <div class="relative w-24 h-24 mx-auto mb-6 flex items-center justify-center">
                     <span class="import-scan-ring"></span>
                     <span class="import-scan-ring import-scan-ring--delay1"></span>
@@ -1704,13 +1884,15 @@ public function closeImportModal(): void
 
                 <p class="font-extrabold text-[#1a2e1a] text-2xl mb-1 tracking-tight">
                     @if($importTotal > 0)
-                        Importing {{ number_format($importProgress) }} / {{ number_format($importTotal) }}
+                        Importing Records {{ number_format($importProgress) }} / {{ number_format($importTotal) }}
                     @else
-                        Checking file &amp; preparing...
+                        Uploading File...
                     @endif
                 </p>
                 <p class="text-base font-medium mb-1 text-[#888888] break-all px-4">{{ $importFileName }}</p>
-                <p class="text-base font-medium mb-6" style="color:#16a34a;">{{ $importStatus ?: 'Please wait...' }}</p>
+                <p class="text-base font-medium mb-6" style="color:#16a34a;">
+                    {{ $importStatus ?: 'Reading file & preparing records...' }}
+                </p>
 
                 @if($importTotal > 0)
                 @php $pct = $importTotal > 0 ? round(($importProgress / $importTotal) * 100) : 0; @endphp
@@ -1737,6 +1919,7 @@ public function closeImportModal(): void
                     Do not close this window while importing
                 </p>
             </div>
+            </div>
 
             {{-- BLOCKED (file failed validation — bad columns, empty file, etc.) --}}
             @elseif($importStep === 'blocked')
@@ -1751,8 +1934,14 @@ public function closeImportModal(): void
                 </div>
             </div>
             <button wire:click="resetImport"
-                    class="w-full bg-white border border-[#E8E0F0] text-[#333333] px-5 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99] mt-auto">
-                <i class="fas fa-rotate-left mr-2"></i>Try Again
+                    wire:loading.attr="disabled" wire:target="resetImport"
+                    class="w-full bg-white border border-[#E8E0F0] text-[#333333] px-5 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99] mt-auto disabled:opacity-60 flex items-center justify-center gap-2">
+                <span wire:loading wire:target="resetImport" class="inline-flex items-center gap-2">
+                    <i class="fas fa-spinner animate-spin"></i> Restarting...
+                </span>
+                <span wire:loading.remove wire:target="resetImport" class="inline-flex items-center gap-2">
+                    <i class="fas fa-rotate-left"></i> Try Again
+                </span>
             </button>
 
             {{-- STEP 3: DONE --}}
@@ -1837,13 +2026,25 @@ public function closeImportModal(): void
 
             <div class="flex gap-3 mt-auto">
                 <button wire:click="resetImport"
-                        class="flex-1 bg-white border border-[#E8E0F0] text-[#333333] px-4 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99]">
-                    <i class="fas fa-rotate-left mr-2"></i>Import Another
+                        wire:loading.attr="disabled" wire:target="resetImport,closeImportModal"
+                        class="flex-1 bg-white border border-[#E8E0F0] text-[#333333] px-4 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2">
+                    <span wire:loading wire:target="resetImport" class="inline-flex items-center gap-2">
+                        <i class="fas fa-spinner animate-spin"></i> Restarting...
+                    </span>
+                    <span wire:loading.remove wire:target="resetImport" class="inline-flex items-center gap-2">
+                        <i class="fas fa-rotate-left"></i> Import Another
+                    </span>
                 </button>
                 <button wire:click="closeImportModal"
-                        class="flex-1 text-white px-4 py-3 rounded-xl text-base font-bold transition hover:opacity-90 active:scale-[.99]"
+                        wire:loading.attr="disabled" wire:target="resetImport,closeImportModal"
+                        class="flex-1 text-white px-4 py-3 rounded-xl text-base font-bold transition hover:opacity-90 active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2"
                         style="background:#7A3F91;">
-                    <i class="fas fa-check mr-2"></i>Done
+                    <span wire:loading wire:target="closeImportModal" class="inline-flex items-center gap-2">
+                        <i class="fas fa-spinner animate-spin"></i> Closing...
+                    </span>
+                    <span wire:loading.remove wire:target="closeImportModal" class="inline-flex items-center gap-2">
+                        <i class="fas fa-check"></i> Done
+                    </span>
                 </button>
             </div>
 

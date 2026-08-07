@@ -596,22 +596,23 @@ new class extends Component {
                         <canvas id="dashEmpPieChart" style="max-width:100%; max-height:100%;"></canvas>
                     </div>
 
-                    {{-- Legend (display-only — not clickable, no tooltip) --}}
+                    {{-- Legend — click a row to jump straight to Alumni Records filtered by that status --}}
                     <div class="grid grid-cols-2 gap-1.5" id="dashEmpPieLegend">
                         @php
                             $legendRows = [
-                                ['label'=>'Employed',      'count'=>$ec['employed'],   'color'=>'#7A3F91'],
-                                ['label'=>'Self-Employed', 'count'=>$ec['self'],       'color'=>'#2563eb'],
-                                ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'color'=>'#d97706'],
-                                ['label'=>'No Record',     'count'=>$ec['noRecord'],   'color'=>'#b0b7c3'],
+                                ['label'=>'Employed',      'count'=>$ec['employed'],   'color'=>'#7A3F91', 'status'=>'employed'],
+                                ['label'=>'Self-Employed', 'count'=>$ec['self'],       'color'=>'#2563eb', 'status'=>'self_employed'],
+                                ['label'=>'Unemployed',    'count'=>$ec['unemployed'], 'color'=>'#d97706', 'status'=>'unemployed'],
+                                ['label'=>'No Record',     'count'=>$ec['noRecord'],   'color'=>'#b0b7c3', 'status'=>'no_record'],
                             ];
                         @endphp
                         @foreach($legendRows as $leg)
-                        <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg">
+                        <a href="{{ route('registrar.alumni') }}?employment_status={{ $leg['status'] }}"
+                           class="flex items-center gap-2 px-2 py-1.5 rounded-lg no-underline hover:bg-[#F5F5F5] transition-colors duration-100">
                             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $leg['color'] }};"></span>
                             <span class="text-[11px] font-semibold text-[#111111] truncate">{{ $leg['label'] }}</span>
                             <span class="text-[11px] font-bold ml-auto shrink-0" style="color:{{ $leg['color'] }};">{{ number_format($leg['count']) }}</span>
-                        </div>
+                        </a>
                         @endforeach
                     </div>
                 </div>
@@ -717,9 +718,11 @@ new class extends Component {
             </div>
             <div class="relative">
                 <button wire:click="closeModal"
+                        wire:loading.attr="disabled" wire:target="closeModal"
                         class="relative flex items-center justify-center w-9 h-9 rounded-[10px]
                                bg-white/[.12] border border-white/20 text-white cursor-pointer
-                               hover:bg-white/[.22] transition-colors duration-150 overflow-visible group">
+                               hover:bg-white/[.22] transition-colors duration-150 overflow-visible group
+                               disabled:opacity-60">
                     <span class="ar-tip absolute top-[calc(100%+8px)] right-0
                                  bg-[rgba(27,6,46,.88)] text-white text-[10px] font-bold tracking-[.08em] uppercase
                                  px-[10px] py-1 rounded-[7px] whitespace-nowrap pointer-events-none
@@ -728,7 +731,12 @@ new class extends Component {
                                  before:border-[5px] before:border-transparent before:border-b-[rgba(27,6,46,.88)]">
                         Close
                     </span>
-                    <i class="fas fa-xmark text-sm"></i>
+                    <span wire:loading wire:target="closeModal">
+                        <i class="fas fa-spinner animate-spin text-sm"></i>
+                    </span>
+                    <span wire:loading.remove wire:target="closeModal">
+                        <i class="fas fa-xmark text-sm"></i>
+                    </span>
                 </button>
             </div>
         </div>
@@ -1710,10 +1718,10 @@ new class extends Component {
                     if (!elements || !elements.length) return;
                     var idx    = elements[0].index;
                     if (rawData[idx] === 0) return;
-                    var filter = PIE_FILTERS[idx];
-                    window.dispatchEvent(new CustomEvent('dash-open-emp', {
-                        detail: { filter: filter }
-                    }));
+                    var filter    = PIE_FILTERS[idx];
+                    var baseRoute = getAlumniRoute();
+                    if (!baseRoute) return;
+                    window.location.href = baseRoute + '?employment_status=' + encodeURIComponent(filter);
                 },
             },
         });

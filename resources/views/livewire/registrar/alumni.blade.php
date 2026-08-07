@@ -20,6 +20,7 @@ new class extends Component {
     public string $alumniBatch       = '';
     public string $alumniCourse      = '';
     public string $alumniProfileFilter = 'all';
+    public string $alumniEmploymentStatus = '';
 
     public ?int   $viewingProfileId  = null;
     public        $viewingProfile    = null;
@@ -45,6 +46,11 @@ new class extends Component {
         $batch = request()->query('batch', '');
         if ($batch !== '') {
             $this->alumniBatch = (string) intval($batch);
+        }
+
+        $empStatus = request()->query('employment_status', '');
+        if (in_array($empStatus, ['employed', 'self_employed', 'unemployed', 'no_record'])) {
+            $this->alumniEmploymentStatus = $empStatus;
         }
 
         $highlight = request()->query('highlight', '');
@@ -149,7 +155,8 @@ new class extends Component {
         $hasActiveFilter = $this->alumniSearch !== ''
             || $this->alumniBatch !== ''
             || $this->alumniCourse !== ''
-            || $this->alumniProfileFilter !== 'all';
+            || $this->alumniProfileFilter !== 'all'
+            || $this->alumniEmploymentStatus !== '';
 
         $q = Alumni::query();
 
@@ -166,6 +173,7 @@ new class extends Component {
             if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
             if ($this->alumniProfileFilter === 'complete')   $q->where('profile_completed', 1);
             elseif ($this->alumniProfileFilter === 'incomplete') $q->where('profile_completed', 0);
+            if ($this->alumniEmploymentStatus !== '') $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatus);
 
             $target = Alumni::find($alumniId);
             if (!$target) return null;
@@ -215,10 +223,50 @@ new class extends Component {
         }
     }
 
+    /** Constrains a query to alumni whose LATEST (most recent, non-deleted)
+     *  employment_trackings row matches the given status. 'no_record' means
+     *  the alumni has no employment_trackings row at all. Shared by
+     *  alumniRecords() and pageFor() so filtering stays identical between
+     *  what's displayed and where notif-highlight jumps land. */
+    protected function applyEmploymentStatusFilter($q, string $status): void
+    {
+        if ($status === 'no_record') {
+            $q->whereNotExists(fn($s) => $s
+                ->from('employment_trackings')
+                ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+                ->whereNull('employment_trackings.deleted_at'));
+            return;
+        }
+
+        $q->whereRaw(
+            '? = (select employment_status from employment_trackings
+                  where employment_trackings.alumni_id = alumni.id
+                    and employment_trackings.deleted_at is null
+                  order by employment_trackings.created_at desc, employment_trackings.id desc
+                  limit 1)',
+            [$status]
+        );
+    }
+
+    /** Label / color classes / icon for an employment status badge,
+     *  matching the palette used on the Alumni Director dashboard's
+     *  employment breakdown (purple=employed, blue=self-employed,
+     *  amber=unemployed, gray=no record). */
+    public function employmentStatusBadge(?string $status): array
+    {
+        return match ($status) {
+            'employed'      => ['Employed',      'text-[#7A3F91] bg-[#F9F7FC] border-[#E8E0F0]', 'fa-user-tie'],
+            'self_employed' => ['Self-Employed', 'text-blue-700 bg-blue-50 border-blue-200',      'fa-store'],
+            'unemployed'    => ['Unemployed',    'text-amber-700 bg-amber-50 border-amber-200',   'fa-magnifying-glass'],
+            default         => ['No Record',     'text-gray-600 bg-gray-50 border-gray-200',      'fa-circle-minus'],
+        };
+    }
+
     public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); $this->highlightIds = []; }
     public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); $this->highlightIds = []; }
     public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); $this->highlightIds = []; }
     public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); $this->highlightIds = []; }
+    public function updatingAlumniEmploymentStatus() { $this->resetPage('alumniPage'); $this->highlightIds = []; }
 
     /** Wrappers around WithPagination's page methods that also clear the
      *  notif-triggered highlight, since manual paging means the user has
@@ -252,6 +300,19 @@ new class extends Component {
             'password_changed_at', 'created_at',
         ]);
 
+        // Latest (non-deleted) employment_trackings status per alumni,
+        // pulled in as a scalar subquery column so the table can show a
+        // badge without turning this into a one-row-per-employment-record
+        // join. Same "latest wins" ordering as viewProfile()'s lookup.
+        $q->addSelect(['employment_status' => DB::table('employment_trackings')
+            ->select('employment_status')
+            ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+            ->whereNull('employment_trackings.deleted_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(1),
+        ]);
+
         // NOTE: text search is intentionally limited to Name, Student ID,
         // and Email. Batch and Program Code already have their own
         // dedicated dropdown filters above the table, so they are excluded
@@ -274,10 +335,14 @@ new class extends Component {
         elseif ($this->alumniProfileFilter === 'incomplete')
             $q->where('profile_completed', 0);
 
+        if ($this->alumniEmploymentStatus !== '')
+            $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatus);
+
         $hasActiveFilter = $this->alumniSearch !== ''
             || $this->alumniBatch !== ''
             || $this->alumniCourse !== ''
-            || $this->alumniProfileFilter !== 'all';
+            || $this->alumniProfileFilter !== 'all'
+            || $this->alumniEmploymentStatus !== '';
 
         // FIX (Paolo-on-screen-but-Jose-in-export bug): without a final
         // deterministic tie-breaker, rows sharing the same course_code /
@@ -374,6 +439,7 @@ new class extends Component {
 
         if ($this->alumniBatch !== '') $parts[] = 'Batch ' . $this->alumniBatch;
         if ($this->alumniCourse !== '') $parts[] = 'Program Code ' . $this->alumniCourse;
+        if ($this->alumniEmploymentStatus !== '') $parts[] = $this->employmentStatusBadge($this->alumniEmploymentStatus)[0];
         if ($this->alumniSearch !== '') $parts[] = 'Search: "' . $this->alumniSearch . '"';
 
         return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
@@ -381,11 +447,12 @@ new class extends Component {
 
     public function resetAlumniFilters(): void
     {
-        $this->alumniSearch        = '';
-        $this->alumniBatch         = '';
-        $this->alumniCourse        = '';
-        $this->alumniProfileFilter = 'all';
-        $this->highlightIds        = [];
+        $this->alumniSearch            = '';
+        $this->alumniBatch             = '';
+        $this->alumniCourse            = '';
+        $this->alumniProfileFilter     = 'all';
+        $this->alumniEmploymentStatus  = '';
+        $this->highlightIds            = [];
         $this->resetPage('alumniPage');
     }
 
@@ -1043,7 +1110,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             <button type="button" @click.stop="$store.report.toggle()" class="ar-report-btn"
                     :disabled="$store.report.exporting"
                     :class="{ 'ar-report-btn-active': $store.report.open }">
-                <i class="fas fa-chart-column"></i>
+                <i class="fas fa-spinner animate-spin" x-show="$store.report.exporting" style="display:none;"></i>
+                <i class="fas fa-chart-column" x-show="!$store.report.exporting"></i>
                 <span class="ar-report-tip">Generate Reports</span>
             </button>
 
@@ -1061,19 +1129,28 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
                 <button type="button" @click="$store.report.doExport('pdf', $wire)"
                         :disabled="$store.report.exporting" class="ar-report-menu-item item-pdf">
-                    <span class="ar-item-icon"><i class="fas fa-file-pdf"></i></span>
+                    <span class="ar-item-icon">
+                        <i class="fas fa-spinner animate-spin" x-show="$store.report.exportingType==='pdf'" style="display:none;"></i>
+                        <i class="fas fa-file-pdf" x-show="$store.report.exportingType!=='pdf'"></i>
+                    </span>
                     <span class="ar-item-label">Export as PDF</span>
                 </button>
 
                 <button type="button" @click="$store.report.doExport('excel', $wire)"
                         :disabled="$store.report.exporting" class="ar-report-menu-item item-excel">
-                    <span class="ar-item-icon"><i class="fas fa-file-excel"></i></span>
+                    <span class="ar-item-icon">
+                        <i class="fas fa-spinner animate-spin" x-show="$store.report.exportingType==='excel'" style="display:none;"></i>
+                        <i class="fas fa-file-excel" x-show="$store.report.exportingType!=='excel'"></i>
+                    </span>
                     <span class="ar-item-label">Export as Excel</span>
                 </button>
 
                 <button type="button" @click="$store.report.doExport('print', $wire)"
                         :disabled="$store.report.exporting" class="ar-report-menu-item item-print">
-                    <span class="ar-item-icon"><i class="fas fa-print"></i></span>
+                    <span class="ar-item-icon">
+                        <i class="fas fa-spinner animate-spin" x-show="$store.report.exportingType==='print'" style="display:none;"></i>
+                        <i class="fas fa-print" x-show="$store.report.exportingType!=='print'"></i>
+                    </span>
                     <span class="ar-item-label">Print Current View</span>
                 </button>
             </div>
@@ -1085,7 +1162,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
         {{-- ── Filter bar ── --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
 
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
@@ -1128,6 +1205,33 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 </div>
             </div>
 
+            {{-- Employment Status filter — sits right beside Batch --}}
+            @php $arEmpOptions = [
+                ['', 'All Employment Status', 'fa-briefcase'],
+                ['employed', 'Employed', 'fa-user-tie'],
+                ['self_employed', 'Self-Employed', 'fa-store'],
+                ['unemployed', 'Unemployed', 'fa-magnifying-glass'],
+                ['no_record', 'No Record', 'fa-circle-minus'],
+            ]; @endphp
+            <div class="ar-dropdown"
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniEmploymentStatus',val); this.close(); } }"
+                 @click.outside="close()" wire:key="employment-status-dropdown">
+                <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniEmploymentStatus!=='','open':open }" class="ar-dropdown-trigger">
+                    <span>@if($alumniEmploymentStatus !== ''){{ $this->employmentStatusBadge($alumniEmploymentStatus)[0] }}@else All Employment Status @endif</span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;">
+                    @foreach($arEmpOptions as [$val, $label, $icon])
+                    <button type="button" @click="select('{{ $val }}')" :class="{'active':$wire.alumniEmploymentStatus==='{{ $val }}'}" class="ar-dropdown-item">
+                        <i class="fas {{ $icon }} text-[11px] mr-1.5 opacity-70"></i>{{ $label }}
+                    </button>
+                    @endforeach
+                </div>
+            </div>
+
             <div class="ar-dropdown"
                  x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniCourse',val); this.close(); } }"
                  @click.outside="close()" wire:key="course-dropdown">
@@ -1148,7 +1252,10 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
             <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none">
-                <i class="fas fa-rotate-left text-sm"></i>
+                <span wire:loading wire:target="resetAlumniFilters">
+                    <i class="fas fa-spinner animate-spin text-sm"></i>
+                </span>
+                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetAlumniFilters"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
@@ -1165,9 +1272,16 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
             @endif
+            @if($alumniEmploymentStatus !== '')
+            @php [$arEmpChipLabel, $arEmpChipClasses, $arEmpChipIcon] = $this->employmentStatusBadge($alumniEmploymentStatus); @endphp
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $arEmpChipClasses }}">
+                <i class="fas {{ $arEmpChipIcon }} text-[10px]"></i>{{ $arEmpChipLabel }}
+                &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
+            </span>
+            @endif
         </div>
 
-        <div class="ar-filter-progress-track" wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+        <div class="ar-filter-progress-track" wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
             <div class="ar-filter-progress-bar"></div>
         </div>
         <style>
@@ -1179,12 +1293,12 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter">
+                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
                     <colgroup>
-                        <col style="width:28%;"><col style="width:18%;"><col style="width:14%;"><col style="width:12%;"><col style="width:28%;">
+                        <col style="width:24%;"><col style="width:15%;"><col style="width:12%;"><col style="width:9%;"><col style="width:16%;"><col style="width:24%;">
                     </colgroup>
                     <thead>
                         <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
@@ -1192,6 +1306,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Student ID</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Program Code</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Batch</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Employment Status</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
                         </tr>
                     </thead>
@@ -1232,6 +1347,12 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             <td class="px-4 py-3 text-center overflow-hidden">
                                 <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
+                            <td class="px-4 py-3 text-center overflow-hidden">
+                                @php [$arEmpLabel, $arEmpClasses, $arEmpIcon] = $this->employmentStatusBadge($item->employment_status ?? null); @endphp
+                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap {{ $arEmpClasses }}">
+                                    <i class="fas {{ $arEmpIcon }} text-[10px]"></i>{{ $arEmpLabel }}
+                                </span>
+                            </td>
                             <td class="px-4 py-3 overflow-hidden">
                                 <span class="text-[#333333] text-sm font-normal truncate block">
                                     {!! $this->highlight($item->email ?? '', $this->alumniSearch) !!}
@@ -1240,7 +1361,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="5" class="py-24 text-center">
+                            <td colspan="6" class="py-24 text-center">
                                 <div class="flex flex-col items-center gap-3">
                                     <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background:#f0e6f8;">
                                         <i class="fas fa-users text-2xl" style="color:#c89de0;"></i>
@@ -1286,6 +1407,12 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                 </span>
                                 <span class="text-[#CCCCCC] text-xs">&bull;</span>
                                 <span class="font-mono text-[#333333] text-xs font-semibold">Batch {{ $item->batch }}</span>
+                            </div>
+                            @php [$arEmpLabelM, $arEmpClassesM, $arEmpIconM] = $this->employmentStatusBadge($item->employment_status ?? null); @endphp
+                            <div class="mt-1.5">
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $arEmpClassesM }}">
+                                    <i class="fas {{ $arEmpIconM }} text-[9px]"></i>{{ $arEmpLabelM }}
+                                </span>
                             </div>
                         </div>
                         <i class="fas fa-chevron-right text-[#CCCCCC] text-xs shrink-0"></i>
@@ -1970,6 +2097,7 @@ compressImage(file, maxW, maxH, quality) {
         window.Alpine.store('report', {
             open: false,
             exporting: false,
+            exportingType: '',
             _lastToggle: 0,
             _lastExport: 0,
 
@@ -1995,6 +2123,7 @@ compressImage(file, maxW, maxH, quality) {
                 if (this.exporting || now - this._lastExport < 400) return;
                 this._lastExport = now;
                 this.exporting = true;
+                this.exportingType = type;
                 this.open = false;
 
                 const label = type === 'excel' ? 'Excel file' : type === 'print' ? 'print view' : 'PDF';
@@ -2008,6 +2137,7 @@ compressImage(file, maxW, maxH, quality) {
                     batch: (wire && wire.alumniBatch) || '',
                     course: (wire && wire.alumniCourse) || '',
                     profile_filter: (wire && wire.alumniProfileFilter) || 'all',
+                    employment_status: (wire && wire.alumniEmploymentStatus) || '',
                 });
                 const url = '/registrar/alumni-records/export?' + params.toString();
 
@@ -2080,6 +2210,7 @@ compressImage(file, maxW, maxH, quality) {
                     }));
                 } finally {
                     this.exporting = false;
+                    this.exportingType = '';
                 }
             }
         });
@@ -2151,6 +2282,7 @@ compressImage(file, maxW, maxH, quality) {
         if (url.searchParams.has('alumniPage'))     { url.searchParams.delete('alumniPage');     changed = true; }
         if (url.searchParams.has('profile_filter')) { url.searchParams.delete('profile_filter'); changed = true; }
         if (url.searchParams.has('batch'))          { url.searchParams.delete('batch');          changed = true; }
+        if (url.searchParams.has('employment_status')) { url.searchParams.delete('employment_status'); changed = true; }
         if (url.searchParams.has('highlight'))      { url.searchParams.delete('highlight');      changed = true; }
         if (changed) history.replaceState(null, '', url.pathname + (url.search || ''));
     }
