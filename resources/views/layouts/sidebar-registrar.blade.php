@@ -332,9 +332,9 @@
             display: flex;
             align-items: flex-start;
             gap: 12px;
-            padding: 14px 18px;
+            padding: 14px 18px 17px;
             cursor: pointer;
-            border-bottom: 2px solid #C9B8DC;
+            border-bottom: 4px solid #7A3F91;
             transition: background .12s ease;
         }
         .notif-item:last-child { border-bottom: none; }
@@ -618,6 +618,17 @@
                             groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
                         }
 
+                        // Pull the individual alumni's display name out of this
+                        // row so a grouped notif (count > 1) can list WHO was
+                        // registered, not just a generic number. Prefer the
+                        // explicit alumni_name field sent at creation time;
+                        // fall back to parsing it out of the message text for
+                        // rows saved before that field existed.
+                        var nName = n.alumni_name || (function () {
+                            var m = (n.message || '').match(/^(.*?)\s*\(ID:/);
+                            return m ? m[1].trim() : '';
+                        })();
+
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
                             g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
@@ -626,6 +637,9 @@
                             if (nAlumniIds.length) {
                                 g.alumni_ids = (g.alumni_ids || []).concat(nAlumniIds);
                             }
+                            if (nName && g._names.indexOf(nName) === -1) {
+                                g._names.push(nName);
+                            }
                             if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
                                 g.created_at = nTimestamp;
                             }
@@ -633,8 +647,23 @@
                                 var rName = g._roomName || 'group chat';
                                 g.message = g.count + ' new message(s) in ' + rName + '.';
                             } else if (isAlumniEvent) {
-                                g.message = g.count + ' new alumni registered today.';
-                                g.title   = 'New Alumni Registered';
+                                // Show every distinct name we actually have,
+                                // e.g. "Fernandos Sal Junios Sr. and Loki M.
+                                // Asgard XIX have been registered..." — falls
+                                // back to the generic count wording only if
+                                // no names came through at all.
+                                g.title = 'New Alumni Registered';
+                                if (g._names.length >= g.count || g._names.length === g.count) {
+                                    g.message = (g._names.length === 1
+                                        ? g._names[0]
+                                        : g._names.slice(0, -1).join(', ') + ' and ' + g._names.slice(-1)
+                                    ) + ' have been registered and are now verified.';
+                                } else if (g._names.length > 0) {
+                                    var extra = g.count - g._names.length;
+                                    g.message = g._names.join(', ') + ' and ' + extra + ' other(s) have been registered today.';
+                                } else {
+                                    g.message = g.count + ' new alumni registered today.';
+                                }
                             } else if (isImportEvent) {
                                 g.message = g.count + ' alumni record(s) imported today.';
                                 g.title   = 'Bulk Import Complete';
@@ -644,6 +673,7 @@
                                 count:      Number(n.count) || 1,
                                 _ids:       [n.id],
                                 _roomName:  n._roomName || '',
+                                _names:     nName ? [nName] : [],
                                 alumni_ids: nAlumniIds.slice(),
                                 created_at: nTimestamp || n.created_at,
                                 title: isChatMsg      ? (n.title || 'New Chat Message')
@@ -1249,6 +1279,7 @@
                     </div>
                 <div
                     class="notif-item"
+                    title="View details"
                     :class="[
                         notif.read ? 'is-read' : 'is-unread',
                         !notif.read
@@ -1260,19 +1291,6 @@
                     ]"
                     @click.stop="
                         $store.notifs.markRead(notif);
-                        $store.notifs.close();
-                        const base = (notif.link_route && window.__registrarRouteMap[notif.link_route])
-                            || '/registrar/alumni';
-                        let ids = Array.isArray(notif.alumni_ids) ? notif.alumni_ids.filter(Boolean) : [];
-                        if (!ids.length && notif.message) {
-                            // Fallback for notifications saved before the alumni_ids
-                            // column existed: pull any '(ID: 12345)' numbers straight
-                            // out of the message text instead.
-                            const found = Array.from(notif.message.matchAll(/\(ID:\s*(\d+)\)/g)).map(m => Number(m[1]));
-                            if (found.length) ids = found;
-                        }
-                        const url = ids.length ? (base + '?highlight=' + ids.join(',')) : base;
-                        window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                     ">
 
                     <div class="notif-icon-wrap"

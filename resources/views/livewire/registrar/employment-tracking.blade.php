@@ -24,10 +24,10 @@ new class extends Component {
     public string $sortBy          = 'a.last_name';
     public string $sortDir         = 'asc';
 
-    // ── Modal (read-only detail view — has its own in-modal SEARCH only;
-    //    modalFilter/modalBatch/modalCourse are still set exclusively from
-    //    openModal(), there is no way to change the underlying scope from
-    //    inside the modal — modalSearch just narrows within it) ──────────
+    // ── Modal (detail view — has its own in-modal SEARCH plus Batch/Program
+    //    filter dropdowns to narrow the currently open record set; these
+    //    only touch modalBatch/modalCourse and never the dashboard-level
+    //    filterBatch/filterCourse) ──────────────────────────────────────
     public bool   $showModal    = false;
     public string $activeModal  = '';
     public string $modalFilter  = '';
@@ -52,6 +52,7 @@ new class extends Component {
     public string $chartRelevanceData = '{}';
     public string $chartBatchData     = '{}';
     public string $chartCourseData    = '{}';
+    public string $topProgramsFullData = '[]';
     public string $chartTrendData     = '{}';
 
     // ── Top Programs ranking (populated only when a single Program is
@@ -117,6 +118,24 @@ new class extends Component {
      * from the search box inside the detail modal.
      */
     public function updatedModalSearch(): void
+    {
+        $this->modalPage = 1;
+        unset($this->modalRecords);
+    }
+
+    /**
+     * In-modal Batch/Program dropdowns — narrow the currently open
+     * detail modal without touching the dashboard-level filterBatch/
+     * filterCourse or closing the modal. Fires whenever either value
+     * changes via the dropdowns rendered inside the modal itself.
+     */
+    public function updatedModalBatch(): void
+    {
+        $this->modalPage = 1;
+        unset($this->modalRecords);
+    }
+
+    public function updatedModalCourse(): void
     {
         $this->modalPage = 1;
         unset($this->modalRecords);
@@ -336,6 +355,38 @@ new class extends Component {
                 $this->courseRank = null;
             }
         }
+
+        // Top Programs — "View All" full ranking list (badge #1/#2/#3 etc.
+        // in the modal). Starts from EVERY program in courseMap (the full
+        // course catalog) — not just courseRowsAll above, which silently
+        // drops any program with zero working alumni via its INNER JOIN.
+        // Working/total counts are left-joined in and default to 0, so a
+        // brand-new program with no alumni yet still shows up, ranked
+        // last. Scoped only by Batch, independent of the current Program
+        // filter, so "View All" always shows where every program stands.
+        $topProgramsWorking = $courseRowsAll->pluck('cnt', 'course_code');
+        $topProgramsTotals  = DB::table('alumni as a')
+            ->whereNull('a.deleted_at')
+            ->when($batchFilter !== '', fn($q) => $q->where('a.batch', $batchFilter))
+            ->select('a.course_code', DB::raw('COUNT(*) as total'))
+            ->groupBy('a.course_code')->pluck('total', 'course_code');
+
+        $topProgramsAll = collect(array_keys($this->courseMap))
+            ->map(fn($code) => [
+                'code'    => $code,
+                'working' => (int) ($topProgramsWorking[$code] ?? 0),
+                'total'   => (int) ($topProgramsTotals[$code]  ?? 0),
+            ])
+            ->sortByDesc('working')->values();
+
+        $this->topProgramsFullData = json_encode(
+            $topProgramsAll->map(fn($row, $idx) => [
+                'rank'    => $idx + 1,
+                'code'    => $row['code'],
+                'working' => $row['working'],
+                'total'   => $row['total'],
+            ])->values()
+        );
 
         // Employment rate trend per batch (line chart) — scoped by Program filter
         $trendRows = DB::table('alumni as a')
@@ -590,6 +641,19 @@ new class extends Component {
         $this->refreshDashboard();
     }
 
+    /**
+     * Narrows the currently open detail modal by Batch / Program without
+     * closing it or touching the dashboard-level filterBatch/filterCourse.
+     * Mirrors clearFilters() below but scoped to the modal only.
+     */
+    public function clearModalFilters(): void
+    {
+        $this->modalBatch  = null;
+        $this->modalCourse = '';
+        $this->modalPage   = 1;
+        unset($this->modalRecords);
+    }
+
     public function getPhotoUrl(?string $path): string
     {
         if (!$path || str_contains($path, 'default.png'))
@@ -703,7 +767,8 @@ new class extends Component {
     .stat-card { border: 1.5px solid #E8E0F0 !important; transition: border-color .18s ease, box-shadow .18s ease; }
     .stat-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,.07) !important; }
     .stat-card-submitted:hover { border-color: #c4b5fd !important; }
-    .stat-card-working:hover   { border-color: #6ee7b7 !important; }
+    .stat-card-employed:hover  { border-color: #6ee7b7 !important; }
+    .stat-card-self-emp:hover  { border-color: #93c5fd !important; }
     .stat-card-unemployed:hover{ border-color: #fcd34d !important; }
     .stat-card-nofill:hover    { border-color: #d1d5db !important; }
 
@@ -805,6 +870,19 @@ new class extends Component {
         z-index: 50;
     }
 
+    /* ── Modal search+filter bar (Batch Year / Program Code inside the
+       full-screen detail modal): same rule as .emp-filter-bar above —
+       this wrapper must never set overflow-x/overflow-y, or it clips the
+       absolutely positioned .ar-dropdown-menu popups and makes them
+       silently fail to show. Wraps on narrow screens instead of
+       horizontally scrolling, and gets its own stacking context so its
+       dropdown popups always paint above the table body underneath. ── */
+    .emp-modal-filter-bar {
+        transition: opacity .2s ease;
+        position: relative;
+        z-index: 50;
+    }
+
     .ar-filter-label { pointer-events: none; }
     .ar-dropdown { position: relative; }
     .ar-dropdown-menu {
@@ -818,8 +896,8 @@ new class extends Component {
     .ar-dropdown-menu::-webkit-scrollbar { width: 5px; }
     .ar-dropdown-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
     .ar-dropdown-item {
-        display: block; width: 100%; padding: 7px 10px; border-radius: 7px;
-        font-size: .8rem; font-weight: 600; text-align: left; color: #333;
+        display: block; width: 100%; padding: 8px 10px; border-radius: 7px;
+        font-size: .9rem; font-weight: 600; text-align: left; color: #333;
         transition: background .1s; cursor: pointer; white-space: nowrap;
         border: none; background: transparent;
     }
@@ -827,8 +905,8 @@ new class extends Component {
     .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
     .ar-dropdown-trigger {
         display: inline-flex; align-items: center; gap: 6px;
-        padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 8px;
-        font-size: .8rem; font-weight: 600; background: #fff; color: #333;
+        padding: 9px 12px; border: 1.5px solid #E8E0F0; border-radius: 8px;
+        font-size: .9rem; font-weight: 600; background: #fff; color: #333;
         cursor: pointer; transition: border-color .15s, background .15s, color .15s;
         white-space: nowrap; user-select: none;
     }
@@ -1045,7 +1123,8 @@ new class extends Component {
      data-relevance="{{ $chartRelevanceData }}"
      data-batch="{{ $chartBatchData }}"
      data-course="{{ $chartCourseData }}"
-     data-trend="{{ $chartTrendData }}">
+     data-trend="{{ $chartTrendData }}"
+     data-top-programs-full="{{ $topProgramsFullData }}">
 </div>
 
 {{-- ═══════════════════════════════════════════════════════════
@@ -1078,7 +1157,8 @@ new class extends Component {
                 <button type="button" @click.stop="$store.empReport.toggle()" class="ar-report-btn"
                         :disabled="$store.empReport.exporting"
                         :class="{ 'ar-report-btn-active': $store.empReport.open }">
-                    <i class="fas fa-chart-column"></i>
+                    <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exporting" style="display:none;"></i>
+                    <i class="fas fa-chart-column" x-show="!$store.empReport.exporting"></i>
                     <span class="ar-report-tip">Generate Reports</span>
                 </button>
 
@@ -1095,19 +1175,28 @@ new class extends Component {
 
                     <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
                             :disabled="$store.empReport.exporting" class="ar-report-menu-item item-pdf">
-                        <span class="ar-item-icon"><i class="fas fa-file-pdf"></i></span>
+                        <span class="ar-item-icon">
+                            <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exportingType==='pdf'" style="display:none;"></i>
+                            <i class="fas fa-file-pdf" x-show="$store.empReport.exportingType!=='pdf'"></i>
+                        </span>
                         <span class="ar-item-label">Export as PDF</span>
                     </button>
 
                     <button type="button" @click="$store.empReport.doExport('excel', $wire)"
                             :disabled="$store.empReport.exporting" class="ar-report-menu-item item-excel">
-                        <span class="ar-item-icon"><i class="fas fa-file-excel"></i></span>
+                        <span class="ar-item-icon">
+                            <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exportingType==='excel'" style="display:none;"></i>
+                            <i class="fas fa-file-excel" x-show="$store.empReport.exportingType!=='excel'"></i>
+                        </span>
                         <span class="ar-item-label">Export as Excel</span>
                     </button>
 
                     <button type="button" @click="$store.empReport.doExport('print', $wire)"
                             :disabled="$store.empReport.exporting || $store.empReport.printLock" class="ar-report-menu-item item-print">
-                        <span class="ar-item-icon"><i class="fas fa-print"></i></span>
+                        <span class="ar-item-icon">
+                            <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exportingType==='print'" style="display:none;"></i>
+                            <i class="fas fa-print" x-show="$store.empReport.exportingType!=='print'"></i>
+                        </span>
                         <span class="ar-item-label">Print Current View</span>
                     </button>
                 </div>
@@ -1128,7 +1217,7 @@ new class extends Component {
              wire:loading.class="opacity-60" wire:target="filterCourse,filterBatch"
              @click.stop>
 
-            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+            <span class="ar-filter-label text-sm font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
 
@@ -1172,15 +1261,16 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Reset --}}
-            @if($filterCourse !== '' || $filterBatch !== '')
-                <button wire:click="clearFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearFilters"
-                        type="button"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
-                    <i class="fas fa-rotate-left text-sm"></i>
-                    <span class="hidden sm:inline">Reset</span>
-                </button>
-            @endif
+            {{-- Reset — always visible now, not conditional on an active filter --}}
+            <button wire:click="clearFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearFilters"
+                    type="button"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
+                <span wire:loading wire:target="clearFilters">
+                    <i class="fas fa-spinner animate-spin text-sm"></i>
+                </span>
+                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearFilters"></i>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
         </div>
 
         {{-- Filtering progress bar --}}
@@ -1195,34 +1285,71 @@ new class extends Component {
 <div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
      wire:loading.class="opacity-60" wire:target="filterCourse,filterBatch" style="transition:opacity .2s ease;">
 
-    {{-- ── 4 STAT CARDS ── --}}
+    {{-- ── 5 STAT CARDS — Submitted, Employed, Self-Employed, Unemployed,
+         No Record. Employed and Self-Employed are shown as their own
+         cards (rather than combined into one "Working" card) so they
+         match how the rest of this dashboard already breaks them out
+         (Program Breakdown table, status badges, donut legend). ── --}}
     @php
-        $totalWorking = $totalEmployed + $totalSelf;
-        $empRate      = $totalAlumni   > 0 ? round($totalWorking   / $totalAlumni   * 100, 1) : 0;
+        $empRate      = $totalAlumni   > 0 ? round($totalEmployed  / $totalAlumni   * 100, 1) : 0;
+        $selfRate     = $totalAlumni   > 0 ? round($totalSelf      / $totalAlumni   * 100, 1) : 0;
         $responseRate = $totalAlumni   > 0 ? round($totalSubmitted / $totalAlumni   * 100, 1) : 0;
         $unempRate    = $totalSubmitted > 0 ? round($totalUnemployed / $totalSubmitted * 100, 1) : 0;
         $nfRate       = $totalAlumni   > 0 ? round($totalNotFilled / $totalAlumni   * 100, 1) : 0;
 
         $statCards = [
-            [''           , $totalSubmitted , 'fa-file-circle-check', 'bg-violet-100' , 'text-violet-700' , 'stat-card-submitted' , 'Submitted'  , $responseRate.'% response rate'],
-            ['employed_all', $totalWorking  , 'fa-briefcase'        , 'bg-emerald-100', 'text-emerald-700', 'stat-card-working'   , 'Working'    , $empRate.'% of total alumni'],
-            ['unemployed'  , $totalUnemployed,'fa-circle-pause'     , 'bg-amber-100'  , 'text-amber-700'  , 'stat-card-unemployed', 'Unemployed' , $unempRate.'% of submitted'],
-            ['no_record'   , $totalNotFilled, 'fa-circle-question'  , 'bg-gray-100'   , 'text-[#333333]'  , 'stat-card-nofill'   , 'No Record'  , $nfRate.'% of total alumni'],
+            [''             , $totalSubmitted , 'fa-file-circle-check', 'bg-violet-100' , 'text-violet-700' , 'stat-card-submitted' , 'Submitted'     , $responseRate.'% response rate'],
+            ['employed'     , $totalEmployed  , 'fa-user-tie'         , 'bg-emerald-100', 'text-emerald-700', 'stat-card-employed'  , 'Employed'      , $empRate.'% of total alumni'],
+            ['self_employed', $totalSelf      , 'fa-store'            , 'bg-blue-100'   , 'text-blue-700'   , 'stat-card-self-emp'  , 'Self-Employed' , $selfRate.'% of total alumni'],
+            ['unemployed'   , $totalUnemployed,'fa-circle-pause'      , 'bg-amber-100'  , 'text-amber-700'  , 'stat-card-unemployed', 'Unemployed'    , $unempRate.'% of submitted'],
+            ['no_record'    , $totalNotFilled, 'fa-circle-question'   , 'bg-gray-100'   , 'text-[#333333]'  , 'stat-card-nofill'    , 'No Record'     , $nfRate.'% of total alumni'],
         ];
     @endphp
-    <div class="stat-cards-grid flex gap-3 flex-wrap lg:flex-nowrap">
+    <div class="stat-cards-grid flex gap-3 flex-wrap xl:flex-nowrap">
         @foreach($statCards as [$filter, $count, $icon, $iconBg, $iconColor, $hoverClass, $label, $rate])
-        <div wire:click="openModal('{{ $filter }}')"
-             data-tip="View {{ $label }}"
+        @php
+            // "Submitted" doesn't map to a single employment_status on the
+            // Alumni Records page (it means "has any record at all"), so
+            // it stays as the local detail modal. The other four link
+            // straight out to Alumni Records, pre-filtered by status —
+            // and by the current Batch Year filter here, if one is set —
+            // matching how the main Dashboard's legend rows do this.
+            $alumniUrl = $filter !== ''
+                ? route('registrar.alumni', array_filter(['employment_status' => $filter, 'batch' => $filterBatch]))
+                : null;
+        @endphp
+        @if($alumniUrl)
+        <a href="{{ $alumniUrl }}"
+             data-tip="View {{ $label }} in Alumni Records"
              class="group relative bg-white rounded-2xl p-3 sm:p-4 flex items-center gap-3
-                    shadow-sm cursor-pointer flex-1 min-w-0 stat-card {{ $hoverClass }}">
+                    shadow-sm cursor-pointer flex-1 min-w-[190px] stat-card {{ $hoverClass }}">
             <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 {{ $iconBg }}">
                 <i class="fa-solid {{ $icon }} {{ $iconColor }}" style="font-size:.9rem;"></i>
             </div>
             <div class="min-w-0 flex-1">
                 <p class="text-xl sm:text-2xl font-black leading-none text-[#111111] stat-number-anim">{{ number_format($count) }}</p>
-                <p class="text-[.7rem] sm:text-xs font-bold text-[#111111] mt-1">{{ $label }}</p>
-                <p class="text-[.62rem] sm:text-[.68rem] font-semibold mt-0.5 {{ $iconColor }}">{{ $rate }}</p>
+                <p class="text-sm sm:text-base font-bold text-[#111111] mt-1">{{ $label }}</p>
+                <p class="text-xs sm:text-sm font-semibold mt-0.5 {{ $iconColor }}">{{ $rate }}</p>
+            </div>
+            <div class="shrink-0 hidden sm:block">
+                <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg {{ $iconBg }} opacity-60
+                             group-hover:opacity-100 transition-opacity">
+                    <i class="fas fa-arrow-right {{ $iconColor }}" style="font-size:.6rem;"></i>
+                </span>
+            </div>
+        </a>
+        @else
+        <div wire:click="openModal('{{ $filter }}')"
+             data-tip="View {{ $label }}"
+             class="group relative bg-white rounded-2xl p-3 sm:p-4 flex items-center gap-3
+                    shadow-sm cursor-pointer flex-1 min-w-[190px] stat-card {{ $hoverClass }}">
+            <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 {{ $iconBg }}">
+                <i class="fa-solid {{ $icon }} {{ $iconColor }}" style="font-size:.9rem;"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+                <p class="text-xl sm:text-2xl font-black leading-none text-[#111111] stat-number-anim">{{ number_format($count) }}</p>
+                <p class="text-sm sm:text-base font-bold text-[#111111] mt-1">{{ $label }}</p>
+                <p class="text-xs sm:text-sm font-semibold mt-0.5 {{ $iconColor }}">{{ $rate }}</p>
             </div>
             <div class="shrink-0 hidden sm:block">
                 <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg {{ $iconBg }} opacity-60
@@ -1231,6 +1358,7 @@ new class extends Component {
                 </span>
             </div>
         </div>
+        @endif
         @endforeach
     </div>
 
@@ -1245,8 +1373,8 @@ new class extends Component {
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-[#10b981] shrink-0"></span>
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Employment Status</span>
-                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">Overall breakdown of alumni job status</span>
+                    <span class="text-sm font-bold text-[#111111] uppercase tracking-wide leading-tight">Employment Status</span>
+                    <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5">Overall breakdown of alumni job status</span>
                 </div>
             </div>
             <div class="flex-1 min-h-0 flex items-center justify-center p-2" wire:ignore>
@@ -1265,23 +1393,23 @@ new class extends Component {
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-[#7a3f91] shrink-0"></span>
                 <div class="flex flex-col min-w-0 flex-1">
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Work Location</span>
-                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">Where working alumni are based</span>
+                    <span class="text-sm font-bold text-[#111111] uppercase tracking-wide leading-tight">Work Location</span>
+                    <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5">Where working alumni are based</span>
                 </div>
-                <span class="text-[.65rem] font-bold text-[#7a3f91] bg-[#f0e6f8] px-2 py-0.5 rounded-full shrink-0">{{ number_format($locTotal) }} working</span>
+                <span class="text-xs font-bold text-[#7a3f91] bg-[#f0e6f8] px-2 py-0.5 rounded-full shrink-0">{{ number_format($locTotal) }} working</span>
             </div>
             <div class="flex-1 flex flex-col justify-center px-4 sm:px-5 py-3 gap-3">
                 <div class="flex items-end justify-between">
                     <div>
                         <p class="text-2xl sm:text-3xl font-black leading-none" style="color:#7a3f91;">{{ number_format($totalLocal) }}</p>
-                        <p class="text-[11px] font-bold text-[#111111] mt-1">Local / PH</p>
-                        <p class="text-[11px] font-black mt-0.5" style="color:#7a3f91;">{{ $localPct }}%</p>
+                        <p class="text-sm font-bold text-[#111111] mt-1">Local / PH</p>
+                        <p class="text-sm font-black mt-0.5" style="color:#7a3f91;">{{ $localPct }}%</p>
                     </div>
-                    <div class="text-[10px] font-semibold text-[#333333] self-center pb-4">-</div>
+                    <div class="text-xs font-semibold text-[#333333] self-center pb-4">-</div>
                     <div class="text-right">
                         <p class="text-2xl sm:text-3xl font-black leading-none" style="color:#c084fc;">{{ number_format($totalAbroad) }}</p>
-                        <p class="text-[11px] font-bold text-[#111111] mt-1">Abroad / OFW</p>
-                        <p class="text-[11px] font-black mt-0.5" style="color:#c084fc;">{{ $abroadPct }}%</p>
+                        <p class="text-sm font-bold text-[#111111] mt-1">Abroad / OFW</p>
+                        <p class="text-sm font-black mt-0.5" style="color:#c084fc;">{{ $abroadPct }}%</p>
                     </div>
                 </div>
                 <div class="h-3 rounded-full overflow-hidden bg-gray-100 flex">
@@ -1295,14 +1423,14 @@ new class extends Component {
                 <div class="flex gap-2">
                     <button onclick="empOpenModal('local','',null)"
                             data-tip="View Local Workers"
-                            class="flex-1 py-[7px] rounded-xl text-[11px] font-bold border border-[#7a3f91]/20
+                            class="flex-1 py-[7px] rounded-xl text-sm font-bold border border-[#7a3f91]/20
                                    bg-[#F9F7FC] text-[#7a3f91] hover:bg-[#7a3f91] hover:text-white hover:border-[#7a3f91]
                                    transition-all duration-150 cursor-pointer">
                         View Local
                     </button>
                     <button onclick="empOpenModal('abroad','',null)"
                             data-tip="View OFW / Abroad"
-                            class="flex-1 py-[7px] rounded-xl text-[11px] font-bold border border-purple-200
+                            class="flex-1 py-[7px] rounded-xl text-sm font-bold border border-purple-200
                                    bg-purple-50 text-[#c084fc] hover:bg-[#c084fc] hover:text-white hover:border-[#c084fc]
                                    transition-all duration-150 cursor-pointer">
                         View Abroad
@@ -1317,8 +1445,8 @@ new class extends Component {
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Job Relevance</span>
-                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">Alumni whose jobs match their program</span>
+                    <span class="text-sm font-bold text-[#111111] uppercase tracking-wide leading-tight">Job Relevance</span>
+                    <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5">Alumni whose jobs match their program</span>
                 </div>
             </div>
             <div class="flex-1 min-h-0 flex items-center justify-center p-2" wire:ignore>
@@ -1337,15 +1465,25 @@ new class extends Component {
              filter change. Keying them makes Livewire treat them as two
              completely distinct elements and always swap them cleanly. ── --}}
         <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                    transition-all flex flex-col overflow-hidden">
-            <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
-                <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-                <div class="flex flex-col min-w-0">
-                    <span class="text-[.72rem] font-bold text-[#111111] uppercase tracking-widest leading-tight">Top Programs</span>
-                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5">
-                        {{ $filterCourse === '' ? 'Top 3 programs by employed alumni' : $filterCourse.' — ranking among all programs' }}
-                    </span>
+                    transition-all flex flex-col overflow-hidden group/topprog"
+             x-data="{ viewAll:false }">
+            <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center justify-between gap-2 shrink-0">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+                    <div class="flex flex-col min-w-0">
+                        <span class="text-sm font-bold text-[#111111] uppercase tracking-wide leading-tight">Top Programs</span>
+                        <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5">
+                            {{ $filterCourse === '' ? 'Top 3 programs by employed alumni' : $filterCourse.' — ranking among all programs' }}
+                        </span>
+                    </div>
                 </div>
+                <button type="button" @click="viewAll=true"
+                        class="text-xs font-bold shrink-0 px-2 py-1 rounded-lg border border-transparent
+                               opacity-0 group-hover/topprog:opacity-100 focus:opacity-100
+                               hover:bg-white hover:border-[#E8E0F0] transition-all duration-150"
+                        style="color:#7A3F91;">
+                    View All <i class="fas fa-arrow-right" style="font-size:.65rem;"></i>
+                </button>
             </div>
 
             @if($filterCourse === '')
@@ -1380,12 +1518,12 @@ new class extends Component {
                              style="background:{{ $rankTier['bg'] }}; color:{{ $rankTier['text'] }}; border:2px solid {{ $rankTier['ring'] }};">
                             #{{ $courseRank }}
                         </div>
-                        <p class="text-[11px] font-bold text-[#111111] mt-1">out of {{ $courseRankTotal }} program(s)</p>
-                        <span class="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+                        <p class="text-sm font-bold text-[#111111] mt-1">out of {{ $courseRankTotal }} program(s)</p>
+                        <span class="text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
                               style="background:{{ $rankTier['bg'] }}; color:{{ $rankTier['text'] }};">
                             {{ $rankTier['label'] }}
                         </span>
-                        <p class="text-[11px] font-semibold mt-0.5" style="color:#7a3f91;">{{ number_format($courseRankCount) }} working alumni</p>
+                        <p class="text-sm font-semibold mt-0.5" style="color:#7a3f91;">{{ number_format($courseRankCount) }} working alumni</p>
                     @else
                         <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:#f0e6f8;">
                             <i class="fas fa-chart-simple" style="color:#c89de0;font-size:.9rem;"></i>
@@ -1394,9 +1532,83 @@ new class extends Component {
                     @endif
                 </div>
             @endif
+
+            {{-- ── "View All" — full program ranking, badge #1/#2/#3, no
+                 filter needed (always shows every program regardless of
+                 the current Program filter, Batch-scoped only, same data
+                 as topProgramsFullData computed server-side). Pure Alpine
+                 overlay — no Livewire round-trip, so it opens instantly. ── --}}
+            <div x-show="viewAll"
+                 x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+                 x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                 class="fixed inset-0 z-[9998] flex items-center justify-center p-4" style="background:rgba(17,17,17,.45);display:none;"
+                 @click.self="viewAll=false" @keydown.escape.window="viewAll=false"
+                 x-data="topProgramsAllList()">
+                <div x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+                     class="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden">
+                    <div class="flex items-center justify-between px-5 py-3.5 shrink-0" style="background:#7A3F91;">
+                        <div class="min-w-0">
+                            <h3 class="text-white font-bold text-sm leading-tight">All Programs — Full Ranking</h3>
+                            <p class="text-white/60 text-xs mt-0.5">By employed + self-employed alumni</p>
+                        </div>
+                        <button type="button" @click="closing=true; $nextTick(() => setTimeout(() => { viewAll=false; closing=false; }, 250))"
+                                :disabled="closing"
+                                class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0
+                                   bg-white/[.12] border border-white/20 text-white hover:bg-white/[.22] transition-colors disabled:opacity-70">
+                            <i class="fas fa-spinner animate-spin text-sm" x-show="closing" style="display:none;"></i>
+                            <i class="fas fa-xmark text-sm" x-show="!closing"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto divide-y divide-gray-100" style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                        <template x-if="list.length === 0">
+                            <p class="text-sm text-[#333333] text-center py-10">No program data available for this scope.</p>
+                        </template>
+                        <template x-for="p in list" :key="p.code">
+                            <div class="flex items-center gap-3 px-5 py-3 hover:bg-[#F5F0FA] transition-colors">
+                                <div class="w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0"
+                                     :style="badgeStyle(p.rank)">
+                                    <span x-text="'#'+p.rank"></span>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-bold text-[#111111]" x-text="p.code"></p>
+                                    <p class="text-xs text-[#333333] mt-0.5">
+                                        <span class="font-semibold" :style="p.working>0 ? 'color:#059669;' : 'color:#9CA3AF;'" x-text="p.working + ' working'"></span>
+                                        <span class="text-[#999999]"> · </span>
+                                        <span x-text="p.total + ' total alumni'"></span>
+                                    </p>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="px-5 py-2.5 border-t border-[#E8E0F0] bg-[#F9F7FC] text-xs text-[#333333] text-center shrink-0">
+                        <span x-text="list.length"></span> program(s) ranked
+                    </div>
+                </div>
+            </div>
         </div>
 
     </div>
+
+    <script>
+        function topProgramsAllList() {
+            return {
+                list: [],
+                closing: false,
+                init() {
+                    var el = document.getElementById('__emp_chart_data');
+                    if (!el) return;
+                    try { this.list = JSON.parse(el.getAttribute('data-top-programs-full') || '[]'); }
+                    catch (e) { this.list = []; }
+                },
+                badgeStyle(rank) {
+                    if (rank === 1) return 'background:#ECFDF5;color:#059669;border:2px solid #6ee7b7;';
+                    if (rank === 2) return 'background:#EFF6FF;color:#2563EB;border:2px solid #93c5fd;';
+                    if (rank === 3) return 'background:#FFFBEB;color:#D97706;border:2px solid #fcd34d;';
+                    return 'background:#F3F4F6;color:#374151;border:2px solid #E5E7EB;';
+                },
+            };
+        }
+    </script>
 
     {{-- ── CHARTS ROW 2: Stacked Batch Bar ── --}}
     <div class="chart-batch-wrap bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
@@ -1405,8 +1617,8 @@ new class extends Component {
             <div class="flex items-center gap-[7px] min-w-0">
                 <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[.72rem] sm:text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em] leading-tight">Employment Breakdown by Batch Year</span>
-                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">Number of employed, self-employed &amp; unemployed per batch</span>
+                    <span class="text-sm sm:text-base font-bold text-[#111111] uppercase tracking-[.04em] leading-tight">Employment Breakdown by Batch Year</span>
+                    <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">Number of employed, self-employed &amp; unemployed per batch</span>
                 </div>
             </div>
             <div id="batchNavControls" class="hidden items-center gap-2 shrink-0 ml-2">
@@ -1417,7 +1629,7 @@ new class extends Component {
                                disabled:opacity-35 disabled:cursor-not-allowed">
                     <i class="fa-solid fa-chevron-left" style="font-size:.60rem;"></i>
                 </button>
-                <span id="batchPageInfo" class="text-[.74rem] font-semibold text-[#333333] whitespace-nowrap"></span>
+                <span id="batchPageInfo" class="text-sm font-semibold text-[#333333] whitespace-nowrap"></span>
                 <button id="batchNext"
                         class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91]
                                cursor-pointer flex items-center justify-center
@@ -1432,15 +1644,18 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- ── CHARTS ROW 3: Employment Rate Trend Line ── --}}
+    {{-- ── CHARTS ROW 3: Employment Rate Trend Line — now the sole home for
+         "Employment Rate" (the Program Breakdown table's rate column/bar
+         was removed to avoid duplicating this exact metric), so it's given
+         extra height + bolder header treatment to carry that weight visually. ── --}}
     <div class="chart-trend-wrap bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                transition-all flex flex-col overflow-hidden" style="height:260px;">
-        <div class="px-3 sm:px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
-            <div class="flex items-center gap-[7px] min-w-0">
-                <div class="w-2 h-2 rounded-full bg-[#7a3f91] shrink-0"></div>
+                transition-all flex flex-col overflow-hidden" style="height:340px;">
+        <div class="px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-2 min-w-0">
+                <div class="w-2.5 h-2.5 rounded-full bg-[#7a3f91] shrink-0"></div>
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[.72rem] sm:text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em] leading-tight">Employment Rate Trend per Batch Year</span>
-                    <span class="text-[.62rem] text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">% of alumni (employed + self-employed) out of total per batch</span>
+                    <span class="text-sm sm:text-base font-bold text-[#111111] uppercase tracking-[.04em] leading-tight">Employment Rate Trend per Batch Year</span>
+                    <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">% of alumni (employed + self-employed) out of total per batch</span>
                 </div>
             </div>
             <div id="trendNavControls" class="hidden items-center gap-2 shrink-0 ml-2">
@@ -1451,7 +1666,7 @@ new class extends Component {
                                disabled:opacity-35 disabled:cursor-not-allowed">
                     <i class="fa-solid fa-chevron-left" style="font-size:.60rem;"></i>
                 </button>
-                <span id="trendPageInfo" class="text-[.74rem] font-semibold text-[#333333] whitespace-nowrap"></span>
+                <span id="trendPageInfo" class="text-sm font-semibold text-[#333333] whitespace-nowrap"></span>
                 <button id="trendNext"
                         class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91]
                                cursor-pointer flex items-center justify-center
@@ -1474,74 +1689,59 @@ new class extends Component {
                     <i class="fas fa-table text-white" style="font-size:.65rem;"></i>
                 </div>
                 <div>
-                    <p class="text-xs sm:text-sm font-bold leading-tight text-[#111111]">Program Breakdown</p>
-                    <p class="text-[10px] text-[#333333] hidden sm:block">Employment rate per program — click any row to view records</p>
+                    <p class="text-sm sm:text-base font-bold leading-tight text-[#111111]">Program Breakdown</p>
+                    <p class="text-xs text-[#333333] hidden sm:block">Alumni counts per program — click any row to view records</p>
                 </div>
             </div>
-            <span class="text-[11px] font-semibold px-2 py-1 rounded-lg bg-[#F9F7FC] text-[#7a3f91] border border-[#E8E0F0] shrink-0">
+            <span class="text-xs font-semibold px-2 py-1 rounded-lg bg-[#F9F7FC] text-[#7a3f91] border border-[#E8E0F0] shrink-0">
                 {{ count($this->courseAnalytics) }} programs
             </span>
         </div>
         <div class="course-table-wrap max-h-[450px] overflow-y-auto overflow-x-auto" style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-            <table class="w-full border-collapse" style="min-width:580px;">
+            <table class="w-full border-collapse" style="min-width:520px;">
                 <thead class="sticky top-0 z-10">
                     <tr class="bg-[#f5f0fa] border-b-2 border-[#E8E0F0]">
-                        <th class="pl-3 sm:pl-4 pr-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#111111]">Program</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[#111111]">Total</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-emerald-700">Employed</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-blue-700">Self-Employed</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-amber-700">Unemployed</th>
-                        <th class="px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-[#333333]">No Record</th>
-                        <th class="px-3 sm:px-4 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#7a3f91]" style="min-width:160px;">Employment Rate</th>
+                        <th class="pl-3 sm:pl-4 pr-3 py-2.5 text-left text-xs font-bold uppercase tracking-wider text-[#111111]">Program</th>
+                        <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-[#111111]">Total</th>
+                        <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-emerald-700">Employed</th>
+                        <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-blue-700">Self-Employed</th>
+                        <th class="px-3 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-amber-700">Unemployed</th>
+                        <th class="px-3 sm:px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wider text-[#333333]">No Record</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     @forelse($this->courseAnalytics as $cr)
                     @php $courseFullName = $this->courseMap[$cr->course_code ?? ''] ?? null; @endphp
-                    <tr class="hover:bg-[#F5F0FA] transition-colors cursor-pointer"
-                        data-tip="View {{ $cr->course_code ?? '' }} Records"
-                        onclick="empOpenModal('employed_all','{{ $cr->course_code }}',null)">
-                        <td class="pl-3 sm:pl-4 pr-3 py-2.5">
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-[#F9F7FC] text-[#7a3f91]">
-                                <i class="fas fa-graduation-cap text-[9px]"></i>
+                    <tr class="transition-colors">
+                        <td class="pl-3 sm:pl-4 pr-3 py-3">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-sm font-bold bg-[#F9F7FC] text-[#7a3f91]">
+                                <i class="fas fa-graduation-cap text-[11px]"></i>
                                 {{ $cr->course_code ?? '—' }}
                             </span>
                             @if($courseFullName)
-                                <p class="text-[11px] mt-0.5 font-semibold text-[#111111] leading-tight hidden sm:block">{{ $courseFullName }}</p>
+                                <p class="text-xs mt-0.5 font-semibold text-[#111111] leading-tight hidden sm:block">{{ $courseFullName }}</p>
                             @endif
                         </td>
-                        <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-bold text-[#111111]">{{ number_format($cr->total) }}</span>
+                        <td class="px-3 py-3 text-center">
+                            <span class="text-sm font-bold text-[#111111]">{{ number_format($cr->total) }}</span>
                         </td>
-                        <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-semibold text-emerald-700">{{ number_format($cr->employed) }}</span>
+                        <td class="px-3 py-3 text-center">
+                            <span class="text-sm font-semibold text-emerald-700">{{ number_format($cr->employed) }}</span>
                         </td>
-                        <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-semibold text-blue-700">{{ number_format($cr->self_employed) }}</span>
+                        <td class="px-3 py-3 text-center">
+                            <span class="text-sm font-semibold text-blue-700">{{ number_format($cr->self_employed) }}</span>
                         </td>
-                        <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-semibold text-amber-700">{{ number_format($cr->unemployed) }}</span>
+                        <td class="px-3 py-3 text-center">
+                            <span class="text-sm font-semibold text-amber-700">{{ number_format($cr->unemployed) }}</span>
                         </td>
-                        <td class="px-3 py-2.5 text-center">
-                            <span class="text-xs font-semibold text-[#333333]">{{ number_format($cr->not_filled) }}</span>
-                        </td>
-                        <td class="px-3 sm:px-4 py-2.5" style="min-width:160px;">
-                            <div class="flex items-center gap-2">
-                                <div class="flex-1 h-1.5 rounded-full bg-[#E8E0F0] overflow-hidden">
-                                    <div class="h-full rounded-full bg-[#10b981] transition-all duration-500"
-                                         style="width:{{ $cr->emp_rate }}%;"></div>
-                                </div>
-                                <span class="text-[11px] font-bold w-9 text-right shrink-0 text-[#111111]">
-                                    {{ $cr->emp_rate }}%
-                                </span>
-                            </div>
-                            <p class="text-[10px] mt-0.5 text-[#333333]">{{ $cr->response_rate }}% response</p>
+                        <td class="px-3 sm:px-4 py-3 text-center">
+                            <span class="text-sm font-semibold text-[#333333]">{{ number_format($cr->not_filled) }}</span>
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="py-10 text-center">
-                            <p class="text-sm font-semibold text-[#333333]">No program data available</p>
+                        <td colspan="6" class="py-10 text-center">
+                            <p class="text-base font-semibold text-[#333333]">No program data available</p>
                         </td>
                     </tr>
                     @endforelse
@@ -1635,24 +1835,29 @@ new class extends Component {
             </div>
         </div>
 
-        <button wire:click="closeModal" class="emp-close-btn shrink-0 ml-3">
+        <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal" class="emp-close-btn shrink-0 ml-3">
             <span class="emp-close-tip">Close</span>
-            <i class="fas fa-xmark text-sm"></i>
+            <span wire:loading wire:target="closeModal">
+                <i class="fas fa-spinner animate-spin text-sm"></i>
+            </span>
+            <i class="fas fa-xmark text-sm" wire:loading.remove wire:target="closeModal"></i>
         </button>
     </div>
 
-    {{-- ── In-modal search — narrows the current record set (name /
-         student ID / email / program code) without touching the
-         underlying modalFilter/modalBatch/modalCourse scope. Matches
-         wire:loading dim + progress-bar treatment used elsewhere, and
-         highlights matches in blue (mark.ar-hl) like Alumni Records. ── --}}
-    <div class="px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center gap-2 shrink-0"
-         wire:loading.class="opacity-60" wire:target="modalSearch">
+    {{-- ── In-modal search + filters — merged into a single row: SEARCH
+         box, result count, then FILTERS (Batch Year + Program Code +
+         Reset), scoped to this modal's own modalSearch/modalBatch/
+         modalCourse. Matches wire:loading dim + progress-bar treatment
+         used elsewhere, and highlights matches in blue (mark.ar-hl)
+         like Alumni Records. Single row, scrolls horizontally instead
+         of wrapping if space is tight. ── --}}
+    <div class="emp-modal-filter-bar px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center gap-2 flex-wrap shrink-0"
+         wire:loading.class="opacity-60" wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters">
         <span class="text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">
             <i class="fas fa-magnifying-glass sm:mr-1"></i><span class="hidden sm:inline">SEARCH</span>
         </span>
         <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
-        <div class="relative flex-1 max-w-xs" wire:ignore
+        <div class="relative flex-1 min-w-[180px] max-w-xs shrink-0" wire:ignore
              x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
             <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
@@ -1669,8 +1874,62 @@ new class extends Component {
         <span class="text-[11px] font-semibold text-[#7A3F91] shrink-0 whitespace-nowrap">
             {{ number_format($records->total()) }} result(s)
         </span>
+
+        <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
+        <span class="text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+
+        {{-- Batch Year --}}
+        <div class="ar-dropdown shrink-0"
+             x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('modalBatch', val===''?null:val); this.close(); } }"
+             @click.outside="close()" wire:key="emp-modal-batch-dropdown">
+            <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalBatch!==null,'open':open }" class="ar-dropdown-trigger">
+                <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
+                <span>@if($modalBatch){{ $modalBatch }}@else All Batch Years @endif</span>
+                <i class="fas fa-chevron-down ar-chevron"></i>
+            </button>
+            <div x-show="open"
+                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                 class="ar-dropdown-menu" style="display:none;" @click.stop>
+                <button type="button" @click.stop="select('')" :class="{'active':$wire.modalBatch===null}" class="ar-dropdown-item">All Batch Years</button>
+                @foreach($this->batchYears as $year)
+                <button type="button" @click.stop="select('{{ $year }}')" :class="{'active':$wire.modalBatch=='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                @endforeach
+            </div>
+        </div>
+
+        {{-- Program Code --}}
+        <div class="ar-dropdown shrink-0"
+             x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('modalCourse',val); this.close(); } }"
+             @click.outside="close()" wire:key="emp-modal-course-dropdown">
+            <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalCourse!=='','open':open }" class="ar-dropdown-trigger">
+                <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
+                <span>@if($modalCourse){{ $modalCourse }}@else All Program Codes @endif</span>
+                <i class="fas fa-chevron-down ar-chevron"></i>
+            </button>
+            <div x-show="open"
+                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                 class="ar-dropdown-menu" style="display:none;" @click.stop>
+                <button type="button" @click.stop="select('')" :class="{'active':$wire.modalCourse===''}" class="ar-dropdown-item">All Program Codes</button>
+                @foreach($this->courseMap as $code => $name)
+                <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.modalCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $code }}</button>
+                @endforeach
+            </div>
+        </div>
+
+        {{-- Reset — always visible now, not conditional on an active filter --}}
+        <button wire:click="clearModalFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearModalFilters"
+                type="button"
+                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
+            <span wire:loading wire:target="clearModalFilters">
+                <i class="fas fa-spinner animate-spin text-sm"></i>
+            </span>
+            <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearModalFilters"></i>
+            <span class="hidden sm:inline">Reset</span>
+        </button>
     </div>
-    <div class="emp-filter-progress-track" wire:loading wire:target="modalSearch">
+    <div class="emp-filter-progress-track" wire:loading wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters">
         <div class="emp-filter-progress-bar"></div>
     </div>
 
@@ -1829,6 +2088,7 @@ new class extends Component {
             open: false,
             _lastToggle: 0,
             exporting: false,
+            exportingType: '',
             printLock: false,
             _activePrintCleanup: null,
 
@@ -1881,6 +2141,7 @@ new class extends Component {
                 }
 
                 this.exporting = true;
+                this.exportingType = type;
 
                 // ── "Please wait" info toast — mirrors Alumni Records,
                 //    shown the instant the export request is dispatched. ──
@@ -1947,6 +2208,7 @@ new class extends Component {
                             if (frame && frame.parentNode) frame.remove();
                             self.printLock  = false;
                             self.exporting  = false;
+                            self.exportingType = '';
                             if (self._activePrintCleanup === cleanup) self._activePrintCleanup = null;
                         };
                         self._activePrintCleanup = cleanup;
@@ -2021,10 +2283,12 @@ new class extends Component {
                         window.URL.revokeObjectURL(blobUrl);
 
                         this.exporting = false;
+                        this.exportingType = '';
                     }
                 } catch (e) {
                     if (type === 'print') this.printLock = false;
                     this.exporting = false;
+                    this.exportingType = '';
                     window.dispatchEvent(new CustomEvent('flash-message', {
                         detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
                     }));
@@ -2307,7 +2571,7 @@ new class extends Component {
                 plugins: {
                     legend: {
                         display:true, position:'top',
-                        labels: { font:{size:10,weight:'600'}, color:'#111111', usePointStyle:true, pointStyleWidth:8, boxHeight:8, padding:14 },
+                        labels: { font:{size:12,weight:'700'}, color:'#111111', usePointStyle:true, pointStyleWidth:9, boxHeight:9, padding:14 },
                     },
                     tooltip: {
                         callbacks: {
@@ -2322,8 +2586,8 @@ new class extends Component {
                     },
                 },
                 scales: {
-                    x: { stacked:true, grid:{display:false}, ticks:{font:{size:11,weight:'600'},color:'#111111'} },
-                    y: { stacked:true, grid:{color:'#f3f4f6'}, ticks:{font:{size:10,weight:'500'},color:'#333333',precision:0}, beginAtZero:true },
+                    x: { stacked:true, grid:{display:false}, ticks:{font:{size:13,weight:'700'},color:'#111111'} },
+                    y: { stacked:true, grid:{color:'#f3f4f6'}, ticks:{font:{size:13,weight:'700'},color:'#333333',precision:0}, beginAtZero:true },
                 },
                 onClick: function(event, elements) {
                     if (event && event.native) event.native.stopPropagation();
@@ -2406,19 +2670,12 @@ new class extends Component {
                     },
                 },
                 scales: {
-                    x:{grid:{display:false},ticks:{font:{size:10,weight:'600'},color:'#111111'}},
+                    x:{grid:{display:false},ticks:{font:{size:13,weight:'700'},color:'#111111'}},
                     y:{
                         grid:{color:'#f3f4f6'},
-                        ticks:{font:{size:10,weight:'500'},color:'#333333',callback:function(val){return val+'%';}},
+                        ticks:{font:{size:13,weight:'700'},color:'#333333',callback:function(val){return val+'%';}},
                         min:0,max:100,
                     },
-                },
-                onClick: function(event,elements){
-                    if(event&&event.native) event.native.stopPropagation();
-                    if(!elements||!elements.length) return;
-                    var batch=slice.labels[elements[0].index];
-                    if(batch===undefined||batch===null) return;
-                    window.dispatchEvent(new CustomEvent('open-emp-modal',{detail:{filter:'',batch:parseInt(batch),course:''}}));
                 },
             },
         });
@@ -2482,11 +2739,19 @@ new class extends Component {
                     borderColor:borderColors,
                     borderWidth:1.5,
                     borderRadius:4,
+                    // Fixed percentages (instead of Chart.js's auto default)
+                    // so all 3 bars stay clearly visible/evenly spaced inside
+                    // this card's fixed 300px row height — without this, a
+                    // 3-category horizontal bar in a short container can
+                    // render its 3rd bar so thin it looks missing.
+                    categoryPercentage: 0.7,
+                    barPercentage: 0.85,
                 }],
             },
             options: {
                 indexAxis:'y',
                 responsive:true, maintainAspectRatio:false,
+                layout:{ padding:{ top:2, bottom:2 } },
                 plugins: {
                     legend:{display:false},
                     tooltip:{
@@ -2498,7 +2763,7 @@ new class extends Component {
                 },
                 scales: {
                     x:{grid:{color:'#f3f4f6'},ticks:{display:false},beginAtZero:true},
-                    y:{grid:{display:false},ticks:{font:{size:10,weight:'600'},color:'#111111'}},
+                    y:{grid:{display:false},ticks:{font:{size:11,weight:'600'},color:'#111111',autoSkip:false}},
                 },
                 onClick:function(event,elements){
                     if(event&&event.native) event.native.stopPropagation();
