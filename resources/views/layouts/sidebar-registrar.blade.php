@@ -31,6 +31,18 @@
 
         .bell-badge { pointer-events: none; }
 
+        /* ── Disable text selection/copy inside the notif panel ───
+           Applies to the whole panel: header label, item titles,
+           messages, timestamps, footer hint. Buttons still work
+           fine since we're only blocking text selection, not clicks. ── */
+        .notif-no-select,
+        .notif-no-select * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
         /* ════════════════════════════════════════════════════════
            SIDEBAR
         ════════════════════════════════════════════════════════ */
@@ -722,31 +734,106 @@
                         } catch (e) { /* ignore */ }
                     }
                 }
-                this.goToTarget(item);
+                await this.goToTarget(item);
             },
 
             // Navigate to wherever this notif points, carrying the affected
             // record IDs as ?highlight=1,2,3 so the destination page can
             // jump to the right pagination page and blue-highlight the
             // matching row(s) — same behavior as before, restored here.
-            goToTarget(item) {
+            //
+            // When the notif represents a GROUP (bulk import, or "N alumni
+            // registered"), also carry ?scope_title= so the destination
+            // page's notif-scoped-view banner can say which notification
+            // the narrowed table came from.
+            //
+            // ⚠️ FIX: the in-memory `item` here can be STALE. This store
+            // only re-fetches on a 5s poll interval, so if a 2nd/3rd
+            // registration or import merged into this notif's DB row
+            // AFTER the last poll but BEFORE the user clicked it, the
+            // clicked item's alumni_ids would only contain the older,
+            // smaller set (e.g. just Fernandos, missing Loki) — causing
+            // the destination page to highlight/scope only 1 of the 2
+            // actual records. Re-fetch this specific notif's row fresh
+            // from the server right before navigating, so we always
+            // carry the true, fully-merged alumni_ids — not whatever
+            // snapshot happened to be sitting in the store.
+            async goToTarget(item) {
                 var routeName = item.link_route;
                 if (!routeName || !window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return;
 
-                var base = window.__registrarRouteMap[routeName];
                 var alumniIds = Array.isArray(item.alumni_ids) ? item.alumni_ids.filter(Boolean) : [];
 
-                var url = base;
+                var freshIds = await this._fetchFreshAlumniIds(item);
+                if (freshIds !== null) alumniIds = freshIds;
+
+                var base = window.__registrarRouteMap[routeName];
+                var url  = base;
                 if (alumniIds.length > 0) {
                     url += (base.indexOf('?') === -1 ? '?' : '&') + 'highlight=' + alumniIds.join(',');
+                    if (alumniIds.length > 1 && item.title) {
+                        url += '&scope_title=' + encodeURIComponent(item.title);
+                    }
                 }
 
                 this.close();
 
-                if (window.Livewire && typeof window.Livewire.navigate === 'function') {
+                // ⚠️ FIX: if the notif points to the SAME route the user is
+                // already sitting on (e.g. clicking a notif while already
+                // viewing Alumni Records), Livewire.navigate() only swaps
+                // the query string of a component that's already mounted —
+                // it does NOT re-run mount() on same-component SPA
+                // transitions in every Livewire setup, so the new
+                // ?highlight=/?scope_title= params silently never get
+                // processed and the table stays unscoped. A full hard
+                // navigation (window.location.href) always re-runs mount()
+                // from scratch, so force that path specifically when
+                // target === current location, and keep the fast SPA
+                // navigate for the normal cross-page case.
+                var isSameLocation = (function () {
+                    try {
+                        var current = window.location.pathname + window.location.search;
+                        var targetPath = url.split('?')[0];
+                        return window.location.pathname === targetPath;
+                    } catch (e) { return false; }
+                })();
+
+                if (isSameLocation) {
+                    window.location.href = url;
+                } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
                     window.Livewire.navigate(url);
                 } else {
                     window.location.href = url;
+                }
+            },
+
+            // Re-fetches the notifications list and returns the freshest
+            // merged alumni_ids for the given (possibly grouped) item, by
+            // matching on the underlying DB row id(s) it represents.
+            // Returns null on any failure so the caller falls back to
+            // whatever was already in memory instead of breaking nav.
+            async _fetchFreshAlumniIds(item) {
+                try {
+                    var res = await window.fetch('/registrar/notifications', {
+                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                    });
+                    if (!res.ok) return null;
+
+                    var raw = await res.json();
+                    var wantedIds = item._ids || [item.id];
+
+                    var merged = [];
+                    Array.from(raw).forEach(function (n) {
+                        if (wantedIds.indexOf(n.id) === -1) return;
+                        var rowIds = Array.isArray(n.alumni_ids) ? n.alumni_ids : [];
+                        rowIds.forEach(function (id) {
+                            if (id && merged.indexOf(id) === -1) merged.push(id);
+                        });
+                    });
+
+                    return merged;
+                } catch (e) {
+                    return null;
                 }
             },
 
@@ -1222,6 +1309,7 @@
 ════════════════════════════════════════════════════════════════════════════ --}}
 <div
     id="notif-panel"
+    class="notif-no-select"
     x-show="$store.notifs && $store.notifs.open"
     x-cloak
     x-transition:enter="transition ease-out duration-100"
@@ -1231,6 +1319,8 @@
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-[0.98] -translate-y-1"
     @click.stop
+    @contextmenu.prevent
+    @copy.prevent
     style="
         position: fixed;
         top: 88px;

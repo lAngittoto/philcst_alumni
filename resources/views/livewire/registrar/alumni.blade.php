@@ -34,6 +34,16 @@ new class extends Component {
      *  jump to the correct page and blue-highlight the matching rows. */
     public array $highlightIds = [];
 
+    /** When a notification click carries a `scope` group (bulk import,
+     *  "New Alumni Registered" x2, etc.), the table is narrowed down to
+     *  ONLY those alumni IDs instead of mixing them into the full list.
+     *  This is intentionally NOT part of queryString() — a manual browser
+     *  refresh should always drop back to the full unscoped table, never
+     *  persist the notif-scoped view. It only ever gets populated from
+     *  the ?highlight= query param inside mount(), once, per page load. */
+    public array $notifScopeIds   = [];
+    public string $notifScopeTitle = '';
+
     protected string $paginationTheme = 'tailwind';
 
     public function mount(): void
@@ -63,7 +73,17 @@ new class extends Component {
 
             $this->highlightIds = $this->resolveHighlightIds($rawValues);
 
-            if (!empty($this->highlightIds)) {
+            // A notif that represents a GROUP (bulk import, or "x2 alumni
+            // registered") narrows the table down to just those records
+            // instead of jumping to a page inside the full 100/page list.
+            // Single-record notifs (one alumni registered) keep the old
+            // jump-and-highlight behavior instead — no scoping needed for
+            // just 1 row.
+            if (count($this->highlightIds) > 1) {
+                $this->notifScopeIds   = $this->highlightIds;
+                $this->notifScopeTitle = (string) request()->query('scope_title', 'Notification');
+                $this->resetPage('alumniPage');
+            } elseif (!empty($this->highlightIds)) {
                 $this->jumpToPageForGroup($this->highlightIds);
             }
         }
@@ -262,31 +282,51 @@ new class extends Component {
         };
     }
 
-    public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); $this->highlightIds = []; }
-    public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); $this->highlightIds = []; }
-    public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); $this->highlightIds = []; }
-    public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); $this->highlightIds = []; }
-    public function updatingAlumniEmploymentStatus() { $this->resetPage('alumniPage'); $this->highlightIds = []; }
+    /** Clears both the row-highlight AND the notif-scoped table view.
+     *  Called any time the user takes an action that means "I'm done
+     *  with whatever the notification pointed me to" — typing a search,
+     *  touching a filter dropdown, manually paging, or hitting Reset. */
+    protected function clearNotifScope(): void
+    {
+        $this->highlightIds    = [];
+        $this->notifScopeIds   = [];
+        $this->notifScopeTitle = '';
+    }
+
+    public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
+    public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
+    public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
+    public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
+    public function updatingAlumniEmploymentStatus() { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
 
     /** Wrappers around WithPagination's page methods that also clear the
-     *  notif-triggered highlight, since manual paging means the user has
-     *  moved on from whatever the notif pointed to. */
+     *  notif-triggered highlight/scope, since manual paging means the
+     *  user has moved on from whatever the notif pointed to. */
     public function goToAlumniPage(int $page): void
     {
-        $this->highlightIds = [];
+        $this->clearNotifScope();
         $this->setPage($page, 'alumniPage');
     }
 
     public function nextAlumniPage(): void
     {
-        $this->highlightIds = [];
+        $this->clearNotifScope();
         $this->nextPage('alumniPage');
     }
 
     public function previousAlumniPage(): void
     {
-        $this->highlightIds = [];
+        $this->clearNotifScope();
         $this->previousPage('alumniPage');
+    }
+
+    /** Explicit "Clear" click on the notif-scope banner — same effect as
+     *  any other filter interaction, just directly requested by the user
+     *  instead of being a side-effect of touching a filter. */
+    public function clearNotifScopeView(): void
+    {
+        $this->clearNotifScope();
+        $this->resetPage('alumniPage');
     }
 
     #[Computed]
@@ -312,6 +352,21 @@ new class extends Component {
             ->orderByDesc('id')
             ->limit(1),
         ]);
+
+        // ── Notification-scoped view ──────────────────────────────────
+        // When arriving from a grouped notification (bulk import, "2
+        // alumni registered", etc.), show ONLY those alumni IDs — none
+        // of the normal search/batch/course/profile/employment filters
+        // apply while scoped. Still paginated 100/page same as usual,
+        // ordered newest-first so the batch reads top-to-bottom the way
+        // it was imported/registered.
+        if (!empty($this->notifScopeIds)) {
+            $q->whereIn('id', $this->notifScopeIds)
+              ->orderByDesc('created_at')
+              ->orderByDesc('id');
+
+            return $q->paginate(100, ['*'], 'alumniPage');
+        }
 
         // NOTE: text search is intentionally limited to Name, Student ID,
         // and Email. Batch and Program Code already have their own
@@ -432,6 +487,10 @@ new class extends Component {
     #[Computed]
     public function activeFilterSummary(): string
     {
+        if (!empty($this->notifScopeIds)) {
+            return 'Notification view: ' . $this->notifScopeTitle;
+        }
+
         $parts = [];
 
         if ($this->alumniProfileFilter === 'complete') $parts[] = 'Complete profiles only';
@@ -452,7 +511,7 @@ new class extends Component {
         $this->alumniCourse            = '';
         $this->alumniProfileFilter     = 'all';
         $this->alumniEmploymentStatus  = '';
-        $this->highlightIds            = [];
+        $this->clearNotifScope();
         $this->resetPage('alumniPage');
     }
 
@@ -1160,8 +1219,28 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     {{-- Table Card --}}
     <div class="ar-table-card bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
 
+        {{-- ── Notification-scoped view banner ──────────────────────────
+             Shown only when arriving from a grouped notification click
+             (bulk import, "N alumni registered", etc). Refreshing the
+             page always drops this — it's intentionally not persisted. --}}
+        @if(!empty($notifScopeIds))
+        <div class="px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F9F7FC] flex flex-wrap items-center gap-2 shrink-0">
+            <i class="fas fa-bell text-[#7A3F91] text-sm shrink-0"></i>
+            <span class="text-sm text-[#333333]">
+                <span class="font-semibold">Showing {{ count($notifScopeIds) }} record{{ count($notifScopeIds) === 1 ? '' : 's' }}</span>
+                from notification: <span class="font-semibold text-[#7A3F91]">{{ $notifScopeTitle }}</span>
+            </span>
+            <button type="button" wire:click="clearNotifScopeView"
+                    wire:loading.attr="disabled" wire:target="clearNotifScopeView"
+                    class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold
+                           bg-white border border-[#E8E0F0] text-[#7A3F91] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0">
+                <i class="fas fa-xmark text-[10px]"></i> Clear, show all records
+            </button>
+        </div>
+        @endif
+
         {{-- ── Filter bar ── --}}
-        <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200"
+        <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
              wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
 
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
@@ -2284,6 +2363,7 @@ compressImage(file, maxW, maxH, quality) {
         if (url.searchParams.has('batch'))          { url.searchParams.delete('batch');          changed = true; }
         if (url.searchParams.has('employment_status')) { url.searchParams.delete('employment_status'); changed = true; }
         if (url.searchParams.has('highlight'))      { url.searchParams.delete('highlight');      changed = true; }
+        if (url.searchParams.has('scope_title'))    { url.searchParams.delete('scope_title');    changed = true; }
         if (changed) history.replaceState(null, '', url.pathname + (url.search || ''));
     }
     cleanAlumniPageParam();
