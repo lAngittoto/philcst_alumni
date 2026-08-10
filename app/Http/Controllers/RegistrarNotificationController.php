@@ -3,6 +3,7 @@ namespace App\Http\Controllers;
 use App\Models\RegistrarNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 class RegistrarNotificationController extends Controller
 {
     /**
@@ -33,6 +34,15 @@ class RegistrarNotificationController extends Controller
      * grouped notif shows "×2" (or "×6" on bulk import) but the message
      * body still only names the single most-recent alumni, which is
      * confusing and drops the others entirely.
+     *
+     * ⚠️ Wrapped in a DB transaction with a row lock (lockForUpdate) on
+     * the dedup lookup. Two "New Alumni Registered" events firing close
+     * together (e.g. staff registering two alumni back-to-back within
+     * the same second) could otherwise both read "no existing row yet"
+     * at the same time and each INSERT their own row instead of one
+     * merging into the other — producing two separate DB rows with the
+     * same title/dedup_key/day that the frontend then has to reconcile
+     * itself, instead of one properly-merged row from the backend.
      */
     public function store(Request $request)
     {
@@ -52,73 +62,76 @@ class RegistrarNotificationController extends Controller
             'alumni_name'  => ['nullable', 'string', 'max:255'],
         ]);
 
-        $today = Carbon::today();
-
+        $today    = Carbon::today();
         $dedupKey = $data['dedup_key'] ?? substr($data['message'], 0, 40);
+        $newIds   = array_values(array_unique(array_map('intval', $data['alumni_ids'] ?? [])));
 
-        $newIds = array_values(array_unique(array_map('intval', $data['alumni_ids'] ?? [])));
+        return DB::transaction(function () use ($data, $today, $dedupKey, $newIds) {
+            $existing = RegistrarNotification::where('title', $data['title'])
+                ->where('dedup_key', $dedupKey)
+                ->whereDate('created_at', $today)
+                ->latest('updated_at')
+                ->lockForUpdate()
+                ->first();
 
-        $existing = RegistrarNotification::where('title', $data['title'])
-            ->where('dedup_key', $dedupKey)
-            ->whereDate('created_at', $today)
-            ->latest('updated_at')
-            ->first();
+            if ($existing) {
+                $now = now();
 
-        if ($existing) {
-            $now = now();
+                $existingIds = (array) ($existing->alumni_ids ?? []);
+                $mergedIds   = array_values(array_unique(array_merge($existingIds, $newIds)));
+                $mergedCount = $existing->count + 1;
 
-            $existingIds = (array) ($existing->alumni_ids ?? []);
-            $mergedIds   = array_values(array_unique(array_merge($existingIds, $newIds)));
-            $mergedCount = $existing->count + 1;
+                // Bulk Import Complete already carries its own total count in
+                // the message text (e.g. "6 alumni record(s) imported..."),
+                // built client-side per batch — it isn't a "one alumni per
+                // call" case like New Alumni Registered, so instead of trying
+                // to extract a name from it, just add this batch's imported
+                // total to the running total across all imports today.
+                if ($dedupKey === 'imported') {
+                    $newMessage = $this->buildImportedMessage($existing->message, $data['message']);
+                } else {
+                    $newMessage = $this->buildGroupedMessage(
+                        $data['message'],
+                        $data['alumni_name'] ?? null,
+                        $mergedCount,
+                        $mergedIds,
+                        $existing
+                    );
+                }
 
-            // Bulk Import Complete already carries its own total count in
-            // the message text (e.g. "6 alumni record(s) imported..."),
-            // built client-side per batch — it isn't a "one alumni per
-            // call" case like New Alumni Registered, so instead of trying
-            // to extract a name from it, just add this batch's imported
-            // total to the running total across all imports today.
-            if ($dedupKey === 'imported') {
-                $newMessage = $this->buildImportedMessage($existing->message, $data['message']);
-            } else {
-                $newMessage = $this->buildGroupedMessage(
-                    $data['message'],
-                    $data['alumni_name'] ?? null,
-                    $mergedCount
-                );
+                // ✅ Refresh BOTH created_at and updated_at so the displayed
+                //    timestamp always reflects the most recent update.
+                $existing->timestamps = false; // disable auto-touch so we set manually
+                $existing->update([
+                    'message'    => $newMessage,
+                    'read'       => false,
+                    'count'      => $mergedCount,
+                    'icon'       => $data['icon']       ?? $existing->icon,
+                    'link_route' => $data['link_route'] ?? $existing->link_route,
+                    'link_label' => $data['link_label'] ?? $existing->link_label,
+                    'alumni_ids' => $mergedIds,
+                    'created_at' => $now, // ✅ this is what the JS panel reads for display
+                    'updated_at' => $now,
+                ]);
+
+                return response()->json($existing->fresh(), 200);
             }
 
-            // ✅ Refresh BOTH created_at and updated_at so the displayed
-            //    timestamp always reflects the most recent update.
-            $existing->timestamps = false; // disable auto-touch so we set manually
-            $existing->update([
-                'message'    => $newMessage,
+            // First occurrence for this title + status today → new row.
+            $notification = RegistrarNotification::create([
+                'icon'       => $data['icon']       ?? 'bell',
+                'title'      => $data['title'],
+                'message'    => $data['message'],
+                'link_route' => $data['link_route'] ?? null,
+                'link_label' => $data['link_label'] ?? null,
+                'alumni_ids' => $newIds,
                 'read'       => false,
-                'count'      => $mergedCount,
-                'icon'       => $data['icon']       ?? $existing->icon,
-                'link_route' => $data['link_route'] ?? $existing->link_route,
-                'link_label' => $data['link_label'] ?? $existing->link_label,
-                'alumni_ids' => $mergedIds,
-                'created_at' => $now, // ✅ this is what the JS panel reads for display
-                'updated_at' => $now,
+                'count'      => 1,
+                'dedup_key'  => $dedupKey,
             ]);
 
-            return response()->json($existing->fresh(), 200);
-        }
-
-        // First occurrence for this title + status today → new row.
-        $notification = RegistrarNotification::create([
-            'icon'       => $data['icon']       ?? 'bell',
-            'title'      => $data['title'],
-            'message'    => $data['message'],
-            'link_route' => $data['link_route'] ?? null,
-            'link_label' => $data['link_label'] ?? null,
-            'alumni_ids' => $newIds,
-            'read'       => false,
-            'count'      => 1,
-            'dedup_key'  => $dedupKey,
-        ]);
-
-        return response()->json($notification, 201);
+            return response()->json($notification, 201);
+        });
     }
 
     /**
@@ -126,33 +139,50 @@ class RegistrarNotificationController extends Controller
      *
      * - 1st occurrence: message is used as-is (handled by the caller,
      *   this only runs from the 2nd occurrence onward).
-     * - 2nd+ occurrence: shows the latest alumni's name plus "and N
-     *   others", so the count badge (×2, ×6, ...) always matches what
-     *   the message text implies instead of silently dropping everyone
-     *   but the most recent alumni.
+     * - 2nd+ occurrence: shows every distinct name we actually have, e.g.
+     *   "Fernandos Sal Junios Sr. and Loki M. Asgard XIX have been
+     *   registered..." when the merged alumni_ids count is small enough
+     *   to name everyone, falling back to "...and N others" once there
+     *   are more registrants than we have names tracked for, and to the
+     *   generic count-only wording if no names came through at all.
      *
-     * If alumni_name wasn't sent, falls back to trying to pull a name
-     * out of the raw message via the "(ID: ...)" pattern used elsewhere
-     * in this codebase; if that also fails, falls back to the raw
-     * incoming message so nothing breaks, it just won't say "and N others".
+     * We now track names on the row itself (via a lightweight in-message
+     * parse of every prior occurrence, not just the latest) so a 3rd,
+     * 4th, etc. registration keeps ALL earlier names instead of losing
+     * them each time this method only saw the newest occurrence's name.
      */
-    protected function buildGroupedMessage(string $rawMessage, ?string $alumniName, int $count): string
-    {
-        $name = $alumniName ?: $this->extractNameFromMessage($rawMessage);
+    protected function buildGroupedMessage(
+        string $rawMessage,
+        ?string $alumniName,
+        int $count,
+        array $mergedIds,
+        RegistrarNotification $existing
+    ): string {
+        $newName = $alumniName ?: $this->extractNameFromMessage($rawMessage);
 
-        if ($name === null) {
-            return $rawMessage;
+        // Recover the names already represented in the existing message so
+        // repeated registrations accumulate names instead of overwriting.
+        $priorNames = $this->extractAllNamesFromMessage($existing->message);
+
+        $names = $priorNames;
+        if ($newName && !in_array($newName, $names, true)) {
+            $names[] = $newName;
         }
 
-        $othersCount = $count - 1;
-
-        if ($othersCount <= 0) {
-            return $rawMessage;
+        if (empty($names)) {
+            return $count . ' new alumni registered today.';
         }
 
+        if (count($names) >= $count) {
+            $last  = array_pop($names);
+            $label = empty($names) ? $last : (implode(', ', $names) . ' and ' . $last);
+            return "{$label} have been registered and are now verified.";
+        }
+
+        $othersCount = $count - count($names);
         $othersLabel = $othersCount === 1 ? '1 other' : "{$othersCount} others";
 
-        return "{$name} and {$othersLabel} have been registered and are now verified.";
+        return implode(', ', $names) . " and {$othersLabel} have been registered today.";
     }
 
     /**
@@ -191,6 +221,42 @@ class RegistrarNotificationController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Pulls every name already present in a previously-grouped message,
+     * covering all three shapes buildGroupedMessage() can produce:
+     *   - "Name (ID: 123) has been registered..."               (1st occurrence, raw)
+     *   - "A, B and C have been registered..."                  (all names known)
+     *   - "A, B and N others have been registered..."           (partial names)
+     * Falls back to an empty list if none of these patterns match, so a
+     * message we don't recognize just doesn't contribute extra names
+     * rather than corrupting the list.
+     */
+    protected function extractAllNamesFromMessage(string $message): array
+    {
+        $single = $this->extractNameFromMessage($message);
+        if ($single !== null) {
+            return [$single];
+        }
+
+        if (!preg_match('/^(.*?)\s+have been registered/', $message, $m)) {
+            return [];
+        }
+
+        $namesPart = trim($m[1]);
+
+        // Strip a trailing "and N other(s)" segment — that's a count, not a name.
+        $namesPart = preg_replace('/\s+and\s+\d+\s+others?$/i', '', $namesPart);
+
+        // Remaining pattern is "A, B and C" or a single "A".
+        $namesPart = preg_replace('/\s+and\s+(?=[^,]+$)/', ', ', $namesPart);
+
+        if ($namesPart === '') {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $namesPart))));
     }
 
     /**

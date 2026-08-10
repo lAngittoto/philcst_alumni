@@ -334,7 +334,7 @@
             gap: 12px;
             padding: 14px 18px 17px;
             cursor: pointer;
-            border-bottom: 4px solid #7A3F91;
+            border-bottom: 2px solid #B8B8B8;
             transition: background .12s ease;
         }
         .notif-item:last-child { border-bottom: none; }
@@ -494,6 +494,9 @@
             #notif-list {
                 max-height: calc(100dvh - 150px) !important;
             }
+            #notif-footer-hint {
+                display: none !important;
+            }
         }
     </style>
 
@@ -631,11 +634,19 @@
 
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
-                            g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
+                            // Use the backend's own count/alumni_ids when this
+                            // row already represents a merged backend group
+                            // (count > 1 or 2+ alumni_ids) rather than blindly
+                            // adding 1 — otherwise a backend-merged row gets
+                            // double-counted on top of the frontend's own
+                            // grouping pass.
+                            var nCount = Number(n.count) || 1;
+                            g.count = Math.max(g.count, g._ids.length + nCount);
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
                             if (nAlumniIds.length) {
-                                g.alumni_ids = (g.alumni_ids || []).concat(nAlumniIds);
+                                g.alumni_ids = (g.alumni_ids || []).concat(nAlumniIds)
+                                    .filter(function (v, i, arr) { return arr.indexOf(v) === i; });
                             }
                             if (nName && g._names.indexOf(nName) === -1) {
                                 g._names.push(nName);
@@ -653,7 +664,7 @@
                                 // back to the generic count wording only if
                                 // no names came through at all.
                                 g.title = 'New Alumni Registered';
-                                if (g._names.length >= g.count || g._names.length === g.count) {
+                                if (g._names.length > 0 && g._names.length >= g.count) {
                                     g.message = (g._names.length === 1
                                         ? g._names[0]
                                         : g._names.slice(0, -1).join(', ') + ' and ' + g._names.slice(-1)
@@ -695,20 +706,47 @@
             close()  { this.open = false; },
 
             async markRead(item) {
-                if (item.read) return;
-                item.read = true;
-                var ids  = item._ids || [item.id];
-                var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                for (var i = 0; i < ids.length; i++) {
-                    try {
-                        await window.fetch('/registrar/notifications/' + ids[i] + '/read', {
-                            method: 'PATCH',
-                            headers: {
-                                'X-CSRF-TOKEN':     csrf,
-                                'X-Requested-With': 'XMLHttpRequest',
-                            }
-                        });
-                    } catch (e) { /* ignore */ }
+                if (!item.read) {
+                    item.read = true;
+                    var ids  = item._ids || [item.id];
+                    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                    for (var i = 0; i < ids.length; i++) {
+                        try {
+                            await window.fetch('/registrar/notifications/' + ids[i] + '/read', {
+                                method: 'PATCH',
+                                headers: {
+                                    'X-CSRF-TOKEN':     csrf,
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                }
+                            });
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+                this.goToTarget(item);
+            },
+
+            // Navigate to wherever this notif points, carrying the affected
+            // record IDs as ?highlight=1,2,3 so the destination page can
+            // jump to the right pagination page and blue-highlight the
+            // matching row(s) — same behavior as before, restored here.
+            goToTarget(item) {
+                var routeName = item.link_route;
+                if (!routeName || !window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return;
+
+                var base = window.__registrarRouteMap[routeName];
+                var alumniIds = Array.isArray(item.alumni_ids) ? item.alumni_ids.filter(Boolean) : [];
+
+                var url = base;
+                if (alumniIds.length > 0) {
+                    url += (base.indexOf('?') === -1 ? '?' : '&') + 'highlight=' + alumniIds.join(',');
+                }
+
+                this.close();
+
+                if (window.Livewire && typeof window.Livewire.navigate === 'function') {
+                    window.Livewire.navigate(url);
+                } else {
+                    window.location.href = url;
                 }
             },
 
@@ -1247,11 +1285,8 @@
     </div>
 
     {{-- Sub-header --}}
-    <div style="background:#F7F4FB; padding:9px 18px; display:flex; align-items:center; justify-content:space-between; border-bottom:0.5px solid #E0D8ED; flex-shrink:0;">
+    <div style="background:#FFFFFF; padding:9px 18px; display:flex; align-items:center; justify-content:space-between; border-bottom:0.5px solid #E0D8ED; flex-shrink:0;">
         <span style="font-size:11px; font-weight:600; color:#7A3F91; letter-spacing:0.1em; text-transform:uppercase;">Recent Activity</span>
-        <span style="font-size:11px; color:#888888; font-weight:400;"
-              x-text="($store.notifs ? $store.notifs.items.length : 0) + ' notification(s)'">
-        </span>
     </div>
 
     {{-- Scrollable list --}}
@@ -1279,7 +1314,6 @@
                     </div>
                 <div
                     class="notif-item"
-                    title="View details"
                     :class="[
                         notif.read ? 'is-read' : 'is-unread',
                         !notif.read
@@ -1348,7 +1382,7 @@
     </div>
 
     {{-- Panel Footer --}}
-    <div style="background:#F7F7F5; border-top:0.5px solid #E0D8ED; padding:10px 18px; text-align:center; flex-shrink:0;">
+    <div id="notif-footer-hint" style="background:#FFFFFF; border-top:0.5px solid #E0D8ED; padding:10px 18px; text-align:center; flex-shrink:0;">
         <p style="font-size:11px; color:#666666; font-weight:400; letter-spacing:0.01em;">
             Select a notification to view details and mark as read.
         </p>

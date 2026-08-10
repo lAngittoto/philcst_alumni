@@ -11,14 +11,19 @@ new class extends Component {
 
     use WithPagination;
 
-    // ── Filters — PAGE-LEVEL now. filterCourse (Program) + filterBatch
-    //    (Batch Year) scope EVERYTHING: stat cards, all charts, the
-    //    Program Breakdown table, AND the exported summary report. ───────
+    // ── Filters — PAGE-LEVEL now. filterCourse (Program) + filterBatchFrom/
+    //    filterBatchTo (Batch Year RANGE) scope EVERYTHING: stat cards, all
+    //    charts, the Program Breakdown table, AND the exported summary
+    //    report. A range (e.g. 2000–2025) replaces the old single-year
+    //    picker so the registrar can look at a whole era at once instead
+    //    of one batch at a time. Both bounds inclusive; either (or both)
+    //    may be blank meaning "unbounded on that side". ──────────────────
     public string $search          = '';
     public string $filterStatus    = '';
     public string $filterLocation  = '';
     public string $filterRelevance = '';
-    public string $filterBatch     = '';
+    public string $filterBatchFrom = '';
+    public string $filterBatchTo   = '';
     public string $filterCourse    = '';
     public string $filterDept      = '';
     public string $sortBy          = 'a.last_name';
@@ -27,7 +32,7 @@ new class extends Component {
     // ── Modal (detail view — has its own in-modal SEARCH plus Batch/Program
     //    filter dropdowns to narrow the currently open record set; these
     //    only touch modalBatch/modalCourse and never the dashboard-level
-    //    filterBatch/filterCourse) ──────────────────────────────────────
+    //    filterBatchFrom/filterBatchTo/filterCourse) ─────────────────────
     public bool   $showModal    = false;
     public string $activeModal  = '';
     public string $modalFilter  = '';
@@ -105,10 +110,31 @@ new class extends Component {
         $this->refreshDashboard();
     }
 
-    public function updatedFilterBatch(): void
+    public function updatedFilterBatchFrom(): void
     {
+        $this->normalizeBatchRange();
         $this->closeAnyModal();
         $this->refreshDashboard();
+    }
+
+    public function updatedFilterBatchTo(): void
+    {
+        $this->normalizeBatchRange();
+        $this->closeAnyModal();
+        $this->refreshDashboard();
+    }
+
+    /**
+     * If the registrar picks a "from" year later than "to" (or vice versa),
+     * swap them instead of silently returning zero rows. Keeps the range
+     * always valid no matter which end was changed last.
+     */
+    private function normalizeBatchRange(): void
+    {
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== ''
+            && (int)$this->filterBatchFrom > (int)$this->filterBatchTo) {
+            [$this->filterBatchFrom, $this->filterBatchTo] = [$this->filterBatchTo, $this->filterBatchFrom];
+        }
     }
 
     /**
@@ -125,7 +151,7 @@ new class extends Component {
 
     /**
      * In-modal Batch/Program dropdowns — narrow the currently open
-     * detail modal without touching the dashboard-level filterBatch/
+     * detail modal without touching the dashboard-level filterBatchFrom/
      * filterCourse or closing the modal. Fires whenever either value
      * changes via the dropdowns rendered inside the modal itself.
      */
@@ -144,8 +170,9 @@ new class extends Component {
     public function clearFilters(): void
     {
         $this->closeAnyModal();
-        $this->filterCourse = '';
-        $this->filterBatch  = '';
+        $this->filterCourse    = '';
+        $this->filterBatchFrom = '';
+        $this->filterBatchTo   = '';
         $this->refreshDashboard();
     }
 
@@ -187,11 +214,28 @@ new class extends Component {
         }
     }
 
+    /**
+     * Applies the dashboard-level Batch Year RANGE filter to any query
+     * builder that has an `a.batch` column in scope. Centralized here so
+     * every chart/stat query (and computeStats/baseQuery) applies the
+     * exact same bounds — this is what was missing before: the Program
+     * filter and the Batch filter used to be applied by two different,
+     * inconsistently-wired `when()` clauses, so combining Program + Year
+     * silently dropped the year bound on some queries. Single choke point
+     * now; every caller below goes through this.
+     */
+    private function applyBatchRange(\Illuminate\Database\Query\Builder $q): \Illuminate\Database\Query\Builder
+    {
+        if ($this->filterBatchFrom !== '') $q->where('a.batch', '>=', $this->filterBatchFrom);
+        if ($this->filterBatchTo   !== '') $q->where('a.batch', '<=', $this->filterBatchTo);
+        return $q;
+    }
+
     private function baseQuery(): \Illuminate\Database\Query\Builder
     {
         $q = DB::table('alumni as a')->whereNull('a.deleted_at');
         if ($this->filterCourse !== '') $q->where('a.course_code', $this->filterCourse);
-        if ($this->filterBatch  !== '') $q->where('a.batch', $this->filterBatch);
+        $this->applyBatchRange($q);
         return $q;
     }
 
@@ -225,7 +269,8 @@ new class extends Component {
     public function buildCharts(): void
     {
         $courseFilter = $this->filterCourse;
-        $batchFilter  = $this->filterBatch;
+        $batchFrom    = $this->filterBatchFrom;
+        $batchTo      = $this->filterBatchTo;
 
         // Status donut — already scoped since it reads from computeStats()
         $this->chartStatusData = json_encode([
@@ -243,7 +288,8 @@ new class extends Component {
             ->whereNull('et.deleted_at')
             ->whereNotNull('et.course_relevance')
             ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
-            ->when($batchFilter  !== '', fn($q) => $q->where('a.batch', $batchFilter))
+            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
+            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
             ->select('et.course_relevance', DB::raw('COUNT(*) as cnt'))
             ->groupBy('et.course_relevance')
             ->get()->keyBy('course_relevance');
@@ -259,12 +305,15 @@ new class extends Component {
             'filters' => ['relevance_yes', 'relevance_partially', 'relevance_no'],
         ]);
 
-        // Batch stacked bar — scoped by Program filter (Batch filter would
-        // just collapse it to a single bar, which is expected/fine)
+        // Batch stacked bar — scoped by Program filter AND the Batch Year
+        // range (a range still shows multiple bars, one per year in range,
+        // instead of collapsing to a single bar the way the old
+        // single-year picker did)
         $batchRows = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
             ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
-            ->when($batchFilter  !== '', fn($q) => $q->where('a.batch', $batchFilter))
+            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
+            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -285,12 +334,13 @@ new class extends Component {
         ]);
 
         // Top Programs — full ranking (by employed + self-employed count),
-        // scoped only by Batch (never by Program — ranking one program
-        // against itself is meaningless). Always computed in full so we
-        // can tell a selected Program exactly where it stands.
+        // scoped only by the Batch Year range (never by Program — ranking
+        // one program against itself is meaningless). Always computed in
+        // full so we can tell a selected Program exactly where it stands.
         $courseRowsAll = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($batchFilter !== '', fn($q) => $q->where('a.batch', $batchFilter))
+            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
+            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
             ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->join('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->whereIn('et.employment_status', ['employed','self_employed'])
@@ -362,12 +412,14 @@ new class extends Component {
         // drops any program with zero working alumni via its INNER JOIN.
         // Working/total counts are left-joined in and default to 0, so a
         // brand-new program with no alumni yet still shows up, ranked
-        // last. Scoped only by Batch, independent of the current Program
-        // filter, so "View All" always shows where every program stands.
+        // last. Scoped only by the Batch Year range, independent of the
+        // current Program filter, so "View All" always shows where every
+        // program stands.
         $topProgramsWorking = $courseRowsAll->pluck('cnt', 'course_code');
         $topProgramsTotals  = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($batchFilter !== '', fn($q) => $q->where('a.batch', $batchFilter))
+            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
+            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
             ->select('a.course_code', DB::raw('COUNT(*) as total'))
             ->groupBy('a.course_code')->pluck('total', 'course_code');
 
@@ -388,11 +440,16 @@ new class extends Component {
             ])->values()
         );
 
-        // Employment rate trend per batch (line chart) — scoped by Program filter
+        // Employment rate trend per batch (line chart) — scoped by Program
+        // filter AND Batch Year range (this is the query that powers
+        // "Employment Breakdown by Batch Year"; both filters now apply
+        // together correctly instead of the year silently being ignored
+        // whenever a Program was also selected)
         $trendRows = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
             ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
-            ->when($batchFilter  !== '', fn($q) => $q->where('a.batch', $batchFilter))
+            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
+            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -441,7 +498,8 @@ new class extends Component {
         return DB::table('alumni as a')
             ->whereNull('a.deleted_at')
             ->when($this->filterCourse !== '', fn($q) => $q->where('a.course_code', $this->filterCourse))
-            ->when($this->filterBatch  !== '', fn($q) => $q->where('a.batch', $this->filterBatch))
+            ->when($this->filterBatchFrom !== '', fn($q) => $q->where('a.batch', '>=', $this->filterBatchFrom))
+            ->when($this->filterBatchTo   !== '', fn($q) => $q->where('a.batch', '<=', $this->filterBatchTo))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -606,7 +664,16 @@ new class extends Component {
     {
         $parts = [];
         if ($this->filterCourse !== '') $parts[] = $this->filterCourse;
-        if ($this->filterBatch  !== '') $parts[] = 'Batch ' . $this->filterBatch;
+
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $parts[] = $this->filterBatchFrom === $this->filterBatchTo
+                ? 'Batch ' . $this->filterBatchFrom
+                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo;
+        } elseif ($this->filterBatchFrom !== '') {
+            $parts[] = 'Batch ' . $this->filterBatchFrom . ' onward';
+        } elseif ($this->filterBatchTo !== '') {
+            $parts[] = 'Up to Batch ' . $this->filterBatchTo;
+        }
 
         return count($parts) ? implode(' · ', $parts) : 'All Programs';
     }
@@ -643,7 +710,7 @@ new class extends Component {
 
     /**
      * Narrows the currently open detail modal by Batch / Program without
-     * closing it or touching the dashboard-level filterBatch/filterCourse.
+     * closing it or touching the dashboard-level filterBatchFrom/filterBatchTo/filterCourse.
      * Mirrors clearFilters() below but scoped to the modal only.
      */
     public function clearModalFilters(): void
@@ -1214,30 +1281,71 @@ new class extends Component {
              filter value can NEVER be mistaken for a click on the
              dashboard cards/charts underneath. ══ --}}
         <div class="emp-filter-bar flex items-center gap-2 mt-3 flex-wrap"
-             wire:loading.class="opacity-60" wire:target="filterCourse,filterBatch"
+             wire:loading.class="opacity-60" wire:target="filterCourse,filterBatchFrom,filterBatchTo"
              @click.stop>
 
             <span class="ar-filter-label text-sm font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
 
-            {{-- Batch Year --}}
+            {{-- Batch Year RANGE — replaces the old single-year picker.
+                 One dropdown, two <select> fields (From / To) plus quick
+                 presets. Both ends inclusive and independently optional;
+                 normalizeBatchRange() on the server auto-swaps them if the
+                 registrar picks From > To so the range is never invalid. --}}
             <div class="ar-dropdown shrink-0"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('filterBatch',val); this.close(); } }"
-                 @click.outside="close()" wire:key="emp-batch-dropdown">
-                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterBatch!=='','open':open }" class="ar-dropdown-trigger">
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; } }"
+                 @click.outside="close()" wire:key="emp-batch-range-dropdown">
+                <button type="button" @click.stop="toggle()"
+                        :class="{ 'has-value': $wire.filterBatchFrom!=='' || $wire.filterBatchTo!=='', 'open':open }"
+                        class="ar-dropdown-trigger">
                     <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
-                    <span>@if($filterBatch){{ $filterBatch }}@else All Batch Years @endif</span>
+                    <span>
+                        @if($filterBatchFrom !== '' && $filterBatchTo !== '')
+                            {{ $filterBatchFrom === $filterBatchTo ? $filterBatchFrom : $filterBatchFrom.'–'.$filterBatchTo }}
+                        @elseif($filterBatchFrom !== '')
+                            {{ $filterBatchFrom }}+
+                        @elseif($filterBatchTo !== '')
+                            Up to {{ $filterBatchTo }}
+                        @else
+                            All Batch Years
+                        @endif
+                    </span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;" @click.stop>
-                    <button type="button" @click.stop="select('')" :class="{'active':$wire.filterBatch===''}" class="ar-dropdown-item">All Batch Years</button>
-                    @foreach($this->batchYears as $year)
-                    <button type="button" @click.stop="select('{{ $year }}')" :class="{'active':$wire.filterBatch==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
-                    @endforeach
+                     class="ar-dropdown-menu p-3" style="display:none;min-width:230px;" @click.stop>
+
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 min-w-0">
+                            <label class="block text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1">From</label>
+                            <select wire:model.live="filterBatchFrom"
+                                    class="w-full text-sm border border-[#E8E0F0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#7A3F91]">
+                                <option value="">Any</option>
+                                @foreach($this->batchYears as $year)
+                                <option value="{{ $year }}">{{ $year }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="pt-4 text-[#999999] shrink-0">–</div>
+                        <div class="flex-1 min-w-0">
+                            <label class="block text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1">To</label>
+                            <select wire:model.live="filterBatchTo"
+                                    class="w-full text-sm border border-[#E8E0F0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#7A3F91]">
+                                <option value="">Any</option>
+                                @foreach($this->batchYears as $year)
+                                <option value="{{ $year }}">{{ $year }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="button" @click.stop="$wire.set('filterBatchFrom',''); $wire.set('filterBatchTo',''); close();"
+                            class="w-full mt-3 text-xs font-semibold text-[#7A3F91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors">
+                        Clear Range
+                    </button>
                 </div>
             </div>
 
@@ -1274,7 +1382,7 @@ new class extends Component {
         </div>
 
         {{-- Filtering progress bar --}}
-        <div class="emp-filter-progress-track" wire:loading wire:target="filterCourse,filterBatch">
+        <div class="emp-filter-progress-track" wire:loading wire:target="filterCourse,filterBatchFrom,filterBatchTo">
             <div class="emp-filter-progress-bar"></div>
         </div>
     </div>
@@ -1283,7 +1391,7 @@ new class extends Component {
      style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
      @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
 <div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
-     wire:loading.class="opacity-60" wire:target="filterCourse,filterBatch" style="transition:opacity .2s ease;">
+     wire:loading.class="opacity-60" wire:target="filterCourse,filterBatchFrom,filterBatchTo" style="transition:opacity .2s ease;">
 
     {{-- ── 5 STAT CARDS — Submitted, Employed, Self-Employed, Unemployed,
          No Record. Employed and Self-Employed are shown as their own
@@ -1312,10 +1420,16 @@ new class extends Component {
             // Alumni Records page (it means "has any record at all"), so
             // it stays as the local detail modal. The other four link
             // straight out to Alumni Records, pre-filtered by status —
-            // and by the current Batch Year filter here, if one is set —
-            // matching how the main Dashboard's legend rows do this.
+            // and by the current Batch Year range here, if set — matching
+            // how the main Dashboard's legend rows do this. Sent as
+            // batch_from/batch_to (Alumni Records reads either param
+            // individually, so a single-ended range still filters there).
             $alumniUrl = $filter !== ''
-                ? route('registrar.alumni', array_filter(['employment_status' => $filter, 'batch' => $filterBatch]))
+                ? route('registrar.alumni', array_filter([
+                    'employment_status' => $filter,
+                    'batch_from'        => $filterBatchFrom,
+                    'batch_to'          => $filterBatchTo,
+                  ]))
                 : null;
         @endphp
         @if($alumniUrl)
@@ -1479,7 +1593,6 @@ new class extends Component {
                 </div>
                 <button type="button" @click="viewAll=true"
                         class="text-xs font-bold shrink-0 px-2 py-1 rounded-lg border border-transparent
-                               opacity-0 group-hover/topprog:opacity-100 focus:opacity-100
                                hover:bg-white hover:border-[#E8E0F0] transition-all duration-150"
                         style="color:#7A3F91;">
                     View All <i class="fas fa-arrow-right" style="font-size:.65rem;"></i>
@@ -1511,7 +1624,7 @@ new class extends Component {
                 @endphp
                 <div wire:click="openModal('employed_all','{{ $filterCourse }}',null)"
                      wire:key="emp-top-programs-rank"
-                     data-tip="View {{ $filterCourse }} Working Alumni"
+                     data-tip="{{ $filterCourse }} — {{ number_format($courseRankCount) }} working alumni"
                      class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3 cursor-pointer">
                     @if($courseRank && $rankTier)
                         <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl leading-none"
@@ -1538,15 +1651,26 @@ new class extends Component {
                  the current Program filter, Batch-scoped only, same data
                  as topProgramsFullData computed server-side). Pure Alpine
                  overlay — no Livewire round-trip, so it opens instantly. ── --}}
+            {{-- ── Mobile: TRUE fullscreen (no backdrop gap, no rounded
+                 corners, no max-width/height caps) below the `sm` (640px)
+                 breakpoint. Desktop/tablet: the original centered dialog,
+                 unchanged, from `sm:` up. Only the outer wrapper and card
+                 sizing classes change here — internal content/list markup
+                 is untouched. ── --}}
             <div x-show="viewAll"
                  x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
                  x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-                 class="fixed inset-0 z-[9998] flex items-center justify-center p-4" style="background:rgba(17,17,17,.45);display:none;"
+                 class="fixed inset-0 z-[9998] flex items-end sm:items-center justify-center p-0 sm:p-4"
+                 style="background:rgba(17,17,17,.45);display:none;"
                  @click.self="viewAll=false" @keydown.escape.window="viewAll=false"
-                 x-data="topProgramsAllList()">
+                 x-data="topProgramsAllList()"
+                 x-init="init()"
+                 x-effect="if (viewAll) refresh()">
                 <div x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
-                     class="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden">
-                    <div class="flex items-center justify-between px-5 py-3.5 shrink-0" style="background:#7A3F91;">
+                     class="bg-white shadow-2xl w-full h-full sm:h-auto sm:max-w-md sm:max-h-[80vh]
+                            rounded-none sm:rounded-2xl flex flex-col overflow-hidden">
+                    <div class="flex items-center justify-between px-5 py-3.5 shrink-0"
+                         style="background:#7A3F91;padding-top:max(0.875rem, env(safe-area-inset-top));">
                         <div class="min-w-0">
                             <h3 class="text-white font-bold text-sm leading-tight">All Programs — Full Ranking</h3>
                             <p class="text-white/60 text-xs mt-0.5">By employed + self-employed alumni</p>
@@ -1567,7 +1691,8 @@ new class extends Component {
                             <div class="flex items-center gap-3 px-5 py-3 hover:bg-[#F5F0FA] transition-colors">
                                 <div class="w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0"
                                      :style="badgeStyle(p.rank)">
-                                    <span x-text="'#'+p.rank"></span>
+                                    <span x-show="p.rank > 3" x-text="'#'+p.rank"></span>
+                                    <span x-show="p.rank <= 3" x-text="medal(p.rank)" style="font-size:1rem;line-height:1;"></span>
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-sm font-bold text-[#111111]" x-text="p.code"></p>
@@ -1580,7 +1705,8 @@ new class extends Component {
                             </div>
                         </template>
                     </div>
-                    <div class="px-5 py-2.5 border-t border-[#E8E0F0] bg-[#F9F7FC] text-xs text-[#333333] text-center shrink-0">
+                    <div class="px-5 py-2.5 border-t border-[#E8E0F0] bg-[#F9F7FC] text-xs text-[#333333] text-center shrink-0"
+                         style="padding-bottom:max(0.625rem, env(safe-area-inset-bottom));">
                         <span x-text="list.length"></span> program(s) ranked
                     </div>
                 </div>
@@ -1594,11 +1720,26 @@ new class extends Component {
             return {
                 list: [],
                 closing: false,
-                init() {
+                // Reads whatever is CURRENTLY in the data bridge. Called both
+                // on first mount (init) and every time the modal is opened
+                // (x-effect watching viewAll in the markup) — x-init only
+                // ever runs once at page load, which is why this modal used
+                // to keep showing whatever Program/Batch scope was active
+                // when the page first loaded, even after switching filters.
+                refresh() {
                     var el = document.getElementById('__emp_chart_data');
-                    if (!el) return;
+                    if (!el) { this.list = []; return; }
                     try { this.list = JSON.parse(el.getAttribute('data-top-programs-full') || '[]'); }
                     catch (e) { this.list = []; }
+                },
+                init() {
+                    this.refresh();
+                },
+                medal(rank) {
+                    if (rank === 1) return '🥇';
+                    if (rank === 2) return '🥈';
+                    if (rank === 3) return '🥉';
+                    return '';
                 },
                 badgeStyle(rank) {
                     if (rank === 1) return 'background:#ECFDF5;color:#059669;border:2px solid #6ee7b7;';
@@ -2110,7 +2251,7 @@ new class extends Component {
             /**
              * The exported report is ALWAYS the current page-level scope —
              * whatever Program + Batch Year filter is selected at the top
-             * of the dashboard (wire.filterCourse / wire.filterBatch).
+             * of the dashboard (wire.filterCourse / wire.filterBatchFrom / wire.filterBatchTo).
              * This is independent from the drill-down detail modal.
              */
             async doExport(type, wire) {
@@ -2153,9 +2294,10 @@ new class extends Component {
                 var self = this;
 
                 var params = new URLSearchParams({
-                    type:    type,
-                    program: (wire && wire.filterCourse) || '',
-                    batch:   (wire && wire.filterBatch)  || '',
+                    type:       type,
+                    program:    (wire && wire.filterCourse)    || '',
+                    batch_from: (wire && wire.filterBatchFrom) || '',
+                    batch_to:   (wire && wire.filterBatchTo)   || '',
                 });
                 var url = '/registrar/employment-tracking/export?' + params.toString();
 
@@ -2900,20 +3042,21 @@ new class extends Component {
         if (window.Livewire) { hookChartsRefreshEvent(); }
         else { document.addEventListener('livewire:initialized', hookChartsRefreshEvent); }
 
-        // Kept as a secondary safety net in case the dispatched-event path
-        // above ever misses a beat — harmless no-op re-render otherwise.
-        function hookLivewire() {
-            if (!window.Livewire) return;
-            Livewire.hook('commit', function(payload) {
-                var succeed = payload.succeed || function(cb){cb({});};
-                if (typeof succeed === 'function') {
-                    succeed(function(){ requestAnimationFrame(initAllCharts); });
-                }
-            });
-        }
-
-        if (window.Livewire) { hookLivewire(); }
-        else { document.addEventListener('livewire:initialized', hookLivewire); }
+        // ⚠️ REMOVED: the old generic Livewire.hook('commit', ...) fallback
+        // that also called initAllCharts() on every single commit. Having
+        // BOTH that hook and the 'emp-charts-refresh' listener above meant
+        // TWO re-renders raced each other after every filter change. Since
+        // buildTrendLine()/buildBatchBar() write to the shared allTrendData/
+        // allBatchData/trendPageIndex/batchPageIndex globals, whichever of
+        // the two races finished LAST silently won — and depending on exact
+        // timing that could be the one holding the OLDER data, which is
+        // exactly what caused the Employment Rate Trend chart to keep
+        // showing old batch-year labels (e.g. still 2023/2025/2026) right
+        // after switching the Batch Year filter to 2027, even though the
+        // stat cards above it (plain server-rendered Blade) already updated
+        // correctly. The explicit 'emp-charts-refresh' dispatch is fired by
+        // PHP every time computeStats()+buildCharts() run, so it's a
+        // complete, reliable, single source of truth — no fallback needed.
     });
 
 })();

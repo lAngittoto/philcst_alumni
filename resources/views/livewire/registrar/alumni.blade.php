@@ -1839,7 +1839,7 @@ compressImage(file, maxW, maxH, quality) {
                             <p class="ar-field-value">{{ $dob }}</p>
                         </div>
                         <div class="ar-cell">
-                            <p class="ar-field-label">Program Name</p>
+                            <p class="ar-field-label">Program</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['course_name'] ?? $viewingProfile['course_code'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
