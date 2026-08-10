@@ -11,20 +11,25 @@ new class extends Component {
 
     use WithPagination;
 
-    // ── Filters — PAGE-LEVEL now. filterCourse (Program) + filterBatchFrom/
-    //    filterBatchTo (Batch Year RANGE) scope EVERYTHING: stat cards, all
-    //    charts, the Program Breakdown table, AND the exported summary
-    //    report. A range (e.g. 2000–2025) replaces the old single-year
-    //    picker so the registrar can look at a whole era at once instead
-    //    of one batch at a time. Both bounds inclusive; either (or both)
-    //    may be blank meaning "unbounded on that side". ──────────────────
+    // ── Filters — PAGE-LEVEL now. filterCourse (Program, MULTI-SELECT) +
+    //    filterBatchFrom/filterBatchTo (Batch Year RANGE) scope EVERYTHING:
+    //    stat cards, all charts, the Program Breakdown table, AND the
+    //    exported summary report.
+    //
+    //    Batch range REQUIRES both bounds — if only From or only To is
+    //    set, the range is treated as incomplete and is NOT applied to any
+    //    query (registrar must finish picking both ends before it filters
+    //    anything). Once both are set, both bounds are inclusive.
+    //
+    //    filterCourse is now an array of program codes so the registrar can
+    //    scope to several programs at once instead of exactly one. ────────
     public string $search          = '';
     public string $filterStatus    = '';
     public string $filterLocation  = '';
     public string $filterRelevance = '';
     public string $filterBatchFrom = '';
     public string $filterBatchTo   = '';
-    public string $filterCourse    = '';
+    public array  $filterCourse    = [];
     public string $filterDept      = '';
     public string $sortBy          = 'a.last_name';
     public string $sortDir         = 'asc';
@@ -60,12 +65,16 @@ new class extends Component {
     public string $topProgramsFullData = '[]';
     public string $chartTrendData     = '{}';
 
-    // ── Top Programs ranking (populated only when a single Program is
-    //    selected via $filterCourse — used to render the "#6 of 12
-    //    programs" rank card instead of the horizontal bar chart) ──────────
+    // ── Top Programs ranking. When exactly ONE program is selected via
+    //    $filterCourse, these back the "#6 of 12 programs" rank card. When
+    //    2+ programs are selected, the card instead shows a mini-ranking
+    //    of just the selected programs, built from $topProgramsSelected
+    //    below — courseRank/courseRankTotal/courseRankCount are unused in
+    //    that case. ─────────────────────────────────────────────────────
     public ?int $courseRank      = null;
     public ?int $courseRankTotal = null;
     public int  $courseRankCount = 0;
+    public string $topProgramsSelectedData = '[]';
 
     // ── Allowed sort columns ──────────────────────────────────────────────────
     #[Locked]
@@ -106,6 +115,40 @@ new class extends Component {
      */
     public function updatedFilterCourse(): void
     {
+        // Dedupe + drop empty entries — the checkbox list can only ever
+        // toggle real codes on/off, but keep this defensive in case the
+        // array is ever manipulated another way.
+        $this->filterCourse = array_values(array_unique(array_filter(
+            $this->filterCourse,
+            fn ($c) => $c !== '' && $c !== null
+        )));
+        $this->closeAnyModal();
+        $this->refreshDashboard();
+    }
+
+    /**
+     * Toggles a single program code in/out of the multi-select filter —
+     * bound directly to each checkbox item in the Program dropdown.
+     */
+    public function toggleFilterCourse(string $code): void
+    {
+        if (in_array($code, $this->filterCourse, true)) {
+            $this->filterCourse = array_values(array_diff($this->filterCourse, [$code]));
+        } else {
+            $this->filterCourse[] = $code;
+        }
+        $this->closeAnyModal();
+        $this->refreshDashboard();
+    }
+
+    /**
+     * "All Program Codes" inside the Program dropdown — clears ONLY the
+     * program selection, unlike clearFilters() which also wipes the Batch
+     * Year range.
+     */
+    public function clearFilterCourse(): void
+    {
+        $this->filterCourse = [];
         $this->closeAnyModal();
         $this->refreshDashboard();
     }
@@ -170,7 +213,7 @@ new class extends Component {
     public function clearFilters(): void
     {
         $this->closeAnyModal();
-        $this->filterCourse    = '';
+        $this->filterCourse    = [];
         $this->filterBatchFrom = '';
         $this->filterBatchTo   = '';
         $this->refreshDashboard();
@@ -192,6 +235,14 @@ new class extends Component {
         $this->computeStats();
         $this->buildCharts();
         unset($this->courseAnalytics);
+        // ── Without this unset, the "Report will include" summary (and the
+        // filter-scope badge next to Reset) could keep showing the PREVIOUS
+        // filter's text — e.g. still "All Programs" right after picking
+        // Batch 2027 — because #[Computed] memoizes this method's return
+        // value for the lifetime of the component instance. It's cheap to
+        // recompute, so just always drop the memoized value here alongside
+        // every other filter-dependent piece of state. ────────────────────
+        unset($this->activeReportFilterSummary);
         $this->dispatch('emp-charts-refresh');
     }
 
@@ -223,18 +274,32 @@ new class extends Component {
      * inconsistently-wired `when()` clauses, so combining Program + Year
      * silently dropped the year bound on some queries. Single choke point
      * now; every caller below goes through this.
+     *
+     * RANGE IS ALL-OR-NOTHING: the filter only takes effect once BOTH
+     * From and To have a value. A lone From (or lone To) is treated as an
+     * incomplete range and is intentionally NOT applied to the query —
+     * previously a lone bound quietly filtered as open-ended, which made
+     * the dashboard look "broken" while the registrar was still in the
+     * middle of picking a range.
      */
+    private function batchRangeIsComplete(): bool
+    {
+        return $this->filterBatchFrom !== '' && $this->filterBatchTo !== '';
+    }
+
     private function applyBatchRange(\Illuminate\Database\Query\Builder $q): \Illuminate\Database\Query\Builder
     {
-        if ($this->filterBatchFrom !== '') $q->where('a.batch', '>=', $this->filterBatchFrom);
-        if ($this->filterBatchTo   !== '') $q->where('a.batch', '<=', $this->filterBatchTo);
+        if ($this->batchRangeIsComplete()) {
+            $q->where('a.batch', '>=', $this->filterBatchFrom)
+              ->where('a.batch', '<=', $this->filterBatchTo);
+        }
         return $q;
     }
 
     private function baseQuery(): \Illuminate\Database\Query\Builder
     {
         $q = DB::table('alumni as a')->whereNull('a.deleted_at');
-        if ($this->filterCourse !== '') $q->where('a.course_code', $this->filterCourse);
+        if (!empty($this->filterCourse)) $q->whereIn('a.course_code', $this->filterCourse);
         $this->applyBatchRange($q);
         return $q;
     }
@@ -268,9 +333,10 @@ new class extends Component {
 
     public function buildCharts(): void
     {
-        $courseFilter = $this->filterCourse;
-        $batchFrom    = $this->filterBatchFrom;
-        $batchTo      = $this->filterBatchTo;
+        $courseFilter  = $this->filterCourse;
+        $batchFrom     = $this->filterBatchFrom;
+        $batchTo       = $this->filterBatchTo;
+        $rangeComplete = $this->batchRangeIsComplete();
 
         // Status donut — already scoped since it reads from computeStats()
         $this->chartStatusData = json_encode([
@@ -287,9 +353,8 @@ new class extends Component {
             ->whereNull('a.deleted_at')
             ->whereNull('et.deleted_at')
             ->whereNotNull('et.course_relevance')
-            ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
-            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
-            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
+            ->when(!empty($courseFilter), fn($q) => $q->whereIn('a.course_code', $courseFilter))
+            ->when($rangeComplete, fn($q) => $q->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo))
             ->select('et.course_relevance', DB::raw('COUNT(*) as cnt'))
             ->groupBy('et.course_relevance')
             ->get()->keyBy('course_relevance');
@@ -311,9 +376,8 @@ new class extends Component {
         // single-year picker did)
         $batchRows = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
-            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
-            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
+            ->when(!empty($courseFilter), fn($q) => $q->whereIn('a.course_code', $courseFilter))
+            ->when($rangeComplete, fn($q) => $q->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -335,101 +399,60 @@ new class extends Component {
 
         // Top Programs — full ranking (by employed + self-employed count),
         // scoped only by the Batch Year range (never by Program — ranking
-        // one program against itself is meaningless). Always computed in
-        // full so we can tell a selected Program exactly where it stands.
+        // one program against itself is meaningless).
+        //
+        // IMPORTANT: this MUST be built from the same full-catalog dataset
+        // as the "View All" list below (topProgramsAll), not from a
+        // separate INNER-JOIN-only query. A program with 0 working alumni
+        // legitimately still HAS a rank (it's simply ranked last, or tied
+        // last) — it used to fall through to "no data" here purely because
+        // the old $courseRowsAll INNER JOIN drops any course with zero
+        // matching employment rows, while "View All" (LEFT JOIN, full
+        // course catalog) kept it and correctly showed e.g. "#3". Both
+        // views must agree, so we compute the full ranked list ONCE and
+        // both the card and the modal read from it.
         $courseRowsAll = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
-            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
+            ->when($rangeComplete, fn($q) => $q->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo))
             ->joinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->join('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->whereIn('et.employment_status', ['employed','self_employed'])
             ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
-            ->groupBy('a.course_code')->orderByDesc('cnt')->get()
-            ->values();
+            ->groupBy('a.course_code')->get();
 
-        if ($courseFilter === '') {
-            // No Program selected — rank ALL programs by employed/working
-            // count (courseRowsAll above already covers every program),
-            // but only surface the top 3 here as the horizontal bar.
-            $courseRows = $courseRowsAll->take(3);
-
-            $this->chartCourseData = json_encode([
-                'labels' => $courseRows->pluck('course_code'),
-                'data'   => $courseRows->pluck('cnt'),
-            ]);
-
-            $this->courseRank      = null;
-            $this->courseRankTotal = null;
-            $this->courseRankCount = 0;
-        } else {
-            // A single Program is selected — the horizontal bar is replaced
-            // by a rank card in the Blade view (e.g. "#6 of 12 programs"),
-            // so no chart data is needed here.
-            $this->chartCourseData = json_encode(['labels' => [], 'data' => []]);
-
-            // Case-insensitive, trimmed match. The Program dropdown's values
-            // come from the `courses` table, but `alumni.course_code` is
-            // free-entered data — a stray space or different casing (e.g.
-            // "Bsit" vs "BSIT") still matches fine in the SQL filter above
-            // (MySQL string comparison is case-insensitive by default), but
-            // a strict PHP === comparison here would silently fail and make
-            // a Program that clearly has data show up as "no data" in the
-            // rank card. Normalize both sides before comparing so the two
-            // stay in sync.
-            $needle    = mb_strtolower(trim($courseFilter));
-            $rankIndex = $courseRowsAll->search(fn($r) => mb_strtolower(trim((string) $r->course_code)) === $needle);
-
-            // Ground-truth working count for THIS Program, taken from the
-            // already course-scoped computeStats() run above (same filter,
-            // same tables) — this can never disagree with the "Working"
-            // stat card, unlike re-deriving it from $courseRowsAll where a
-            // stray casing/whitespace mismatch in the free-typed
-            // `alumni.course_code` column could make the row fail to match
-            // and silently show "no data" even though alumni are working.
-            $groundTruthWorking = $this->totalEmployed + $this->totalSelf;
-
-            $this->courseRankTotal = $courseRowsAll->count();
-            $this->courseRankCount = $groundTruthWorking;
-
-            if ($rankIndex !== false) {
-                $this->courseRank = $rankIndex + 1;
-            } elseif ($groundTruthWorking > 0) {
-                // The stats clearly show working alumni for this Program,
-                // but the ranking list (matched by course_code) didn't pick
-                // it up — rather than showing a misleading "no data" card,
-                // still rank it. Worst case: it slots in last place.
-                $this->courseRankTotal = $courseRowsAll->count() + 1;
-                $this->courseRank      = $this->courseRankTotal;
-            } else {
-                $this->courseRank = null;
-            }
-        }
-
-        // Top Programs — "View All" full ranking list (badge #1/#2/#3 etc.
-        // in the modal). Starts from EVERY program in courseMap (the full
-        // course catalog) — not just courseRowsAll above, which silently
-        // drops any program with zero working alumni via its INNER JOIN.
-        // Working/total counts are left-joined in and default to 0, so a
-        // brand-new program with no alumni yet still shows up, ranked
-        // last. Scoped only by the Batch Year range, independent of the
-        // current Program filter, so "View All" always shows where every
-        // program stands.
+        // Full catalog ranking — every program in courseMap gets a row and
+        // a rank, working alumni or not. This is the ONE ranked list used
+        // by both the "Top Programs" card AND the "View All" modal, so the
+        // two can never disagree again.
         $topProgramsWorking = $courseRowsAll->pluck('cnt', 'course_code');
         $topProgramsTotals  = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
-            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
+            ->when($rangeComplete, fn($q) => $q->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo))
             ->select('a.course_code', DB::raw('COUNT(*) as total'))
             ->groupBy('a.course_code')->pluck('total', 'course_code');
 
+        // Case-insensitive, trimmed keying — `alumni.course_code` is
+        // free-typed data, so "Bsit" and "BSIT" must land in the same
+        // bucket instead of splitting into two separate rows.
         $topProgramsAll = collect(array_keys($this->courseMap))
-            ->map(fn($code) => [
-                'code'    => $code,
-                'working' => (int) ($topProgramsWorking[$code] ?? 0),
-                'total'   => (int) ($topProgramsTotals[$code]  ?? 0),
-            ])
-            ->sortByDesc('working')->values();
+            ->map(function ($code) use ($topProgramsWorking, $topProgramsTotals) {
+                $needle = mb_strtolower(trim($code));
+                $working = 0;
+                foreach ($topProgramsWorking as $rowCode => $cnt) {
+                    if (mb_strtolower(trim((string) $rowCode)) === $needle) { $working = (int) $cnt; break; }
+                }
+                $total = 0;
+                foreach ($topProgramsTotals as $rowCode => $cnt) {
+                    if (mb_strtolower(trim((string) $rowCode)) === $needle) { $total = (int) $cnt; break; }
+                }
+                return ['code' => $code, 'working' => $working, 'total' => $total];
+            })
+            // Rank by working DESC first (matches the "by employed +
+            // self-employed" label), then by total DESC as a tiebreaker
+            // so two programs both at 0 working still land in a stable,
+            // sensible order instead of an arbitrary one.
+            ->sortByDesc(fn($row) => [$row['working'], $row['total']])
+            ->values();
 
         $this->topProgramsFullData = json_encode(
             $topProgramsAll->map(fn($row, $idx) => [
@@ -440,6 +463,72 @@ new class extends Component {
             ])->values()
         );
 
+        $selectedCount = count($courseFilter);
+
+        if ($selectedCount === 0) {
+            // No Program selected — show the top 3 as the horizontal bar.
+            $courseRows = $courseRowsAll->sortByDesc('cnt')->take(3)->values();
+
+            $this->chartCourseData = json_encode([
+                'labels' => $courseRows->pluck('course_code'),
+                'data'   => $courseRows->pluck('cnt'),
+            ]);
+
+            $this->courseRank            = null;
+            $this->courseRankTotal       = null;
+            $this->courseRankCount       = 0;
+            $this->topProgramsSelectedData = '[]';
+        } elseif ($selectedCount === 1) {
+            // Exactly one Program selected — the horizontal bar is replaced
+            // by a rank card in the Blade view (e.g. "#3 of 8 programs").
+            // Pulled straight from topProgramsAll above — the exact same
+            // list "View All" renders — so a program with 0 working alumni
+            // still gets its real rank instead of falling back to a "no
+            // data" empty state.
+            $this->chartCourseData = json_encode(['labels' => [], 'data' => []]);
+            $this->topProgramsSelectedData = '[]';
+
+            $needle    = mb_strtolower(trim($courseFilter[0]));
+            $rankIndex = $topProgramsAll->search(fn($r) => mb_strtolower(trim((string) $r['code'])) === $needle);
+
+            if ($rankIndex !== false) {
+                $matched = $topProgramsAll[$rankIndex];
+                $this->courseRank      = $rankIndex + 1;
+                $this->courseRankTotal = $topProgramsAll->count();
+                $this->courseRankCount = $matched['working'];
+            } else {
+                // Program filter value doesn't exist in the course catalog
+                // at all (e.g. stale/renamed course code) — genuinely no
+                // rank to show.
+                $this->courseRank      = null;
+                $this->courseRankTotal = null;
+                $this->courseRankCount = 0;
+            }
+        } else {
+            // 2+ Programs selected — no single rank makes sense, so the
+            // card instead shows a mini-ranking board of just the selected
+            // programs (1st/2nd/3rd... among each other), same ordering
+            // rule as the full ranking (working DESC, then total DESC).
+            $this->chartCourseData = json_encode(['labels' => [], 'data' => []]);
+            $this->courseRank      = null;
+            $this->courseRankTotal = null;
+            $this->courseRankCount = 0;
+
+            $needles = collect($courseFilter)->map(fn($c) => mb_strtolower(trim($c)));
+            $selectedRows = $topProgramsAll
+                ->filter(fn($r) => $needles->contains(mb_strtolower(trim((string) $r['code']))))
+                ->values();
+
+            $this->topProgramsSelectedData = json_encode(
+                $selectedRows->map(fn($row, $idx) => [
+                    'rank'    => $idx + 1,
+                    'code'    => $row['code'],
+                    'working' => $row['working'],
+                    'total'   => $row['total'],
+                ])->values()
+            );
+        }
+
         // Employment rate trend per batch (line chart) — scoped by Program
         // filter AND Batch Year range (this is the query that powers
         // "Employment Breakdown by Batch Year"; both filters now apply
@@ -447,9 +536,8 @@ new class extends Component {
         // whenever a Program was also selected)
         $trendRows = DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($courseFilter !== '', fn($q) => $q->where('a.course_code', $courseFilter))
-            ->when($batchFrom !== '', fn($q) => $q->where('a.batch', '>=', $batchFrom))
-            ->when($batchTo   !== '', fn($q) => $q->where('a.batch', '<=', $batchTo))
+            ->when(!empty($courseFilter), fn($q) => $q->whereIn('a.course_code', $courseFilter))
+            ->when($rangeComplete, fn($q) => $q->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -497,9 +585,8 @@ new class extends Component {
     {
         return DB::table('alumni as a')
             ->whereNull('a.deleted_at')
-            ->when($this->filterCourse !== '', fn($q) => $q->where('a.course_code', $this->filterCourse))
-            ->when($this->filterBatchFrom !== '', fn($q) => $q->where('a.batch', '>=', $this->filterBatchFrom))
-            ->when($this->filterBatchTo   !== '', fn($q) => $q->where('a.batch', '<=', $this->filterBatchTo))
+            ->when(!empty($this->filterCourse), fn($q) => $q->whereIn('a.course_code', $this->filterCourse))
+            ->when($this->batchRangeIsComplete(), fn($q) => $q->where('a.batch', '>=', $this->filterBatchFrom)->where('a.batch', '<=', $this->filterBatchTo))
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select(
@@ -655,27 +742,43 @@ new class extends Component {
 
     /**
      * Human-readable summary of the CURRENT PAGE-LEVEL filter (Program +
-     * Batch Year) — used inside the Generate Reports dropdown message.
-     * This is exactly what gets exported now (a scoped summary report),
-     * independent of whatever drill-down modal happens to be open.
+     * Batch Year) — used to build the actual exported PDF/Excel/Print
+     * report's "Report scope" line ($filters, passed straight through to
+     * the print/export view). Always includes BOTH a Batch segment and a
+     * Programs segment — "All Batch Years" / "All Programs" are shown
+     * explicitly rather than silently omitted when nothing is picked, so
+     * the exported report's scope line never looks like it's missing
+     * something. (The live "Report will include" preview inside the
+     * Generate Reports dropdown mirrors this exact logic client-side in
+     * Alpine, since that panel sits inside a wire:ignore block.)
      */
     #[Computed]
     public function activeReportFilterSummary(): string
     {
         $parts = [];
-        if ($this->filterCourse !== '') $parts[] = $this->filterCourse;
 
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+        if ($this->batchRangeIsComplete()) {
             $parts[] = $this->filterBatchFrom === $this->filterBatchTo
                 ? 'Batch ' . $this->filterBatchFrom
                 : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo;
-        } elseif ($this->filterBatchFrom !== '') {
-            $parts[] = 'Batch ' . $this->filterBatchFrom . ' onward';
-        } elseif ($this->filterBatchTo !== '') {
-            $parts[] = 'Up to Batch ' . $this->filterBatchTo;
+        } elseif ($this->filterBatchFrom !== '' || $this->filterBatchTo !== '') {
+            // One end picked, the other still blank — range isn't applied
+            // to the query yet, so say so instead of implying a scope that
+            // isn't actually in effect.
+            $parts[] = 'Batch range incomplete (not yet applied)';
+        } else {
+            $parts[] = 'All Batch Years';
         }
 
-        return count($parts) ? implode(' · ', $parts) : 'All Programs';
+        if (count($this->filterCourse) === 1) {
+            $parts[] = $this->filterCourse[0];
+        } elseif (count($this->filterCourse) > 1) {
+            $parts[] = count($this->filterCourse) . ' Programs';
+        } else {
+            $parts[] = 'All Programs';
+        }
+
+        return implode(' · ', $parts);
     }
 
     public function openModal(string $filter = '', ?int $batch = null, string $course = ''): void
@@ -1191,7 +1294,8 @@ new class extends Component {
      data-batch="{{ $chartBatchData }}"
      data-course="{{ $chartCourseData }}"
      data-trend="{{ $chartTrendData }}"
-     data-top-programs-full="{{ $topProgramsFullData }}">
+     data-top-programs-full="{{ $topProgramsFullData }}"
+     data-top-programs-selected="{{ $topProgramsSelectedData }}">
 </div>
 
 {{-- ═══════════════════════════════════════════════════════════
@@ -1216,9 +1320,52 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- ══ GENERATE REPORTS BUTTON ══ --}}
+            {{-- ══ GENERATE REPORTS BUTTON ══
+                 wire:ignore on this whole block is intentional — it stops
+                 Livewire from morphing the Alpine dropdown/transition state
+                 out from under itself on every commit. BUT that also means
+                 Livewire will NEVER touch the Blade `{{ }}` interpolations
+                 in here again after first paint — which is exactly why
+                 "Report will include" used to keep showing "All Programs" /
+                 the old alumni count forever after the very first filter
+                 change, no matter what Program/Batch was picked afterward.
+                 Fix: don't interpolate Blade values into this subtree at
+                 all — read $wire.filterCourse / $wire.filterBatchFrom /
+                 $wire.filterBatchTo / $wire.totalAlumni reactively via
+                 Alpine instead, mirroring activeReportFilterSummary()'s
+                 logic client-side so it updates live without needing
+                 Livewire to re-render this block. ── --}}
             <div class="relative shrink-0" wire:ignore
-                 x-data
+                 x-data="{
+                    reportSummary() {
+                        var course = $wire.filterCourse || [];
+                        var from   = $wire.filterBatchFrom || '';
+                        var to     = $wire.filterBatchTo   || '';
+                        var parts  = [];
+                        // Batch segment — only added once the range is
+                        // actually complete (a lone From/To isn't applied
+                        // to the query yet, so don't claim it's in scope).
+                        if (from !== '' && to !== '') {
+                            parts.push('Batch ' + (from === to ? from : from + '–' + to));
+                        } else if (from !== '' || to !== '') {
+                            parts.push('Batch range incomplete (not yet applied)');
+                        } else {
+                            parts.push('All Batch Years');
+                        }
+                        // Programs segment — ALWAYS shown, same as the
+                        // filter bar's own 'All Program Codes' default, so
+                        // the report scope never silently drops this line
+                        // just because nothing is selected.
+                        if (course.length === 1) {
+                            parts.push(course[0]);
+                        } else if (course.length > 1) {
+                            parts.push(course.length + ' Programs');
+                        } else {
+                            parts.push('All Programs');
+                        }
+                        return parts.join(' · ');
+                    }
+                 }"
                  x-init="window.__empEnsureReportStore && window.__empEnsureReportStore()"
                  @click.outside="$store.empReport.open=false" wire:key="emp-report-dropdown">
                 <button type="button" @click.stop="$store.empReport.toggle()" class="ar-report-btn"
@@ -1236,8 +1383,8 @@ new class extends Component {
 
                     <div class="ar-report-menu-message">
                         <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
-                        <span class="txt">{{ $this->activeReportFilterSummary }}</span>
-                        <span class="cnt">{{ number_format($totalAlumni) }} alumni in this scope</span>
+                        <span class="txt" x-text="reportSummary()"></span>
+                        <span class="cnt" x-text="Number($wire.totalAlumni || 0).toLocaleString() + ' alumni in this scope'"></span>
                     </div>
 
                     <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
@@ -1281,32 +1428,47 @@ new class extends Component {
              filter value can NEVER be mistaken for a click on the
              dashboard cards/charts underneath. ══ --}}
         <div class="emp-filter-bar flex items-center gap-2 mt-3 flex-wrap"
-             wire:loading.class="opacity-60" wire:target="filterCourse,filterBatchFrom,filterBatchTo"
+             wire:loading.class="opacity-60" wire:target="filterCourse,toggleFilterCourse,clearFilterCourse,filterBatchFrom,filterBatchTo"
              @click.stop>
 
             <span class="ar-filter-label text-sm font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
 
-            {{-- Batch Year RANGE — replaces the old single-year picker.
-                 One dropdown, two <select> fields (From / To) plus quick
-                 presets. Both ends inclusive and independently optional;
-                 normalizeBatchRange() on the server auto-swaps them if the
-                 registrar picks From > To so the range is never invalid. --}}
+            {{-- Batch Year — back to the original single-select list of
+                 years by default (click a year, done, like before), PLUS
+                 an "Add Range" option at the bottom of the same dropdown.
+                 Clicking it swaps the list view for From/To selects so a
+                 range (e.g. 2000–2025) is opt-in rather than always-on.
+
+                 RANGE IS ALL-OR-NOTHING: picking only From (or only To)
+                 does NOT filter anything yet — the trigger label makes
+                 this explicit ("2020 → pick an end year") instead of
+                 quietly looking like a working filter while the query is
+                 still unscoped server-side. --}}
             <div class="ar-dropdown shrink-0"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; } }"
-                 @click.outside="close()" wire:key="emp-batch-range-dropdown">
+                 x-data="{
+                    open:false,
+                    rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
+                    toggle(){ this.open=!this.open; },
+                    close(){ this.open=false; },
+                    selectYear(val){ $wire.set('filterBatchFrom', val); $wire.set('filterBatchTo', val); this.close(); },
+                    clearYear(){ $wire.set('filterBatchFrom',''); $wire.set('filterBatchTo',''); this.close(); }
+                 }"
+                 @click.outside="close()" wire:key="emp-batch-dropdown">
                 <button type="button" @click.stop="toggle()"
-                        :class="{ 'has-value': $wire.filterBatchFrom!=='' || $wire.filterBatchTo!=='', 'open':open }"
+                        :class="{ 'has-value': $wire.filterBatchFrom!=='' && $wire.filterBatchTo!=='', 'open':open }"
                         class="ar-dropdown-trigger">
                     <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
                     <span>
-                        @if($filterBatchFrom !== '' && $filterBatchTo !== '')
-                            {{ $filterBatchFrom === $filterBatchTo ? $filterBatchFrom : $filterBatchFrom.'–'.$filterBatchTo }}
+                        @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
+                            Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
+                        @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
+                            Batch {{ $filterBatchFrom }}
                         @elseif($filterBatchFrom !== '')
-                            {{ $filterBatchFrom }}+
+                            Batch {{ $filterBatchFrom }} → pick end year
                         @elseif($filterBatchTo !== '')
-                            Up to {{ $filterBatchTo }}
+                            pick start year → Batch {{ $filterBatchTo }}
                         @else
                             All Batch Years
                         @endif
@@ -1316,55 +1478,108 @@ new class extends Component {
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu p-3" style="display:none;min-width:230px;" @click.stop>
+                     class="ar-dropdown-menu" style="display:none;min-width:190px;" @click.stop>
 
-                    <div class="flex items-center gap-2">
-                        <div class="flex-1 min-w-0">
-                            <label class="block text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1">From</label>
-                            <select wire:model.live="filterBatchFrom"
-                                    class="w-full text-sm border border-[#E8E0F0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#7A3F91]">
-                                <option value="">Any</option>
-                                @foreach($this->batchYears as $year)
-                                <option value="{{ $year }}">{{ $year }}</option>
-                                @endforeach
-                            </select>
+                    {{-- Default view: plain year list, exactly like before --}}
+                    <template x-if="!rangeMode">
+                        <div>
+                            <button type="button" @click.stop="clearYear()" :class="{'active':$wire.filterBatchFrom==='' && $wire.filterBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
+                            @foreach($this->batchYears as $year)
+                            <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.filterBatchFrom==='{{ $year }}' && $wire.filterBatchTo==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                            @endforeach
+                            <div class="h-px bg-[#E8E0F0] my-1"></div>
+                            <button type="button" @click.stop="rangeMode=true"
+                                    class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
+                                <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                            </button>
                         </div>
-                        <div class="pt-4 text-[#999999] shrink-0">–</div>
-                        <div class="flex-1 min-w-0">
-                            <label class="block text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1">To</label>
-                            <select wire:model.live="filterBatchTo"
-                                    class="w-full text-sm border border-[#E8E0F0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#7A3F91]">
-                                <option value="">Any</option>
-                                @foreach($this->batchYears as $year)
-                                <option value="{{ $year }}">{{ $year }}</option>
-                                @endforeach
-                            </select>
-                        </div>
-                    </div>
+                    </template>
 
-                    <button type="button" @click.stop="$wire.set('filterBatchFrom',''); $wire.set('filterBatchTo',''); close();"
-                            class="w-full mt-3 text-xs font-semibold text-[#7A3F91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors">
-                        Clear Range
-                    </button>
+                    {{-- Range view: opt-in, shown only after "Add Range" is
+                         clicked. From/To selects; normalizeBatchRange() on
+                         the server auto-swaps them if From ends up later
+                         than To. --}}
+                    <template x-if="rangeMode">
+                        <div class="p-3">
+                            <div class="flex items-center gap-2">
+                                <div class="flex-1 min-w-0">
+                                    <label class="block text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1">From</label>
+                                    <select wire:model.live="filterBatchFrom"
+                                            class="w-full text-sm border border-[#E8E0F0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#7A3F91]">
+                                        <option value="">Any</option>
+                                        @foreach($this->batchYears as $year)
+                                        <option value="{{ $year }}">{{ $year }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="pt-4 text-[#999999] shrink-0">–</div>
+                                <div class="flex-1 min-w-0">
+                                    <label class="block text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1">To</label>
+                                    <select wire:model.live="filterBatchTo"
+                                            class="w-full text-sm border border-[#E8E0F0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#7A3F91]">
+                                        <option value="">Any</option>
+                                        @foreach($this->batchYears as $year)
+                                        <option value="{{ $year }}">{{ $year }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mt-3">
+                                <button type="button" @click.stop="rangeMode=false"
+                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                    Back to List
+                                </button>
+                                <button type="button" @click.stop="clearYear(); rangeMode=false;"
+                                        class="flex-1 text-xs font-semibold text-[#7A3F91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </div>
 
-            {{-- Program Code --}}
+            {{-- Program Code — MULTI-SELECT. Checking a box toggles that
+                 program in/out of filterCourse via toggleFilterCourse();
+                 the dropdown stays open across clicks (no auto-close) so
+                 the registrar can check several programs in one go. The
+                 check indicator sits on the RIGHT of each row (Messenger
+                 destination-picker style) instead of a leading checkbox,
+                 so the program code itself is the first thing read. The
+                 trigger label shows the count once 2+ are picked so the
+                 bar doesn't overflow with every selected code. --}}
             <div class="ar-dropdown shrink-0"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('filterCourse',val); this.close(); } }"
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; } }"
                  @click.outside="close()" wire:key="emp-course-dropdown">
-                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterCourse!=='','open':open }" class="ar-dropdown-trigger">
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterCourse.length>0,'open':open }" class="ar-dropdown-trigger">
                     <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
-                    <span>@if($filterCourse){{ $filterCourse }}@else All Program Codes @endif</span>
+                    <span>
+                        @if(count($filterCourse) === 0)
+                            All Program Codes
+                        @elseif(count($filterCourse) === 1)
+                            {{ $filterCourse[0] }}
+                        @else
+                            {{ count($filterCourse) }} Programs
+                        @endif
+                    </span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;" @click.stop>
-                    <button type="button" @click.stop="select('')" :class="{'active':$wire.filterCourse===''}" class="ar-dropdown-item">All Program Codes</button>
+                    <button type="button" wire:click="clearFilterCourse" :class="{'active':$wire.filterCourse.length===0}" class="ar-dropdown-item">All Program Codes</button>
+                    <div class="h-px bg-[#E8E0F0] my-1"></div>
                     @foreach($this->courseMap as $code => $name)
-                    <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.filterCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $code }}</button>
+                    <button type="button" wire:click="toggleFilterCourse('{{ $code }}')"
+                            :class="{'active': $wire.filterCourse.includes('{{ $code }}')}"
+                            class="ar-dropdown-item flex items-center justify-between gap-2">
+                        <span>{{ $code }}</span>
+                        <span class="w-3.5 h-3.5 rounded-full border shrink-0 flex items-center justify-center"
+                              :style="$wire.filterCourse.includes('{{ $code }}') ? 'background:#7A3F91;border-color:#7A3F91;' : 'border-color:#D4C5E8;'">
+                            <i class="fas fa-check" style="font-size:8px;color:#fff;" x-show="$wire.filterCourse.includes('{{ $code }}')"></i>
+                        </span>
+                    </button>
                     @endforeach
                 </div>
             </div>
@@ -1379,10 +1594,39 @@ new class extends Component {
                 <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearFilters"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
+
+            {{-- Active-scope pill — same treatment as Alumni Records' "Batch
+                 2027 — 1 result(s)" badge next to its own Reset button.
+                 Only shows once a filter is ACTUALLY in effect (batch range
+                 complete and/or 1+ programs picked) — an incomplete range
+                 alone stays silent here too, consistent with it not being
+                 applied to any query yet. Lives outside wire:ignore, so it
+                 re-renders normally on every filter change like the rest
+                 of the filter bar. --}}
+            @if($this->batchRangeIsComplete() || count($filterCourse) > 0)
+            <span class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shrink-0"
+                  style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
+                <i class="fas fa-calendar-check" style="font-size:11px;"></i>
+                @php
+                    $pillParts = [];
+                    if ($this->batchRangeIsComplete()) {
+                        $pillParts[] = $filterBatchFrom === $filterBatchTo
+                            ? 'Batch ' . $filterBatchFrom
+                            : 'Batch ' . $filterBatchFrom . '–' . $filterBatchTo;
+                    }
+                    if (count($filterCourse) === 1) {
+                        $pillParts[] = $filterCourse[0];
+                    } elseif (count($filterCourse) > 1) {
+                        $pillParts[] = count($filterCourse) . ' Programs';
+                    }
+                @endphp
+                {{ implode(' · ', $pillParts) }} — {{ number_format($totalAlumni) }} result(s)
+            </span>
+            @endif
         </div>
 
         {{-- Filtering progress bar --}}
-        <div class="emp-filter-progress-track" wire:loading wire:target="filterCourse,filterBatchFrom,filterBatchTo">
+        <div class="emp-filter-progress-track" wire:loading wire:target="filterCourse,toggleFilterCourse,clearFilterCourse,filterBatchFrom,filterBatchTo">
             <div class="emp-filter-progress-bar"></div>
         </div>
     </div>
@@ -1391,7 +1635,7 @@ new class extends Component {
      style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
      @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
 <div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
-     wire:loading.class="opacity-60" wire:target="filterCourse,filterBatchFrom,filterBatchTo" style="transition:opacity .2s ease;">
+     wire:loading.class="opacity-60" wire:target="filterCourse,toggleFilterCourse,clearFilterCourse,filterBatchFrom,filterBatchTo" style="transition:opacity .2s ease;">
 
     {{-- ── 5 STAT CARDS — Submitted, Employed, Self-Employed, Unemployed,
          No Record. Employed and Self-Employed are shown as their own
@@ -1587,7 +1831,13 @@ new class extends Component {
                     <div class="flex flex-col min-w-0">
                         <span class="text-sm font-bold text-[#111111] uppercase tracking-wide leading-tight">Top Programs</span>
                         <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5">
-                            {{ $filterCourse === '' ? 'Top 3 programs by employed alumni' : $filterCourse.' — ranking among all programs' }}
+                            @if(count($filterCourse) === 0)
+                                Top 3 programs by employed alumni
+                            @elseif(count($filterCourse) === 1)
+                                {{ $filterCourse[0] }} — ranking among all programs
+                            @else
+                                {{ count($filterCourse) }} selected programs — ranked against each other
+                            @endif
                         </span>
                     </div>
                 </div>
@@ -1599,12 +1849,13 @@ new class extends Component {
                 </button>
             </div>
 
-            @if($filterCourse === '')
+            @if(count($filterCourse) === 0)
                 <div class="flex-1 min-h-0 p-2" wire:ignore wire:key="emp-top-programs-chart">
                     <canvas id="chartCourse" style="max-height:100%;width:100%;"></canvas>
                 </div>
-            @else
+            @elseif(count($filterCourse) === 1)
                 @php
+                    $singleCourse = $filterCourse[0];
                     // ── Smart rank badge — color-tiers the rank number so a
                     //    Program's standing reads at a glance: green for the
                     //    top third of programs, amber for the middle third,
@@ -1622,11 +1873,15 @@ new class extends Component {
                         }
                     }
                 @endphp
-                <div wire:click="openModal('employed_all','{{ $filterCourse }}',null)"
+                {{-- wire:click / data-tip / cursor-pointer live ONLY on the
+                     ranked state below — the no-rank empty state has
+                     nothing to open and nothing to hover, so it must never
+                     look or behave clickable. --}}
+                @if($courseRank && $rankTier)
+                <div wire:click="openModal('employed_all','{{ $singleCourse }}',null)"
                      wire:key="emp-top-programs-rank"
-                     data-tip="{{ $filterCourse }} — {{ number_format($courseRankCount) }} working alumni"
+                     data-tip="{{ $singleCourse }} — {{ number_format($courseRankCount) }} working alumni"
                      class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3 cursor-pointer">
-                    @if($courseRank && $rankTier)
                         <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl leading-none"
                              style="background:{{ $rankTier['bg'] }}; color:{{ $rankTier['text'] }}; border:2px solid {{ $rankTier['ring'] }};">
                             #{{ $courseRank }}
@@ -1637,12 +1892,46 @@ new class extends Component {
                             {{ $rankTier['label'] }}
                         </span>
                         <p class="text-sm font-semibold mt-0.5" style="color:#7a3f91;">{{ number_format($courseRankCount) }} working alumni</p>
-                    @else
+                </div>
+                @else
+                <div wire:key="emp-top-programs-norank"
+                     class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3">
                         <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:#f0e6f8;">
                             <i class="fas fa-chart-simple" style="color:#c89de0;font-size:.9rem;"></i>
                         </div>
-                        <p class="text-xs font-semibold text-[#333333] text-center mt-1">No working alumni yet for {{ $filterCourse }} in this scope.</p>
-                    @endif
+                        <p class="text-xs font-semibold text-[#333333] text-center mt-1">"{{ $singleCourse }}" isn't in the program catalog for this scope.</p>
+                </div>
+                @endif
+
+            @else
+                {{-- 2+ Programs selected — mini-ranking board of just the
+                     selected programs (their rank against each other only,
+                     not the full catalog). Same visual language as the
+                     rank card list — badge, code, working count — but as
+                     a compact stacked list instead of one big number. --}}
+                <div wire:key="emp-top-programs-multi" class="flex-1 min-h-0 overflow-y-auto px-2.5 py-1.5 scroll-c">
+                    @forelse(json_decode($topProgramsSelectedData, true) ?? [] as $row)
+                    <div wire:click="openModal('employed_all','{{ $row['code'] }}',null)"
+                         data-tip="{{ $row['code'] }} — {{ number_format($row['working']) }} working alumni"
+                         class="flex items-center gap-2.5 py-1.5 px-1.5 rounded-lg hover:bg-[#F9F7FC] transition-colors cursor-pointer">
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center font-black text-[11px] shrink-0"
+                             style="background:{{ $row['rank'] === 1 ? '#ECFDF5' : ($row['rank'] === 2 ? '#FFFBEB' : '#F9F7FC') }};
+                                    color:{{ $row['rank'] === 1 ? '#059669' : ($row['rank'] === 2 ? '#D97706' : '#7A3F91') }};">
+                            #{{ $row['rank'] }}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-bold text-[#111111] leading-tight">{{ $row['code'] }}</p>
+                        </div>
+                        <span class="text-xs font-semibold shrink-0" style="color:#7a3f91;">{{ number_format($row['working']) }} working</span>
+                    </div>
+                    @empty
+                    <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3">
+                        <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:#f0e6f8;">
+                            <i class="fas fa-chart-simple" style="color:#c89de0;font-size:.9rem;"></i>
+                        </div>
+                        <p class="text-xs font-semibold text-[#333333] text-center mt-1">None of the selected programs are in the catalog for this scope.</p>
+                    </div>
+                    @endforelse
                 </div>
             @endif
 
@@ -2293,11 +2582,21 @@ new class extends Component {
 
                 var self = this;
 
+                // filterCourse is now an array (multi-select) — join into a
+                // comma-separated list for the export endpoint, matching
+                // the same "program" param it already expects. Batch range
+                // is all-or-nothing on the dashboard now too: only send
+                // batch_from/batch_to when BOTH are set, so the exported
+                // report can never end up scoped to a half-picked range
+                // that was never actually applied to what's on screen.
+                var hasProgram = wire && Array.isArray(wire.filterCourse) && wire.filterCourse.length > 0;
+                var hasFullRange = wire && wire.filterBatchFrom && wire.filterBatchTo;
+
                 var params = new URLSearchParams({
                     type:       type,
-                    program:    (wire && wire.filterCourse)    || '',
-                    batch_from: (wire && wire.filterBatchFrom) || '',
-                    batch_to:   (wire && wire.filterBatchTo)   || '',
+                    program:    hasProgram   ? wire.filterCourse.join(',') : '',
+                    batch_from: hasFullRange ? wire.filterBatchFrom        : '',
+                    batch_to:   hasFullRange ? wire.filterBatchTo          : '',
                 });
                 var url = '/registrar/employment-tracking/export?' + params.toString();
 
@@ -2498,6 +2797,21 @@ new class extends Component {
         }, true);
 
         document.addEventListener('mousemove', function(e) {
+            // If the element we're tracking got swapped out from under the
+            // cursor (e.g. Livewire morphdom replaced the Top Programs
+            // rank card / no-rank / multi-select-list block after a
+            // Program filter change), it's no longer attached to the
+            // document. `mouseout` never fires for a node that was
+            // removed rather than actually left, so without this check
+            // the tooltip kept showing the OLD block's text — a stale
+            // "BSIT — 12 working alumni" tip hanging over content that no
+            // longer has anything to do with BSIT. Catch that here on the
+            // very next mousemove instead of waiting for a mouseout that
+            // will never come.
+            if (currentTarget && !document.contains(currentTarget)) {
+                hideTip();
+                return;
+            }
             if (currentTarget) moveTip(e);
         }, true);
 
@@ -2509,6 +2823,18 @@ new class extends Component {
 
         document.addEventListener('scroll', hideTip, true);
         document.addEventListener('touchstart', hideTip, true);
+
+        // ── Belt-and-suspenders: also hide immediately whenever the
+        // dashboard's own "data changed, rebuild everything" signal fires.
+        // This is the exact moment DOM under the tooltip can be swapped
+        // (Top Programs card branch changes shape), so don't wait for the
+        // next mousemove poll above — clear it the instant refresh starts.
+        function hookTipRefreshHide() {
+            if (!window.Livewire) return;
+            Livewire.on('emp-charts-refresh', hideTip);
+        }
+        if (window.Livewire) { hookTipRefreshHide(); }
+        else { document.addEventListener('livewire:initialized', hookTipRefreshHide); }
     })();
 
     // ── Chart helpers ─────────────────────────────────────────────────────────
@@ -3062,4 +3388,4 @@ new class extends Component {
 })();
 </script>
 
-</div>
+</div>n
