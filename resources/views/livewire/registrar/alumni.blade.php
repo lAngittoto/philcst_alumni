@@ -17,8 +17,23 @@ new class extends Component {
     protected function queryString(): array { return []; }
 
     public string $alumniSearch      = '';
-    public string $alumniBatch       = '';
-    public string $alumniCourse      = '';
+
+    // Batch is now a FROM/TO range (like Employment Tracking) instead of
+    // a single-value dropdown. alumniBatch (single string) is gone —
+    // everything downstream reads alumniBatchFrom/alumniBatchTo instead.
+    public string $alumniBatchFrom   = '';
+    public string $alumniBatchTo     = '';
+
+    /** Set while setSingleBatchYear()/clearFilterBatch()/setBatchRange()
+     *  are writing to alumniBatchFrom/alumniBatchTo directly, so the
+     *  updatedAlumniBatchFrom()/updatedAlumniBatchTo() hooks below don't
+     *  ALSO fire and refresh the table a second time in the same request. */
+    private bool $skipBatchHooks = false;
+
+    // Program Code is now a MULTI-SELECT (like Employment Tracking) —
+    // an array of checked course codes instead of a single string.
+    // alumniCourse (single string) is gone.
+    public array  $alumniCourses     = [];
     public string $alumniProfileFilter = 'all';
     public string $alumniEmploymentStatus = '';
 
@@ -55,7 +70,9 @@ new class extends Component {
 
         $batch = request()->query('batch', '');
         if ($batch !== '') {
-            $this->alumniBatch = (string) intval($batch);
+            $year = (string) intval($batch);
+            $this->alumniBatchFrom = $year;
+            $this->alumniBatchTo   = $year;
         }
 
         $empStatus = request()->query('employment_status', '');
@@ -172,9 +189,11 @@ new class extends Component {
      *  across several ids before deciding where to land. */
     protected function pageFor(int $alumniId): ?int
     {
+        $rangeComplete = $this->batchRangeIsComplete();
+
         $hasActiveFilter = $this->alumniSearch !== ''
-            || $this->alumniBatch !== ''
-            || $this->alumniCourse !== ''
+            || $rangeComplete
+            || !empty($this->alumniCourses)
             || $this->alumniProfileFilter !== 'all'
             || $this->alumniEmploymentStatus !== '';
 
@@ -189,8 +208,11 @@ new class extends Component {
                     ->orWhere('student_id', 'like', $term)
                     ->orWhere('email',      'like', $term));
             }
-            if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
-            if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
+            if ($rangeComplete) {
+                $q->where('batch', '>=', $this->alumniBatchFrom)
+                  ->where('batch', '<=', $this->alumniBatchTo);
+            }
+            if (!empty($this->alumniCourses)) $q->whereIn('course_code', $this->alumniCourses);
             if ($this->alumniProfileFilter === 'complete')   $q->where('profile_completed', 1);
             elseif ($this->alumniProfileFilter === 'incomplete') $q->where('profile_completed', 0);
             if ($this->alumniEmploymentStatus !== '') $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatus);
@@ -294,10 +316,128 @@ new class extends Component {
     }
 
     public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
-    public function updatingAlumniBatch()         { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
-    public function updatingAlumniCourse()        { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
     public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
     public function updatingAlumniEmploymentStatus() { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
+
+    /** True only once BOTH ends of the batch range are set — a half-picked
+     *  range (just From, or just To) never scopes the query. */
+    private function batchRangeIsComplete(): bool
+    {
+        return $this->alumniBatchFrom !== '' && $this->alumniBatchTo !== '';
+    }
+
+    public function updatedAlumniBatchFrom(): void
+    {
+        if ($this->skipBatchHooks) return;
+        $this->normalizeBatchRange();
+        // Don't fire a filter request yet if only "From" is picked — wait
+        // until "To" is also set (or both cleared) so a half-picked range
+        // never triggers a query, and picking From then To doesn't cause
+        // two separate table refreshes.
+        if ($this->alumniBatchFrom !== '' && $this->alumniBatchTo === '') {
+            return;
+        }
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    public function updatedAlumniBatchTo(): void
+    {
+        if ($this->skipBatchHooks) return;
+        $this->normalizeBatchRange();
+        // Mirror of updatedAlumniBatchFrom() above.
+        if ($this->alumniBatchTo !== '' && $this->alumniBatchFrom === '') {
+            return;
+        }
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** If "from" ends up later than "to" (or vice versa), swap them
+     *  instead of silently returning zero rows. */
+    private function normalizeBatchRange(): void
+    {
+        if ($this->alumniBatchFrom !== '' && $this->alumniBatchTo !== ''
+            && (int)$this->alumniBatchFrom > (int)$this->alumniBatchTo) {
+            [$this->alumniBatchFrom, $this->alumniBatchTo] = [$this->alumniBatchTo, $this->alumniBatchFrom];
+        }
+    }
+
+    /** Single-year quick pick from the default (non-range) Batch Year
+     *  list — sets From and To to the same year in ONE Livewire
+     *  round-trip instead of two separate $wire.set() calls (which would
+     *  each fire their own updatedAlumniBatch*() hook and refresh the
+     *  table twice for a single click). */
+    public function setSingleBatchYear(string $year): void
+    {
+        $this->skipBatchHooks = true;
+        $this->alumniBatchFrom = $year;
+        $this->alumniBatchTo   = $year;
+        $this->skipBatchHooks = false;
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** "All Batch Years" — clears both ends of the range in one
+     *  round-trip, same reasoning as setSingleBatchYear() above. */
+    public function clearFilterBatch(): void
+    {
+        $this->skipBatchHooks = true;
+        $this->alumniBatchFrom = '';
+        $this->alumniBatchTo   = '';
+        $this->skipBatchHooks = false;
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** Applies a From–To range in ONE Livewire round-trip. Bound to the
+     *  range picker's local Alpine state (not wire:model.live on the two
+     *  <select>s) so picking "From" alone never touches the server at
+     *  all — the request only fires once both ends are chosen and this
+     *  single method is called. */
+    public function setBatchRange(string $from, string $to): void
+    {
+        $this->skipBatchHooks = true;
+        $this->alumniBatchFrom = $from;
+        $this->alumniBatchTo   = $to;
+        $this->skipBatchHooks = false;
+        $this->normalizeBatchRange();
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** Toggles a single program code in/out of the multi-select filter —
+     *  bound directly to each checkbox item in the Program dropdown.
+     *  Mirrors Employment Tracking's toggleFilterCourse() exactly. */
+    public function toggleProgramCode(string $code): void
+    {
+        if (in_array($code, $this->alumniCourses, true)) {
+            $this->alumniCourses = array_values(array_diff($this->alumniCourses, [$code]));
+        } else {
+            $this->alumniCourses[] = $code;
+        }
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** "All Program Codes" inside the dropdown — clears the whole
+     *  multi-select in one round-trip. */
+    public function clearProgramCodes(): void
+    {
+        $this->alumniCourses = [];
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** "Select All" inside the dropdown — checks every program code in
+     *  the course catalog, mirroring clearProgramCodes()'s "uncheck all"
+     *  at the opposite end of the same toggle. */
+    public function selectAllProgramCodes(): void
+    {
+        $this->alumniCourses = $this->courses->pluck('code')->values()->all();
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
 
     /** Wrappers around WithPagination's page methods that also clear the
      *  notif-triggered highlight/scope, since manual paging means the
@@ -382,8 +522,11 @@ new class extends Component {
                 ->orWhere('email',      'like', $term));
         }
 
-        if ($this->alumniBatch)  $q->where('batch', $this->alumniBatch);
-        if ($this->alumniCourse) $q->where('course_code', $this->alumniCourse);
+        if ($this->batchRangeIsComplete()) {
+            $q->where('batch', '>=', $this->alumniBatchFrom)
+              ->where('batch', '<=', $this->alumniBatchTo);
+        }
+        if (!empty($this->alumniCourses)) $q->whereIn('course_code', $this->alumniCourses);
 
         if ($this->alumniProfileFilter === 'complete')
             $q->where('profile_completed', 1);
@@ -394,8 +537,8 @@ new class extends Component {
             $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatus);
 
         $hasActiveFilter = $this->alumniSearch !== ''
-            || $this->alumniBatch !== ''
-            || $this->alumniCourse !== ''
+            || $this->batchRangeIsComplete()
+            || !empty($this->alumniCourses)
             || $this->alumniProfileFilter !== 'all'
             || $this->alumniEmploymentStatus !== '';
 
@@ -496,8 +639,16 @@ new class extends Component {
         if ($this->alumniProfileFilter === 'complete') $parts[] = 'Complete profiles only';
         elseif ($this->alumniProfileFilter === 'incomplete') $parts[] = 'Pending profiles only';
 
-        if ($this->alumniBatch !== '') $parts[] = 'Batch ' . $this->alumniBatch;
-        if ($this->alumniCourse !== '') $parts[] = 'Program Code ' . $this->alumniCourse;
+        if ($this->batchRangeIsComplete()) {
+            $parts[] = $this->alumniBatchFrom === $this->alumniBatchTo
+                ? 'Batch ' . $this->alumniBatchFrom
+                : 'Batch ' . $this->alumniBatchFrom . '–' . $this->alumniBatchTo;
+        }
+        if (!empty($this->alumniCourses)) {
+            $parts[] = count($this->alumniCourses) === 1
+                ? 'Program Code ' . $this->alumniCourses[0]
+                : count($this->alumniCourses) . ' Program Codes';
+        }
         if ($this->alumniEmploymentStatus !== '') $parts[] = $this->employmentStatusBadge($this->alumniEmploymentStatus)[0];
         if ($this->alumniSearch !== '') $parts[] = 'Search: "' . $this->alumniSearch . '"';
 
@@ -506,11 +657,14 @@ new class extends Component {
 
     public function resetAlumniFilters(): void
     {
+        $this->skipBatchHooks          = true;
         $this->alumniSearch            = '';
-        $this->alumniBatch             = '';
-        $this->alumniCourse            = '';
+        $this->alumniBatchFrom         = '';
+        $this->alumniBatchTo           = '';
+        $this->alumniCourses           = [];
         $this->alumniProfileFilter     = 'all';
         $this->alumniEmploymentStatus  = '';
+        $this->skipBatchHooks          = false;
         $this->clearNotifScope();
         $this->resetPage('alumniPage');
     }
@@ -636,7 +790,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         pointer-events: none;
         opacity: 0;
         transition: opacity .15s ease;
-        z-index: 99999;
+        z-index: 500;
         box-shadow: 0 4px 14px rgba(0,0,0,.30);
         transform: translate(12px, -110%);
     }
@@ -853,6 +1007,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         font-size: .8rem; font-weight: 600; text-align: left; color: #333;
         transition: background .1s; cursor: pointer; white-space: nowrap;
         border: none; background: transparent;
+        user-select: none; -webkit-user-select: none;
     }
     .ar-dropdown-item:hover { background: #F5F0FA; color: #7A3F91; }
     .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
@@ -1231,27 +1386,32 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 from notification: <span class="font-semibold text-[#7A3F91]">{{ $notifScopeTitle }}</span>
             </span>
             <button type="button" wire:click="clearNotifScopeView"
-                    wire:loading.attr="disabled" wire:target="clearNotifScopeView"
+                    wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearNotifScopeView"
                     class="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold
-                           bg-white border border-[#E8E0F0] text-[#7A3F91] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0">
-                <i class="fas fa-xmark text-[10px]"></i> Clear, show all records
+                           bg-white border border-[#E8E0F0] text-[#7A3F91] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
+                <span wire:loading wire:target="clearNotifScopeView">
+                    <i class="fas fa-spinner animate-spin text-[10px]"></i>
+                </span>
+                <i class="fas fa-xmark text-[10px]" wire:loading.remove wire:target="clearNotifScopeView"></i> Clear, show all records
             </button>
         </div>
         @endif
 
         {{-- ── Filter bar ── --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus,resetAlumniFilters">
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
 
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
-            <div class="flex items-center gap-1.5 shrink-0">
-                <button type="button" wire:click="$set('alumniProfileFilter','all')"
-                        class="ar-status-pill {{ $alumniProfileFilter === 'all' ? 'active-all' : '' }}">All</button>
-                <button type="button" wire:click="$set('alumniProfileFilter','complete')"
-                        class="ar-status-pill {{ $alumniProfileFilter === 'complete' ? 'active-complete' : '' }}">Complete</button>
-                <button type="button" wire:click="$set('alumniProfileFilter','incomplete')"
-                        class="ar-status-pill {{ $alumniProfileFilter === 'incomplete' ? 'active-incomplete' : '' }}">Pending</button>
+            <div class="flex items-center gap-1.5 shrink-0"
+                 x-data="{ active:'{{ $alumniProfileFilter }}' }"
+                 x-init="$wire.$watch('alumniProfileFilter', v => active = v)">
+                <button type="button" @click="active='all'" wire:click="$set('alumniProfileFilter','all')"
+                        :class="{ 'active-all': active==='all' }" class="ar-status-pill">All</button>
+                <button type="button" @click="active='complete'" wire:click="$set('alumniProfileFilter','complete')"
+                        :class="{ 'active-complete': active==='complete' }" class="ar-status-pill">Complete</button>
+                <button type="button" @click="active='incomplete'" wire:click="$set('alumniProfileFilter','incomplete')"
+                        :class="{ 'active-incomplete': active==='incomplete' }" class="ar-status-pill">Pending</button>
             </div>
 
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
@@ -1259,28 +1419,129 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
                  x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('alumniSearch',q)"
+                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('alumniSearch',q)"
                        placeholder="Search name, ID, email…"
                        class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
                               placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
                        autocomplete="off" spellcheck="false">
             </div>
 
+            {{-- Batch Year — plain year list by default (click a year,
+                 done), PLUS an "Add Range" option at the bottom of the
+                 same dropdown. Clicking it swaps the list view for
+                 From/To pickers so a range (e.g. 2000–2025) is opt-in
+                 rather than always-on. Mirrors the Employment Tracking
+                 dashboard's batch filter exactly.
+
+                 RANGE IS ALL-OR-NOTHING: picking only From (or only To)
+                 does NOT filter anything yet — the trigger label makes
+                 this explicit ("2020 → pick an end year") instead of
+                 quietly looking like a working filter while the query is
+                 still unscoped server-side.
+
+                 Only one filter dropdown open at a time: `open` here is
+                 driven by the shared $store.arFilters.openKey instead of
+                 local state, so opening this one auto-closes Employment
+                 Status / Program Code and vice versa. --}}
             <div class="ar-dropdown"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniBatch',val); this.close(); } }"
+                 x-data="{
+                    rangeMode: {{ ($alumniBatchFrom !== '' && $alumniBatchTo !== '' && $alumniBatchFrom !== $alumniBatchTo) ? 'true' : 'false' }},
+                    rangeFrom: '{{ $alumniBatchFrom }}',
+                    rangeTo: '{{ $alumniBatchTo }}',
+                    get open(){ return $store.arFilters.isOpen('batch'); },
+                    toggle(){ $store.arFilters.toggle('batch'); },
+                    close(){ $store.arFilters.close('batch'); },
+                    selectYear(val){ $wire.setSingleBatchYear(val); this.close(); },
+                    clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
+                    startRange(){ this.rangeFrom=$wire.alumniBatchFrom||''; this.rangeTo=$wire.alumniBatchTo||''; this.rangeMode=true; },
+                    pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
+                    pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
+                    applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
+                 }"
                  @click.outside="close()" wire:key="batch-dropdown">
-                <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniBatch!=='','open':open }" class="ar-dropdown-trigger">
-                    <span>@if($alumniBatch){{ $alumniBatch }}@else All Batch Years @endif</span>
+                <button type="button" @click.stop="toggle()"
+                        :class="{ 'has-value': $wire.alumniBatchFrom!=='' && $wire.alumniBatchTo!=='', 'open':open }"
+                        class="ar-dropdown-trigger">
+                    <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
+                    <span>
+                        @if($alumniBatchFrom !== '' && $alumniBatchTo !== '' && $alumniBatchFrom !== $alumniBatchTo)
+                            Batch {{ $alumniBatchFrom }}–{{ $alumniBatchTo }}
+                        @elseif($alumniBatchFrom !== '' && $alumniBatchTo !== '')
+                            Batch {{ $alumniBatchFrom }}
+                        @elseif($alumniBatchFrom !== '')
+                            Batch {{ $alumniBatchFrom }} → pick end year
+                        @elseif($alumniBatchTo !== '')
+                            pick start year → Batch {{ $alumniBatchTo }}
+                        @else
+                            All Batch Years
+                        @endif
+                    </span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;">
-                    <button type="button" @click="select('')" :class="{'active':$wire.alumniBatch===''}" class="ar-dropdown-item">All Batch Years</button>
-                    @foreach($this->batches as $b)
-                    <button type="button" @click="select('{{ $b }}')" :class="{'active':$wire.alumniBatch==='{{ $b }}'}" class="ar-dropdown-item">{{ $b }}</button>
-                    @endforeach
+                     class="ar-dropdown-menu" style="display:none;min-width:190px;" @click.stop>
+
+                    {{-- Default view: plain year list --}}
+                    <template x-if="!rangeMode">
+                        <div>
+                            <button type="button" @click.stop="clearYear()" :class="{'active':$wire.alumniBatchFrom==='' && $wire.alumniBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
+                            @foreach($this->batches as $b)
+                            <button type="button" @click.stop="selectYear('{{ $b }}')" :class="{'active': $wire.alumniBatchFrom==='{{ $b }}' && $wire.alumniBatchTo==='{{ $b }}'}" class="ar-dropdown-item">{{ $b }}</button>
+                            @endforeach
+                            <div class="h-px bg-[#E8E0F0] my-1"></div>
+                            <button type="button" @click.stop="startRange()"
+                                    class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
+                                <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                            </button>
+                        </div>
+                    </template>
+
+                    {{-- Range view: opt-in, shown right away once "Add
+                         Range" is clicked. From/To are two flat scrollable
+                         lists side by side (NOT a popover nested inside
+                         this already-scrollable menu — a nested
+                         position:absolute dropdown gets clipped by the
+                         parent's own overflow-y:auto, which is exactly
+                         what caused the un-scrollable/cut-off picker
+                         before). No placeholder "Any" row — an unselected
+                         side is simply blank until picked. Held in LOCAL
+                         Alpine state only — nothing is sent to the server
+                         while just one side is picked. The moment both
+                         sides have a value, applyRangeIfComplete() fires
+                         ONE Livewire call (setBatchRange) that applies
+                         the whole range at once. --}}
+                    <template x-if="rangeMode">
+                        <div class="p-2" style="width:220px;">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">From</span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">To</span>
+                            </div>
+                            <div class="flex items-start gap-2">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                    @foreach($this->batches as $b)
+                                    <button type="button" @click.stop="pickFrom('{{ $b }}')" :class="{'active':rangeFrom==='{{ $b }}'}" class="ar-dropdown-item" style="border-radius:0;">{{ $b }}</button>
+                                    @endforeach
+                                </div>
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                    @foreach($this->batches as $b)
+                                    <button type="button" @click.stop="pickTo('{{ $b }}')" :class="{'active':rangeTo==='{{ $b }}'}" class="ar-dropdown-item" style="border-radius:0;">{{ $b }}</button>
+                                    @endforeach
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 mt-3">
+                                <button type="button" @click.stop="rangeMode=false"
+                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                    Back to List
+                                </button>
+                                <button type="button" @click.stop="clearYear(); rangeMode=false;"
+                                        class="flex-1 text-xs font-semibold text-[#7A3F91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </div>
 
@@ -1293,38 +1554,89 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 ['no_record', 'No Record', 'fa-circle-minus'],
             ]; @endphp
             <div class="ar-dropdown"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniEmploymentStatus',val); this.close(); } }"
+                 x-data="{
+                    get open(){ return $store.arFilters.isOpen('empStatus'); },
+                    toggle(){ $store.arFilters.toggle('empStatus'); },
+                    close(){ $store.arFilters.close('empStatus'); },
+                    select(val){ $wire.set('alumniEmploymentStatus',val); this.close(); }
+                 }"
                  @click.outside="close()" wire:key="employment-status-dropdown">
-                <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniEmploymentStatus!=='','open':open }" class="ar-dropdown-trigger">
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.alumniEmploymentStatus!=='','open':open }" class="ar-dropdown-trigger">
                     <span>@if($alumniEmploymentStatus !== ''){{ $this->employmentStatusBadge($alumniEmploymentStatus)[0] }}@else All Employment Status @endif</span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;">
+                     class="ar-dropdown-menu" style="display:none;" @click.stop>
                     @foreach($arEmpOptions as [$val, $label, $icon])
-                    <button type="button" @click="select('{{ $val }}')" :class="{'active':$wire.alumniEmploymentStatus==='{{ $val }}'}" class="ar-dropdown-item">
+                    <button type="button" @click.stop="select('{{ $val }}')" :class="{'active':$wire.alumniEmploymentStatus==='{{ $val }}'}" class="ar-dropdown-item">
                         <i class="fas {{ $icon }} text-[11px] mr-1.5 opacity-70"></i>{{ $label }}
                     </button>
                     @endforeach
                 </div>
             </div>
 
+            {{-- Program Code — MULTI-SELECT with real checkboxes, exactly
+                 matching the Employment Tracking dashboard. Checking a
+                 box toggles that program in/out of alumniCourses via
+                 toggleProgramCode(); the dropdown stays open across
+                 clicks so several programs can be checked in one go. A
+                 "Select All" checkbox sits in a sticky header row at the
+                 TOP of the list — tri-state: checked when every program
+                 is selected, indeterminate (dash) when some but not all
+                 are. The trigger label shows a count once 2+ are picked
+                 so the bar doesn't overflow with every selected code. --}}
             <div class="ar-dropdown"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('alumniCourse',val); this.close(); } }"
+                 x-data="{
+                    get open(){ return $store.arFilters.isOpen('course'); },
+                    toggle(){ $store.arFilters.toggle('course'); if(this.open){ this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; }); } },
+                    close(){ $store.arFilters.close('course'); }
+                 }"
                  @click.outside="close()" wire:key="course-dropdown">
-                <button type="button" @click="toggle()" :class="{ 'has-value':$wire.alumniCourse!=='','open':open }" class="ar-dropdown-trigger">
-                    <span>@if($alumniCourse){{ $alumniCourse }}@else All Program Codes @endif</span>
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.alumniCourses.length>0,'open':open }" class="ar-dropdown-trigger">
+                    <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
+                    <span>
+                        @if(count($alumniCourses) === 0)
+                            All Program Codes
+                        @elseif(count($alumniCourses) === 1)
+                            {{ $alumniCourses[0] }}
+                        @else
+                            {{ count($alumniCourses) }} Programs
+                        @endif
+                    </span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
-                <div x-show="open"
+                <div x-show="open" x-ref="courseMenu"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;">
-                    <button type="button" @click="select('')" :class="{'active':$wire.alumniCourse===''}" class="ar-dropdown-item">All Program Codes</button>
+                     class="ar-dropdown-menu" style="display:none;min-width:220px;" @click.stop>
+
+                    {{-- Header row: "Select All" checkbox, sticky at the
+                         TOP of the list — one tap checks/unchecks every
+                         program code at once. --}}
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
+                        <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
+                            <input type="checkbox"
+                                   :checked="$wire.alumniCourses.length === {{ count($this->courses) }}"
+                                   :indeterminate="$wire.alumniCourses.length > 0 && $wire.alumniCourses.length < {{ count($this->courses) }}"
+                                   @change="$event.target.checked ? $wire.selectAllProgramCodes() : $wire.clearProgramCodes()"
+                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
+                            Select All
+                        </label>
+                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="$wire.alumniCourses.length > 0">
+                            <span x-text="$wire.alumniCourses.length"></span> selected
+                        </span>
+                    </div>
+
                     @foreach($this->courses as $c)
-                    <button type="button" @click="select('{{ $c->code }}')" :class="{'active':$wire.alumniCourse==='{{ $c->code }}'}" class="ar-dropdown-item">{{ $c->code }}</button>
+                    <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
+                           :class="{'active': $wire.alumniCourses.includes('{{ $c->code }}')}">
+                        <input type="checkbox" wire:click="toggleProgramCode('{{ $c->code }}')"
+                               :checked="$wire.alumniCourses.includes('{{ $c->code }}')"
+                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
+                        <span>{{ $c->code }}</span>
+                    </label>
                     @endforeach
                 </div>
             </div>
@@ -1345,9 +1657,9 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
             @endif
-            @if($alumniBatch !== '')
+            @if($alumniBatchFrom !== '' && $alumniBatchTo !== '')
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
-                <i class="fas fa-calendar text-[10px]"></i>Batch {{ $alumniBatch }}
+                <i class="fas fa-calendar text-[10px]"></i>{{ $alumniBatchFrom === $alumniBatchTo ? 'Batch ' . $alumniBatchFrom : 'Batch ' . $alumniBatchFrom . '–' . $alumniBatchTo }}
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
             @endif
@@ -1355,6 +1667,12 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             @php [$arEmpChipLabel, $arEmpChipClasses, $arEmpChipIcon] = $this->employmentStatusBadge($alumniEmploymentStatus); @endphp
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $arEmpChipClasses }}">
                 <i class="fas {{ $arEmpChipIcon }} text-[10px]"></i>{{ $arEmpChipLabel }}
+                &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
+            </span>
+            @endif
+            @if(!empty($alumniCourses))
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
+                <i class="fas fa-graduation-cap text-[10px]"></i>{{ count($alumniCourses) === 1 ? $alumniCourses[0] : count($alumniCourses) . ' Programs' }}
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
             @endif
@@ -1366,25 +1684,21 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
 
-            {{-- Center overlay spinner — same idea as the Generate Reports
-                 loading state, scoped to just the table card (not the
-                 whole screen) so it centers over the rows, not the
-                 sidebar/header. Parent has a fixed flex height via
-                 .ar-table-card, so this stays centered regardless of how
-                 few rows are currently rendered. Disappears the instant
-                 the new filtered rows land. --}}
-            <div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
-                 wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus,resetAlumniFilters">
-                <div class="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl"
-                     style="background:rgba(255,255,255,0.92); box-shadow:0 8px 24px -6px rgba(90,34,112,0.22);">
+            {{-- Center overlay spinner — icon only, no background box,
+                 sitting sticky right under the filter bar (not floated
+                 down mid-table). Matches Employment Tracking's filter
+                 loading state exactly. Disappears the instant the new
+                 filtered rows land. --}}
+            <div class="sticky top-0 left-0 w-full h-0 z-20 flex items-center justify-center pointer-events-none"
+                 wire:loading wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+                <div class="flex items-center justify-center" style="margin-top:16px;">
                     <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
-                    <span class="text-sm font-semibold" style="color:#5A2270;">Filtering records…</span>
                 </div>
             </div>
 
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus,resetAlumniFilters">
+                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
@@ -1540,48 +1854,59 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             $pgStart  = max(1, $cp - 2);
             $pgEnd    = min($lastPage, $cp + 2);
         @endphp
-        <div class="px-4 py-2.5 border-t border-[#7A3F91]/30 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ar-pg-footer"
-             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <p class="text-white/70 text-sm font-normal">
+        {{-- Footer stays outside the filtered-results scroll container and
+             is never targeted by any wire:loading dim/opacity class — it
+             always shows its solid purple gradient, unaffected by filter
+             loading state. --}}
+        <div class="px-4 py-2.5 border-t border-[#7A3F91]/30 shrink-0 flex flex-col min-[560px]:flex-row min-[560px]:items-center min-[560px]:justify-between gap-2 ar-pg-footer opacity-100"
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6) !important;">
+            <p class="text-white/70 text-sm font-normal min-w-0 truncate">
                 Showing <strong class="text-white font-semibold">{{ $from }}–{{ $to }}</strong>
                 of <strong class="text-white font-semibold">{{ $total }}</strong> alumni
                 @if($alumniProfileFilter !== 'all')
                     <span class="text-white/50 font-normal">&nbsp;({{ $alumniProfileFilter === 'complete' ? 'complete profiles' : 'pending profiles' }})</span>
                 @endif
-                @if($alumniBatch !== '')
-                    <span class="text-white/50 font-normal">&nbsp;&bull; Batch {{ $alumniBatch }}</span>
+                @if($alumniBatchFrom !== '' && $alumniBatchTo !== '')
+                    <span class="text-white/50 font-normal">&nbsp;&bull; {{ $alumniBatchFrom === $alumniBatchTo ? 'Batch ' . $alumniBatchFrom : 'Batch ' . $alumniBatchFrom . '–' . $alumniBatchTo }}</span>
                 @endif
             </p>
-            @if($lastPage > 1)
-            <div class="flex items-center gap-1.5 flex-wrap">
-                @if($this->alumniRecords->onFirstPage())
-                    <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-                @else
-                    <button wire:click="previousAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-                @endif
-                @if($pgStart > 1)
-                    <button wire:click="goToAlumniPage(1)" class="ar-pg-btn ar-pg-nav">1</button>
-                    @if($pgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                @endif
-                @for($p = $pgStart; $p <= $pgEnd; $p++)
-                    @if($p === $cp)
-                        <span class="ar-pg-btn ar-pg-active">{{ $p }}</span>
+            {{-- Pagination controls always occupy this slot — even on a
+                 single-page result set — so the footer's height never
+                 changes when a filter narrows the results down to one
+                 page. Buttons just render disabled/inert instead of the
+                 whole block disappearing. shrink-0 keeps this row from
+                 ever being squeezed/overlapped by the "Showing…" text
+                 above it now that the layout stacks earlier (560px). --}}
+            <div class="flex items-center gap-1.5 flex-wrap shrink-0 min-h-[26px]">
+                @if($lastPage > 1)
+                    @if($this->alumniRecords->onFirstPage())
+                        <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                     @else
-                        <button wire:click="goToAlumniPage({{ $p }})" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
+                        <button wire:click="previousAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                     @endif
-                @endfor
-                @if($pgEnd < $lastPage)
-                    @if($pgEnd < $lastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                    <button wire:click="goToAlumniPage({{ $lastPage }})" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
+                    @if($pgStart > 1)
+                        <button wire:click="goToAlumniPage(1)" class="ar-pg-btn ar-pg-nav">1</button>
+                        @if($pgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
+                    @endif
+                    @for($p = $pgStart; $p <= $pgEnd; $p++)
+                        @if($p === $cp)
+                            <span class="ar-pg-btn ar-pg-active">{{ $p }}</span>
+                        @else
+                            <button wire:click="goToAlumniPage({{ $p }})" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
+                        @endif
+                    @endfor
+                    @if($pgEnd < $lastPage)
+                        @if($pgEnd < $lastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
+                        <button wire:click="goToAlumniPage({{ $lastPage }})" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
+                    @endif
+                    @if($this->alumniRecords->hasMorePages())
+                        <button wire:click="nextAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
+                    @else
+                        <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
+                    @endif
+                    <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $cp }}/{{ $lastPage }}</span>
                 @endif
-                @if($this->alumniRecords->hasMorePages())
-                    <button wire:click="nextAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-                @else
-                    <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-                @endif
-                <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $cp }}/{{ $lastPage }}</span>
             </div>
-            @endif
         </div>
 
     </div>{{-- end table card --}}
@@ -1674,9 +1999,10 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                     </p>
                 </div>
             </div>
-            <button wire:click="closeModal" class="ar-close-btn">
+            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal" class="ar-close-btn">
                 <span class="ar-close-tip">Close</span>
-                <i class="fas fa-xmark text-sm"></i>
+                <i class="fas fa-xmark text-sm" wire:loading.remove wire:target="closeModal"></i>
+                <i class="fas fa-spinner fa-spin text-sm" wire:loading wire:target="closeModal"></i>
             </button>
         </div>
 
@@ -2225,8 +2551,21 @@ compressImage(file, maxW, maxH, quality) {
                 const params = new URLSearchParams({
                     type: type,
                     search: (wire && wire.alumniSearch) || '',
-                    batch: (wire && wire.alumniBatch) || '',
-                    course: (wire && wire.alumniCourse) || '',
+                    // Batch is now a range. batch_from/batch_to are the
+                    // real values — RegistrarAlumniExportController needs
+                    // updating to read these instead of the old single
+                    // `batch` param. `batch` is still sent (mirroring
+                    // batch_from) purely as a fallback for old server code
+                    // that hasn't been updated yet.
+                    batch_from: (wire && wire.alumniBatchFrom) || '',
+                    batch_to: (wire && wire.alumniBatchTo) || '',
+                    batch: (wire && wire.alumniBatchFrom) || '',
+                    // Program Code is now a multi-select array. Sent as a
+                    // comma-separated list — RegistrarAlumniExportController
+                    // needs updating to split this on "," (or read it as
+                    // course[] if you prefer switching to array-style
+                    // params) instead of the old single `course` string.
+                    course: (wire && wire.alumniCourses && wire.alumniCourses.join(',')) || '',
                     profile_filter: (wire && wire.alumniProfileFilter) || 'all',
                     employment_status: (wire && wire.alumniEmploymentStatus) || '',
                 });
@@ -2309,12 +2648,35 @@ compressImage(file, maxW, maxH, quality) {
 
     window.__arEnsureReportStore = registerReportStore;
 
+    function registerFilterDropdownStore() {
+        if (!window.Alpine) return;
+        if (window.Alpine.store('arFilters')) return;
+
+        // Tracks which single filter dropdown is currently open (batch,
+        // employment status, program code) so opening one automatically
+        // closes any other that was left open — only one dropdown shown
+        // at a time instead of them stacking on top of each other.
+        window.Alpine.store('arFilters', {
+            openKey: '',
+            isOpen(key) { return this.openKey === key; },
+            toggle(key) { this.openKey = (this.openKey === key) ? '' : key; },
+            close(key) { if (this.openKey === key) this.openKey = ''; },
+            closeAll() { this.openKey = ''; },
+        });
+    }
+
+    window.__arEnsureFilterDropdownStore = registerFilterDropdownStore;
+
     if (window.Alpine) {
         registerReportStore();
+        registerFilterDropdownStore();
     }
     document.addEventListener('alpine:init', registerReportStore);
+    document.addEventListener('alpine:init', registerFilterDropdownStore);
     document.addEventListener('livewire:init', registerReportStore);
+    document.addEventListener('livewire:init', registerFilterDropdownStore);
     document.addEventListener('livewire:navigated', registerReportStore);
+    document.addEventListener('livewire:navigated', registerFilterDropdownStore);
 
     var tip = document.getElementById('ar-hover-tip');
 
@@ -2356,6 +2718,11 @@ compressImage(file, maxW, maxH, quality) {
     document.addEventListener('livewire:navigating', hideHoverTip);
     document.addEventListener('livewire:navigated', hideHoverTip);
     document.addEventListener('livewire:load', hideHoverTip);
+
+    // Also hide the tooltip the instant a row is clicked to open the
+    // profile modal — otherwise it can linger on top of the modal
+    // (including its close button) if the mouse hasn't moved yet.
+    document.addEventListener('livewire:updated', hideHoverTip);
 
     // ── Auto-scroll to the first highlighted row (arrived from a
     //    notification click) — runs once per page load, after the
