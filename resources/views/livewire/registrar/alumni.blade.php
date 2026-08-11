@@ -1241,7 +1241,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
         {{-- ── Filter bar ── --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus,resetAlumniFilters">
 
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
@@ -1360,19 +1360,31 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             @endif
         </div>
 
-        <div class="ar-filter-progress-track" wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
-            <div class="ar-filter-progress-bar"></div>
-        </div>
-        <style>
-            .ar-filter-progress-track { height:2px;width:100%;overflow:hidden;background:transparent;position:relative; }
-            .ar-filter-progress-bar { position:absolute;top:0;left:0;height:100%;width:40%;border-radius:99px;background:linear-gradient(135deg,#7A3F91,#9b59b6);animation:arFilterProgress 1s ease-in-out infinite; }
-            @keyframes arFilterProgress { 0%{left:-40%} 100%{left:100%} }
-        </style>
+        {{-- (Old thin top progress bar removed — replaced by the centered
+             overlay spinner below, which reads more clearly as "working"
+             and doesn't risk looking visually stuck mid-DOM-swap.) --}}
 
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
+
+            {{-- Center overlay spinner — same idea as the Generate Reports
+                 loading state, scoped to just the table card (not the
+                 whole screen) so it centers over the rows, not the
+                 sidebar/header. Parent has a fixed flex height via
+                 .ar-table-card, so this stays centered regardless of how
+                 few rows are currently rendered. Disappears the instant
+                 the new filtered rows land. --}}
+            <div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
+                 wire:loading wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus,resetAlumniFilters">
+                <div class="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl"
+                     style="background:rgba(255,255,255,0.92); box-shadow:0 8px 24px -6px rgba(90,34,112,0.22);">
+                    <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
+                    <span class="text-sm font-semibold" style="color:#5A2270;">Filtering records…</span>
+                </div>
+            </div>
+
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus">
+                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniBatch,alumniCourse,alumniProfileFilter,alumniEmploymentStatus,resetAlumniFilters">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">

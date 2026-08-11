@@ -124,6 +124,7 @@ Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.'
     Route::post('/notifications',                     [RegistrarNotificationController::class, 'store'])      ->name('notifications.store');
     Route::patch('/notifications/read-all',           [RegistrarNotificationController::class, 'markAllRead'])->name('notifications.read-all');
     Route::patch('/notifications/{notification}/read',[RegistrarNotificationController::class, 'markRead'])   ->name('notifications.read');
+    Route::delete('/notifications/{notification}',    [RegistrarNotificationController::class, 'destroy'])    ->name('notifications.destroy');
 });
 
 // ===================================

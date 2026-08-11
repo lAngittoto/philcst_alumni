@@ -457,6 +457,7 @@
         .notif-time-row {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 5px;
             margin-top: 6px;
             font-size: .68rem;
@@ -464,6 +465,63 @@
             font-weight: 600;
         }
         .notif-time-row i { font-size: .62rem; }
+
+        /* ── Delete icon (only shown once a notif is 30+ days old) ──
+           Sits at the end of the time row, next to the timestamp.
+           Red icon by default so it's visible right away in the
+           sidebar (not just on hover), with a slightly deeper red +
+           light-red bg on hover for feedback. */
+        .notif-delete-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            border: none;
+            background: transparent;
+            color: #DC2626;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .notif-delete-btn:hover {
+            background: #FDE8E8;
+            color: #B91C1C;
+        }
+        .notif-delete-btn i { font-size: .95rem; pointer-events: none; }
+
+        .notif-delete-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            right: 0;
+            background: #DC2626;
+            color: #fff;
+            font-size: .62rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            padding: 4px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(2px);
+            transition: opacity .12s ease, transform .12s ease;
+            z-index: 10;
+        }
+        .notif-delete-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            right: 7px;
+            border: 4px solid transparent;
+            border-top-color: #DC2626;
+        }
+        .notif-delete-btn:hover .notif-delete-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
 
         .notif-divider {
             display: flex;
@@ -509,6 +567,12 @@
             #notif-footer-hint {
                 display: none !important;
             }
+            #notif-delete-toast {
+                left: 50% !important;
+                top: auto !important;
+                bottom: 24px !important;
+                transform: translateX(-50%) !important;
+            }
         }
     </style>
 
@@ -553,6 +617,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            deleteToast: { show: false, message: '' },
             async init() {
                 await this._fetch();
                 this._startPolling();
@@ -848,6 +913,68 @@
                         }
                     });
                 } catch (e) { /* ignore */ }
+            },
+
+            // Deletes a notification MESSAGE only — never the underlying
+            // alumni record, employment update, or import batch that
+            // generated it. This just clears the row(s) from the
+            // `notifications` table so the panel/list gets shorter; the
+            // actual alumni/import data this notif was about is untouched.
+            //
+            // Only ever called for notifs that are 30+ days old (enforced
+            // by the x-show on the delete button in the markup), so this
+            // is purely a "clean up old noise" action, not a moderation
+            // action on real data.
+            async deleteNotif(item) {
+                var ids = item._ids || [item.id];
+
+                // Optimistic removal from the panel so it feels instant.
+                var removedItems = this.items.filter(function (n) {
+                    return ids.indexOf(n.id) !== -1 || (n._ids || [n.id]).some(function (id) {
+                        return ids.indexOf(id) !== -1;
+                    });
+                });
+                this.items = this.items.filter(function (n) { return n !== item; });
+                this._showDeleteToast('Notification deleted');
+
+                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                var failedIds = [];
+
+                for (var i = 0; i < ids.length; i++) {
+                    try {
+                        var res = await window.fetch('/registrar/notifications/' + ids[i], {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN':     csrf,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            }
+                        });
+                        if (!res.ok) failedIds.push(ids[i]);
+                    } catch (e) {
+                        failedIds.push(ids[i]);
+                    }
+                }
+
+                // If any delete calls actually failed server-side, put the
+                // item back rather than silently losing it from view while
+                // it still exists in the DB.
+                if (failedIds.length > 0) {
+                    await this._fetch();
+                    this._showDeleteToast('Delete failed, please try again');
+                }
+            },
+
+            // Small self-clearing toast shown at the edge of the notif
+            // panel. Re-triggerable: calling this again while a toast is
+            // already showing resets its timer instead of stacking.
+            _showDeleteToast(message) {
+                var self = this;
+                this.deleteToast.message = message;
+                this.deleteToast.show = true;
+                if (this._toastTimer) clearTimeout(this._toastTimer);
+                this._toastTimer = setTimeout(function () {
+                    self.deleteToast.show = false;
+                }, 2200);
             },
 
             async markReadByRoute(routeName) {
@@ -1455,14 +1582,31 @@
                         <p class="notif-message-text" x-text="notif.message"></p>
 
                         <div class="notif-time-row">
-                            <i class="fas fa-clock"></i>
-                            <span x-text="notif.created_at
-                                ? new Date(notif.created_at).toLocaleString('en-PH', {
-                                    month: 'short', day: 'numeric', year: 'numeric',
-                                    hour: '2-digit', minute: '2-digit'
-                                  })
-                                : ''">
+                            <span style="display:flex; align-items:center; gap:5px;">
+                                <i class="fas fa-clock"></i>
+                                <span x-text="notif.created_at
+                                    ? new Date(notif.created_at).toLocaleString('en-PH', {
+                                        month: 'short', day: 'numeric', year: 'numeric',
+                                        hour: '2-digit', minute: '2-digit'
+                                      })
+                                    : ''">
+                                </span>
                             </span>
+
+                            {{-- Delete only becomes available once this notif
+                                 is 30+ days old — recent notifs can't be
+                                 deleted. This only removes the notification
+                                 message itself; it never touches the alumni
+                                 record or import that generated it. --}}
+                            <button type="button"
+                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                    x-cloak
+                                    class="notif-delete-btn"
+                                    @click.stop="$store.notifs && $store.notifs.deleteNotif(notif)"
+                                    aria-label="Delete notification">
+                                <i class="fas fa-trash-can"></i>
+                                <span class="notif-delete-tooltip">Delete</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1472,11 +1616,44 @@
     </div>
 
     {{-- Panel Footer --}}
-    <div id="notif-footer-hint" style="background:#FFFFFF; border-top:0.5px solid #E0D8ED; padding:10px 18px; text-align:center; flex-shrink:0;">
-        <p style="font-size:11px; color:#666666; font-weight:400; letter-spacing:0.01em;">
+    <div id="notif-footer-hint" style="background:#FFFFFF; border-top:0.5px solid #E0D8ED; padding:12px 18px; text-align:center; flex-shrink:0;">
+        <p style="font-size:13px; color:#555555; font-weight:500; letter-spacing:0.01em;">
             Select a notification to view details and mark as read.
         </p>
     </div>
+</div>
+
+{{-- Delete toast — floats off the right edge of the notif panel --}}
+<div
+    id="notif-delete-toast"
+    x-data
+    x-show="$store.notifs && $store.notifs.deleteToast.show"
+    x-cloak
+    x-transition:enter="transition ease-out duration-150"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    style="
+        position: fixed;
+        top: 100px;
+        left: 424px;
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #16A34A;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 12px 18px;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px -4px rgba(0,0,0,0.28);
+        white-space: nowrap;
+    ">
+    <i class="fas fa-circle-check" style="font-size:14px;"></i>
+    <span x-text="$store.notifs ? $store.notifs.deleteToast.message : ''"></span>
 </div>
 
 @livewireScripts

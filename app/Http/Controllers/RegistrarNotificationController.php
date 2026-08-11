@@ -276,4 +276,24 @@ class RegistrarNotificationController extends Controller
         RegistrarNotification::where('read', false)->update(['read' => true]);
         return response()->json(['ok' => true]);
     }
+
+    /**
+     * DELETE /registrar/notifications/{notification}
+     *
+     * Deletes the notification MESSAGE row only — it never touches the
+     * alumni record, employment record, or import batch that the
+     * notification was originally about. Deleting a "Bulk Import
+     * Complete" notif does not delete the imported alumni; it just
+     * clears the message from this table.
+     *
+     * Only meant to be called on notifications 30+ days old (enforced
+     * client-side by the delete button's visibility), but that's a UX
+     * gate, not a security boundary — the route itself doesn't need to
+     * re-check age since there's nothing destructive to real data here.
+     */
+    public function destroy(RegistrarNotification $notification)
+    {
+        $notification->delete();
+        return response()->json(['ok' => true]);
+    }
 }
