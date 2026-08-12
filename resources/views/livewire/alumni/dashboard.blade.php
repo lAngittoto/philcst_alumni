@@ -463,20 +463,18 @@ new class extends Component {
                 <div class="px-4 py-3 flex flex-col divide-y divide-[#F3F4F6] flex-1">
 
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Course</span>
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Student ID</span>
+                        <span class="text-[0.83rem] font-semibold font-mono text-gray-900">{{ $alumniStudentId ?: '—' }}</span>
+                    </div>
+
+                    <div class="flex items-center justify-between gap-2 py-2.5">
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Program</span>
                         <span class="text-[0.88rem] font-bold font-mono text-gray-900">{{ $alumniCourseCode ?: '—' }}</span>
                     </div>
 
                     @if($alumniCourseFull)
                     <div class="py-2.5 flex items-center justify-center">
                         <span class="text-[0.82rem] font-semibold text-center text-gray-900 leading-snug">{{ $alumniCourseFull }}</span>
-                    </div>
-                    @endif
-
-                    @if($alumniCollege)
-                    <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">College</span>
-                        <span class="text-[0.82rem] font-semibold text-right uppercase text-gray-900 leading-snug" style="max-width:170px;">{{ $alumniCollege }}</span>
                     </div>
                     @endif
 
@@ -487,10 +485,21 @@ new class extends Component {
                     </div>
                     @endif
 
+                    @if($alumniCollege)
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Student ID</span>
-                        <span class="text-[0.83rem] font-semibold font-mono text-gray-900">{{ $alumniStudentId ?: '—' }}</span>
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">College</span>
+                        <span class="text-[0.82rem] font-semibold text-right uppercase text-gray-900 leading-snug" style="max-width:170px;">{{ $alumniCollege }}</span>
                     </div>
+                    @endif
+
+                    @if($profileComplete)
+                    <div class="flex items-center justify-between gap-2 py-2.5">
+                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Profile</span>
+                        <span class="inline-flex items-center gap-1 text-[0.75rem] font-bold px-2.5 py-1 rounded-full border text-emerald-700 bg-emerald-50 border-emerald-200">
+                            <i class="fas fa-circle-check text-[10px]"></i> Complete
+                        </span>
+                    </div>
+                    @endif
 
                     <div class="flex-1"></div>
 
@@ -832,25 +841,23 @@ new class extends Component {
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Course Code</p>
-                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug font-mono">{{ $alumniCourseCode ?: '—' }}</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Student ID</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug font-mono">{{ $alumniStudentId ?: '—' }}</p>
                         </div>
-                        @if($alumniCourseFull)
                         <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Course</p>
-                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $alumniCourseFull }}</p>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Program</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $alumniCourseFull ?: ($alumniCourseCode ?: '—') }}</p>
                         </div>
-                        @endif
+                        <div>
+                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Batch / Graduation Year</p>
+                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $alumniBatch ?: '—' }}</p>
+                        </div>
                         @if($alumniCollege)
                         <div>
                             <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">College</p>
                             <p class="text-[0.92rem] font-bold text-gray-900 leading-snug uppercase">{{ $alumniCollege }}</p>
                         </div>
                         @endif
-                        <div>
-                            <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Batch / Graduation Year</p>
-                            <p class="text-[0.92rem] font-bold text-gray-900 leading-snug">{{ $alumniBatch ?: '—' }}</p>
-                        </div>
                         <div>
                             <p class="text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-400 mb-0.5">Profile Status</p>
                             <p class="text-[0.92rem] font-bold leading-snug {{ $profileComplete ? 'text-emerald-600' : 'text-amber-600' }}">

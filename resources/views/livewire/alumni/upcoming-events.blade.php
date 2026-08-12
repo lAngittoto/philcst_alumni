@@ -588,8 +588,10 @@ select.filter-input {
     background: #111827; color: #fff;
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     padding: 4px 10px; border-radius: 6px; white-space: nowrap;
-    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 99999;
     font-family: ui-sans-serif, system-ui, sans-serif;
+    box-shadow: 0 4px 12px rgba(0,0,0,.25);
+    isolation: isolate;
 }
 .detail-top-btn .tip::before {
     content: ''; position: absolute; bottom: 100%; right: 10px;
@@ -823,7 +825,7 @@ select.filter-input {
 
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
-        <div class="bg-gray-100 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
+        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
@@ -857,27 +859,20 @@ select.filter-input {
                     <i class="fas fa-rotate-left text-xs"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
-                    <svg class="animate-spin w-3.5 h-3.5 text-[#7a3f91]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
+                    <i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
         </div>
 
-        <div class="ev-filter-progress-track" wire:loading wire:target="search,filterStatus">
-            <div class="ev-filter-progress-bar"></div>
-        </div>
-        <style>
-            .ev-filter-progress-track { height:2px; width:100%; overflow:hidden; background:transparent; position:relative; }
-            .ev-filter-progress-bar { position:absolute; top:0; left:0; height:100%; width:40%; border-radius:99px; background:linear-gradient(135deg,#7a3f91,#9b59b6); animation:evFilterProgress 1s ease-in-out infinite; }
-            @keyframes evFilterProgress { 0%{left:-40%} 100%{left:100%} }
-        </style>
-
-        <div class="bg-gray-100 p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
+        <div class="bg-white p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
              wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus">
+
+            <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
+                 wire:loading.flex wire:target="search,filterStatus">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
             @if($this->pagedEvents->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -963,9 +958,16 @@ select.filter-input {
                             <button type="button"
                                     data-ev-share
                                     wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
+                                    wire:loading.attr="disabled"
+                                    wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
                                     class="card-share-btn">
-                                <i class="fas fa-share-nodes text-[11px]"></i>
-                                <span class="tip">Share</span>
+                                <span wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">
+                                    <i class="fas fa-share-nodes text-[11px]"></i>
+                                </span>
+                                <span wire:loading wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">
+                                    <i class="fas fa-spinner fa-spin text-[11px]"></i>
+                                </span>
+                                <span class="tip" wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">Share</span>
                             </button>
                         </div>
                     </div>
@@ -1112,23 +1114,40 @@ select.filter-input {
 
         <div class="flex items-center gap-1.5 flex-shrink-0">
             <button type="button" wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
+                    wire:loading.attr="disabled"
+                    wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
                     class="detail-top-btn share-btn" aria-label="Share">
-                <i class="fas fa-share-nodes text-[13px] text-white"></i>
-                <span class="tip">Share</span>
+                <span wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">
+                    <i class="fas fa-share-nodes text-[13px] text-white"></i>
+                </span>
+                <span wire:loading wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">
+                    <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
+                </span>
+                <span class="tip" wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">Share</span>
             </button>
             @if(!$isCompleted)
             <button type="button" wire:click="openRsvpModal"
+                    wire:loading.attr="disabled"
+                    wire:target="openRsvpModal"
                     class="detail-top-btn rsvp-btn" aria-label="{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}">
-                <i class="fas fa-calendar-plus text-[13px] text-white"></i>
-                <span class="tip">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
+                <span wire:loading.remove wire:target="openRsvpModal">
+                    <i class="fas fa-calendar-plus text-[13px] text-white"></i>
+                </span>
+                <span wire:loading wire:target="openRsvpModal">
+                    <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
+                </span>
+                <span class="tip" wire:loading.remove wire:target="openRsvpModal">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
             </button>
             @endif
             <button type="button" wire:click="closeViewModal"
+                    wire:loading.attr="disabled"
+                    wire:target="closeViewModal"
                     class="detail-top-btn close-btn" aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeViewModal">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
-                <span class="tip">Close</span>
+                <i class="fas fa-spinner fa-spin text-[13px] text-white" wire:loading wire:target="closeViewModal"></i>
+                <span class="tip" wire:loading.remove wire:target="closeViewModal">Close</span>
             </button>
         </div>
     </div>
@@ -1139,7 +1158,7 @@ select.filter-input {
 
             @if($hasPhoto)
                 <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                     class="w-full h-48 sm:h-56 object-cover bg-[#f5eef9] flex-shrink-0"
+                     class="w-full h-48 sm:h-56 object-cover bg-gray-50 flex-shrink-0"
                      onerror="this.style.display='none'">
             @endif
 
@@ -1629,11 +1648,12 @@ select.filter-input {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <button wire:click="closeShareModal" type="button" class="share-close-btn" aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <button wire:click="closeShareModal" wire:loading.attr="disabled" wire:target="closeShareModal" type="button" class="share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeShareModal">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
-                <span class="tip">Close</span>
+                <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeShareModal"></i>
+                <span class="tip" wire:loading.remove wire:target="closeShareModal">Close</span>
             </button>
         </div>
 
@@ -1779,11 +1799,12 @@ select.filter-input {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-paper-plane text-[#7a3f91] text-xs"></i> Send to Chat
             </h2>
-            <button wire:click="closeForwardModal" type="button" class="share-close-btn" aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <button wire:click="closeForwardModal" wire:loading.attr="disabled" wire:target="closeForwardModal" type="button" class="share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeForwardModal">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
-                <span class="tip">Close</span>
+                <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeForwardModal"></i>
+                <span class="tip" wire:loading.remove wire:target="closeForwardModal">Close</span>
             </button>
         </div>
 
@@ -1817,8 +1838,11 @@ select.filter-input {
 
         <div class="px-5 py-3.5 border-t border-gray-100 flex-shrink-0 flex items-center gap-2">
             <button type="button" wire:click="closeForwardModal"
-                    class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer" style="color:#333333;">
-                Cancel
+                    wire:loading.attr="disabled"
+                    wire:target="closeForwardModal"
+                    class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5" style="color:#333333;">
+                <span wire:loading.remove wire:target="closeForwardModal">Cancel</span>
+                <span wire:loading wire:target="closeForwardModal"><i class="fas fa-spinner fa-spin text-[11px]"></i></span>
             </button>
             <button type="button" wire:click="confirmSendToChat"
                     wire:loading.attr="disabled"
