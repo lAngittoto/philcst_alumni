@@ -936,9 +936,16 @@ new class extends \Livewire\Volt\Component {
         })->values()->toArray();
     }
 
-    public function sendMessage(): void
+    // ── Accepts the textarea's live value directly from the client ─────────
+    // The textarea uses wire:model.live.debounce.200ms for typing indicators
+    // and general sync, but that debounce can lag behind a fast Enter/Send
+    // press — $this->body would still hold the previous (stale) value when
+    // this method runs, causing messages to silently drop or appear late.
+    // Passing $typed straight from the DOM element bypasses that race
+    // entirely; $this->body is kept only as a fallback for older calls.
+    public function sendMessage(?string $typed = null): void
     {
-        $body = trim($this->body);
+        $body = trim($typed ?? $this->body);
         if ($body === '') return;
 
         if ($this->editingId) {
@@ -1382,7 +1389,74 @@ new class extends \Livewire\Volt\Component {
         .msgr-reactions-popup-list::-webkit-scrollbar-thumb { background: #c9aee0; border-radius: 999px; }
         .msgr-reactions-popup-list::-webkit-scrollbar-thumb:hover { background: #ad8ac7; }
 
-        #msgr-chat-body-wrap { position: relative; background: #ffffff; }
+        /* ── Floating background bubbles — same drifting lavender-circle
+           theme as the Yearbook page, used on the "no chat selected"
+           empty state so the two pages feel like one design system.
+           Split into separate layers (::before, ::after, and one real
+           child .msgr-bubble-layer) because a single element can only
+           animate its background-position along ONE shared path — to
+           get bubbles drifting in different directions each layer needs
+           its own animated element. ── */
+        .msgr-bubble-bg {
+            position: relative;
+            background-color: #FFFFFF;
+            overflow: hidden;
+        }
+        .msgr-bubble-bg::before,
+        .msgr-bubble-bg::after,
+        .msgr-bubble-layer {
+            content: '';
+            position: absolute;
+            inset: -60px;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .msgr-bubble-bg::before {
+            background-image:
+                radial-gradient(circle, rgba(216,180,254,0.55) 0, rgba(216,180,254,0.55) 22px, transparent 23px),
+                radial-gradient(circle, rgba(122,63,145,0.3) 0, rgba(122,63,145,0.3) 17px, transparent 18px);
+            background-repeat: repeat;
+            background-size: 340px 340px, 300px 300px;
+            background-position: 20px 40px, 90px 220px;
+            animation: msgrBubbleDriftUp 26s linear infinite;
+        }
+        .msgr-bubble-bg::after {
+            background-image:
+                radial-gradient(circle, rgba(216,180,254,0.4) 0, rgba(216,180,254,0.4) 14px, transparent 15px),
+                radial-gradient(circle, rgba(122,63,145,0.22) 0, rgba(122,63,145,0.22) 8px, transparent 9px);
+            background-repeat: repeat;
+            background-size: 260px 260px, 180px 180px;
+            background-position: 180px 120px, 40px 260px;
+            animation: msgrBubbleDriftDown 32s linear infinite;
+        }
+        .msgr-bubble-layer {
+            background-image:
+                radial-gradient(circle, rgba(216,180,254,0.45) 0, rgba(216,180,254,0.45) 10px, transparent 11px);
+            background-repeat: repeat;
+            background-size: 220px 220px;
+            background-position: 250px 60px;
+            animation: msgrBubbleDriftDiag 38s linear infinite;
+        }
+        @keyframes msgrBubbleDriftUp {
+            from { background-position: 20px 40px, 90px 220px; }
+            to   { background-position: 20px -300px, 90px -80px; }
+        }
+        @keyframes msgrBubbleDriftDown {
+            from { background-position: 180px 120px, 40px 260px; }
+            to   { background-position: 180px 380px, 40px 440px; }
+        }
+        @keyframes msgrBubbleDriftDiag {
+            from { background-position: 250px 60px; }
+            to   { background-position: -70px 340px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .msgr-bubble-bg::before,
+            .msgr-bubble-bg::after,
+            .msgr-bubble-layer { animation: none; }
+        }
+        .msgr-bubble-bg > * { position: relative; z-index: 1; }
+
+        #msgr-chat-body-wrap { position: relative; }
         .msgr-watermark {
             position: absolute;
             inset: 0;
@@ -1674,7 +1748,6 @@ new class extends \Livewire\Volt\Component {
         <div class="px-4 pt-3 pb-1.5 flex-shrink-0 bg-white border-b border-[#E8E0F0]">
             <p class="text-xs font-semibold text-[#999999] uppercase tracking-widest flex items-center gap-1.5">
                 <i class="fa-solid fa-comments"></i> Chats
-                <span class="text-xs font-semibold text-[#999999] bg-[#f5f5f5] px-2 py-0.5 rounded-full border border-[#E8E0F0] ml-auto">{{ count($rooms) }}</span>
             </p>
         </div>
 
@@ -1771,20 +1844,15 @@ new class extends \Livewire\Volt\Component {
                      x-transition:leave-end="opacity-0 scale-90"
                      style="display: none;">
                     <button wire:click.stop="togglePinRoom({{ $r['id'] }})"
-                            class="msgr-pin-btn w-7 h-7 rounded-full flex items-center justify-center shadow-md border transition-all duration-200 cursor-pointer
+                            wire:loading.attr="disabled" wire:target="togglePinRoom({{ $r['id'] }})"
+                            class="msgr-pin-btn w-7 h-7 rounded-full flex items-center justify-center shadow-md border transition-all duration-200 cursor-pointer disabled:opacity-60
                                    {{ $isPinnedRm
                                        ? 'bg-amber-400 border-amber-500 text-white hover:bg-amber-500 scale-105'
                                        : 'bg-white border-[#E8E0F0] text-[#aaaaaa] hover:bg-amber-50 hover:text-amber-500 hover:border-amber-300' }}">
-                        <i class="fa-solid fa-thumbtack" style="font-size: 10px;"></i>
+                        <i class="fa-solid fa-thumbtack" style="font-size: 10px;" wire:loading.remove wire:target="togglePinRoom({{ $r['id'] }})"></i>
+                        <i class="fa-solid fa-spinner fa-spin" style="font-size: 10px;" wire:loading wire:target="togglePinRoom({{ $r['id'] }})"></i>
                     </button>
-                    {{-- Opens UPWARD (bottom-full) instead of downward, so it
-                         paints over the PREVIOUS room row (earlier in the DOM)
-                         instead of getting hidden behind the NEXT room row
-                         (later in the DOM always paints on top of an earlier
-                         sibling's overflow content, regardless of z-index,
-                         once `isolation: isolate` scopes each row into its
-                         own stacking context). --}}
-                    <span class="msgr-tooltip bottom-full right-0 mb-2 px-2.5 py-1.5 rounded-lg">
+                    <span class="msgr-tooltip top-full right-0 mt-2 px-2.5 py-1.5 rounded-lg">
                         {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
                     </span>
                 </div>
@@ -1837,18 +1905,20 @@ new class extends \Livewire\Volt\Component {
             </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
                 <div class="relative msgr-tooltip-wrap">
-                    <button type="button" wire:click="togglePins"
-                            class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer
+                    <button type="button" wire:click="togglePins" wire:loading.attr="disabled" wire:target="togglePins"
+                            class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer disabled:opacity-60
                                    {{ $showPins ? 'bg-white/25 text-white' : 'bg-white/15 msgr-hdr-soft hover:bg-white/25' }}">
-                        <i class="fa-solid fa-thumbtack text-xs"></i>
+                        <i class="fa-solid fa-thumbtack text-xs" wire:loading.remove wire:target="togglePins"></i>
+                        <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePins"></i>
                     </button>
                     <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Pins</span>
                 </div>
                 <div class="relative msgr-tooltip-wrap">
-                    <button type="button" wire:click="toggleBatchmates"
-                            class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer
+                    <button type="button" wire:click="toggleBatchmates" wire:loading.attr="disabled" wire:target="toggleBatchmates"
+                            class="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 cursor-pointer disabled:opacity-60
                                    {{ $showBatchmates ? 'bg-white/25 text-white' : 'bg-white/15 msgr-hdr-soft hover:bg-white/25' }}">
-                        <i class="fa-solid fa-user-group text-xs"></i>
+                        <i class="fa-solid fa-user-group text-xs" wire:loading.remove wire:target="toggleBatchmates"></i>
+                        <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="toggleBatchmates"></i>
                     </button>
                     <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Members</span>
                 </div>
@@ -1858,7 +1928,7 @@ new class extends \Livewire\Volt\Component {
         <div class="flex flex-1 min-h-0 relative">
             <div class="flex flex-col flex-1 min-w-0">
 
-                <div id="msgr-chat-body-wrap" class="flex-1 min-h-0 flex flex-col"
+                <div id="msgr-chat-body-wrap" class="flex-1 min-h-0 flex flex-col msgr-bubble-bg"
                      x-data="{
                          nearBottom: true,
                          scrollDir: null,
@@ -1873,6 +1943,8 @@ new class extends \Livewire\Volt\Component {
                              this.dirTimer = setTimeout(() => { this.scrollDir = null; }, 1200);
                          }
                      }">
+
+                    <div class="msgr-bubble-layer" aria-hidden="true"></div>
 
                     @if($watermarkText !== '')
                     <div class="msgr-watermark" aria-hidden="true">
@@ -2371,15 +2443,17 @@ new class extends \Livewire\Volt\Component {
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="{{ $editingId ? 'Edit your message…' : ($roomType==='college' ? 'Message '.$alumniCollege.'…' : 'Message '.($room['name']??'group').'…') }}"
                                 rows="1"
-                                @keydown.enter="if (!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
+                                @keydown.enter="if (!$event.shiftKey){$event.preventDefault(); const val=$el.value; $el.value=''; $el.style.height='auto'; $wire.sendMessage(val);}"
                                 @keydown.escape="$wire.cancelEdit()"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-lg border-2 px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:ring-2 transition-all duration-150 placeholder-[#999999]
-                                       {{ $editingId ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 focus:ring-amber-300/30' : 'border-[#c9aee0] bg-[#F8F3FC] focus:border-[#7a3f91] focus:ring-[#7a3f91]/25' }}"
+                                class="w-full resize-none rounded-lg border px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:ring-2 transition-all duration-150 placeholder-[#999999]
+                                       {{ $editingId ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 focus:ring-amber-300/30' : 'border-[#E8E0F0] bg-white focus:border-[#7a3f91] focus:ring-[#7a3f91]/20' }}"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
-                        <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
+                        <button type="button"
+                                @click="const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; $wire.sendMessage(val);"
+                                wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm disabled:opacity-60 cursor-pointer
                                        {{ $editingId ? 'bg-amber-500' : 'bg-[#7a3f91]' }}">
                             <i class="fa-solid {{ $editingId ? 'fa-check' : 'fa-paper-plane' }} text-base" wire:loading.remove wire:target="sendMessage"></i>
@@ -2413,9 +2487,10 @@ new class extends \Livewire\Volt\Component {
                         </p>
                     @endif
                     <div class="relative msgr-tooltip-wrap">
-                        <button type="button" wire:click="closeSidePanel"
-                                class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition-all duration-150 cursor-pointer">
-                            <i class="fa-solid fa-xmark text-sm"></i>
+                        <button type="button" wire:click="closeSidePanel" wire:loading.attr="disabled" wire:target="closeSidePanel"
+                                class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition-all duration-150 cursor-pointer disabled:opacity-60">
+                            <i class="fa-solid fa-xmark text-sm" wire:loading.remove wire:target="closeSidePanel"></i>
+                            <i class="fa-solid fa-spinner fa-spin text-sm" wire:loading wire:target="closeSidePanel"></i>
                         </button>
                         <span class="msgr-tooltip top-full right-0 mt-2 px-2.5 py-1.5 rounded-lg">Close</span>
                     </div>
@@ -2561,8 +2636,10 @@ new class extends \Livewire\Volt\Component {
                                 </div>
                                 @if($pin['pinned_by_me'])
                                 <button wire:click="togglePin({{ $pin['id'] }})"
-                                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0 cursor-pointer">
-                                    <i class="fa-solid fa-xmark text-xs"></i>
+                                        wire:loading.attr="disabled" wire:target="togglePin({{ $pin['id'] }})"
+                                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0 cursor-pointer disabled:opacity-60">
+                                    <i class="fa-solid fa-xmark text-xs" wire:loading.remove wire:target="togglePin({{ $pin['id'] }})"></i>
+                                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePin({{ $pin['id'] }})"></i>
                                 </button>
                                 @else
                                 <span class="w-5 h-5 flex items-center justify-center text-[#cccccc] flex-shrink-0" title="Only the pinner can remove this">
@@ -2590,19 +2667,20 @@ new class extends \Livewire\Volt\Component {
     </div>
 
     @else
-    <div class="hidden md:flex flex-1 items-center justify-center bg-[#F4ECFB]">
+    <div class="hidden md:flex flex-1 items-center justify-center msgr-bubble-bg">
+        <div class="msgr-bubble-layer" aria-hidden="true"></div>
         <div class="flex flex-col items-center text-center px-8">
             <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f3eef8]">
                 <i class="fa-solid fa-hand-pointer text-4xl text-[#7a3f91]"></i>
             </div>
             <p class="text-lg font-semibold text-[#333333]">Click a message to view</p>
-            <p class="text-sm text-[#999999] mt-2 max-w-xs leading-relaxed">
+            <p class="text-sm text-[#333333] mt-2 max-w-xs leading-relaxed">
                 Select a chat from the left to start messaging your batchmates or college group.
             </p>
-            <div class="mt-5 flex items-center gap-2 text-xs text-[#999999]">
+            <div class="mt-5 flex items-center gap-2 text-xs text-[#333333] font-medium">
                 <span class="w-5 h-5 flex items-center justify-center rounded-lg bg-[#f3eef8]"><i class="fa-solid fa-users text-[#7a3f91]" style="font-size:10px;"></i></span>
                 <span>Batch chat</span>
-                <span class="mx-2 text-[#E8E0F0]">·</span>
+                <span class="mx-2 text-[#333333]">·</span>
                 <span class="w-5 h-5 flex items-center justify-center rounded-lg bg-[#f3eef8]"><i class="fa-solid fa-school text-[#7a3f91]" style="font-size:10px;"></i></span>
                 <span>College chat</span>
             </div>

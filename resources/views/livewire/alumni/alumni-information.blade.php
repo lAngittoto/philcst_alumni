@@ -894,9 +894,6 @@ new class extends Component {
     .ai-tooltip { display: none !important; }
 }
 
-@keyframes ai-spin { to { transform: rotate(360deg); } }
-.ai-spin { animation: ai-spin .7s linear infinite; }
-
 #profile-toast {
     position: fixed; top: 20px; left: 50%;
     transform: translateX(-50%) translateY(-90px); z-index: 9999;
@@ -1387,10 +1384,7 @@ function phAddress(initial) {
                     <span class="ai-tooltip">Edit Profile</span>
                     <span wire:loading.remove wire:target="startEditingProfile"><i class="fas fa-pen text-sm"></i></span>
                     <span wire:loading wire:target="startEditingProfile">
-                        <svg class="ai-spin w-4 h-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                        </svg>
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
                     </span>
                 </button>
 
@@ -1404,10 +1398,7 @@ function phAddress(initial) {
                     <span class="ai-tooltip">Update Employment</span>
                     <span wire:loading.remove wire:target="startEditingEmployment"><i class="fa-solid fa-briefcase text-sm"></i></span>
                     <span wire:loading wire:target="startEditingEmployment">
-                        <svg class="ai-spin w-4 h-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                        </svg>
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
                     </span>
                 </button>
             @else
@@ -1428,10 +1419,7 @@ function phAddress(initial) {
                         <span class="ai-tooltip">Cancel</span>
                         <span wire:loading.remove wire:target="cancelEditingProfile"><i class="fas fa-xmark text-sm"></i></span>
                         <span wire:loading wire:target="cancelEditingProfile">
-                            <svg class="ai-spin w-4 h-4 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                            </svg>
+                            <i class="fas fa-spinner fa-spin text-sm"></i>
                         </span>
                     </button>
                 @endif
@@ -1537,7 +1525,7 @@ function phAddress(initial) {
                         </div>
                         <div class="flex flex-col gap-1 field-block">
                             <p class="field-label">Program</p>
-                            @if($course_code)<p class="field-value">{{ strtoupper($course_code) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                            @if($course_name)<p class="field-value">{{ $course_name }}</p>@elseif($course_code)<p class="field-value">{{ strtoupper($course_code) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                         </div>
                     </div>
                 </div>
@@ -1947,7 +1935,8 @@ function phAddress(initial) {
                     <button wire:click="cancelEditingEmployment" type="button"
                             wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="cancelEditingEmployment"
                             class="emp-hdr-btn bg-white/15 text-white hover:bg-white/25">
-                        <i class="fas fa-xmark text-sm"></i>
+                        <span wire:loading.remove wire:target="cancelEditingEmployment"><i class="fas fa-xmark text-sm"></i></span>
+                        <span wire:loading wire:target="cancelEditingEmployment"><i class="fas fa-spinner fa-spin text-sm"></i></span>
                     </button>
                     <span class="emp-hdr-tip">Close</span>
                 </div>

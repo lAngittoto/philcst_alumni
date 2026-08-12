@@ -240,6 +240,23 @@ new class extends Component {
             const bottomSafe = 8;
             const avail = window.innerHeight - rect.top - bottomSafe;
             this.$el.style.setProperty('--yb-avail-h', avail + 'px');
+        },
+        profileOpen: false,
+        profileData: null,
+        closing: false,
+        openProfile(data) {
+            this.profileData = data;
+            this.profileOpen = true;
+            this.closing = false;
+        },
+        closeProfile() {
+            if (this.closing) return;
+            this.closing = true;
+            setTimeout(() => {
+                this.profileOpen = false;
+                this.closing = false;
+                setTimeout(() => { this.profileData = null; }, 200);
+            }, 350);
         }
      }"
      x-init="
@@ -247,6 +264,7 @@ new class extends Component {
         window.addEventListener('resize', () => setAvailHeight());
         window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
      ">
+
 
 <style>
 /* ── Base ──────────────────────────────────────────────── */
@@ -272,29 +290,6 @@ new class extends Component {
 .yb-scroll::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
 .yb-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-
-/* ── Filtering progress bar ───────────────────────────────── */
-.yb-filter-progress-track {
-    height: 2px;
-    width: 100%;
-    overflow: hidden;
-    background: transparent;
-    position: relative;
-    flex-shrink: 0;
-}
-.yb-filter-progress-bar {
-    position: absolute;
-    top: 0; left: 0;
-    height: 100%;
-    width: 40%;
-    border-radius: 99px;
-    background: #7A3F91;
-    animation: ybFilterProgress 1s ease-in-out infinite;
-}
-@keyframes ybFilterProgress {
-    0%   { left: -40%; }
-    100% { left: 100%; }
-}
 
 /* ── Entry animation ────────────────────────────────────── */
 @keyframes ybFadeUp {
@@ -517,6 +512,193 @@ new class extends Component {
         padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
     }
 }
+
+/* ── Floating background bubbles (whole scroll area) ─────────
+   Layered, gently drifting white/lavender circles behind the
+   alumni cards — NOT on the card headers themselves, so every
+   card stays a clean, readable solid purple. This lives on the
+   scroll container background only. ──────────────────────────── */
+.yb-bubble-bg {
+    position: relative;
+    background-color: #FFFFFF;
+}
+.yb-bubble-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(circle, rgba(243,232,255,0.6) 0, rgba(243,232,255,0.6) 6px, transparent 7px),
+        radial-gradient(circle, rgba(243,232,255,0.45) 0, rgba(243,232,255,0.45) 4px, transparent 5px),
+        radial-gradient(circle, rgba(216,180,254,0.25) 0, rgba(216,180,254,0.25) 5px, transparent 6px),
+        radial-gradient(circle, rgba(243,232,255,0.5) 0, rgba(243,232,255,0.5) 3px, transparent 4px);
+    background-repeat: repeat;
+    background-size: 340px 340px, 260px 260px, 300px 300px, 220px 220px;
+    background-position: 20px 40px, 180px 120px, 90px 220px, 250px 60px;
+    animation: ybBubbleDrift 22s linear infinite;
+}
+@keyframes ybBubbleDrift {
+    from { background-position: 20px 40px, 180px 120px, 90px 220px, 250px 60px; }
+    to   { background-position: 20px -300px, 180px -140px, 90px -80px, 250px -260px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .yb-bubble-bg::before { animation: none; }
+}
+
+/* ── Card click affordance ─────────────────────────────────
+   Only the LOGGED-IN alumni's own card is clickable and opens
+   the profile modal — other alumni cards in the yearbook have
+   no click handler at all and use the default cursor. ─────── */
+.yb-card-clickable { cursor: pointer; }
+.yb-card-clickable:hover { transform: translateY(-2px); }
+.yb-card-clickable:active { transform: translateY(0); }
+
+/* ── "View Profile" tooltip — own card only, hover-triggered,
+   matches the dark-pill .tip pattern used elsewhere in the app
+   (event cards' Share/RSVP tooltips) ────────────────────────── */
+.yb-card-tip {
+    position: absolute; top: -8px; left: 50%;
+    transform: translate(-50%, -100%);
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s;
+    z-index: 40;
+}
+.yb-card-tip::after {
+    content: ''; position: absolute; top: 100%; left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent; border-top-color: #111827;
+}
+.yb-card-clickable:hover .yb-card-tip { opacity: 1; }
+
+/* ── Profile / yearbook-page modal ──────────────────────── */
+.yb-modal-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(40, 20, 55, .55);
+    backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+}
+.yb-modal-card {
+    position: relative;
+    width: 100%; max-width: 420px;
+    background: #fff;
+    border-radius: 22px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(60,20,80,.35);
+    max-height: 90vh;
+    display: flex; flex-direction: column;
+}
+
+/* ── Mobile: profile view goes full screen, not a floating modal ── */
+@media (max-width: 640px) {
+    .yb-modal-overlay {
+        padding: 0;
+        align-items: stretch;
+        justify-content: stretch;
+    }
+    .yb-modal-card {
+        max-width: 100%;
+        width: 100%;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+    }
+    .yb-modal-body { flex: 1; }
+}
+.yb-modal-close {
+    position: absolute; top: 12px; right: 12px; z-index: 5;
+    width: 32px; height: 32px; border-radius: 9999px;
+    background: rgba(255,255,255,.25);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+    transition: background .15s;
+}
+.yb-modal-close:hover { background: rgba(255,255,255,.4); }
+.yb-modal-header {
+    position: relative;
+    background: linear-gradient(135deg, #7A3F91 0%, #9C5FB8 100%);
+    padding: 34px 20px 50px;
+    text-align: center;
+    flex-shrink: 0;
+}
+.yb-modal-header-deco {
+    position: absolute; inset: 0;
+    overflow: hidden;
+    border-radius: 22px 22px 0 0;
+    pointer-events: none;
+}
+.yb-modal-header-deco::before,
+.yb-modal-header-deco::after {
+    content: '';
+    position: absolute;
+    border-radius: 9999px;
+    background: rgba(255,255,255,.12);
+}
+.yb-modal-header-deco::before { width: 140px; height: 140px; top: -60px; left: -40px; }
+.yb-modal-header-deco::after  { width: 90px; height: 90px; bottom: -30px; right: -20px; background: rgba(255,255,255,.1); }
+.yb-modal-photo-ring {
+    position: relative;
+    margin: 0 auto;
+    width: 96px; height: 96px; border-radius: 9999px;
+    background: #fff; padding: 4px;
+    box-shadow: 0 8px 22px rgba(60,20,80,.3);
+    z-index: 2;
+}
+.yb-modal-body {
+    padding: 20px 24px 24px;
+    text-align: center;
+    overflow-y: auto;
+}
+.yb-modal-info-grid {
+    margin-top: 18px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.yb-modal-info-item {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 10px 12px; border-radius: 12px;
+    background: #F8F0FF; border: 1px solid #E4CBFA;
+    text-align: left;
+}
+.yb-modal-info-label {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+    color: #7A3F91;
+}
+.yb-modal-info-value {
+    font-size: 12.5px; font-weight: 700; color: #333333;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.yb-modal-note {
+    margin-top: 14px;
+    border-radius: 14px;
+    padding: 16px 18px;
+    background: linear-gradient(135deg, #F8F0FF 0%, #F3E8FF 100%);
+    border: 1.5px solid #E4CBFA;
+}
+.yb-modal-note-title {
+    font-size: 13px; font-weight: 800; color: #7A3F91;
+    letter-spacing: .02em; margin-bottom: 4px;
+}
+.yb-modal-note-text {
+    font-size: 13.5px; line-height: 1.55; color: #4A2E58;
+}
+.yb-modal-private-tag {
+    margin-top: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 9999px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
+    background: #FFF8E7; color: #92660A;
+    border: 1.5px solid #F6D860;
+}
+@keyframes ybModalIn {
+    from { opacity: 0; transform: scale(.94) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.yb-modal-anim { animation: ybModalIn .22s cubic-bezier(.4,0,.2,1) both; }
 </style>
 
     {{-- PAGE HEADER --}}
@@ -613,7 +795,7 @@ new class extends Component {
                     @if($course !== '')
                         <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
                     @else
-                        <span>All Courses</span>
+                        <span>All Programs</span>
                     @endif
                 </button>
                 <div x-show="open"
@@ -629,7 +811,7 @@ new class extends Component {
                             wire:click="clearCourse"
                             @click="open = false"
                             :class="{ 'sel': $wire.course === '' }"
-                            class="yb-dd-item">All Courses</button>
+                            class="yb-dd-item">All Programs</button>
                     @forelse($this->courses as $c)
                     <button type="button"
                             wire:click="setCourse('{{ $c->code }}')"
@@ -654,31 +836,28 @@ new class extends Component {
                     <i class="fas fa-rotate-left text-sm"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
-                    <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7A3F91;"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
         </div>
 
-        {{-- Filtering progress bar --}}
-        <div class="yb-filter-progress-track" wire:loading wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
-            <div class="yb-filter-progress-bar"></div>
-        </div>
-
         {{-- SCROLLABLE CARDS AREA --}}
-        <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
+        <div class="flex-1 min-h-0 relative yb-bubble-bg"
              x-data="{ showTop: false }">
 
             <div id="yb-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4"
-                 wire:loading.class="opacity-50"
+                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 transition-opacity duration-200"
+                 style="z-index: 1;"
+                 wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
+
+                <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
+                     wire:loading.flex wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
+                    <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+                </div>
 
                 @if($this->alumniRecords->count() > 0)
                     <div class="yb-grid-wrap space-y-2"
@@ -696,8 +875,17 @@ new class extends Component {
                                     @foreach($group as $alumni)
                                         @php $isMe = ($myAlumniId > 0 && $alumni->id === $myAlumniId); @endphp
                                         <div wire:key="alumni-{{ $alumni->id }}"
-                                             class="yb-card {{ $isMe ? 'yb-card-me' : '' }} bg-white rounded-2xl overflow-hidden border flex flex-col items-center shadow-sm cursor-default"
-                                             style="border-color:#E8E0F0;">
+                                             class="yb-card {{ $isMe ? 'yb-card-me yb-card-clickable' : '' }} bg-white rounded-2xl overflow-hidden border flex flex-col items-center shadow-sm"
+                                             style="border-color:#E8E0F0;"
+                                             @if($isMe)
+                                             @click="openProfile({
+                                                name: @js($this->formatAlumniName($alumni->name)),
+                                                course: @js($alumni->course_name),
+                                                batch: @js((string) $alumni->batch),
+                                                photo: @js($this->getPhotoUrl($alumni->profile_photo)),
+                                                isMe: true
+                                             })"
+                                             @endif>
 
                                             {{-- Purple header strip --}}
                                             <div class="w-full h-[88px] shrink-0 relative bg-[#7A3F91]">
@@ -726,6 +914,9 @@ new class extends Component {
                                                     Class of {{ $alumni->batch }}
                                                 </span>
                                             </div>
+                                            @if($isMe)
+                                            <span class="yb-card-tip">View Profile</span>
+                                            @endif
                                         </div>
                                     @endforeach
                                 </div>
@@ -821,5 +1012,71 @@ new class extends Component {
         </div>
 
     </div>{{-- /yb-table-block --}}
+
+    {{-- DIGITAL YEARBOOK PROFILE MODAL --}}
+    <template x-if="profileOpen && profileData">
+        <div class="yb-modal-overlay"
+             x-show="profileOpen"
+             x-transition:enter="transition ease-out duration-150"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0">
+
+            <div class="yb-modal-card yb-modal-anim">
+
+                <button type="button" class="yb-modal-close" @click="closeProfile()" :disabled="closing" aria-label="Close">
+                    <i class="fas fa-xmark text-sm" x-show="!closing"></i>
+                    <i class="fas fa-spinner fa-spin text-sm" x-show="closing" x-cloak></i>
+                </button>
+
+                <div class="yb-modal-header">
+                    <div class="yb-modal-header-deco"></div>
+                    <div class="yb-modal-photo-ring">
+                        <img :src="profileData.photo" :alt="profileData.name"
+                             class="w-full h-full rounded-full object-cover block"
+                             style="background:#f0e6f8;"
+                             onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+                    </div>
+                </div>
+
+                <div class="yb-modal-body">
+                    <p class="text-lg font-semibold uppercase leading-snug" style="color:#333333;" x-text="profileData.name"></p>
+
+                    {{-- Digital yearbook info strip --}}
+                    <div class="yb-modal-info-grid">
+                        <div class="yb-modal-info-item">
+                            <span class="yb-modal-info-label"><i class="fas fa-id-card"></i> Program</span>
+                            <span class="yb-modal-info-value" x-text="profileData.course"></span>
+                        </div>
+                        <div class="yb-modal-info-item">
+                            <span class="yb-modal-info-label"><i class="fas fa-calendar-check"></i> Batch</span>
+                            <span class="yb-modal-info-value" x-text="profileData.batch"></span>
+                        </div>
+                    </div>
+
+                    {{-- "We / Our" congratulatory note --}}
+                    <div class="yb-modal-note">
+                        <p class="yb-modal-note-title">
+                            <i class="fas fa-heart mr-1"></i> A Note From PhilCST
+                        </p>
+                        <p class="yb-modal-note-text">
+                            We are so proud of you. From your first day on campus to walking the stage,
+                            <span x-text="profileData.name"></span> — this achievement is <em>ours</em> to celebrate too.
+                            Congratulations, Alumni! 🎓
+                        </p>
+                    </div>
+
+                    {{-- Privacy notice: only shows on the viewer's own card --}}
+                    <template x-if="profileData.isMe">
+                        <span class="yb-modal-private-tag">
+                            <i class="fas fa-lock"></i> Only you can see this note
+                        </span>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </template>
 
 </div>{{-- /main layout --}}
