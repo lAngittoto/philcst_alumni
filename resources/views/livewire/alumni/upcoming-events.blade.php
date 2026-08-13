@@ -1948,29 +1948,37 @@ select.filter-input {
 
         attachListeners();
 
-        document.addEventListener('livewire:navigated', () => {
-            document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
-            attachListeners();
-            evAutoFitDetail();
-        });
+        // ─────────────────────────────────────────────────────────────────
+        // Rebind pass is coalesced into a single rAF tick per settle.
+        //
+        // livewire:navigated, morph.updated (fires per morphed element —
+        // can be several times for one commit), and commit's succeed
+        // callback used to each independently re-run rebind+reflow. Firing
+        // that 2-3x back-to-back for the SAME navigation is what produced
+        // the visible double-open/flash ("kidyam") when a notif deep-links
+        // straight into the event details view: the details page would
+        // paint, then visibly re-settle a beat later. One coalesced call
+        // per settle = one smooth paint.
+        // ─────────────────────────────────────────────────────────────────
+        var evRebindQueued = false;
+        function queueRebind() {
+            if (evRebindQueued) return;
+            evRebindQueued = true;
+            requestAnimationFrame(() => {
+                evRebindQueued = false;
+                document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
+                attachListeners();
+                evAutoFitDetail();
+            });
+        }
+
+        document.addEventListener('livewire:navigated', queueRebind);
 
         if (window.Livewire) {
-            window.Livewire.hook('morph.updated', ({ el }) => {
-                requestAnimationFrame(() => {
-                    document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
-                    attachListeners();
-                    evAutoFitDetail();
-                });
-            });
+            window.Livewire.hook('morph.updated', () => queueRebind());
             try {
                 window.Livewire.hook('commit', ({ succeed }) => {
-                    succeed(() => {
-                        requestAnimationFrame(() => {
-                            document.querySelectorAll('[data-ev-card]').forEach(c => { c._evBound = false; });
-                            attachListeners();
-                            evAutoFitDetail();
-                        });
-                    });
+                    succeed(() => queueRebind());
                 });
             } catch(e) {}
         }
@@ -1991,8 +1999,16 @@ select.filter-input {
 
 <script>
 (function () {
+    // Runs once per Livewire.navigate() paint (this <script> tag is
+    // re-injected fresh by the SPA morph each time, so it re-executes on
+    // every navigation).
+    //
+    // Strip ?event=&type= from the address bar the moment this page loads
+    // with them present — deep link should only ever show in the URL for
+    // the instant it takes this script to run, never persist while the
+    // modal is open.
     var params = new URLSearchParams(window.location.search);
-    if (params.has('event')) {
+    if (params.has('event') || params.has('type')) {
         window.history.replaceState({}, '', window.location.pathname);
     }
 })();

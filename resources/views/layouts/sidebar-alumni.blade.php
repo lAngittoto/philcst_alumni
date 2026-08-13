@@ -551,6 +551,21 @@
             }
         }
 
+        if (notif.link_route === 'job.opportunities') {
+            // job-opportunities.blade.php's mount() reads ?job= from the
+            // query string, opens that job's view-details panel immediately,
+            // and clears the query string once loaded (see jbStripJobQuery
+            // in that file) — same deep-link pattern as events above.
+            // dedup_key shapes: 'job-posted::{id}' or
+            // 'job-status-activated::{id}::{minuteBucket}' — the job id is
+            // always the segment right after the first '::'.
+            var dedup = notif.dedup_key || '';
+            var parts = dedup.split('::');
+            if (parts[1]) {
+                return base + '?job=' + encodeURIComponent(parts[1]);
+            }
+        }
+
         return base;
     };
 
@@ -607,6 +622,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            _navigating: false, // guards against double-click/double-tap firing two navigations for the same notif (the "kidyam"/double-open flicker)
             deleteToast: { show: false, message: '' },
 
             async init() {
@@ -1530,13 +1546,17 @@
                                transition-colors duration-150 select-none"
                         :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
                         @click.stop="
+                            if ($store.alumniNotifs._navigating) return;
+                            $store.alumniNotifs._navigating = true;
                             $store.alumniNotifs.markRead(notif).then(() => {
                                 $store.alumniNotifs.close();
                                 if (notif.link_route) {
                                     const url = window.__alumniNotifTargetUrl(notif);
                                     window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                                } else {
+                                    $store.alumniNotifs._navigating = false;
                                 }
-                            });
+                            }).catch(() => { $store.alumniNotifs._navigating = false; });
                         ">
 
                         <div class="notif-icon-wrap" style="background:#F3EBFA;">

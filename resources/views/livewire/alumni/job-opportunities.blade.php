@@ -24,6 +24,7 @@ new class extends Component {
 
     public bool $showDetail    = false;
     public ?int $viewingJobId  = null;
+    public bool $deepLinkedJob = false;
 
     public string $alumniCollege   = '';
     public string $alumniCourse    = '';
@@ -130,18 +131,24 @@ new class extends Component {
         // `livewire:navigated` guarantees our cleanup runs last.
         $jobParam = request()->query('job');
         if ($jobParam !== null && ctype_digit((string) $jobParam)) {
-            $exists = JobPosting::where('id', (int) $jobParam)
+            $job = JobPosting::where('id', (int) $jobParam)
                 ->where('status', 'ACTIVE')
-                ->exists();
-            if ($exists) {
+                ->first(['id', 'deadline']);
+            if ($job) {
+                $isExpired = $job->deadline
+                    && \Illuminate\Support\Carbon::parse($job->deadline)->lt(now('Asia/Manila')->startOfDay());
+
                 // Reset filters so the job is guaranteed to show under the list.
+                // If it's already expired, switch to Job History so it doesn't
+                // vanish from the list the moment the detail modal is closed.
                 $this->search      = '';
-                $this->filterType  = '';
+                $this->filterType  = $isExpired ? '__job_history' : '';
                 $this->filterLevel = '';
                 $this->filterSort  = 'recent';
 
-                $this->viewingJobId = (int) $jobParam;
-                $this->showDetail   = true;
+                $this->viewingJobId  = (int) $jobParam;
+                $this->showDetail    = true;
+                $this->deepLinkedJob = true;
             }
         }
     }
@@ -175,8 +182,15 @@ new class extends Component {
                 $q->whereNull('target_college')
                   ->orWhere('target_college', '')
                   ->orWhere('target_college', 'like', "%{$college}%");
-            })
-            ->where('deadline', '>=', $today);
+            });
+
+        // "Job History" shows every posting regardless of deadline, so
+        // expired postings remain visible with an Expired badge. All other
+        // filter selections (including "All Types") keep the normal
+        // still-open-only behavior.
+        if ($this->filterType !== '__job_history') {
+            $q->where('deadline', '>=', $today);
+        }
 
         if ($this->search !== '') {
             $s = strip_tags(trim($this->search));
@@ -187,11 +201,14 @@ new class extends Component {
             );
         }
 
-        if ($this->filterType  !== '') $q->where('employment_type',  $this->filterType);
+        if ($this->filterType !== '' && $this->filterType !== '__job_history') {
+            $q->where('employment_type', $this->filterType);
+        }
         if ($this->filterLevel !== '') $q->where('experience_level', $this->filterLevel);
 
         // Latest-posted job always leads unless the alumni explicitly
-        // picks "Deadline (Soonest)" from the sort filter.
+        // picks "Deadline (Soonest)" from the sort filter. Job History
+        // defaults to most-recently-expired/most-recent first.
         match ($this->filterSort) {
             'deadline_asc'  => $q->orderBy('deadline', 'asc'),
             'recent'        => $q->orderBy('created_at', 'desc'),
@@ -211,6 +228,11 @@ new class extends Component {
     {
         $this->showDetail   = false;
         $this->viewingJobId = null;
+
+        if ($this->deepLinkedJob) {
+            $this->resetPage();
+            $this->deepLinkedJob = false;
+        }
     }
 
     #[Computed]
@@ -220,6 +242,14 @@ new class extends Component {
         return JobPosting::where('id', $this->viewingJobId)
             ->where('status', 'ACTIVE')
             ->first();
+    }
+
+    #[Computed]
+    public function viewingJobExpired(): bool
+    {
+        $job = $this->viewingJob;
+        if (!$job || !$job->deadline) return false;
+        return \Illuminate\Support\Carbon::parse($job->deadline)->lt(now('Asia/Manila')->startOfDay());
     }
 
     public static function jobImageUrl(?string $path): string
@@ -789,6 +819,7 @@ select.filter-input {
                 <option value="Contract">Contract</option>
                 <option value="Internship">Internship</option>
                 <option value="Freelance">Freelance</option>
+                <option value="__job_history">Job History</option>
             </select>
 
             <select wire:model.live="filterLevel"
@@ -844,12 +875,15 @@ select.filter-input {
                     $dl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
                     $today    = now('Asia/Manila')->startOfDay();
                     $daysLeft = (int) $today->diffInDays($dl->copy()->startOfDay(), false);
+                    $isExpired = $daysLeft < 0;
 
-                    if ($daysLeft === 0)     $dlLabel = 'Closes today';
-                    elseif ($daysLeft === 1) $dlLabel = '1 day left';
-                    else                     $dlLabel = $daysLeft . ' days left';
+                    if ($isExpired)           $dlLabel = 'Deadline ' . $dl->format('M d, Y');
+                    elseif ($daysLeft === 0)  $dlLabel = 'Closes today';
+                    elseif ($daysLeft === 1)  $dlLabel = '1 day left';
+                    else                      $dlLabel = $daysLeft . ' days left';
 
-                    if ($daysLeft <= 3)       { $dlClass = 'text-red-600 font-bold'; $dlIcon = 'fa-fire'; }
+                    if ($isExpired)           { $dlClass = 'text-gray-400 font-medium'; $dlIcon = 'fa-ban'; }
+                    elseif ($daysLeft <= 3)   { $dlClass = 'text-red-600 font-bold'; $dlIcon = 'fa-fire'; }
                     elseif ($daysLeft <= 14)  { $dlClass = 'text-orange-700 font-semibold'; $dlIcon = 'fa-clock'; }
                     else                      { $dlClass = 'text-gray-600 font-medium'; $dlIcon = 'fa-calendar'; }
 
@@ -859,17 +893,23 @@ select.filter-input {
 
                 <div wire:key="job-card-{{ $job->id }}"
                      class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
-                            cursor-pointer relative select-none flex flex-col group"
+                            cursor-pointer relative select-none flex flex-col group
+                            {{ $isExpired ? 'opacity-70' : '' }}"
                      data-jb-card
                      wire:click="viewJob({{ $job->id }})"
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
-                    <div class="w-full h-40 bg-gray-50 flex-shrink-0 overflow-hidden pointer-events-none">
+                    <div class="relative w-full h-40 bg-gray-50 flex-shrink-0 overflow-hidden pointer-events-none">
                         <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
                              loading="lazy"
                              class="w-full h-full object-contain"
                              onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
+                        @if($isExpired)
+                            <span class="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-gray-700/90 text-white">
+                                <i class="fas fa-ban text-[9px]"></i> Expired
+                            </span>
+                        @endif
                     </div>
 
                     <div class="flex flex-col flex-1 p-4 gap-2.5">
@@ -1022,6 +1062,7 @@ select.filter-input {
     $dlValueClass = $dlIsUrgent ? 'text-red-600 font-bold' : ($dlIsSoon ? 'text-orange-700 font-bold' : 'text-gray-900 font-semibold');
 
     $isUrgent    = $daysLeft <= 7;
+    $isExpired   = $daysLeft < 0;
     $createdPH   = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
     $hasQual     = !empty($job->qualifications);
@@ -1085,7 +1126,7 @@ select.filter-input {
         <div class="w-full lg:w-[340px] lg:flex-none bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
 
             <img src="{{ $detailImg }}" alt="{{ $job->job_title }}"
-                 class="w-full h-48 sm:h-56 object-contain bg-gray-50 flex-shrink-0"
+                 class="w-full h-48 sm:h-56 object-contain flex-shrink-0"
                  onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
 
             <div class="p-5 flex flex-col gap-4">
@@ -1100,6 +1141,11 @@ select.filter-input {
                 </div>
 
                 <div class="flex flex-wrap gap-1.5">
+                    @if($isExpired)
+                        <span class="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                            <i class="fas fa-ban mr-1 text-[10px]"></i>Expired
+                        </span>
+                    @endif
                     @if($displayType)
                         <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $displayType }}</span>
                     @endif
@@ -1812,26 +1858,36 @@ select.filter-input {
 
         attachListeners();
 
-        document.addEventListener('livewire:navigated', () => {
-            document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
-            attachListeners();
-        });
+        // ─────────────────────────────────────────────────────────────────
+        // Rebind pass is coalesced into a single rAF tick per settle.
+        //
+        // livewire:navigated, morph.updated (fires per morphed element —
+        // can be several times for one commit), and commit's succeed
+        // callback used to each independently re-run rebind work. Firing
+        // that 2-3x back-to-back for the SAME navigation is what produced
+        // the visible double-open/flash ("kidyam") when a "View Post" link
+        // deep-links straight into the job detail view: the details panel
+        // would paint, then visibly re-settle a beat later. One coalesced
+        // call per settle = one smooth paint.
+        // ─────────────────────────────────────────────────────────────────
+        var jbRebindQueued = false;
+        function queueRebind() {
+            if (jbRebindQueued) return;
+            jbRebindQueued = true;
+            requestAnimationFrame(() => {
+                jbRebindQueued = false;
+                document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
+                attachListeners();
+            });
+        }
+
+        document.addEventListener('livewire:navigated', queueRebind);
 
         if (window.Livewire) {
-            window.Livewire.hook('morph.updated', ({ el }) => {
-                requestAnimationFrame(() => {
-                    document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
-                    attachListeners();
-                });
-            });
+            window.Livewire.hook('morph.updated', () => queueRebind());
             try {
                 window.Livewire.hook('commit', ({ succeed }) => {
-                    succeed(() => {
-                        requestAnimationFrame(() => {
-                            document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
-                            attachListeners();
-                        });
-                    });
+                    succeed(() => queueRebind());
                 });
             } catch(e) {}
         }
