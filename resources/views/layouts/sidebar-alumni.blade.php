@@ -17,6 +17,12 @@
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
 
+        /* ── Mobile viewport height fix ── */
+        .alm-app-shell {
+            height: 100vh;
+            height: 100dvh;
+        }
+
         /* ── Sidebar (desktop) bell ── */
         #alumni-bell-btn {
             background: transparent !important;
@@ -66,7 +72,85 @@
         }
 
         .bell-badge { pointer-events: none; }
+
+        /* ── Notif "bubbles" — replaces the bell-shake wave.
+             Small red bubbles rise off the badge and pop, looping, only
+             while there are unread notifs. Bell icon itself stays still
+             and keeps its normal color (untouched). ── */
+        .bell-bubbles {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 26px;
+            height: 26px;
+            pointer-events: none;
+        }
+        .bell-bubble {
+            position: absolute;
+            bottom: 6px;
+            right: 8px;
+            border-radius: 50%;
+            background: #EF4444;
+            opacity: 0;
+            animation: bellBubbleRise 2.6s ease-in infinite;
+        }
+        .bell-bubble:nth-child(1) { width: 5px;   height: 5px;   right: 10px; animation-delay: 0s;    }
+        .bell-bubble:nth-child(2) { width: 3.5px; height: 3.5px; right: 3px;  animation-delay: 0.55s; }
+        .bell-bubble:nth-child(3) { width: 4px;   height: 4px;   right: 15px; animation-delay: 1.1s;  }
+        @keyframes bellBubbleRise {
+            0%   { opacity: 0;   transform: translateY(0) scale(0.4); }
+            12%  { opacity: 0.9; transform: translateY(-3px) scale(1); }
+            70%  { opacity: 0.55; transform: translateY(-16px) scale(0.85); }
+            100% { opacity: 0;   transform: translateY(-22px) scale(0.3); }
+        }
         .notif-item { cursor: pointer; position: relative; }
+
+        /* Prevent copy/select of notification text inside the dropdown panel */
+        #alumni-notif-panel {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        .notif-close-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .notif-close-tip {
+            position: absolute;
+            top: calc(100% + 7px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a1a;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            padding: 4px 10px;
+            border-radius: 7px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            z-index: 100000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.30);
+        }
+        .notif-close-tip::after {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-bottom-color: #1a1a1a;
+        }
+        .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
+        @media (max-width: 1023px) {
+            .notif-close-tip { display: none !important; }
+        }
 
         /* ════════════════════════════════════════════════════════
            ALUMNI SIDEBAR — GRADUATE / ALUMNI THEME
@@ -342,6 +426,61 @@
             white-space: nowrap;
         }
 
+        /* ── Delete icon (only shown once a notif is 30+ days old) ──
+           Registrar-style: sits at the end of the time row, next to the
+           timestamp. Red icon, deeper red + light-red bg on hover. ── */
+        .alm-notif-delete-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            border: none;
+            background: transparent;
+            color: #DC2626;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .alm-notif-delete-btn:hover {
+            background: #FDE8E8;
+            color: #B91C1C;
+        }
+        .alm-notif-delete-btn i { font-size: .95rem; pointer-events: none; }
+
+        .alm-notif-delete-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            right: 0;
+            background: #DC2626;
+            color: #fff;
+            font-size: .62rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            padding: 4px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(2px);
+            transition: opacity .12s ease, transform .12s ease;
+            z-index: 10;
+        }
+        .alm-notif-delete-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            right: 7px;
+            border: 4px solid transparent;
+            border-top-color: #DC2626;
+        }
+        .alm-notif-delete-btn:hover .alm-notif-delete-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
         /* ── Mobile: notification panel goes true full-screen (registrar style) ── */
         @media (max-width: 1023px) {
             #alumni-notif-panel {
@@ -384,6 +523,35 @@
         'upcoming.events':    '/upcoming/events',
         'alumni.messenger':   '/alumni/messenger',
         'alumni.yearbook':    '/alumni/yearbook',
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  NOTIF → TARGET URL
+    //  For event notifs, deep-link straight into that event's detail modal
+    //  instead of just landing on the plain events list. The event's id +
+    //  source (ADMIN/ORGANIZER) are encoded in dedup_key server-side as
+    //  'event-announced::{source}::{id}' (see AlumniNotificationController
+    //  ::syncEventNotifications()) — parse that back out here.
+    //
+    //  upcoming-events.blade.php's mount() already reads ?event=&type= from
+    //  the query string, opens that event's view-details modal immediately,
+    //  and — once the modal is closed — auto-resets the list filter back to
+    //  "Upcoming" (see closeViewModal()'s deepLinkedView handling). This
+    //  helper just has to produce the right URL; the rest already works.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__alumniNotifTargetUrl = function (notif) {
+        var base = window.__alumniRouteMap[notif.link_route] || '/alumni/dashboard';
+
+        if (notif.link_route === 'upcoming.events') {
+            var dedup = notif.dedup_key || '';
+            var parts = dedup.split('::'); // ['event-announced', 'ADMIN'|'ORGANIZER', '{id}']
+            if (parts[0] === 'event-announced' && parts[1] && parts[2]) {
+                return base + '?event=' + encodeURIComponent(parts[2]) +
+                              '&type='  + encodeURIComponent(parts[1]);
+            }
+        }
+
+        return base;
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -439,6 +607,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            deleteToast: { show: false, message: '' },
 
             async init() {
                 await this._fetch();
@@ -452,6 +621,7 @@
             },
 
             async _fetch() {
+                if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
                 try {
                     var res = await window.fetch('/alumni/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -472,54 +642,41 @@
             },
 
             _groupByDay(rows) {
-                var map = new Map();
+                // Only CHAT MESSAGE notifs get grouped (by day) — otherwise
+                // an active batch chat floods the panel with one row per
+                // message. Everything else (jobs, events, profile, etc.)
+                // stays individual, one row per notif.
                 var localReads = window.__alumniLocalReadIds;
+                var msgMap = new Map();
+                var result = [];
+
                 Array.from(rows)
                     .sort(function (a, b) {
                         return new Date(b.created_at) - new Date(a.created_at);
                     })
                     .forEach(function (n) {
+                        var rawDedup = n.dedup_key || '';
+                        var isMessageEvent = (
+                            rawDedup.startsWith('message-received::') ||
+                            n.icon === 'comments'
+                        );
+
+                        if (!isMessageEvent) {
+                            result.push(Object.assign({}, n, {
+                                read:  n.read || localReads.has(n.id),
+                                count: 1,
+                                _ids:  [n.id],
+                            }));
+                            return;
+                        }
+
                         var day = n.created_at
                             ? new Date(n.created_at).toISOString().slice(0, 10)
                             : 'unknown';
-                        var rawDedup = n.dedup_key || '';
+                        var groupKey = 'message_day::' + day;
 
-                        var isMessageEvent = (
-                            rawDedup.startsWith('message-received::') ||
-                            n.icon  === 'comments'
-                        );
-
-                        // ── JOB EVENTS — MERGED ──────────────────────────
-                        // A brand-new posting (job-posted::) and an existing
-                        // posting being turned back on (job-status-activated::)
-                        // are both treated as ONE "New Job Postings" bucket —
-                        // it's still just one job either way, so they share
-                        // the same group/day and the same counter instead of
-                        // being split into separate notification types.
-                        var isJobEvent = (
-                            rawDedup.startsWith('job-posted::') ||
-                            rawDedup.startsWith('job-status-activated::') ||
-                            n.icon === 'briefcase'
-                        );
-
-                        var isCalendarEvent = (
-                            rawDedup.startsWith('event-announced::') ||
-                            n.icon  === 'calendar'
-                        );
-
-                        var groupKey;
-                        if (isMessageEvent) {
-                            groupKey = 'message_day::' + day;
-                        } else if (isJobEvent) {
-                            groupKey = 'job_day::' + day;
-                        } else if (isCalendarEvent) {
-                            groupKey = 'calendar_day::' + day;
-                        } else {
-                            groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id);
-                        }
-
-                        if (map.has(groupKey)) {
-                            var g = map.get(groupKey);
+                        if (msgMap.has(groupKey)) {
+                            var g = msgMap.get(groupKey);
                             g.count = (g.count || 1) + (n.count || 1);
                             g._ids.push(n.id);
 
@@ -529,36 +686,30 @@
                                 g.read = false;
                             }
 
-                            if (isMessageEvent) {
-                                g.message = g.count + ' new message(s) today.';
-                                g.title   = g.count + ' New Messages';
-                            } else if (isJobEvent) {
-                                g.message = g.count + ' new job posting(s) today.';
-                                g.title   = 'New Job Postings';
-                            } else if (isCalendarEvent) {
-                                g.message = g.count + ' new event(s) announced today.';
-                                g.title   = 'New Events Announced';
-                            }
+                            g.message = g.count + ' new message(s) today.';
+                            g.title   = g.count + ' New Messages';
                         } else {
-                            map.set(groupKey, Object.assign({}, n, {
+                            msgMap.set(groupKey, Object.assign({}, n, {
                                 read:  n.read || localReads.has(n.id),
                                 count: n.count || 1,
                                 _ids:  [n.id],
-                                title: isMessageEvent ? (n.title || 'New Message')
-                                     : isJobEvent ? 'New Job Postings'
-                                     : isCalendarEvent ? (n.title || 'New Event Announced')
-                                     : n.title,
-                                message: isJobEvent
-                                     ? '1 new job posting(s) today.'
-                                     : n.message,
-                                icon:  isMessageEvent ? 'comments'
-                                     : isJobEvent ? 'briefcase'
-                                     : isCalendarEvent ? 'calendar'
-                                     : (n.icon || 'bell'),
+                                title: n.title || 'New Message',
+                                icon:  'comments',
                             }));
                         }
                     });
-                return Array.from(map.values());
+
+                msgMap.forEach(function (v) { result.push(v); });
+
+                // Unread items float to the top (newest first), read items
+                // sit below (also newest first) — keeps a single clean
+                // "Already Read" divider point.
+                result.sort(function (a, b) {
+                    if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
+
+                return result;
             },
 
             get unread() {
@@ -637,6 +788,69 @@
                         }
                     }).catch(function () { /* ignore network errors */ });
                 }));
+            },
+
+            // Deletes a notification MESSAGE only — never the underlying
+            // alumni record, job posting, or event that generated it. This
+            // just clears the row(s) from the `notifications` table so the
+            // panel/list gets shorter; the actual data this notif was about
+            // is untouched.
+            //
+            // Only ever called for notifs that are 30+ days old (enforced
+            // by the x-show on the delete button in the markup), so this
+            // is purely a "clean up old noise" action.
+            async deleteNotif(item) {
+                var ids = item._ids || [item.id];
+                var self = this;
+                this._deleting = true;
+                this._showDeleteToast('Notification deleted');
+
+                // Give the slide-out leave transition time to play before
+                // actually removing the item from the array — removing it
+                // immediately would skip straight past x-transition:leave.
+                await new Promise(function (resolve) { setTimeout(resolve, 250); });
+                this.items = this.items.filter(function (n) { return n !== item; });
+
+                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                var failedIds = [];
+
+                for (var i = 0; i < ids.length; i++) {
+                    try {
+                        var res = await window.fetch('/alumni/notifications/' + ids[i], {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN':     csrf,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            }
+                        });
+                        if (!res.ok) failedIds.push(ids[i]);
+                    } catch (e) {
+                        failedIds.push(ids[i]);
+                    }
+                }
+
+                this._deleting = false;
+
+                // If any delete calls actually failed server-side, put the
+                // item back rather than silently losing it from view while
+                // it still exists in the DB.
+                if (failedIds.length > 0) {
+                    await this._fetch();
+                    this._showDeleteToast('Delete failed, please try again');
+                }
+            },
+
+            // Small self-clearing toast shown at the edge of the notif
+            // panel. Re-triggerable: calling this again while a toast is
+            // already showing resets its timer instead of stacking.
+            _showDeleteToast(message) {
+                var self = this;
+                this.deleteToast.message = message;
+                this.deleteToast.show = true;
+                if (this._toastTimer) clearTimeout(this._toastTimer);
+                this._toastTimer = setTimeout(function () {
+                    self.deleteToast.show = false;
+                }, 2200);
             },
         };
     };
@@ -934,7 +1148,7 @@
     x-on:profile-updated.window="profileComplete = $event.detail.completed"
     @click="$store.alumniNotifs && $store.alumniNotifs.open && $store.alumniNotifs.close()">
 
-<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="alm-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
     {{-- Mobile overlay --}}
     <div
@@ -1143,11 +1357,15 @@
                 aria-label="Open notifications"
                 class="alm-topbar-bell">
                 <i class="bell-icon fas fa-bell"
-                   :class="$store.alumniNotifs && $store.alumniNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
-                          --fa-animation-duration:4s;
-                          --fa-animation-iteration-count:infinite;
-                          pointer-events:none;"></i>
+                   style="font-size:20px; color:#7A3F91; pointer-events:none;"></i>
+                <span
+                    x-show="$store.alumniNotifs && $store.alumniNotifs.unread > 0"
+                    x-cloak
+                    class="bell-bubbles">
+                    <span class="bell-bubble"></span>
+                    <span class="bell-bubble"></span>
+                    <span class="bell-bubble"></span>
+                </span>
                 <span
                     x-show="$store.alumniNotifs && $store.alumniNotifs.unread > 0"
                     x-cloak
@@ -1166,7 +1384,8 @@
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8">
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+             style="min-height: 0; -webkit-overflow-scrolling: touch;">
             <div class="container mx-auto">
                 @yield('content')
             </div>
@@ -1190,6 +1409,8 @@
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
     @click.stop
+    @contextmenu.prevent
+    @copy.prevent
     class="bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden"
     style="
         position: fixed;
@@ -1230,13 +1451,16 @@
                 Mark all read
             </button>
 
-            <button type="button"
-                    @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
-                    aria-label="Close notifications"
-                    class="w-7 h-7 flex items-center justify-center rounded-lg
-                           text-white/50 hover:text-white hover:bg-white/10 transition ml-1">
-                <i class="fas fa-xmark" style="font-size:14px;"></i>
-            </button>
+            <div class="notif-close-wrap ml-1">
+                <span class="notif-close-tip">Close</span>
+                <button type="button"
+                        @click.stop="$store.alumniNotifs && $store.alumniNotifs.close()"
+                        aria-label="Close notifications"
+                        class="w-7 h-7 flex items-center justify-center rounded-lg
+                               text-white/50 hover:text-white hover:bg-white/10 transition">
+                    <i class="fas fa-xmark" style="font-size:14px;"></i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1249,6 +1473,30 @@
         <span style="font-size:11px; color:#9A8AA8; font-weight:500;"
               x-text="($store.alumniNotifs ? $store.alumniNotifs.items.length : 0) + ' notification(s)'">
         </span>
+    </div>
+
+    {{-- Delete toast — slides in ABOVE the list, inside the panel --}}
+    <div
+        x-show="$store.alumniNotifs && $store.alumniNotifs.deleteToast.show"
+        x-cloak
+        x-transition:enter="transition ease-out duration-200"
+        x-transition:enter-start="opacity-0 -translate-y-2"
+        x-transition:enter-end="opacity-100 translate-y-0"
+        x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="opacity-100 translate-y-0"
+        x-transition:leave-end="opacity-0 -translate-y-2"
+        style="
+            background: #ECFDF3;
+            border-bottom: 1px solid #BBF7D0;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        ">
+        <i class="fas fa-circle-check" style="font-size:13px; color:#16A34A;"></i>
+        <span style="font-size:12.5px; font-weight:600; color:#15803D;"
+              x-text="$store.alumniNotifs ? $store.alumniNotifs.deleteToast.message : ''"></span>
     </div>
 
     {{-- Scrollable notification list --}}
@@ -1285,7 +1533,7 @@
                             $store.alumniNotifs.markRead(notif).then(() => {
                                 $store.alumniNotifs.close();
                                 if (notif.link_route) {
-                                    const url = window.__alumniRouteMap[notif.link_route] || '/alumni/dashboard';
+                                    const url = window.__alumniNotifTargetUrl(notif);
                                     window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                                 }
                             });
@@ -1346,7 +1594,7 @@
                                       class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                             </div>
 
-                            <p class="text-[#666666] mt-1 leading-relaxed"
+                            <p class="text-[#333333] mt-1 leading-relaxed"
                                style="font-size:12px;
                                       display:-webkit-box;
                                       -webkit-line-clamp:2;
@@ -1355,16 +1603,29 @@
                                x-text="notif.message">
                             </p>
 
-                            <div class="flex items-center gap-1 mt-2">
-                                <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                                <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                      x-text="notif.created_at
-                                          ? new Date(notif.created_at).toLocaleString('en-PH',{
-                                              month:'short',day:'numeric',year:'numeric',
-                                              hour:'2-digit',minute:'2-digit'
-                                            })
-                                          : ''">
+                            <div class="flex items-center justify-between gap-2 mt-2">
+                                <span style="display:flex; align-items:center; gap:5px;">
+                                    <i class="fas fa-clock" style="font-size:10px;color:#666666;"></i>
+                                    <span style="font-size:11px;color:#333333;font-weight:500;"
+                                          x-text="notif.created_at
+                                              ? new Date(notif.created_at).toLocaleString('en-PH',{
+                                                  month:'short',day:'numeric',year:'numeric',
+                                                  hour:'2-digit',minute:'2-digit'
+                                                })
+                                              : ''">
+                                    </span>
                                 </span>
+
+                                {{-- Delete icon — only shown once a notif is 30+ days old --}}
+                                <button type="button"
+                                        x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                        x-cloak
+                                        class="alm-notif-delete-btn"
+                                        @click.stop="$store.alumniNotifs && $store.alumniNotifs.deleteNotif(notif)"
+                                        aria-label="Delete notification">
+                                    <i class="fas fa-trash-can"></i>
+                                    <span class="alm-notif-delete-tooltip">Delete</span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1375,7 +1636,7 @@
 
     {{-- Panel Footer --}}
     <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
-        <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
+        <p style="font-size:11px;color:#333333;font-weight:600;">
             Click a notification to view and mark as read
         </p>
     </div>

@@ -136,6 +136,39 @@ class AlumniNotificationController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  DELETE /alumni/notifications/{id}
+    //
+    //  Deletes a notification MESSAGE only — never the underlying alumni
+    //  record, job posting, or event that generated it. This just removes
+    //  the row from `alumni_notifications` so the panel/list gets shorter;
+    //  whatever the notif was ABOUT is completely untouched.
+    //
+    //  Scoped via forAlumni($alumni->id) — same guard as markRead()/
+    //  markAllRead() above — so one alumni can never delete another
+    //  alumni's notification row by guessing/changing the id in the URL.
+    //
+    //  The frontend only ever shows the delete button once a notif is
+    //  30+ days old (see sidebar-alumni.blade.php), but that's a UI-only
+    //  gate — this endpoint doesn't re-check the age itself, matching how
+    //  the registrar side's equivalent delete endpoint works.
+    // ─────────────────────────────────────────────────────────────────────────
+    public function destroy(int $id): JsonResponse
+    {
+        $alumni = Auth::user()?->alumni;
+        if (!$alumni) return response()->json(['error' => 'Unauthenticated'], 401);
+
+        $deleted = AlumniNotification::forAlumni($alumni->id)
+            ->where('id', $id)
+            ->delete();
+
+        if (!$deleted) {
+            return response()->json(['error' => 'Notification not found'], 404);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  PUBLIC: Notify all alumni targeted by a newly-posted job.
     //
     //  Called SERVER-SIDE from OrganizerJobManagement::savePost() right after

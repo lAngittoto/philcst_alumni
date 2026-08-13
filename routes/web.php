@@ -100,6 +100,7 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
     Route::post('/alumni/notifications',             [AlumniNotificationController::class, 'store']);
     Route::patch('/alumni/notifications/read-all',   [AlumniNotificationController::class, 'markAllRead']);
     Route::patch('/alumni/notifications/{n}/read',   [AlumniNotificationController::class, 'markRead']);
+    Route::delete('/alumni/notifications/{n}',       [AlumniNotificationController::class, 'destroy']);
 });
 
 // ===================================

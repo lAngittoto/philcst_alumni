@@ -301,7 +301,7 @@ new class extends Component {
         $this->resetRsvpModal();
 
         if ($this->deepLinkedView) {
-            $this->filterStatus   = 'upcoming';
+            $this->filterStatus   = 'completed';
             $this->page           = 1;
             $this->deepLinkedView = false;
         }
@@ -584,20 +584,21 @@ select.filter-input {
 }
 .detail-top-btn:active { transform: scale(.93); }
 .detail-top-btn .tip {
-    position: absolute; top: calc(100% + 6px); right: 0;
+    position: absolute; top: calc(100% + 10px); right: 0;
     background: #111827; color: #fff;
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     padding: 4px 10px; border-radius: 6px; white-space: nowrap;
-    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 99999;
+    pointer-events: none; opacity: 0; transform: translateY(-4px);
+    transition: opacity .15s, transform .15s; z-index: 99999;
     font-family: ui-sans-serif, system-ui, sans-serif;
-    box-shadow: 0 4px 12px rgba(0,0,0,.25);
+    box-shadow: 0 4px 12px rgba(0,0,0,.35);
     isolation: isolate;
 }
 .detail-top-btn .tip::before {
     content: ''; position: absolute; bottom: 100%; right: 10px;
     border: 4px solid transparent; border-bottom-color: #111827;
 }
-.detail-top-btn:hover .tip { opacity: 1; }
+.detail-top-btn:hover .tip { opacity: 1; transform: translateY(0); }
 
 .detail-top-btn.share-btn { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); color: #fff; }
 .detail-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
@@ -894,11 +895,9 @@ select.filter-input {
                      onkeypress="if(event.key==='Enter')this.click()">
 
                     @if($hasPhoto)
-                    <div class="relative w-full flex-shrink-0" style="height:200px;">
+                    <div class="relative w-full flex-shrink-0 bg-white" style="height:200px;">
                         <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                             class="w-full h-full object-cover">
-                        <div class="absolute inset-x-0 bottom-0 h-16 pointer-events-none"
-                             style="background:linear-gradient(to top,rgba(0,0,0,.55),transparent);"></div>
+                             class="w-full h-full object-contain">
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
                                 <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
@@ -1154,15 +1153,17 @@ select.filter-input {
 
     <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row">
 
-        <div class="w-full lg:w-[340px] lg:flex-none lg:min-h-0 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
+        <div class="w-full lg:w-[440px] lg:flex-none lg:min-h-0 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col">
 
             @if($hasPhoto)
-                <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                     class="w-full h-48 sm:h-56 object-cover bg-gray-50 flex-shrink-0"
-                     onerror="this.style.display='none'">
+                <div class="px-4 pt-4">
+                    <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
+                         class="w-full h-auto max-h-[560px] object-contain rounded-xl flex-shrink-0"
+                         onerror="this.parentElement.style.display='none'">
+                </div>
             @endif
 
-            <div class="p-4 flex flex-col gap-3">
+            <div class="px-4 pt-3 pb-4 flex flex-col gap-3">
                 @if($isPhilcst)
                     <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[10px]"></i> Official PHILCST Event</span>
                 @endif
