@@ -360,10 +360,10 @@
             border-left: 4px solid #7A3F91;
         }
         .notif-item.is-read {
-            background: #EDEDED;
+            background: #FFFFFF;
             border-left: 4px solid transparent;
         }
-        .notif-item.is-read:hover { background: #E4E4E4; }
+        .notif-item.is-read:hover { background: #F7F7F7; }
 
         .notif-icon-wrap {
             width: 38px;
@@ -440,11 +440,24 @@
         }
 
         .notif-unread-dot {
+            position: relative;
             width: 8px; height: 8px;
             border-radius: 50%;
-            background: #7A3F91;
+            background: #2563EB;
             flex-shrink: 0;
             margin-top: 4px;
+        }
+        .notif-unread-dot::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: #2563EB;
+            animation: notif-dot-wave 1.6s ease-out infinite;
+        }
+        @keyframes notif-dot-wave {
+            0%   { transform: scale(1);   opacity: 0.7; }
+            100% { transform: scale(2.8); opacity: 0; }
         }
 
         .notif-message-text {
@@ -617,6 +630,8 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            navigating: false,
+            markingAll: false,
             deleteToast: { show: false, message: '' },
             async init() {
                 await this._fetch();
@@ -628,6 +643,7 @@
                 this._pollTimer = setInterval(function () { self._fetch(); }, 5000);
             },
             async _fetch() {
+                if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
                 try {
                     var res = await window.fetch('/registrar/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -783,23 +799,34 @@
             close()  { this.open = false; },
 
             async markRead(item) {
-                if (!item.read) {
-                    item.read = true;
-                    var ids  = item._ids || [item.id];
-                    var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                    for (var i = 0; i < ids.length; i++) {
-                        try {
-                            await window.fetch('/registrar/notifications/' + ids[i] + '/read', {
-                                method: 'PATCH',
-                                headers: {
-                                    'X-CSRF-TOKEN':     csrf,
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                }
-                            });
-                        } catch (e) { /* ignore */ }
+                this.navigating = true;
+                var clearedByNav = false;
+                try {
+                    if (!item.read) {
+                        item.read = true;
+                        var ids  = item._ids || [item.id];
+                        var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                        for (var i = 0; i < ids.length; i++) {
+                            try {
+                                await window.fetch('/registrar/notifications/' + ids[i] + '/read', {
+                                    method: 'PATCH',
+                                    headers: {
+                                        'X-CSRF-TOKEN':     csrf,
+                                        'X-Requested-With': 'XMLHttpRequest',
+                                    }
+                                });
+                            } catch (e) { /* ignore */ }
+                        }
                     }
+                    clearedByNav = await this.goToTarget(item);
+                } finally {
+                    // If goToTarget actually kicked off a navigation, leave
+                    // `navigating` on — it gets cleared once the destination
+                    // page is truly ready (see livewire:navigated listener
+                    // below), so the spinner never drops early and leaves a
+                    // blank gap before content shows up.
+                    if (!clearedByNav) this.navigating = false;
                 }
-                await this.goToTarget(item);
             },
 
             // Navigate to wherever this notif points, carrying the affected
@@ -825,7 +852,7 @@
             // snapshot happened to be sitting in the store.
             async goToTarget(item) {
                 var routeName = item.link_route;
-                if (!routeName || !window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return;
+                if (!routeName || !window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return false;
 
                 var alumniIds = Array.isArray(item.alumni_ids) ? item.alumni_ids.filter(Boolean) : [];
 
@@ -864,12 +891,13 @@
                 })();
 
                 if (isSameLocation) {
-                    window.location.href = url;
+                    window.location.href = url; // hard nav — page unloads, spinner naturally ends with it
                 } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
-                    window.Livewire.navigate(url);
+                    window.Livewire.navigate(url); // SPA nav — spinner cleared by livewire:navigated listener
                 } else {
                     window.location.href = url;
                 }
+                return true;
             },
 
             // Re-fetches the notifications list and returns the freshest
@@ -903,6 +931,7 @@
             },
 
             async markAllRead() {
+                this.markingAll = true;
                 this.items.forEach(function (n) { n.read = true; });
                 try {
                     await window.fetch('/registrar/notifications/read-all', {
@@ -913,6 +942,8 @@
                         }
                     });
                 } catch (e) { /* ignore */ }
+                this.markingAll = false;
+                // Panel stays open — marking all read never closes it.
             },
 
             // Deletes a notification MESSAGE only — never the underlying
@@ -927,15 +958,15 @@
             // action on real data.
             async deleteNotif(item) {
                 var ids = item._ids || [item.id];
-
-                // Optimistic removal from the panel so it feels instant.
-                var removedItems = this.items.filter(function (n) {
-                    return ids.indexOf(n.id) !== -1 || (n._ids || [n.id]).some(function (id) {
-                        return ids.indexOf(id) !== -1;
-                    });
-                });
-                this.items = this.items.filter(function (n) { return n !== item; });
+                var self = this;
+                this._deleting = true;
                 this._showDeleteToast('Notification deleted');
+
+                // Give the slide-out leave transition time to play before
+                // actually removing the item from the array — removing it
+                // immediately would skip straight past x-transition:leave.
+                await new Promise(function (resolve) { setTimeout(resolve, 250); });
+                this.items = this.items.filter(function (n) { return n !== item; });
 
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 var failedIds = [];
@@ -954,6 +985,8 @@
                         failedIds.push(ids[i]);
                     }
                 }
+
+                this._deleting = false;
 
                 // If any delete calls actually failed server-side, put the
                 // item back rather than silently losing it from view while
@@ -975,29 +1008,6 @@
                 this._toastTimer = setTimeout(function () {
                     self.deleteToast.show = false;
                 }, 2200);
-            },
-
-            async markReadByRoute(routeName) {
-                var matched = this.items.filter(function (n) {
-                    return n.link_route === routeName && !n.read;
-                });
-                if (matched.length === 0) return;
-                var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                for (var i = 0; i < matched.length; i++) {
-                    matched[i].read = true;
-                    var ids = matched[i]._ids || [matched[i].id];
-                    for (var j = 0; j < ids.length; j++) {
-                        try {
-                            await window.fetch('/registrar/notifications/' + ids[j] + '/read', {
-                                method: 'PATCH',
-                                headers: {
-                                    'X-CSRF-TOKEN':     csrf,
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                }
-                            });
-                        } catch (e) { /* ignore */ }
-                    }
-                }
             },
         };
     };
@@ -1052,6 +1062,7 @@
             if (s._pollTimer) clearInterval(s._pollTimer);
             s._pollTimer = null;
             s.open  = false;
+            s.navigating = false; // destination page has landed — drop the spinner now, not before
             s.init();
         } else {
             Alpine.store('notifs', window.__makeNotifsStore());
@@ -1100,15 +1111,6 @@
         var s = window.__safeNotifsStore();
         if (s && s.open) positionPanel();
     });
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  SIDEBAR SMART MARK-READ
-    // ─────────────────────────────────────────────────────────────────────────
-    window.__sidebarNotifsMarkRead = function (routeName) {
-        var s = window.__safeNotifsStore();
-        if (!s) return;
-        s.markReadByRoute(routeName);
-    };
 
     // ─────────────────────────────────────────────────────────────────────────
     //  LIVEWIRE → DB BRIDGE
@@ -1329,7 +1331,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="window.__sidebarNotifsMarkRead('{{ $link['route'] }}'); sidebarOpen = false;"
+                   @click="sidebarOpen = false;"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
                     <div class="reg-nav-icon {{ $link['color'] }}">
                         <i class="fa-solid fa-{{ $link['icon'] }}"></i>
@@ -1482,8 +1484,9 @@
         </div>
         <div style="display:flex; align-items:center; gap:4px;">
             <button type="button"
-                    x-show="$store.notifs && $store.notifs.unread > 0"
+                    x-show="$store.notifs && ($store.notifs.unread > 0 || $store.notifs.markingAll)"
                     x-cloak
+                    :disabled="$store.notifs && $store.notifs.markingAll"
                     @click.stop="$store.notifs && $store.notifs.markAllRead()"
                     style="background:transparent; border:0.5px solid rgba(255,255,255,0.3); color:rgba(255,255,255,0.85); font-size:11px; font-weight:500; padding:5px 10px; border-radius:8px; cursor:pointer; letter-spacing:0.02em; transition:background 0.15s;"
                     onmouseover="this.style.background='rgba(255,255,255,0.12)'"
@@ -1504,6 +1507,35 @@
     {{-- Sub-header --}}
     <div style="background:#FFFFFF; padding:9px 18px; display:flex; align-items:center; justify-content:space-between; border-bottom:0.5px solid #E0D8ED; flex-shrink:0;">
         <span style="font-size:11px; font-weight:600; color:#7A3F91; letter-spacing:0.1em; text-transform:uppercase;">Recent Activity</span>
+        <span x-show="$store.notifs && $store.notifs.items.length > 0"
+              x-cloak
+              style="font-size:11px; font-weight:700; color:#7A3F91; background:#F0E9F6; padding:2px 9px; border-radius:999px;"
+              x-text="$store.notifs ? $store.notifs.items.length : 0">
+        </span>
+    </div>
+
+    {{-- Delete toast — slides in ABOVE the list, inside the panel --}}
+    <div
+        x-show="$store.notifs && $store.notifs.deleteToast.show"
+        x-cloak
+        x-transition:enter="transition ease-out duration-200"
+        x-transition:enter-start="opacity-0 -translate-y-2"
+        x-transition:enter-end="opacity-100 translate-y-0"
+        x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="opacity-100 translate-y-0"
+        x-transition:leave-end="opacity-0 -translate-y-2"
+        style="
+            background: #ECFDF3;
+            border-bottom: 1px solid #BBF7D0;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        ">
+        <i class="fas fa-circle-check" style="font-size:13px; color:#16A34A;"></i>
+        <span style="font-size:12.5px; font-weight:600; color:#15803D;"
+              x-text="$store.notifs ? $store.notifs.deleteToast.message : ''"></span>
     </div>
 
     {{-- Scrollable list --}}
@@ -1523,7 +1555,11 @@
 
         <template x-if="$store.notifs">
             <template x-for="(notif, notifIdx) in $store.notifs.items" :key="notif.id">
-                <div>
+                <div
+                    x-transition:leave="transition ease-in duration-250"
+                    x-transition:leave-start="opacity-100 translate-x-0"
+                    x-transition:leave-end="opacity-0 translate-x-full"
+                    style="overflow: hidden;">
                     <div class="notif-divider"
                          x-show="notif.read && notifIdx > 0 && !$store.notifs.items[notifIdx - 1].read"
                          x-cloak>
@@ -1593,14 +1629,10 @@
                                 </span>
                             </span>
 
-                            {{-- Delete only becomes available once this notif
-                                 is 30+ days old — recent notifs can't be
-                                 deleted. This only removes the notification
-                                 message itself; it never touches the alumni
-                                 record or import that generated it. --}}
+                            {{-- TESTING: 30-day gate temporarily disabled.
+                                 Original condition: notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30
+                                 Restore that x-show once testing is done. --}}
                             <button type="button"
-                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
-                                    x-cloak
                                     class="notif-delete-btn"
                                     @click.stop="$store.notifs && $store.notifs.deleteNotif(notif)"
                                     aria-label="Delete notification">
@@ -1623,38 +1655,42 @@
     </div>
 </div>
 
-{{-- Delete toast — floats off the right edge of the notif panel --}}
+{{-- Top loading bar while a clicked notif navigates to its target page. --}}
 <div
-    id="notif-delete-toast"
+    id="notif-nav-bar"
     x-data
-    x-show="$store.notifs && $store.notifs.deleteToast.show"
+    x-show="$store.notifs && $store.notifs.navigating"
     x-cloak
-    x-transition:enter="transition ease-out duration-150"
+    x-transition:enter="transition ease-out duration-100"
     x-transition:enter-start="opacity-0"
     x-transition:enter-end="opacity-100"
     x-transition:leave="transition ease-in duration-150"
     x-transition:leave-start="opacity-100"
     x-transition:leave-end="opacity-0"
     style="
-        position: fixed;
-        top: 100px;
-        left: 424px;
-        z-index: 10000;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        background: #16A34A;
-        color: #fff;
-        font-size: 13px;
-        font-weight: 600;
-        padding: 12px 18px;
-        border-radius: 10px;
-        box-shadow: 0 8px 20px -4px rgba(0,0,0,0.28);
-        white-space: nowrap;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        height: 3px;
+        z-index: 2147483647 !important;
+        background: #E8D9F2;
+        overflow: hidden;
     ">
-    <i class="fas fa-circle-check" style="font-size:14px;"></i>
-    <span x-text="$store.notifs ? $store.notifs.deleteToast.message : ''"></span>
+    <div style="
+            height: 100%;
+            width: 40%;
+            background: #7A3F91;
+            border-radius: 0 3px 3px 0;
+            animation: notif-nav-bar-slide 1s ease-in-out infinite;
+        "></div>
 </div>
+<style>
+    @keyframes notif-nav-bar-slide {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(250%); }
+    }
+</style>
 
 @livewireScripts
 

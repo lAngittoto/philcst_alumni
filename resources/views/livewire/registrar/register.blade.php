@@ -745,12 +745,12 @@ public function closeImportModal(): void
     /* ── Picker panel ── */
     .reg-picker-panel {
         position: absolute;
-        bottom: calc(100% + 8px);
+        top: calc(100% + 8px);
         left: 0;
         background: #fff;
         border: 1.5px solid #E8E0F0;
         border-radius: 14px;
-        box-shadow: 0 -4px 6px rgba(0,0,0,.03), 0 16px 40px rgba(122,63,145,.18);
+        box-shadow: 0 4px 6px rgba(0,0,0,.03), 0 16px 40px rgba(122,63,145,.18);
         z-index: 600;
         overflow: hidden;
     }
@@ -880,24 +880,20 @@ public function closeImportModal(): void
         gap: 10px;
         padding: 8px 10px;
         border-radius: 9px;
-        border: 1.5px solid transparent;
+        border: none;
         background: transparent;
         cursor: pointer;
         text-align: left;
-        transition: background .12s, border-color .12s;
+        transition: background .12s;
         margin-bottom: 2px;
     }
     .reg-picker-course-cell:hover { background: #F3E8FF; }
-    .reg-picker-course-cell--selected { background: #F3E8FF; border-color: #7A3F91; }
+    .reg-picker-course-cell--selected { background: #F3E8FF; }
     .reg-picker-course-code {
         flex-shrink: 0;
-        font-size: .72rem;
-        font-weight: 800;
-        color: #7A3F91;
-        background: #F0E6F8;
-        padding: 3px 7px;
-        border-radius: 6px;
-        letter-spacing: .02em;
+        font-size: .82rem;
+        font-weight: 500;
+        color: #333333;
     }
     .reg-picker-course-name {
         flex: 1;
@@ -972,7 +968,7 @@ public function closeImportModal(): void
         background: #FDFAFF;
     }
     .reg-suffix-clear {
-        font-size: .72rem; font-weight: 700; color: #999;
+        font-size: .72rem; font-weight: 700; color: #333333;
         background: none; border: none; cursor: pointer;
         padding: 4px 8px; border-radius: 6px;
         transition: color .12s, background .12s;
@@ -1396,7 +1392,7 @@ public function closeImportModal(): void
                                                         class="reg-suffix-item">
                                                     <span class="font-mono font-bold w-12 shrink-0" x-text="s.label"></span>
                                                     <span class="text-xs font-medium" x-text="s.desc"
-                                                          :class="$wire.regSuffix === s.label ? 'text-white/70' : 'text-[#888]'"></span>
+                                                          :class="$wire.regSuffix === s.label ? 'text-white/70' : 'text-[#333333]'"></span>
                                                 </button>
                                             </template>
                                         </div>
