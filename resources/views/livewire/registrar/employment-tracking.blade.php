@@ -1704,7 +1704,7 @@ new class extends Component {
                         <input type="checkbox" wire:click="toggleFilterCourse('{{ $code }}')"
                                :checked="$wire.filterCourse.includes('{{ $code }}')"
                                class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
-                        <span>{{ $code }}</span>
+                        <span>{{ $name }}</span>
                     </label>
                     @endforeach
                 </div>
@@ -2477,7 +2477,7 @@ new class extends Component {
                  class="ar-dropdown-menu" style="display:none;" @click.stop>
                 <button type="button" @click.stop="select('')" :class="{'active':$wire.modalCourse===''}" class="ar-dropdown-item">All Program Codes</button>
                 @foreach($this->courseMap as $code => $name)
-                <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.modalCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $code }}</button>
+                <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.modalCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $name }}</button>
                 @endforeach
             </div>
         </div>

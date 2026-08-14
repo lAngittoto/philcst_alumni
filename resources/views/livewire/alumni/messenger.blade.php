@@ -38,6 +38,66 @@ new class extends \Livewire\Volt\Component {
 
     public array $typingUsers = [];
 
+    // ── Profanity filter (English + Tagalog) ──────────────────────────────
+    // Matches whole words only (so "class" won't trigger on "ass"), case
+    // insensitive, and tolerates simple letter-repeat spam (e.g. "puuuta").
+    // Matched words are replaced with asterisks of the same length so the
+    // message length/shape stays roughly intact without revealing the word.
+    private static array $bannedWords = [
+        // English
+        'fuck', 'fucking', 'fucker', 'fck', 'motherfucker',
+        'shit', 'shitty', 'bullshit',
+        'bitch', 'bitches',
+        'asshole', 'ass',
+        'dick', 'cock', 'pussy', 'cunt',
+        'bastard', 'slut', 'whore',
+        'nigger', 'nigga',
+        'retard', 'retarded',
+        // Tagalog
+        'putangina', 'putang ina', 'putanginamo', 'putanginamu',
+        'tangina', 'tanginamo', 'tang ina',
+        'gago', 'gaga', 'gagu',
+        'ulol', 'ulul',
+        'bobo', 'boba',
+        'tarantado', 'tarantada',
+        'hayop', 'hayup',
+        'leche', 'lecheng',
+        'punyeta', 'punyeta ka',
+        'peste', 'pesteng',
+        'kingina', 'kinginamo',
+        'siraulo', 'sira ulo',
+        'engot',
+        'pakyu',
+        'pucha', 'puchang',
+        'yawa',
+        // Pangasinan
+        'baoninam', 'putang inam',
+    ];
+
+    private static function filterProfanity(string $text): string
+    {
+        foreach (self::$bannedWords as $word) {
+            // Allow spaces/dashes/underscores BETWEEN letters (basic evasion
+            // resistance) and repeated letters (e.g. "puuutangina"), without
+            // swallowing the whitespace that follows the whole word.
+            $letters = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
+            $last    = count($letters) - 1;
+            $pattern = implode('', array_map(
+                fn($ch, $i) => preg_quote($ch, '/') . '+' . ($i < $last ? '[\s\-_]*' : ''),
+                $letters,
+                array_keys($letters)
+            ));
+
+            $text = preg_replace_callback(
+                '/\b' . $pattern . '\b/iu',
+                fn($m) => str_repeat('*', mb_strlen($m[0])),
+                $text
+            ) ?? $text;
+        }
+
+        return $text;
+    }
+
     public ?int  $reactionsPopupMsgId = null;
     public array $reactionsPopupData  = [];
 
@@ -669,19 +729,24 @@ new class extends \Livewire\Volt\Component {
         $this->openPinsPanel();
     }
 
+    // ── Polling budget, per 1.5s tick ───────────────────────────────────────
+    // The old version ran loadRooms() (6+ queries PER room, incl. member
+    // counts) and a full notification scan on every single tick, forever —
+    // that's what made the whole page feel heavy, including the delete
+    // modal, which just gets stuck in line behind this work. Real-time
+    // "did a new message arrive" only needs loadMessages() + typing on the
+    // open room every tick; the sidebar/room list and notification scan
+    // don't need to be that fresh, so they're staggered out to every 4th
+    // tick (~6s) instead. Presence stays every tick since it's a single
+    // cheap indexed UPDATE, not a read-heavy query.
     public function unifiedPoll(): void
     {
         $this->pollTick++;
-
-        $this->checkAndDispatchNewMessageNotifications();
-        $this->loadRooms();
+        $isHeavyTick = ($this->pollTick % 4 === 0);
 
         if ($this->roomId) {
-            $this->loadTypingIndicators();
-        }
-
-        if ($this->pollTick % 2 === 0 && $this->roomId) {
             $this->loadMessages();
+            $this->loadTypingIndicators();
             $this->markRoomAsRead($this->roomId);
             // Soft scroll: only actually jumps to the bottom if the user
             // is already near the bottom of the thread (handled client
@@ -691,16 +756,11 @@ new class extends \Livewire\Volt\Component {
             $this->dispatch('chat-scroll-bottom');
         }
 
-        // ── Presence: ping EVERY tick (every 1.5s) instead of every 4th ──
-        // tick. As long as this Messenger page is mounted — whether or not
-        // a specific room is open — the alumnus keeps refreshing their own
-        // `last_seen_at`, so the 1-minute "Online" threshold above never
-        // goes stale while they're sitting here. `refreshOnlineCount()` for
-        // the header pill still runs on a slightly lighter cadence since it
-        // does a couple of extra count() queries.
         $this->pingPresence();
 
-        if ($this->pollTick % 2 === 0) {
+        if ($isHeavyTick) {
+            $this->checkAndDispatchNewMessageNotifications();
+            $this->loadRooms();
             $this->refreshOnlineCount();
         }
     }
@@ -956,6 +1016,8 @@ new class extends \Livewire\Volt\Component {
         if (! $this->roomId) return;
         $college = $this->alumniCollege;
 
+        $body = self::filterProfanity($body);
+
         $msgId = DB::table('chat_messages')->insertGetId([
             'room_id'     => $this->roomId,
             'sender_type' => 'alumni',
@@ -1007,6 +1069,8 @@ new class extends \Livewire\Volt\Component {
 
     private function applyEdit(string $body): void
     {
+        $body = self::filterProfanity($body);
+
         DB::table('chat_messages')
             ->where('id', $this->editingId)
             ->where('sender_type', 'alumni')
@@ -1057,14 +1121,90 @@ new class extends \Livewire\Volt\Component {
 
     public function unsend(int $id): void
     {
-        DB::table('chat_messages')->where('id',$id)->where('sender_type','alumni')->where('sender_id',$this->alumniId)->update(['deleted_at' => now()]);
+        $updated = DB::table('chat_messages')
+            ->where('id', $id)
+            ->where('sender_type', 'alumni')
+            ->where('sender_id', $this->alumniId)
+            ->whereNull('deleted_at')
+            ->update(['deleted_at' => now()]);
+
+        // Nothing actually changed (already deleted / not yours) — just
+        // close the modal, no need to touch anything else.
+        if (! $updated) {
+            $this->openToolbarMsgId = null;
+            $this->confirmDeleteId  = null;
+            return;
+        }
+
         DB::table('chat_pins')->where('message_id', $id)->delete();
         DB::table('chat_reactions')->where('message_id', $id)->delete();
+
         $this->openToolbarMsgId = null;
         $this->confirmDeleteId  = null;
         if ($this->editingId === $id) { $this->editingId = null; $this->body = ''; }
-        $this->loadMessages(); $this->loadRooms();
-        if ($this->showPins) $this->loadPins();
+
+        // ── Patch the message in place instead of reloading the whole
+        // room + message list. Deleting one row doesn't change anyone's
+        // name/photo/other messages, so there's nothing else to refetch.
+        foreach ($this->messages as $i => $m) {
+            if ($m['id'] === $id) {
+                $this->messages[$i]['is_deleted']   = true;
+                $this->messages[$i]['body']         = null;
+                $this->messages[$i]['reactions']    = [];
+                $this->messages[$i]['my_reaction']  = null;
+                $this->messages[$i]['is_pinned']    = false;
+                $this->messages[$i]['pinned_by_me'] = false;
+                $this->messages[$i]['post_preview'] = null;
+                break;
+            }
+        }
+
+        // Only the sidebar preview needs updating if this was the room's
+        // most recent message — and even then it's one cheap lookup, not
+        // a full loadRooms() pass over every room + its member counts.
+        $this->refreshRoomPreview($this->roomId);
+
+        if ($this->showPins) {
+            $this->pinnedMessages = array_values(array_filter(
+                $this->pinnedMessages,
+                fn ($p) => $p['id'] !== $id
+            ));
+        }
+    }
+
+    // ── Cheap sidebar refresh: only re-pulls the single row's preview
+    // fields for the room that changed, instead of re-running loadRooms()
+    // (which re-counts online/offline members for every room every time).
+    private function refreshRoomPreview(int $roomId): void
+    {
+        foreach ($this->rooms as $i => $r) {
+            if ($r['id'] !== $roomId) continue;
+
+            $latest = DB::table('chat_messages as m')
+                ->where('m.room_id', $roomId)
+                ->whereNull('m.deleted_at')
+                ->orderByDesc('m.created_at')
+                ->first(['m.body', 'm.sender_type', 'm.sender_id', 'm.created_at']);
+
+            if (! $latest) {
+                $this->rooms[$i]['latest_body']   = null;
+                $this->rooms[$i]['latest_sender'] = null;
+                $this->rooms[$i]['latest_time']   = null;
+                break;
+            }
+
+            $name = $latest->sender_type === 'alumni'
+                ? DB::table('alumni')->where('id', $latest->sender_id)->value('first_name')
+                : DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
+
+            $this->rooms[$i]['latest_body']   = $this->resolvePreviewText($latest->body);
+            $this->rooms[$i]['latest_sender'] = $latest->sender_type === 'alumni'
+                ? ($name ?? 'Alumni')
+                : (($name ?? 'Coordinator') . ' (Coordinator)');
+            $this->rooms[$i]['latest_time']   = Carbon::parse($latest->created_at)
+                ->setTimezone('Asia/Manila')->format('h:i A');
+            break;
+        }
     }
 
     public function react(int $msgId, string $reaction): void
@@ -1467,16 +1607,19 @@ new class extends \Livewire\Volt\Component {
             pointer-events: none;
             z-index: 0;
             user-select: none;
+            padding: 0 8%;
         }
         .msgr-watermark span {
-            font-size: clamp(64px, 13vw, 190px);
+            font-size: clamp(20px, 5vw, 56px);
             font-weight: 900;
             color: #7A3F91;
             opacity: 0.07;
             letter-spacing: .04em;
-            white-space: nowrap;
+            white-space: normal;
+            text-align: center;
             transform: rotate(-6deg);
-            line-height: 1;
+            line-height: 1.15;
+            max-width: 90%;
         }
         #msg-list { position: relative; z-index: 1; background: transparent; }
 
@@ -1708,10 +1851,7 @@ new class extends \Livewire\Volt\Component {
 
         $watermarkText = '';
         if ($roomType === 'college') {
-            $words = preg_split('/\s+/', trim($alumniCollege));
-            $words = array_filter($words, fn ($w) => ! in_array(strtolower($w), ['of','and','the','&'], true));
-            $initials = collect($words)->map(fn ($w) => mb_strtoupper(mb_substr($w, 0, 1)))->implode('');
-            $watermarkText = $initials !== '' ? $initials : mb_strtoupper($alumniCollege);
+            $watermarkText = mb_strtoupper(trim($alumniCollege));
         } elseif ($roomType === 'batch') {
             $watermarkText = strtoupper($alumniCourse);
         }
@@ -2436,25 +2576,27 @@ new class extends \Livewire\Volt\Component {
                     </div>
                     @endif
 
-                    <div class="flex items-end gap-2">
+                    <div class="flex items-end gap-2" x-data="{ sending: false }">
                         <div class="flex-1 relative">
                             <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="{{ $editingId ? 'Edit your message…' : ($roomType==='college' ? 'Message '.$alumniCollege.'…' : 'Message '.($room['name']??'group').'…') }}"
                                 rows="1"
-                                @keydown.enter="if (!$event.shiftKey){$event.preventDefault(); const val=$el.value; $el.value=''; $el.style.height='auto'; $wire.sendMessage(val);}"
+                                :disabled="sending"
+                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; const val=$el.value; $el.value=''; $el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; });}"
                                 @keydown.escape="$wire.cancelEdit()"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-lg border px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:ring-2 transition-all duration-150 placeholder-[#999999]
+                                class="w-full resize-none rounded-lg border px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:ring-2 transition-all duration-150 placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed
                                        {{ $editingId ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 focus:ring-amber-300/30' : 'border-[#E8E0F0] bg-white focus:border-[#7a3f91] focus:ring-[#7a3f91]/20' }}"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
                         <button type="button"
-                                @click="const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; $wire.sendMessage(val);"
+                                :disabled="sending"
+                                @click="if (!sending) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; }); }"
                                 wire:loading.attr="disabled" wire:target="sendMessage"
-                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm disabled:opacity-60 cursor-pointer
+                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer
                                        {{ $editingId ? 'bg-amber-500' : 'bg-[#7a3f91]' }}">
                             <i class="fa-solid {{ $editingId ? 'fa-check' : 'fa-paper-plane' }} text-base" wire:loading.remove wire:target="sendMessage"></i>
                             <span class="hidden items-center gap-1" wire:loading.flex wire:target="sendMessage">
@@ -2667,8 +2809,7 @@ new class extends \Livewire\Volt\Component {
     </div>
 
     @else
-    <div class="hidden md:flex flex-1 items-center justify-center msgr-bubble-bg">
-        <div class="msgr-bubble-layer" aria-hidden="true"></div>
+    <div class="hidden md:flex flex-1 items-center justify-center bg-white">
         <div class="flex flex-col items-center text-center px-8">
             <div class="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 bg-[#f3eef8]">
                 <i class="fa-solid fa-hand-pointer text-4xl text-[#7a3f91]"></i>

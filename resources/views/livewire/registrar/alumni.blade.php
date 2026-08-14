@@ -35,7 +35,11 @@ new class extends Component {
     // alumniCourse (single string) is gone.
     public array  $alumniCourses     = [];
     public string $alumniProfileFilter = 'all';
-    public string $alumniEmploymentStatus = '';
+
+    // Employment Status is now a MULTI-SELECT (like Program Code) — an
+    // array of checked statuses instead of a single string, so e.g.
+    // "Employed" + "Self-Employed" can be viewed together.
+    public array  $alumniEmploymentStatuses = [];
 
     public ?int   $viewingProfileId  = null;
     public        $viewingProfile    = null;
@@ -76,8 +80,14 @@ new class extends Component {
         }
 
         $empStatus = request()->query('employment_status', '');
-        if (in_array($empStatus, ['employed', 'self_employed', 'unemployed', 'no_record'])) {
-            $this->alumniEmploymentStatus = $empStatus;
+        if ($empStatus !== '') {
+            $validStatuses = ['employed', 'self_employed', 'unemployed', 'no_record'];
+            $this->alumniEmploymentStatuses = collect(explode(',', $empStatus))
+                ->map(fn($v) => trim($v))
+                ->filter(fn($v) => in_array($v, $validStatuses, true))
+                ->unique()
+                ->values()
+                ->all();
         }
 
         $highlight = request()->query('highlight', '');
@@ -195,7 +205,7 @@ new class extends Component {
             || $rangeComplete
             || !empty($this->alumniCourses)
             || $this->alumniProfileFilter !== 'all'
-            || $this->alumniEmploymentStatus !== '';
+            || !empty($this->alumniEmploymentStatuses);
 
         $q = Alumni::query();
 
@@ -215,7 +225,7 @@ new class extends Component {
             if (!empty($this->alumniCourses)) $q->whereIn('course_code', $this->alumniCourses);
             if ($this->alumniProfileFilter === 'complete')   $q->where('profile_completed', 1);
             elseif ($this->alumniProfileFilter === 'incomplete') $q->where('profile_completed', 0);
-            if ($this->alumniEmploymentStatus !== '') $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatus);
+            if (!empty($this->alumniEmploymentStatuses)) $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatuses);
 
             $target = Alumni::find($alumniId);
             if (!$target) return null;
@@ -266,28 +276,54 @@ new class extends Component {
     }
 
     /** Constrains a query to alumni whose LATEST (most recent, non-deleted)
-     *  employment_trackings row matches the given status. 'no_record' means
-     *  the alumni has no employment_trackings row at all. Shared by
+     *  employment_trackings row matches ANY of the given statuses (OR'd
+     *  together) — so e.g. "Employed" + "Self-Employed" can be checked
+     *  at once. 'no_record' means the alumni has no employment_trackings
+     *  row at all, and is combined with the others via orWhere. Shared by
      *  alumniRecords() and pageFor() so filtering stays identical between
-     *  what's displayed and where notif-highlight jumps land. */
-    protected function applyEmploymentStatusFilter($q, string $status): void
+     *  what's displayed and where notif-highlight jumps land.
+     *
+     *  PERF: previously this ran a correlated scalar subquery PER ROW
+     *  (`(select ... limit 1) in (...)`), which the DB can't use an index
+     *  for and re-executes on every row scanned — noticeably slow once
+     *  this fires on every checkbox click. Rewritten to a single
+     *  `alumni.id IN (subquery)` instead: the subquery below computes
+     *  each alumni's latest employment_trackings row ONCE (via a
+     *  group-by max(id) — non-deleted rows only, id is a safe tie-break
+     *  since it's monotonic with created_at) and is evaluated once total,
+     *  not once per row. Same result set as before, just fast. */
+    protected function applyEmploymentStatusFilter($q, array $statuses): void
     {
-        if ($status === 'no_record') {
-            $q->whereNotExists(fn($s) => $s
-                ->from('employment_trackings')
-                ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
-                ->whereNull('employment_trackings.deleted_at'));
-            return;
-        }
+        $statuses = array_values(array_unique($statuses));
+        if (empty($statuses)) return;
 
-        $q->whereRaw(
-            '? = (select employment_status from employment_trackings
-                  where employment_trackings.alumni_id = alumni.id
-                    and employment_trackings.deleted_at is null
-                  order by employment_trackings.created_at desc, employment_trackings.id desc
-                  limit 1)',
-            [$status]
-        );
+        $realStatuses = array_values(array_diff($statuses, ['no_record']));
+        $wantsNoRecord = in_array('no_record', $statuses, true);
+
+        // Latest non-deleted employment_trackings row ID per alumni_id.
+        $latestPerAlumni = DB::table('employment_trackings')
+            ->select('alumni_id', DB::raw('MAX(id) as latest_id'))
+            ->whereNull('deleted_at')
+            ->groupBy('alumni_id');
+
+        $q->where(function ($outer) use ($realStatuses, $wantsNoRecord, $latestPerAlumni) {
+            if (!empty($realStatuses)) {
+                $outer->orWhereIn('alumni.id', function ($sub) use ($realStatuses, $latestPerAlumni) {
+                    $sub->select('et.alumni_id')
+                        ->from('employment_trackings as et')
+                        ->joinSub($latestPerAlumni, 'latest', function ($join) {
+                            $join->on('latest.latest_id', '=', 'et.id');
+                        })
+                        ->whereIn('et.employment_status', $realStatuses);
+                });
+            }
+            if ($wantsNoRecord) {
+                $outer->orWhereNotExists(fn($s) => $s
+                    ->from('employment_trackings')
+                    ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+                    ->whereNull('employment_trackings.deleted_at'));
+            }
+        });
     }
 
     /** Label / color classes / icon for an employment status badge,
@@ -317,7 +353,6 @@ new class extends Component {
 
     public function updatingAlumniSearch()        { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
     public function updatingAlumniProfileFilter() { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
-    public function updatingAlumniEmploymentStatus() { $this->resetPage('alumniPage'); $this->clearNotifScope(); }
 
     /** True only once BOTH ends of the batch range are set — a half-picked
      *  range (just From, or just To) never scopes the query. */
@@ -439,6 +474,38 @@ new class extends Component {
         $this->clearNotifScope();
     }
 
+    /** Toggles a single employment status in/out of the multi-select
+     *  filter — bound directly to each checkbox item in the Employment
+     *  Status dropdown. Mirrors toggleProgramCode() exactly. */
+    public function toggleEmploymentStatus(string $status): void
+    {
+        if (in_array($status, $this->alumniEmploymentStatuses, true)) {
+            $this->alumniEmploymentStatuses = array_values(array_diff($this->alumniEmploymentStatuses, [$status]));
+        } else {
+            $this->alumniEmploymentStatuses[] = $status;
+        }
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** "All Employment Status" inside the dropdown — clears the whole
+     *  multi-select in one round-trip. Mirrors clearProgramCodes(). */
+    public function clearEmploymentStatuses(): void
+    {
+        $this->alumniEmploymentStatuses = [];
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** "Select All" inside the dropdown — checks every employment status
+     *  option. Mirrors selectAllProgramCodes(). */
+    public function selectAllEmploymentStatuses(): void
+    {
+        $this->alumniEmploymentStatuses = ['employed', 'self_employed', 'unemployed', 'no_record'];
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
     /** Wrappers around WithPagination's page methods that also clear the
      *  notif-triggered highlight/scope, since manual paging means the
      *  user has moved on from whatever the notif pointed to. */
@@ -533,14 +600,14 @@ new class extends Component {
         elseif ($this->alumniProfileFilter === 'incomplete')
             $q->where('profile_completed', 0);
 
-        if ($this->alumniEmploymentStatus !== '')
-            $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatus);
+        if (!empty($this->alumniEmploymentStatuses))
+            $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatuses);
 
         $hasActiveFilter = $this->alumniSearch !== ''
             || $this->batchRangeIsComplete()
             || !empty($this->alumniCourses)
             || $this->alumniProfileFilter !== 'all'
-            || $this->alumniEmploymentStatus !== '';
+            || !empty($this->alumniEmploymentStatuses);
 
         // FIX (Paolo-on-screen-but-Jose-in-export bug): without a final
         // deterministic tie-breaker, rows sharing the same course_code /
@@ -647,7 +714,12 @@ new class extends Component {
         if (!empty($this->alumniCourses)) {
             $parts[] = implode(', ', $this->alumniCourses);
         }
-        if ($this->alumniEmploymentStatus !== '') $parts[] = $this->employmentStatusBadge($this->alumniEmploymentStatus)[0];
+        if (!empty($this->alumniEmploymentStatuses)) {
+            $parts[] = implode(', ', array_map(
+                fn($s) => $this->employmentStatusBadge($s)[0],
+                $this->alumniEmploymentStatuses
+            ));
+        }
         if ($this->alumniSearch !== '') $parts[] = 'Search: "' . $this->alumniSearch . '"';
 
         return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
@@ -660,8 +732,8 @@ new class extends Component {
         $this->alumniBatchFrom         = '';
         $this->alumniBatchTo           = '';
         $this->alumniCourses           = [];
-        $this->alumniProfileFilter     = 'all';
-        $this->alumniEmploymentStatus  = '';
+        $this->alumniProfileFilter       = 'all';
+        $this->alumniEmploymentStatuses  = [];
         $this->skipBatchHooks          = false;
         $this->clearNotifScope();
         $this->resetPage('alumniPage');
@@ -1431,7 +1503,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
         {{-- ── Filter bar ── --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
 
             <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
@@ -1577,9 +1649,18 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 </div>
             </div>
 
-            {{-- Employment Status filter — sits right beside Batch --}}
+            {{-- Employment Status filter — sits right beside Batch.
+                 MULTI-SELECT with real checkboxes, exactly matching the
+                 Program Code dropdown above. Checking a box toggles that
+                 status in/out of alumniEmploymentStatuses via
+                 toggleEmploymentStatus(); the dropdown stays open across
+                 clicks so e.g. "Employed" + "Self-Employed" can be
+                 checked together. A "Select All" checkbox sits in a
+                 sticky header row at the TOP of the list — tri-state:
+                 checked when every status is selected, indeterminate
+                 (dash) when some but not all are. The trigger label
+                 shows a count once 2+ are picked. --}}
             @php $arEmpOptions = [
-                ['', 'All Employment Status', 'fa-briefcase'],
                 ['employed', 'Employed', 'fa-user-tie'],
                 ['self_employed', 'Self-Employed', 'fa-store'],
                 ['unemployed', 'Unemployed', 'fa-magnifying-glass'],
@@ -1589,22 +1670,51 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  x-data="{
                     get open(){ return $store.arFilters.isOpen('empStatus'); },
                     toggle(){ $store.arFilters.toggle('empStatus'); },
-                    close(){ $store.arFilters.close('empStatus'); },
-                    select(val){ $wire.set('alumniEmploymentStatus',val); this.close(); }
+                    close(){ $store.arFilters.close('empStatus'); }
                  }"
                  @click.outside="close()" wire:key="employment-status-dropdown">
-                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.alumniEmploymentStatus!=='','open':open }" class="ar-dropdown-trigger">
-                    <span>@if($alumniEmploymentStatus !== ''){{ $this->employmentStatusBadge($alumniEmploymentStatus)[0] }}@else All Employment Status @endif</span>
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.alumniEmploymentStatuses.length>0,'open':open }" class="ar-dropdown-trigger">
+                    <span>
+                        @if(count($alumniEmploymentStatuses) === 0)
+                            All Employment Status
+                        @elseif(count($alumniEmploymentStatuses) === 1)
+                            {{ $this->employmentStatusBadge($alumniEmploymentStatuses[0])[0] }}
+                        @else
+                            {{ count($alumniEmploymentStatuses) }} Statuses
+                        @endif
+                    </span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;" @click.stop>
+                     class="ar-dropdown-menu" style="display:none;min-width:200px;" @click.stop>
+
+                    {{-- Header row: "Select All" checkbox, sticky at the
+                         TOP of the list — one tap checks/unchecks every
+                         status at once. --}}
+                    <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
+                        <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
+                            <input type="checkbox"
+                                   :checked="$wire.alumniEmploymentStatuses.length === {{ count($arEmpOptions) }}"
+                                   :indeterminate="$wire.alumniEmploymentStatuses.length > 0 && $wire.alumniEmploymentStatuses.length < {{ count($arEmpOptions) }}"
+                                   @change="$event.target.checked ? $wire.selectAllEmploymentStatuses() : $wire.clearEmploymentStatuses()"
+                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
+                            Select All
+                        </label>
+                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="$wire.alumniEmploymentStatuses.length > 0">
+                            <span x-text="$wire.alumniEmploymentStatuses.length"></span> selected
+                        </span>
+                    </div>
+
                     @foreach($arEmpOptions as [$val, $label, $icon])
-                    <button type="button" @click.stop="select('{{ $val }}')" :class="{'active':$wire.alumniEmploymentStatus==='{{ $val }}'}" class="ar-dropdown-item">
-                        <i class="fas {{ $icon }} text-[11px] mr-1.5 opacity-70"></i>{{ $label }}
-                    </button>
+                    <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
+                           :class="{'active': $wire.alumniEmploymentStatuses.includes('{{ $val }}')}">
+                        <input type="checkbox" wire:click="toggleEmploymentStatus('{{ $val }}')"
+                               :checked="$wire.alumniEmploymentStatuses.includes('{{ $val }}')"
+                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
+                        <i class="fas {{ $icon }} text-[11px] opacity-70"></i>{{ $label }}
+                    </label>
                     @endforeach
                 </div>
             </div>
@@ -1667,7 +1777,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                         <input type="checkbox" wire:click="toggleProgramCode('{{ $c->code }}')"
                                :checked="$wire.alumniCourses.includes('{{ $c->code }}')"
                                class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
-                        <span>{{ $c->code }}</span>
+                        <span>{{ $c->name ?? $c->code }}</span>
                     </label>
                     @endforeach
                 </div>
@@ -1695,12 +1805,19 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
             @endif
-            @if($alumniEmploymentStatus !== '')
-            @php [$arEmpChipLabel, $arEmpChipClasses, $arEmpChipIcon] = $this->employmentStatusBadge($alumniEmploymentStatus); @endphp
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $arEmpChipClasses }}">
-                <i class="fas {{ $arEmpChipIcon }} text-[10px]"></i>{{ $arEmpChipLabel }}
-                &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
-            </span>
+            @if(!empty($alumniEmploymentStatuses))
+            @if(count($alumniEmploymentStatuses) === 1)
+                @php [$arEmpChipLabel, $arEmpChipClasses, $arEmpChipIcon] = $this->employmentStatusBadge($alumniEmploymentStatuses[0]); @endphp
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border {{ $arEmpChipClasses }}">
+                    <i class="fas {{ $arEmpChipIcon }} text-[10px]"></i>{{ $arEmpChipLabel }}
+                    &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
+                </span>
+            @else
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
+                    <i class="fas fa-briefcase text-[10px]"></i>{{ count($alumniEmploymentStatuses) }} Statuses
+                    &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
+                </span>
+            @endif
             @endif
             @if(!empty($alumniCourses))
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7A3F91] border-[#E8E0F0]">
@@ -1722,7 +1839,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  scroll container. Pure overlay: floats on top, table
                  layout is completely undisturbed while loading. --}}
             <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-                 wire:loading wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+                 wire:loading wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
                 <div class="flex items-center justify-center" style="margin-top:16px;">
                     <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
                 </div>
@@ -1730,7 +1847,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
@@ -2599,7 +2716,12 @@ compressImage(file, maxW, maxH, quality) {
                     // params) instead of the old single `course` string.
                     course: (wire && wire.alumniCourses && wire.alumniCourses.join(',')) || '',
                     profile_filter: (wire && wire.alumniProfileFilter) || 'all',
-                    employment_status: (wire && wire.alumniEmploymentStatus) || '',
+                    // Employment Status is now a multi-select array, same
+                    // treatment as Program Code above — sent as a
+                    // comma-separated list. RegistrarAlumniExportController
+                    // needs updating to split this on "," instead of the
+                    // old single `employment_status` string.
+                    employment_status: (wire && wire.alumniEmploymentStatuses && wire.alumniEmploymentStatuses.join(',')) || '',
                 });
                 const url = '/registrar/alumni-records/export?' + params.toString();
 

@@ -39,6 +39,10 @@ new class extends Component {
     public int $empUnemployed    = 0;
     public int $empNotFilled     = 0;
 
+    // Last 6 months of Employed-count trend, oldest → newest, for the
+    // Employment card's zigzag sparkline (see loadStats() for the query).
+    public array $empMonthlyTrend = [];
+
     // ── Course breakdown ──
     public array $courseStats = [];
 
@@ -171,6 +175,40 @@ new class extends Component {
         $filled = $this->empEmployed + $this->empSelf + $this->empUnemployed;
         $this->empNotFilled = max(0, $this->totalAlumni - $filled);
 
+        // ── Employed monthly trend (last 6 months, for the sparkline) ──
+        // Buckets by the month each employment_trackings row was last
+        // touched (updated_at), counting rows whose CURRENT status is
+        // "employed". This is a per-month snapshot count, not a running
+        // total, so the line can genuinely rise and fall month to month
+        // instead of only ever climbing.
+        $trendStart = now('Asia/Manila')->subMonths(5)->startOfMonth();
+
+        $trendRowsQ = DB::table('alumni as a')
+            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
+            ->whereNull('a.deleted_at')
+            ->whereNull('et.deleted_at')
+            ->where('et.employment_status', 'employed')
+            ->where('et.updated_at', '>=', $trendStart);
+        if ($dept) {
+            $trendRowsQ->join('courses as tc', 'a.course_code', '=', 'tc.code')
+                       ->where('tc.college', $dept);
+        }
+
+        $trendRows = $trendRowsQ
+            ->selectRaw("DATE_FORMAT(et.updated_at, '%Y-%m') as ym, COUNT(*) as cnt")
+            ->groupBy('ym')
+            ->pluck('cnt', 'ym');
+
+        $this->empMonthlyTrend = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $m = now('Asia/Manila')->subMonths($i);
+            $key = $m->format('Y-m');
+            $this->empMonthlyTrend[] = [
+                'label' => $m->format('M'),
+                'count' => (int) ($trendRows[$key] ?? 0),
+            ];
+        }
+
         // ── Course breakdown (alumni count per course) ──
         $courseQ = DB::table('alumni as a')
             ->join('courses as c', 'a.course_code', '=', 'c.code')
@@ -207,6 +245,7 @@ new class extends Component {
                 'course' => $course,
             ],
         ]);
+        session()->save();
 
         $this->redirect(route('organizer.alumni/employment'), navigate: true);
     }
@@ -523,23 +562,73 @@ new class extends Component {
                 </p>
             </a>
 
-            {{-- Employment --}}
-            <button type="button" wire:click="goToEmployment('', '')"
+            {{-- Employment — zigzag monthly trend --}}
+            <button type="button" wire:click="goToEmployment('employed', '')"
                class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
-                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employment</span>
-                <div class="flex items-start justify-between mb-3 sm:mb-4">
+                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employed</span>
+                <div class="flex items-start justify-between mb-2 sm:mb-3">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
                         <i class="fas fa-chart-line text-white text-base sm:text-lg"></i>
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700
                                  border border-amber-200 bg-amber-50 text-[0.7rem] sm:text-[0.75rem]">Employment</span>
                 </div>
-                <p class="org-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($empEmployed + $empSelf) }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Employed</p>
+
+                <div class="flex items-end justify-between gap-2">
+                    <div>
+                        <p class="org-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.1rem] sm:text-[2.4rem]">{{ number_format($empEmployed) }}</p>
+                        <p class="text-[#111111] font-semibold mt-1 text-[0.92rem] sm:text-[1rem]">Employed</p>
+                    </div>
+
+                    {{-- Zigzag sparkline: last 6 months of Employed counts.
+                         Pure SVG, no JS charting lib needed — built from
+                         $empMonthlyTrend (see loadStats() in the component). --}}
+                    @php
+                        $trend  = $empMonthlyTrend ?: [];
+                        $counts = array_column($trend, 'count');
+                        $max    = max($counts ?: [0]);
+                        $max    = $max < 1 ? 1 : $max;
+                        $min    = min($counts ?: [0]);
+                        $n      = count($trend);
+                        $w      = 108;
+                        $h      = 46;
+                        $padY   = 6;
+                        $points = [];
+                        foreach ($trend as $i => $pt) {
+                            $x = $n > 1 ? ($i / ($n - 1)) * $w : $w / 2;
+                            $range = ($max - $min) ?: 1;
+                            $y = $padY + (1 - (($pt['count'] - $min) / $range)) * ($h - $padY * 2);
+                            $points[] = [round($x, 1), round($y, 1)];
+                        }
+                        $polyline = implode(' ', array_map(fn($p) => "{$p[0]},{$p[1]}", $points));
+                    @endphp
+                    <div class="shrink-0" style="width:{{ $w }}px;">
+                        <svg viewBox="0 0 {{ $w }} {{ $h }}" width="{{ $w }}" height="{{ $h }}" fill="none">
+                            @if($n > 1)
+                                <polyline points="{{ $polyline }}"
+                                          stroke="#D97706" stroke-width="2"
+                                          stroke-linecap="round" stroke-linejoin="round"/>
+                                @foreach($points as $i => $p)
+                                    <circle cx="{{ $p[0] }}" cy="{{ $p[1] }}" r="{{ $i === $n - 1 ? 3 : 2 }}"
+                                            fill="{{ $i === $n - 1 ? '#D97706' : '#F3D9A8' }}"/>
+                                @endforeach
+                            @endif
+                        </svg>
+                        <div class="flex justify-between mt-0.5">
+                            @if($n > 0)
+                                <span class="text-[0.58rem] text-[#999999] font-medium">{{ $trend[0]['label'] }}</span>
+                                @if($n > 1)
+                                    <span class="text-[0.58rem] text-[#999999] font-medium">{{ $trend[$n - 1]['label'] }}</span>
+                                @endif
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
                 @php $filled = $empEmployed + $empSelf + $empUnemployed; $rate = $filled > 0 ? round((($empEmployed + $empSelf) / $filled) * 100) : 0; @endphp
-                <p class="text-amber-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                <p class="text-amber-600 font-semibold mt-2 flex items-center gap-1 text-[0.85rem]">
                     <i class="fas fa-circle text-[8px]"></i> {{ $rate }}% emp. rate
                     @if($empNotFilled > 0)
                         <span class="text-[#333333] font-normal">· {{ $empNotFilled }} not filled</span>

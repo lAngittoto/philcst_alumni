@@ -351,31 +351,6 @@ new class extends Component {
 .yb-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Filtering progress bar (replaces the old full-screen spinner
-     overlay — thin animated bar under the filter row, same pattern
-     as the alumni-facing yearbook, much less jarring on mobile) ── */
-.yb-filter-progress-track {
-    height: 2px;
-    width: 100%;
-    overflow: hidden;
-    background: transparent;
-    position: relative;
-    flex-shrink: 0;
-}
-.yb-filter-progress-bar {
-    position: absolute;
-    top: 0; left: 0;
-    height: 100%;
-    width: 40%;
-    border-radius: 99px;
-    background: #7A3F91;
-    animation: ybFilterProgress 1s ease-in-out infinite;
-}
-@keyframes ybFilterProgress {
-    0%   { left: -40%; }
-    100% { left: 100%; }
-}
-
 /* ── Entry animation ────────────────────────────────────── */
 @keyframes ybFadeUp {
     from { opacity: 0; transform: translateY(8px); }
@@ -653,24 +628,13 @@ new class extends Component {
                     <i class="fas fa-rotate-left text-sm"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
-                    <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7A3F91;"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
-            {{-- Found count + spinner ── --}}
+            {{-- Found count ── --}}
             <div class="flex items-center gap-2 ml-auto">
-                <span wire:loading wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
-                    <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                </span>
                 <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
                       style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
                     {{ number_format($this->totalFiltered) }} found
@@ -678,17 +642,17 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Filtering progress bar — replaces the old blurred full-overlay
-             spinner. Same lightweight pattern as the alumni-facing
-             yearbook: a thin animated bar under the filter row, much
-             friendlier on small screens than a blocking overlay. --}}
-        <div class="yb-filter-progress-track" wire:loading wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
-            <div class="yb-filter-progress-bar"></div>
-        </div>
-
         {{-- ── SCROLLABLE CARDS AREA ── --}}
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
              x-data="{ showTop: false }">
+
+            {{-- Centered loading spinner — big icon over the table itself,
+                 same pattern as the alumni-facing yearbook, instead of a
+                 small spinner tucked in the filter bar. --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
             <div id="yb-organizer-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"

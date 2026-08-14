@@ -49,6 +49,7 @@ new class extends Component {
 
     public bool   $showForwardModal = false;
     public array  $selectedRoomIds  = [];
+    public array  $sentRoomIds      = []; // rooms already sent to in this modal session — keeps their Send button disabled to prevent spam
 
     public int $page    = 1;
     public int $perPage = 20;
@@ -394,6 +395,7 @@ new class extends Component {
         }
 
         $this->selectedRoomIds  = $this->alumniRoomId ? [$this->alumniRoomId] : [];
+        $this->sentRoomIds      = [];
         $this->showForwardModal = true;
     }
 
@@ -401,6 +403,7 @@ new class extends Component {
     {
         $this->showForwardModal = false;
         $this->selectedRoomIds  = [];
+        $this->sentRoomIds      = [];
     }
 
     public function toggleRoomSelection(int $roomId): void
@@ -412,11 +415,14 @@ new class extends Component {
         }
     }
 
-    public function confirmSendToChat(): void
+    // Sends the event to a single chat room, right from that room's own
+    // "Send" button — keeps the modal open afterward so the alumni can
+    // still send to the other chat too if they want. Once sent, that
+    // room's button stays disabled so it can't be spammed.
+    public function sendToRoom(int $roomId): void
     {
-        if (empty($this->selectedRoomIds)) {
-            $this->dispatch('flash-message', type: 'warning', message: 'Pumili muna ng chat kung saan mo ipapadala.');
-            return;
+        if (in_array($roomId, $this->sentRoomIds, true)) {
+            return; // already sent — ignore repeat clicks
         }
 
         if (!$this->shareEventId) {
@@ -435,36 +441,31 @@ new class extends Component {
         $body        = "@everyone [[EVENT:{$type}:{$event->id}]]";
         $now         = now();
 
-        foreach ($this->selectedRoomIds as $roomId) {
-            $msgId = DB::table('chat_messages')->insertGetId([
-                'room_id'     => $roomId,
-                'sender_type' => 'alumni',
-                'sender_id'   => $this->alumniId,
-                'body'        => $body,
-                'reply_to_id' => null,
-                'created_at'  => $now,
-                'updated_at'  => $now,
-            ]);
+        $msgId = DB::table('chat_messages')->insertGetId([
+            'room_id'     => $roomId,
+            'sender_type' => 'alumni',
+            'sender_id'   => $this->alumniId,
+            'body'        => $body,
+            'reply_to_id' => null,
+            'created_at'  => $now,
+            'updated_at'  => $now,
+        ]);
 
-            if (!$isCompleted) {
-                DB::table('chat_mentions')->insert([
-                    'message_id'   => $msgId,
-                    'mention_type' => 'everyone',
-                    'mentioned_id' => null,
-                    'created_at'   => $now,
-                    'updated_at'   => $now,
-                ]);
-            }
+        if (!$isCompleted) {
+            DB::table('chat_mentions')->insert([
+                'message_id'   => $msgId,
+                'mention_type' => 'everyone',
+                'mentioned_id' => null,
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ]);
         }
 
-        $count = count($this->selectedRoomIds);
-        $label = $isCompleted
-            ? ($count > 1 ? "Event highlights posted to {$count} chats! 🏆" : 'Event highlights posted to your Batch Chat! 🏆')
-            : ($count > 1 ? "Event posted to {$count} chats! 🎉" : 'Event posted to your batch chat! 🎉');
+        $this->sentRoomIds[] = $roomId;
 
-        $this->closeForwardModal();
-        $this->closeShareModal();
-        $this->dispatch('flash-message', type: 'success', message: $label);
+        $this->dispatch('flash-message', type: 'success', message: $isCompleted
+            ? 'Event highlights posted to the chat! 🏆'
+            : 'Event posted to the chat! 🎉');
     }
 };
 ?>
@@ -1810,54 +1811,52 @@ select.filter-input {
         </div>
 
         <div class="px-5 py-3 flex-shrink-0">
-            <p class="text-xs" style="color:#333333;">Tap to select — pick one chat, or both to send to everyone at once.</p>
+            <p class="text-xs" style="color:#333333;">Tap Send on a chat to share this event there.</p>
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 pb-3 flex flex-col gap-2">
             @forelse($alumniChatRooms as $room)
-            @php $isSelected = in_array($room['id'], $selectedRoomIds); @endphp
-            <button type="button"
-                    wire:click="toggleRoomSelection({{ $room['id'] }})"
-                    class="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border transition text-left cursor-pointer
-                           {{ $isSelected ? 'border-[#7a3f91] bg-[#f5eef9]' : 'border-gray-200 bg-white hover:bg-gray-50' }}">
-                <span class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0
-                             {{ $isSelected ? 'bg-[#7a3f91]' : 'bg-gray-100' }}">
-                    <i class="fas fa-users text-sm {{ $isSelected ? 'text-white' : 'text-gray-400' }}"></i>
+            @php $isSent = in_array($room['id'], $sentRoomIds); @endphp
+            <div class="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border border-gray-200 bg-white">
+                <span class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-gray-100">
+                    <i class="fas fa-users text-sm text-gray-400"></i>
                 </span>
                 <span class="flex-1 min-w-0">
                     <span class="block text-sm font-semibold truncate" style="color:#333333;">{{ $room['label'] }}</span>
                 </span>
-                <span class="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0
-                             {{ $isSelected ? 'bg-[#7a3f91] border-[#7a3f91]' : 'border-gray-300' }}">
-                    @if($isSelected)<i class="fas fa-check text-white text-[10px]"></i>@endif
-                </span>
-            </button>
+
+                <button type="button"
+                        wire:click="sendToRoom({{ $room['id'] }})"
+                        wire:loading.attr="disabled"
+                        wire:target="sendToRoom({{ $room['id'] }})"
+                        @if($isSent) disabled @endif
+                        class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition flex-shrink-0
+                               disabled:cursor-not-allowed flex items-center justify-center gap-1.5
+                               {{ $isSent ? 'bg-gray-100 text-gray-400' : 'text-white bg-[#7a3f91] hover:bg-[#5e2f72] cursor-pointer disabled:opacity-60 disabled:cursor-wait' }}">
+                    @if($isSent)
+                        <i class="fas fa-check text-[10px]"></i> Sent
+                    @else
+                        <span wire:loading.remove wire:target="sendToRoom({{ $room['id'] }})">
+                            <i class="fas fa-paper-plane text-[10px]"></i> Send
+                        </span>
+                        <span wire:loading wire:target="sendToRoom({{ $room['id'] }})">
+                            <i class="fas fa-spinner fa-spin text-[10px]"></i> Sending…
+                        </span>
+                    @endif
+                </button>
+            </div>
             @empty
             <p class="text-xs text-center py-6" style="color:#333333;">No chats found to send to.</p>
             @endforelse
         </div>
 
-        <div class="px-5 py-3.5 border-t border-gray-100 flex-shrink-0 flex items-center gap-2">
+        <div class="px-5 py-3.5 border-t border-gray-100 flex-shrink-0">
             <button type="button" wire:click="closeForwardModal"
                     wire:loading.attr="disabled"
                     wire:target="closeForwardModal"
-                    class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5" style="color:#333333;">
+                    class="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5" style="color:#333333;">
                 <span wire:loading.remove wire:target="closeForwardModal">Cancel</span>
                 <span wire:loading wire:target="closeForwardModal"><i class="fas fa-spinner fa-spin text-[11px]"></i></span>
-            </button>
-            <button type="button" wire:click="confirmSendToChat"
-                    wire:loading.attr="disabled"
-                    wire:target="confirmSendToChat"
-                    @if(empty($selectedRoomIds)) disabled @endif
-                    class="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-white transition cursor-pointer
-                           bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5">
-                <span wire:loading.remove wire:target="confirmSendToChat">
-                    <i class="fas fa-paper-plane text-[11px]"></i>
-                    Send{{ count($selectedRoomIds) > 1 ? ' to Both' : '' }}
-                </span>
-                <span wire:loading wire:target="confirmSendToChat">
-                    <i class="fas fa-spinner fa-spin text-[11px]"></i> Sending…
-                </span>
             </button>
         </div>
     </div>

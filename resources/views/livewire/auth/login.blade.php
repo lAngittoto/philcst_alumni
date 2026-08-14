@@ -437,9 +437,33 @@ new #[Layout('app')] class extends Component {
          survives every navigation — forward AND Back/Forward — without
          ever flashing or reloading.
 --}}
+
+{{--
+    FIX: "Signing you in" purple overlay showing on plain page open / after
+    logout — not only during an actual login submit.
+
+    Cause: `redirecting` is Alpine state, initialized false only when this
+    component's x-data runs for the very first time. It does NOT re-init
+    on a bfcache restore (browser Back/Forward, or landing back on a
+    cached render of this page right after logout) — the browser can
+    repaint the DOM exactly as it was left, including a stray
+    `redirecting: true` from a previous visit, without ever re-running
+    x-data. The 'pageshow' listener below explicitly forces the overlay
+    off any time the page becomes visible via bfcache (event.persisted),
+    so it only ever shows when login() itself dispatches
+    'login-redirecting' during a real submit.
+--}}
 <div class="min-h-screen w-full flex flex-col items-center justify-center p-5 antialiased relative"
      x-data="{ showGuide: false, forgotLoading: false, redirecting: false }"
-     x-on:login-redirecting.window="redirecting = true">
+     x-on:login-redirecting.window="redirecting = true"
+     x-init="
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) { redirecting = false; forgotLoading = false; }
+        });
+        document.addEventListener('livewire:navigated', () => {
+            redirecting = false; forgotLoading = false;
+        });
+     ">
 
     <link rel="preload" as="image" href="{{ asset('images/school-1.jpg') }}">
     <style>

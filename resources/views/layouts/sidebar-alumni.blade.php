@@ -4,15 +4,29 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Alumni</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 
     <style>
+        /* Hide Livewire's default wire:navigate progress bar (nprogress) —
+           the thin blue line at the very top of the browser viewport.
+           This is Livewire's OWN built-in indicator, separate from any
+           custom bar in this file, so it must be killed here explicitly. */
+        #livewire-navigate-progress-bar,
+        .livewire-progress-bar,
+        nprogress,
+        #nprogress,
+        #nprogress .bar,
+        #nprogress .spinner,
+        #nprogress .peg {
+            display: none !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            pointer-events: none !important;
+        }
+
         [x-cloak] { display: none !important; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
