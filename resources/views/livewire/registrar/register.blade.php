@@ -124,10 +124,10 @@ new class extends Component {
         }
 
         if (!trim($this->regCourseCode)) {
-            $errors[]      = 'Please select a program code.';
+            $errors[]      = 'Please select a program.';
             $fieldErrors[] = 'course';
         } elseif (!Course::where('code', $this->regCourseCode)->exists()) {
-            $errors[]      = 'The selected program code does not exist.';
+            $errors[]      = 'The selected program does not exist.';
             $fieldErrors[] = 'course';
         }
 
@@ -869,8 +869,8 @@ public function closeImportModal(): void
     .reg-picker-search-input::placeholder { color: #bbb; font-weight: 400; }
 
     .reg-picker-list-course {
-        max-height: 260px;
-        overflow-y: auto;
+        max-height: 170px;
+        overflow: hidden;
         padding: 6px;
     }
     .reg-picker-course-cell {
@@ -1429,7 +1429,7 @@ public function closeImportModal(): void
                         <div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                                 <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
-                                    Program Code <span class="text-red-500">*</span>
+                                    Program <span class="text-red-500">*</span>
                                 </p>
                                 <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
                                     Batch <span class="text-red-500">*</span>
@@ -1449,7 +1449,7 @@ public function closeImportModal(): void
                                      x-data="{
                                          open: false,
                                          allCourses: {{ $coursesJson }},
-                                         pageSize: 6,
+                                         pageSize: 3,
                                          pageIndex: 0,
                                          search: '',
                                          get filtered() {
@@ -1505,7 +1505,7 @@ public function closeImportModal(): void
                                         <div class="reg-picker-search">
                                             <i class="fas fa-magnifying-glass"></i>
                                             <input type="text" x-model="search" @input="pageIndex = 0"
-                                                   placeholder="Search program code or name..."
+                                                   placeholder="Search program..."
                                                    class="reg-picker-search-input" @click.stop>
                                         </div>
 

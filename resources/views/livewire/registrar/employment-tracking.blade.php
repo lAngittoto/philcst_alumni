@@ -859,7 +859,7 @@ new class extends Component {
         if (count($this->filterCourse) === 1) {
             $parts[] = $this->filterCourse[0];
         } elseif (count($this->filterCourse) > 1) {
-            $parts[] = count($this->filterCourse) . ' Programs';
+            $parts[] = implode(', ', $this->filterCourse);
         } else {
             $parts[] = 'All Programs';
         }
@@ -1430,13 +1430,13 @@ new class extends Component {
                             parts.push('All Batch Years');
                         }
                         // Programs segment — ALWAYS shown, same as the
-                        // filter bar's own 'All Program Codes' default, so
+                        // filter bar's own 'All Programs' default, so
                         // the report scope never silently drops this line
                         // just because nothing is selected.
                         if (course.length === 1) {
                             parts.push(course[0]);
                         } else if (course.length > 1) {
-                            parts.push(course.length + ' Programs');
+                            parts.push(course.join(', '));
                         } else {
                             parts.push('All Programs');
                         }
@@ -1525,12 +1525,12 @@ new class extends Component {
                  still unscoped server-side. --}}
             <div class="ar-dropdown shrink-0"
                  x-data="{
-                    open:false,
+                    get open(){ return $store.empFilters.isOpen('batch'); },
                     rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
                     rangeFrom: '{{ $filterBatchFrom }}',
                     rangeTo: '{{ $filterBatchTo }}',
-                    toggle(){ this.open=!this.open; },
-                    close(){ this.open=false; },
+                    toggle(){ $store.empFilters.toggle('batch'); },
+                    close(){ $store.empFilters.close('batch'); },
                     selectYear(val){
                         $wire.setSingleBatchYear(val);
                         this.close();
@@ -1660,13 +1660,13 @@ new class extends Component {
                  once 2+ are picked so the bar doesn't overflow with every
                  selected code. --}}
             <div class="ar-dropdown shrink-0"
-                 x-data="{ open:false, toggle(){ this.open=!this.open; if(this.open){ this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; }); } }, close(){ this.open=false; } }"
+                 x-data="{ get open(){ return $store.empFilters.isOpen('course'); }, toggle(){ $store.empFilters.toggle('course'); if(this.open){ this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; }); } }, close(){ $store.empFilters.close('course'); } }"
                  @click.outside="close()" wire:key="emp-course-dropdown">
                 <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterCourse.length>0,'open':open }" class="ar-dropdown-trigger">
                     <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
                     <span>
                         @if(count($filterCourse) === 0)
-                            All Program Codes
+                            All Programs
                         @elseif(count($filterCourse) === 1)
                             {{ $filterCourse[0] }}
                         @else
@@ -1743,7 +1743,7 @@ new class extends Component {
                     if (count($filterCourse) === 1) {
                         $pillParts[] = $filterCourse[0];
                     } elseif (count($filterCourse) > 1) {
-                        $pillParts[] = count($filterCourse) . ' Programs';
+                        $pillParts[] = implode(', ', $filterCourse);
                     }
                 @endphp
                 {{ implode(' · ', $pillParts) }} — {{ number_format($totalAlumni) }} result(s)
@@ -1752,18 +1752,23 @@ new class extends Component {
         </div>
     </div>
 
-<div class="relative flex-1 overflow-y-auto"
-     style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
-     @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
+<div class="relative flex-1 min-h-0">
 
-    {{-- Center overlay spinner — icon only, no background box, sitting
-         right under the filter bar (not floated down the page). --}}
-    <div class="sticky top-0 left-0 w-full h-0 z-20 flex items-center justify-center pointer-events-none"
+    {{-- Center overlay spinner — icon only, no background box, absolutely
+         positioned over the scroll area (NOT sticky/in-flow), so it never
+         competes with the sticky <thead> elements below for the top:0 slot
+         inside the scrolling container. Pure overlay: floats on top, table
+         layout is completely undisturbed while loading. --}}
+    <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
          wire:loading wire:target="toggleFilterCourse,clearFilterCourse,selectAllFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange">
         <div class="flex items-center justify-center" style="margin-top:16px;">
             <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
         </div>
     </div>
+
+<div class="relative flex-1 h-full overflow-y-auto"
+     style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
+     @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
 
 <div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
      wire:loading.class="opacity-40 pointer-events-none" wire:target="toggleFilterCourse,clearFilterCourse,selectAllFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange" style="transition:opacity .2s ease;">
@@ -2328,7 +2333,7 @@ new class extends Component {
         <span class="emp-scroll-indicator-btn">
             <i class="fas fa-chevron-up"></i>
         </span>
-    </button>
+</div>
 
 </div>
 
@@ -2878,6 +2883,30 @@ new class extends Component {
     document.addEventListener('alpine:init', registerEmpReportStore);
     document.addEventListener('livewire:init', registerEmpReportStore);
     document.addEventListener('livewire:navigated', registerEmpReportStore);
+
+    // ── Filter dropdown coordination store ──────────────────────────────
+    // Tracks which single filter dropdown (Batch Year / Program Code) is
+    // currently open, so opening one automatically closes the other
+    // instead of both being able to stay open/stacked at the same time.
+    // Mirrors Alumni Records' $store.arFilters exactly.
+    function registerEmpFiltersStore() {
+        if (!window.Alpine) return;
+        if (window.Alpine.store('empFilters')) return;
+
+        window.Alpine.store('empFilters', {
+            openKey: '',
+            isOpen(key) { return this.openKey === key; },
+            toggle(key) { this.openKey = (this.openKey === key) ? '' : key; },
+            close(key) { if (this.openKey === key) this.openKey = ''; },
+            closeAll() { this.openKey = ''; },
+        });
+    }
+
+    window.__empEnsureFiltersStore = registerEmpFiltersStore;
+    if (window.Alpine) registerEmpFiltersStore();
+    document.addEventListener('alpine:init', registerEmpFiltersStore);
+    document.addEventListener('livewire:init', registerEmpFiltersStore);
+    document.addEventListener('livewire:navigated', registerEmpFiltersStore);
 
     // ── Cursor-follow tooltip (desktop only — never shows on mobile/touch) ─────
     (function initCursorTip() {

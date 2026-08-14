@@ -83,6 +83,11 @@
     .rp-complete { color: #059669; }
     .rp-pending  { color: #D97706; }
 
+    .rp-emp-employed      { color: #7A3F91; }
+    .rp-emp-self_employed { color: #1D4ED8; }
+    .rp-emp-unemployed    { color: #B45309; }
+    .rp-emp-no_record     { color: #6B7280; }
+
     .rp-page-block { page-break-after: always; }
     .rp-page-block:last-child { page-break-after: auto; }
 
@@ -114,6 +119,16 @@
      * back to the raw column too, never to a derived guess.
      */
     $isComplete = $isComplete ?? fn($row) => (bool) ($row->profile_completed ?? false);
+
+    // Employment Status — mirrors employmentStatusBadge() in the
+    // registrar's alumni-records Volt component (label only, no icon;
+    // plain colored text same as the Complete/Pending status cell).
+    $empStatusLabel = fn($row) => match ($row->employment_status ?? null) {
+        'employed'      => ['Employed',      'rp-emp-employed'],
+        'self_employed' => ['Self-Employed', 'rp-emp-self_employed'],
+        'unemployed'    => ['Unemployed',    'rp-emp-unemployed'],
+        default         => ['No Record',     'rp-emp-no_record'],
+    };
 @endphp
 
 @forelse($chunks as $pageIndex => $chunk)
@@ -134,12 +149,13 @@
     <table>
         <thead>
             <tr>
-                <th style="width:24%;">Name</th>
-                <th style="width:15%;">Student ID</th>
-                <th style="width:13%;">Program Code</th>
-                <th style="width:9%;">Batch</th>
-                <th style="width:24%;">Email</th>
-                <th style="width:15%;">Status</th>
+                <th style="width:19%;">Name</th>
+                <th style="width:12%;">Student ID</th>
+                <th style="width:10%;">Program Code</th>
+                <th style="width:7%;">Batch</th>
+                <th style="width:20%;">Email</th>
+                <th style="width:16%;">Employment Status</th>
+                <th style="width:16%;">Status</th>
             </tr>
         </thead>
         <tbody>
@@ -150,6 +166,10 @@
                 <td>{{ $item->course_code }}</td>
                 <td>{{ $item->batch }}</td>
                 <td>{{ $item->email }}</td>
+                <td>
+                    @php [$empLabel, $empClass] = $empStatusLabel($item); @endphp
+                    <span class="rp-badge {{ $empClass }}">{{ $empLabel }}</span>
+                </td>
                 <td>
                     @if($isComplete($item))
                         <span class="rp-badge rp-complete">Complete</span>

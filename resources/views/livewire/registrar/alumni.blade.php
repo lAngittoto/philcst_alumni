@@ -645,9 +645,7 @@ new class extends Component {
                 : 'Batch ' . $this->alumniBatchFrom . '–' . $this->alumniBatchTo;
         }
         if (!empty($this->alumniCourses)) {
-            $parts[] = count($this->alumniCourses) === 1
-                ? 'Program Code ' . $this->alumniCourses[0]
-                : count($this->alumniCourses) . ' Program Codes';
+            $parts[] = implode(', ', $this->alumniCourses);
         }
         if ($this->alumniEmploymentStatus !== '') $parts[] = $this->employmentStatusBadge($this->alumniEmploymentStatus)[0];
         if ($this->alumniSearch !== '') $parts[] = 'Search: "' . $this->alumniSearch . '"';
@@ -1318,8 +1316,28 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         </div>
 
         <div class="relative shrink-0" wire:ignore
-             x-data
-             x-init="window.__arEnsureReportStore && window.__arEnsureReportStore()"
+             x-data="{
+                summary: 'All alumni records (no filters applied)',
+                count: '0',
+                _observer: null,
+                syncFromSource(){
+                    const src = document.getElementById('ar-report-summary-source');
+                    if (!src) return;
+                    this.summary = src.dataset.summary;
+                    this.count   = src.dataset.count;
+                },
+                watchSource(){
+                    const src = document.getElementById('ar-report-summary-source');
+                    if (!src || this._observer) return;
+                    this._observer = new MutationObserver(() => this.syncFromSource());
+                    this._observer.observe(src, { attributes: true, attributeFilter: ['data-summary', 'data-count'] });
+                }
+             }"
+             x-init="
+                window.__arEnsureReportStore && window.__arEnsureReportStore();
+                syncFromSource();
+                watchSource();
+             "
              @click.outside="$store.report.open=false" wire:key="ar-report-dropdown">
             <button type="button" @click.stop="$store.report.toggle()" class="ar-report-btn"
                     :disabled="$store.report.exporting"
@@ -1332,12 +1350,12 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             <div x-show="$store.report.open"
                  x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                  x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                 class="ar-report-menu" style="display:none;">
+                 class="ar-report-menu" style="display:none;" @click="setTimeout(() => syncFromSource(), 0)">
 
                 <div class="ar-report-menu-message">
                     <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
-                    <span class="txt">{{ $this->activeFilterSummary }}</span>
-                    <span class="cnt">{{ number_format($this->alumniRecords->total()) }} matching record(s)</span>
+                    <span class="txt" x-text="summary"></span>
+                    <span class="cnt" x-text="count + ' matching record(s)'"></span>
                     
                 </div>
 
@@ -1370,6 +1388,20 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             </div>
         </div>
     </div>
+
+    {{-- Hidden source for the "Report will include" text inside the
+         wire:ignore'd report dropdown below. wire:ignore means Livewire
+         never touches that dropdown's DOM after first render, so the
+         summary text used to freeze at whatever it was on page load
+         (usually "All alumni records (no filters applied)") even after
+         the user changed filters. This span DOES re-render normally on
+         every Livewire update; Alpine watches it and copies its values
+         into the report dropdown, so the dropdown text now stays live
+         without needing to remove wire:ignore (which would break the
+         Alpine report store's persistence). --}}
+    <span id="ar-report-summary-source" class="hidden"
+          data-summary="{{ $this->activeFilterSummary }}"
+          data-count="{{ number_format($this->alumniRecords->total()) }}"></span>
 
     {{-- Table Card --}}
     <div class="ar-table-card bg-white rounded-2xl shadow-sm border border-[#E8E0F0] flex flex-col overflow-hidden flex-1 min-h-0">
@@ -1598,7 +1630,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                     <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
                     <span>
                         @if(count($alumniCourses) === 0)
-                            All Program Codes
+                            All Programs
                         @elseif(count($alumniCourses) === 1)
                             {{ $alumniCourses[0] }}
                         @else
@@ -1685,11 +1717,11 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
 
             {{-- Center overlay spinner — icon only, no background box,
-                 sitting sticky right under the filter bar (not floated
-                 down mid-table). Matches Employment Tracking's filter
-                 loading state exactly. Disappears the instant the new
-                 filtered rows land. --}}
-            <div class="sticky top-0 left-0 w-full h-0 z-20 flex items-center justify-center pointer-events-none"
+                 absolutely positioned over the table (NOT sticky/in-flow)
+                 so it never pushes the sticky <thead> down inside the
+                 scroll container. Pure overlay: floats on top, table
+                 layout is completely undisturbed while loading. --}}
+            <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
                  wire:loading wire:target="alumniSearch,alumniProfileFilter,alumniEmploymentStatus,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
                 <div class="flex items-center justify-center" style="margin-top:16px;">
                     <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>

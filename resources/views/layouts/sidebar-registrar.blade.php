@@ -1629,11 +1629,10 @@
                                 </span>
                             </span>
 
-                            {{-- TESTING: 30-day gate temporarily disabled.
-                                 Original condition: notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30
-                                 Restore that x-show once testing is done. --}}
                             <button type="button"
                                     class="notif-delete-btn"
+                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                    x-cloak
                                     @click.stop="$store.notifs && $store.notifs.deleteNotif(notif)"
                                     aria-label="Delete notification">
                                 <i class="fas fa-trash-can"></i>
