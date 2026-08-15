@@ -50,16 +50,12 @@ new class extends Component {
     // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
 
-    // NOTE: filterStatus / filterCourse deliberately removed from queryString.
-    // Deep-linking from the dashboard now goes exclusively through the
-    // session handoff below (session('organizer_employment_filter')), so the
-    // browser URL always stays clean (/organizer/alumni/employment) instead
-    // of showing ?course=BSED or ?status=employed.
-    protected $queryString = [
-        'search'          => ['except' => ''],
-        'filterRelevance' => ['except' => ''],
-        'filterBatch'     => ['except' => ''],
-    ];
+    // NOTE: search / filterRelevance / filterBatch / filterStatus / filterCourse
+    // are all deliberately kept OUT of the query string now, so a plain page
+    // refresh always resets every filter back to its default — same behavior
+    // as the Job Management and Event Organizer tables. Deep-linking from the
+    // dashboard still works via the one-time session handoff below
+    // (session('organizer_employment_filter')).
 
     public function mount(): void
     {
@@ -333,10 +329,6 @@ new class extends Component {
                 'a.student_id',
                 'a.profile_photo',
                 'a.email',
-                'a.address_street',
-                'a.address_barangay',
-                'a.address_municipality',
-                'a.address_province',
                 DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.middle_initial,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
                 'a.suffix', 'a.course_name', 'a.course_code', 'a.batch',
                 'a.gender', 'a.civil_status', 'a.contact_number',
@@ -469,8 +461,12 @@ new class extends Component {
 
         $rate = $total > 0 ? round(($working / $total) * 100, 1) : 0.0;
 
+        $courseName = $course
+            ? (DB::table('courses')->where('code', $course)->value('name') ?: $course)
+            : 'All Programs';
+
         return [
-            'course'     => $course ?: 'All Programs',
+            'course'     => $courseName,
             'batch'      => $batch ?: 'All Batches',
             'total'      => $total,
             'employed'   => $employed,
@@ -637,9 +633,11 @@ new class extends Component {
         <div class="relative group shrink-0">
             <button type="button"
                     wire:click="openCompareModal"
+                    wire:loading.attr="disabled" wire:target="openCompareModal"
                     aria-label="Compare Tool"
-                    class="inline-flex items-center justify-center w-11 h-11 rounded-xl text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110">
-                <i class="fa-solid fa-code-compare text-base"></i>
+                    class="inline-flex items-center justify-center w-11 h-11 rounded-xl text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110 disabled:opacity-60 disabled:cursor-wait">
+                <i class="fa-solid fa-code-compare text-base" wire:loading.remove wire:target="openCompareModal"></i>
+                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="openCompareModal"></i>
             </button>
             {{-- Tooltip: icon-only trigger, text-only tooltip. Hidden on
                  mobile (hidden sm:block) since touch devices don't have a
@@ -910,7 +908,7 @@ new class extends Component {
                             style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
                         <option value="">All Programs</option>
                         @foreach($courses as $c)
-                            <option value="{{ $c->code }}">{{ $c->code }}</option>
+                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
                         @endforeach
                     </select>
                 @endif
@@ -981,15 +979,17 @@ new class extends Component {
                 </button>
             </div>
 
-            {{-- LOADING PROGRESS BAR (same effect as Alumni Records) --}}
-            <div class="h-0.5 w-full overflow-hidden bg-transparent relative flex-shrink-0" wire:loading wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters,previousPage,nextPage">
-                <div class="absolute top-0 left-[-40%] h-full w-2/5 rounded-full bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] animate-[aeFilterProgress_1s_ease-in-out_infinite]"></div>
-            </div>
-
             {{-- TABLE WRAPPER — always flex-1 so the empty state fills the
                  same fixed height as when rows are present; the block never
                  shrinks or resizes when a filter returns zero results. --}}
             <div class="relative flex flex-col flex-1 min-h-0">
+
+                {{-- Centered loading spinner — big icon over the table itself,
+                     same pattern as Job Management / Event Organizer. --}}
+                <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                     wire:loading.flex wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
+                    <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+                </div>
 
                 @if($rows->count() > 0)
                 <div class="overflow-x-hidden overflow-y-auto flex-1 min-h-0 bg-white
@@ -1006,8 +1006,6 @@ new class extends Component {
                         <thead class="sticky top-0 z-10 bg-white shadow-[0_1px_0_#E8E0F0]">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Alumni</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[540px]:table-cell [container-type:normal]"
-                                    style="container-name:ae-tbl;">Student ID</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Program</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[660px]:table-cell">Batch</th>
                                 <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[860px]:table-cell">Job Title</th>
@@ -1061,7 +1059,6 @@ new class extends Component {
                                              class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                         <div class="min-w-0">
                                             <p class="font-semibold text-sm leading-snug truncate uppercase text-[#333333]">{{ $row->full_name }}</p>
-                                            <p class="text-xs font-mono mt-0.5 text-[#999999] block @[540px]:hidden">{{ $row->student_id }}</p>
 
                                             {{-- Compact inline row for info hidden at this container width.
                                                  Status badge and job title/unemployment note both collapse
@@ -1084,10 +1081,6 @@ new class extends Component {
                                             </div>
                                         </div>
                                     </div>
-                                </td>
-
-                                <td class="px-4 py-3.5 hidden @[540px]:table-cell">
-                                    <span class="text-sm font-mono font-semibold text-[#333333]">{{ $row->student_id }}</span>
                                 </td>
 
                                 <td class="px-4 py-3.5">
@@ -1181,8 +1174,6 @@ new class extends Component {
                                 <p class="font-semibold text-sm uppercase truncate text-[#333333]">{{ $row->full_name }}</p>
 
                                 <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                                    <span class="font-mono text-xs font-semibold text-[#666666]">{{ $row->student_id }}</span>
-                                    <span class="text-[#CCCCCC] text-xs">&bull;</span>
                                     <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
                                         {{ $row->course_code ?? '—' }}
                                     </span>
@@ -1357,13 +1348,6 @@ new class extends Component {
     ];
     $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
 
-    $addressParts = array_filter([
-        $md['address_street']       ?? '',
-        $md['address_barangay']     ?? '',
-        $md['address_municipality'] ?? '',
-        $md['address_province']     ?? '',
-    ]);
-    $fullAddress = !empty($addressParts) ? implode(', ', $addressParts) : null;
     $modalPhotoPath = $md['profile_photo'] ?? null;
     $modalPhotoUrl  = (!$modalPhotoPath || str_contains($modalPhotoPath, 'default.png'))
         ? asset('storage/alumni-photos/default.png')
@@ -1402,7 +1386,6 @@ new class extends Component {
                         {{ $modalData['full_name'] ?? '—' }}
                         @if($modalData['suffix'] ?? null) {{ $modalData['suffix'] }}@endif
                     </p>
-                    <p class="text-xs text-white/70 font-mono mt-0.5">{{ $modalData['student_id'] ?? '—' }}</p>
                 </div>
             </div>
             <button type="button"
@@ -1410,7 +1393,8 @@ new class extends Component {
                     wire:loading.attr="disabled"
                     wire:target="closeModal"
                     class="relative group/close w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-base"></i>
+                <i class="fa-solid fa-xmark text-base" wire:loading.remove wire:target="closeModal"></i>
+                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="closeModal"></i>
                 <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close:opacity-100 transition-opacity duration-150">Close</span>
             </button>
         </div>
@@ -1431,17 +1415,9 @@ new class extends Component {
                         </div>
                     @endforeach
                 </div>
-                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] mb-2">
+                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
                     <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Email Address</p>
                     <p class="text-sm font-semibold text-[#333333] break-all">{{ $md['email'] ?? '—' }}</p>
-                </div>
-                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Full Address</p>
-                    @if($fullAddress)
-                        <p class="text-sm font-semibold text-[#333333] uppercase">{{ $fullAddress }}</p>
-                    @else
-                        <p class="text-sm text-[#999999]">— Not provided</p>
-                    @endif
                 </div>
             </div>
 
@@ -1552,8 +1528,10 @@ new class extends Component {
             </div>
             <button type="button"
                     wire:click="closeCompareModal"
+                    wire:loading.attr="disabled" wire:target="closeCompareModal"
                     class="relative group/close2 w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-base"></i>
+                <i class="fa-solid fa-xmark text-base" wire:loading.remove wire:target="closeCompareModal"></i>
+                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="closeCompareModal"></i>
                 <span class="hidden sm:block pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close2:opacity-100 transition-opacity duration-150">Close</span>
             </button>
         </div>
@@ -1585,7 +1563,7 @@ new class extends Component {
                             class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
                         <option value="">All Programs</option>
                         @foreach($courses as $c)
-                            <option value="{{ $c->code }}">{{ $c->code }}</option>
+                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
                         @endforeach
                     </select>
                     <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
@@ -1612,7 +1590,7 @@ new class extends Component {
                             class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
                         <option value="">All Programs</option>
                         @foreach($courses as $c)
-                            <option value="{{ $c->code }}">{{ $c->code }}</option>
+                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
                         @endforeach
                     </select>
                     <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
@@ -1720,21 +1698,16 @@ new class extends Component {
             </button>
             <button type="button"
                     wire:click="resetCompare"
-                    class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer text-[#333333]">
-                <i class="fas fa-rotate-left text-sm"></i>
+                    wire:loading.attr="disabled" wire:target="resetCompare"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-wait">
+                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetCompare"></i>
+                <i class="fas fa-spinner fa-spin text-sm" wire:loading wire:target="resetCompare"></i>
                 <span class="hidden sm:inline">Reset</span>
             </button>
         </div>
     </div>
 </div>
 @endif
-
-<style>
-@keyframes aeFilterProgress {
-    0%   { left: -40%; }
-    100% { left: 100%; }
-}
-</style>
 
 <script>
 (function () {
@@ -1756,13 +1729,13 @@ new class extends Component {
                 if (!tip || !isHoverCapable()) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
-                tip.classList.add('opacity-100');
+                tip.style.opacity = '1';
             });
             row.addEventListener('mouseleave', function () {
-                if (tip) tip.classList.remove('opacity-100');
+                if (tip) tip.style.opacity = '0';
             });
             row.addEventListener('click', function () {
-                if (tip) tip.classList.remove('opacity-100');
+                if (tip) tip.style.opacity = '0';
             });
         });
     }

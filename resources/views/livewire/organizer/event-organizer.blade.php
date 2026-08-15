@@ -1241,15 +1241,6 @@ select.tw-select-arrow {
     white-space: nowrap;
 }
 
-/* ── Search / filter loading progress bar (same pattern as Alumni Records) ── */
-.eo-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
-.eo-filter-progress-bar {
-    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
-    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
-    animation: eoFilterProgress 1s ease-in-out infinite;
-}
-@keyframes eoFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
-
 /* ── Tooltips: never show on touch / small screens ──
    Every hover-tooltip bubble in this page uses the "group-hover:opacity-100"
    utility class (submit/reset/close buttons, row action tooltips, share/
@@ -1538,6 +1529,21 @@ select.tw-select-arrow {
                 <option value="COMPLETED">Completed</option>
             </select>
 
+            <button wire:click="resetFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="resetFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
+                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
+
             @if($filterStatus)
             @php
                 $pillMap = [
@@ -1559,26 +1565,6 @@ select.tw-select-arrow {
             </span>
             @endif
             @endif
-
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
-                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-        </div>
-
-        {{-- Filtering / searching progress bar --}}
-        <div class="eo-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
-            <div class="eo-filter-progress-bar"></div>
         </div>
 
         {{-- ── TABLE WRAPPER (fixed-height card, scrolls internally — same pattern as Alumni Records) ── --}}
@@ -1699,9 +1685,11 @@ select.tw-select-arrow {
                                         <div class="relative inline-flex group" data-eo-share>
                                             <button type="button"
                                                     wire:click.stop="openShareModal({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition-all duration-150 active:scale-[.92] cursor-pointer
-                                                           bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
-                                                <i class="fas fa-share-nodes"></i>
+                                                           bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                 Share
@@ -1714,9 +1702,11 @@ select.tw-select-arrow {
                                         <div class="relative inline-flex group" data-eo-share>
                                             <button type="button"
                                                     wire:click.stop="confirmDelete({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="confirmDelete({{ $event->id }})"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400">
-                                                <i class="fas fa-trash-can"></i>
+                                                           bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-trash-can" wire:loading.remove wire:target="confirmDelete({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmDelete({{ $event->id }})"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                 Delete
@@ -2583,9 +2573,11 @@ select.tw-select-arrow {
             @if($isApproved || $isCompleted)
                 <div class="relative inline-flex group">
                     <button type="button" wire:click="openShareModal({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
+                            wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Share event">
-                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <i class="fas fa-share-nodes text-white text-sm" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Share
@@ -2967,10 +2959,17 @@ select.tw-select-arrow {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <button wire:click="closeShareModal" type="button" class="eo-share-close-btn" aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 2L12 12M12 2L2 12"/>
-                </svg>
+            <button wire:click="closeShareModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closeShareModal"
+                    class="eo-share-close-btn" aria-label="Close">
+                <span wire:loading.remove wire:target="closeShareModal">
+                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2L12 12M12 2L2 12"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="closeShareModal">
+                    <i class="fas fa-spinner fa-spin text-xs"></i>
+                </span>
                 <span class="tip">Close</span>
             </button>
         </div>
@@ -3100,25 +3099,6 @@ select.tw-select-arrow {
                         @endif
                     </div>
                 </div>
-
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
-                    </div>
-                </div>
-
-                <button type="button" @click="copyLinkFn()"
-                        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 active:scale-[.98] text-sm transition-all duration-150 cursor-pointer bg-white" style="color:#333333;">
-                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
-                    </span>
-                    <div class="flex-1 text-left min-w-0">
-                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
-                    </div>
-                </button>
 
                 <p class="text-[10px] text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
             </div>

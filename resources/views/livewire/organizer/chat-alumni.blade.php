@@ -1503,7 +1503,8 @@ new class extends Component {
 
         $msgIds  = collect($rows)->pluck('id');
         $rxns    = DB::table('chat_reactions')->whereIn('message_id', $msgIds)->get()->groupBy('message_id');
-        $pins    = DB::table('chat_pins')->whereIn('message_id', $msgIds)->pluck('message_id')->flip();
+        $pins    = DB::table('chat_pins')->whereIn('message_id', $msgIds)
+            ->get(['message_id','pinned_by_type','pinned_by_id'])->keyBy('message_id');
         $rplyIds = collect($rows)->whereNotNull('reply_to_id')->pluck('reply_to_id')->unique();
         $rplyMap = DB::table('chat_messages')->whereIn('id', $rplyIds)->whereNull('deleted_at')
             ->get(['id','sender_type','sender_id','body'])->keyBy(fn($m)=>(int)$m->id);
@@ -1555,7 +1556,8 @@ new class extends Component {
                 'is_director'    => $isDir,
                 'is_coordinator' => $isCoord,
                 'is_other_coord' => $isOtherCoord,
-                'is_pinned'      => isset($pins[$m->id]),
+                'is_pinned'      => $pins->has($m->id),
+                'is_pinned_by_me'=> $pins->has($m->id) && $pins->get($m->id)->pinned_by_type === 'organizer' && (int) $pins->get($m->id)->pinned_by_id === $self->coordinatorId,
                 'reactions'      => $rxnGrps,
                 'my_reaction'    => $myRxn ? $myRxn->reaction : null,
                 'reply_to'       => $reply,
@@ -1777,11 +1779,29 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function togglePin(int $msgId): void
     {
-        if (DB::table('chat_pins')->where('message_id',$msgId)->exists()) {
-            DB::table('chat_pins')->where('message_id',$msgId)->delete();
+        $existing = DB::table('chat_pins')->where('message_id', $msgId)->first();
+
+        if ($existing) {
+            $isMine = $existing->pinned_by_type === 'organizer'
+                && (int) $existing->pinned_by_id === $this->coordinatorId;
+
+            if (! $isMine) {
+                $this->openToolbarMsgId = null;
+                return;
+            }
+
+            DB::table('chat_pins')->where('message_id', $msgId)->delete();
         } else {
-            DB::table('chat_pins')->insert(['room_id'=>$this->roomId,'message_id'=>$msgId,'pinned_by_type'=>'organizer','pinned_by_id'=>$this->coordinatorId,'created_at'=>now(),'updated_at'=>now()]);
+            DB::table('chat_pins')->insert([
+                'room_id'        => $this->roomId,
+                'message_id'     => $msgId,
+                'pinned_by_type' => 'organizer',
+                'pinned_by_id'   => $this->coordinatorId,
+                'created_at'     => now(),
+                'updated_at'     => now(),
+            ]);
         }
+
         $this->openToolbarMsgId = null;
         $this->loadMessages();
         if ($this->showPins) $this->loadPins();
@@ -1909,7 +1929,7 @@ new class extends Component {
             ->join('chat_messages as m','m.id','=','p.message_id')
             ->where('p.room_id',$this->roomId)->whereNull('m.deleted_at')
             ->orderByDesc('p.created_at')
-            ->get(['m.id','m.sender_type','m.sender_id','m.body','p.created_at as pinned_at'])->toArray();
+            ->get(['m.id','m.sender_type','m.sender_id','m.body','p.created_at as pinned_at','p.pinned_by_type','p.pinned_by_id'])->toArray();
 
         $aIds = collect($rows)->where('sender_type','alumni')->pluck('sender_id')->unique();
         $oIds = collect($rows)->where('sender_type','organizer')->pluck('sender_id')->unique();
@@ -1922,7 +1942,13 @@ new class extends Component {
 
         $this->pinnedMessages = collect($rows)->map(function ($p) use ($aMap,$oMap,$dMap,$self) {
             $s = $p->sender_type==='director'?$dMap->get((int)$p->sender_id):($p->sender_type==='organizer'?$oMap->get((int)$p->sender_id):$aMap->get((int)$p->sender_id));
-            return ['id'=>$p->id,'body'=>$self->resolvePreviewText($p->body),'from'=>$s?trim($s->first_name.' '.$s->last_name):'Unknown','pinned_at'=>Carbon::parse($p->pinned_at)->setTimezone('Asia/Manila')->format('M d, Y h:i A')];
+            return [
+                'id'           => $p->id,
+                'body'         => $self->resolvePreviewText($p->body),
+                'from'         => $s?trim($s->first_name.' '.$s->last_name):'Unknown',
+                'pinned_at'    => Carbon::parse($p->pinned_at)->setTimezone('Asia/Manila')->format('M d, Y h:i A'),
+                'pinned_by_me' => $p->pinned_by_type === 'organizer' && (int) $p->pinned_by_id === $self->coordinatorId,
+            ];
         })->toArray();
     }
 
@@ -2352,9 +2378,110 @@ new class extends Component {
         .msgr-post-source-row span {
             font-size: 11px; font-weight: 500; color: #EDE0F5;
         }
+
+        /* ── Floating background bubbles + college/course watermark —
+           same drifting lavender-circle theme as the alumni Messenger
+           page, so the coordinator's chat feels like one design system
+           with the alumni-facing side instead of a flat gray backdrop. ── */
+        .org-bubble-bg {
+            position: relative;
+            background-color: #FFFFFF;
+            overflow: hidden;
+        }
+        .org-bubble-bg::before,
+        .org-bubble-bg::after,
+        .org-bubble-layer {
+            content: '';
+            position: absolute;
+            inset: -60px;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .org-bubble-bg::before {
+            background-image:
+                radial-gradient(circle, rgba(216,180,254,0.55) 0, rgba(216,180,254,0.55) 22px, transparent 23px),
+                radial-gradient(circle, rgba(107,36,144,0.3) 0, rgba(107,36,144,0.3) 17px, transparent 18px);
+            background-repeat: repeat;
+            background-size: 340px 340px, 300px 300px;
+            background-position: 20px 40px, 90px 220px;
+            animation: orgBubbleDriftUp 26s linear infinite;
+        }
+        .org-bubble-bg::after {
+            background-image:
+                radial-gradient(circle, rgba(216,180,254,0.4) 0, rgba(216,180,254,0.4) 14px, transparent 15px),
+                radial-gradient(circle, rgba(107,36,144,0.22) 0, rgba(107,36,144,0.22) 8px, transparent 9px);
+            background-repeat: repeat;
+            background-size: 260px 260px, 180px 180px;
+            background-position: 180px 120px, 40px 260px;
+            animation: orgBubbleDriftDown 32s linear infinite;
+        }
+        .org-bubble-layer {
+            background-image:
+                radial-gradient(circle, rgba(216,180,254,0.45) 0, rgba(216,180,254,0.45) 10px, transparent 11px);
+            background-repeat: repeat;
+            background-size: 220px 220px;
+            background-position: 250px 60px;
+            animation: orgBubbleDriftDiag 38s linear infinite;
+        }
+        @keyframes orgBubbleDriftUp {
+            from { background-position: 20px 40px, 90px 220px; }
+            to   { background-position: 20px -300px, 90px -80px; }
+        }
+        @keyframes orgBubbleDriftDown {
+            from { background-position: 180px 120px, 40px 260px; }
+            to   { background-position: 180px 380px, 40px 440px; }
+        }
+        @keyframes orgBubbleDriftDiag {
+            from { background-position: 250px 60px; }
+            to   { background-position: -70px 340px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .org-bubble-bg::before,
+            .org-bubble-bg::after,
+            .org-bubble-layer { animation: none; }
+        }
+        .org-bubble-bg > * { position: relative; z-index: 1; }
+
+        #org-chat-body-wrap { position: relative; }
+        .org-watermark {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 0;
+            user-select: none;
+            padding: 0 8%;
+        }
+        .org-watermark span {
+            font-size: clamp(20px, 5vw, 56px);
+            font-weight: 900;
+            color: #6b2490;
+            opacity: 0.07;
+            letter-spacing: .04em;
+            white-space: normal;
+            text-align: center;
+            transform: rotate(-6deg);
+            line-height: 1.15;
+            max-width: 90%;
+        }
+        #msg-list { position: relative; z-index: 1; background: transparent; }
     </style>
 
-    @php $defaultAv = asset('storage/alumni-photos/default.png'); @endphp
+    @php
+        $defaultAv = asset('storage/alumni-photos/default.png');
+
+        $watermarkText = '';
+        if ($isStaffRoom) {
+            $watermarkText = 'STAFF';
+        } elseif ($isCollegeRoom) {
+            $watermarkText = mb_strtoupper(trim($department));
+        } elseif ($isCourseRoom || (! $isStaffRoom && $room)) {
+            $watermarkText = strtoupper($room['course_code'] ?? '');
+        }
+    @endphp
 
     {{-- ══════════════════════════════════════════════════════════════════
          LEFT SIDEBAR
@@ -2634,7 +2761,7 @@ new class extends Component {
             <div class="flex flex-col flex-1 min-w-0">
 
                 {{-- Message list --}}
-                <div id="org-chat-body-wrap" class="flex-1 min-h-0 flex flex-col"
+                <div id="org-chat-body-wrap" class="flex-1 min-h-0 flex flex-col org-bubble-bg"
                      x-data="{
                          nearBottom: true,
                          scrollDir: null,
@@ -2650,8 +2777,16 @@ new class extends Component {
                          }
                      }">
 
+                    <div class="org-bubble-layer" aria-hidden="true"></div>
+
+                    @if($watermarkText !== '')
+                    <div class="org-watermark" aria-hidden="true">
+                        <span>{{ $watermarkText }}</span>
+                    </div>
+                    @endif
+
                     <div id="msg-list"
-                         class="flex-1 overflow-y-auto px-3 sm:px-4 py-4 bg-[#fafafa]"
+                         class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
                          x-init="lastTop = $el.scrollTop; $el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
                          @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
                          @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; scrollDir = null; })"
@@ -2672,6 +2807,7 @@ new class extends Component {
                                 $prevSendKey = $senderKey;
                                 $isLast      = $msgIdx === $lastIdx;
                                 $toolbarOpen = $openToolbarMsgId === $msg['id'];
+                                $canTogglePin = ! $msg['is_pinned'] || $msg['is_pinned_by_me'];
 
                                 if ($msg['is_mine']) {
                                     $bubbleBg  = 'background:#6b2490;';
@@ -2878,10 +3014,16 @@ new class extends Component {
 
                                             <div class="relative org-tooltip-wrap">
                                                 <button wire:click.stop="togglePin({{ $msg['id'] }})"
-                                                        class="w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-150 cursor-pointer {{ $msg['is_pinned']?'text-amber-600 bg-amber-50 hover:bg-amber-100':'text-[#555] hover:bg-amber-50 hover:text-amber-600' }}">
+                                                        @if(! $canTogglePin) disabled @endif
+                                                        class="w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-150
+                                                               {{ $msg['is_pinned']
+                                                                   ? ($canTogglePin
+                                                                       ? 'text-amber-600 bg-amber-50 hover:bg-amber-100 cursor-pointer'
+                                                                       : 'text-amber-300 bg-amber-50/50 cursor-not-allowed')
+                                                                   : 'text-[#555] hover:bg-amber-50 hover:text-amber-600 cursor-pointer' }}">
                                                     <i class="fa-solid fa-thumbtack text-xs"></i>
                                                 </button>
-                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">{{ $msg['is_pinned']?'Unpin':'Pin' }}</span>
+                                                <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">{{ $msg['is_pinned'] ? ($canTogglePin ? 'Unpin' : 'Only pinner can unpin') : 'Pin' }}</span>
                                             </div>
 
                                             @if($msg['is_mine'])
@@ -3295,15 +3437,24 @@ new class extends Component {
                     @elseif($showPins)
                         <div class="flex-1 overflow-y-auto p-3 space-y-2">
                             @forelse($pinnedMessages as $pin)
-                            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 transition-all duration-150">
                                 <div class="flex items-start justify-between gap-2 mb-1.5">
                                     <div class="flex items-center gap-1.5 min-w-0">
                                         <i class="fa-solid fa-thumbtack text-amber-600 text-xs flex-shrink-0"></i>
                                         <p class="text-xs font-semibold text-amber-800 truncate">{{ $pin['from'] }}</p>
                                     </div>
-                                    <button wire:click="togglePin({{ $pin['id'] }})" class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition flex-shrink-0 cursor-pointer">
-                                        <i class="fa-solid fa-xmark text-xs"></i>
+                                    @if($pin['pinned_by_me'])
+                                    <button wire:click="togglePin({{ $pin['id'] }})"
+                                            wire:loading.attr="disabled" wire:target="togglePin({{ $pin['id'] }})"
+                                            class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0 cursor-pointer disabled:opacity-60">
+                                        <i class="fa-solid fa-xmark text-xs" wire:loading.remove wire:target="togglePin({{ $pin['id'] }})"></i>
+                                        <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePin({{ $pin['id'] }})"></i>
                                     </button>
+                                    @else
+                                    <span class="w-5 h-5 flex items-center justify-center text-[#cccccc] flex-shrink-0" title="Only the pinner can remove this">
+                                        <i class="fa-solid fa-lock text-[10px]"></i>
+                                    </span>
+                                    @endif
                                 </div>
                                 <p class="text-sm text-[#333333] leading-snug break-words">{{ Str::limit($pin['body'],140) }}</p>
                                 <p class="text-xs text-[#999999] mt-1.5">{{ $pin['pinned_at'] }}</p>
