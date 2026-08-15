@@ -1407,14 +1407,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     font-style: italic;
 }
 
-.jm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
-.jm-filter-progress-bar {
-    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
-    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
-    animation: jmFilterProgress 1s ease-in-out infinite;
-}
-@keyframes jmFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
-
 @media (max-width: 767px) {
     .jm-share-backdrop {
         padding: 0 !important;
@@ -1645,8 +1637,14 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </span>
             <div class="relative inline-flex group">
                 <button wire:click="openPostModal"
-                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    <i class="fas fa-plus text-sm"></i>
+                        wire:loading.attr="disabled" wire:target="openPostModal"
+                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
+                    <span wire:loading.remove wire:target="openPostModal">
+                        <i class="fas fa-plus text-sm"></i>
+                    </span>
+                    <span wire:loading wire:target="openPostModal">
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
+                    </span>
                 </button>
                 <div class="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
                     <i class="fas fa-plus text-[9px] mr-1"></i>Post a Job
@@ -1688,6 +1686,20 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @endforeach
             </select>
 
+            <button wire:click="resetFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="resetFilters"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
+
             @if($filterStatus)
             @php
                 $statusPillMap = [
@@ -1710,27 +1722,22 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <button wire:click="$set('filterType', '')" type="button" class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer"><i class="fas fa-xmark text-[10px]"></i></button>
             </span>
             @endif
-
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-        </div>
-
-        {{-- Filtering / searching progress bar --}}
-        <div class="jm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterType">
-            <div class="jm-filter-progress-bar"></div>
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
         <div class="relative flex-1 min-h-0 bg-white">
+
+            {{-- Centered loading spinner — big icon over the table itself,
+                 same pattern as the alumni-facing yearbook, instead of only
+                 the thin progress bar in the filter strip. --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
+
             <div id="jm-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
 
             @if($this->jobPostings->count() > 0)
 
@@ -1804,8 +1811,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                     @if($canShare)
                                         <div class="relative inline-flex group" data-eo-share>
                                             <button type="button" wire:click.stop="openShareModal({{ $job->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
-                                                <i class="fas fa-share-nodes"></i>
+                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $job->id }})"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $job->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $job->id }})"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                 Share
@@ -1828,8 +1837,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         @if($isActive)
                                             <div class="relative inline-flex group" data-eo-share>
                                                 <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400">
-                                                    <i class="fas fa-circle-pause"></i>
+                                                        wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400 disabled:opacity-60 disabled:cursor-wait">
+                                                    <i class="fas fa-circle-pause" wire:loading.remove wire:target="confirmToggleStatus({{ $job->id }})"></i>
+                                                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleStatus({{ $job->id }})"></i>
                                                 </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                     Deactivate
@@ -1848,8 +1859,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         @elseif(!$isDeadlinePassed)
                                             <div class="relative inline-flex group" data-eo-share>
                                                 <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400">
-                                                    <i class="fas fa-circle-play"></i>
+                                                        wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                    <i class="fas fa-circle-play" wire:loading.remove wire:target="confirmToggleStatus({{ $job->id }})"></i>
+                                                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleStatus({{ $job->id }})"></i>
                                                 </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                     Activate
@@ -1858,8 +1871,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                             </div>
                                             <div class="relative inline-flex group" data-eo-share>
                                                 <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400">
-                                                    <i class="fas fa-trash text-[10px]"></i>
+                                                        wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                                    <i class="fas fa-trash text-[10px]" wire:loading.remove wire:target="confirmDeleteJob({{ $job->id }})"></i>
+                                                    <i class="fas fa-spinner fa-spin text-[10px]" wire:loading wire:target="confirmDeleteJob({{ $job->id }})"></i>
                                                 </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                     Delete
@@ -1878,8 +1893,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                             </div>
                                             <div class="relative inline-flex group" data-eo-share>
                                                 <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400">
-                                                    <i class="fas fa-trash text-[10px]"></i>
+                                                        wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                                    <i class="fas fa-trash text-[10px]" wire:loading.remove wire:target="confirmDeleteJob({{ $job->id }})"></i>
+                                                    <i class="fas fa-spinner fa-spin text-[10px]" wire:loading wire:target="confirmDeleteJob({{ $job->id }})"></i>
                                                 </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                     Delete
@@ -2027,14 +2044,26 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelDeleteJob"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>
-                    Cancel
+                        wire:loading.attr="disabled" wire:target="executeDeleteJob,cancelDeleteJob"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                    <span wire:loading.remove wire:target="cancelDeleteJob">
+                        <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                    </span>
+                    <span wire:loading wire:target="cancelDeleteJob">
+                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Cancel
+                    </span>
                 </button>
                 <button wire:click="executeDeleteJob"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer">
-                    <i class="fas fa-trash-can mr-1 text-xs"></i>
-                    Yes, Delete Permanently
+                        wire:loading.attr="disabled" wire:target="executeDeleteJob"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-70 disabled:cursor-wait">
+                    <span wire:loading.remove wire:target="executeDeleteJob">
+                        <i class="fas fa-trash-can mr-1 text-xs"></i>
+                        Yes, Delete Permanently
+                    </span>
+                    <span wire:loading wire:target="executeDeleteJob">
+                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>
+                        Deleting…
+                    </span>
                 </button>
             </div>
         </div>
@@ -2074,15 +2103,27 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             @endif
             <div class="flex gap-2">
                 <button wire:click="cancelToggleStatus"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>
-                    Cancel
+                        wire:loading.attr="disabled" wire:target="executeToggleStatus,cancelToggleStatus"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                    <span wire:loading.remove wire:target="cancelToggleStatus">
+                        <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                    </span>
+                    <span wire:loading wire:target="cancelToggleStatus">
+                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Cancel
+                    </span>
                 </button>
                 <button wire:click="executeToggleStatus"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer
+                        wire:loading.attr="disabled" wire:target="executeToggleStatus"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-70 disabled:cursor-wait
                                {{ $toggleAction === 'activate' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600' }}">
-                    <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-xs"></i>
-                    Yes, {{ $toggleAction === 'activate' ? 'Activate' : 'Deactivate' }}
+                    <span wire:loading.remove wire:target="executeToggleStatus">
+                        <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-xs"></i>
+                        Yes, {{ $toggleAction === 'activate' ? 'Activate' : 'Deactivate' }}
+                    </span>
+                    <span wire:loading wire:target="executeToggleStatus">
+                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>
+                        {{ $toggleAction === 'activate' ? 'Activating…' : 'Deactivating…' }}
+                    </span>
                 </button>
             </div>
         </div>
@@ -2108,11 +2149,17 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
         <div class="flex items-center gap-1.5">
             <button wire:click="closePostModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closePostModal"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
                     aria-label="Close">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
-                </svg>
+                <span wire:loading.remove wire:target="closePostModal">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="closePostModal">
+                    <i class="fas fa-spinner fa-spin text-white text-xs"></i>
+                </span>
                 <span class="mtip">Close</span>
             </button>
         </div>
@@ -2190,9 +2237,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                     </div>
                                 </template>
                             </div>
-                            <p class="text-[10px] text-[#777777] mt-1.5 text-center">The default photo above is used automatically if you don't upload one.</p>
-                            <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
-                                <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                            <p class="text-[10px] mt-1.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
+                            <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
+                                <i class="fas fa-spinner fa-spin text-xs"></i> Uploading…
                             </div>
                             @if(isset($postErrors['postJobImage']))
                                 <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
@@ -2447,14 +2494,28 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
                 <button type="button" wire:click="savePost"
-                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    <i class="fas fa-paper-plane text-xs"></i>
-                    Post Job
+                        wire:loading.attr="disabled" wire:target="savePost"
+                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
+                    <span wire:loading.remove wire:target="savePost" class="flex items-center justify-center gap-2">
+                        <i class="fas fa-paper-plane text-xs"></i>
+                        Post Job
+                    </span>
+                    <span wire:loading wire:target="savePost" class="flex items-center justify-center gap-2">
+                        <i class="fas fa-spinner fa-spin text-xs"></i>
+                        Posting…
+                    </span>
                 </button>
                 <button type="button" wire:click="closePostModal"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                    Cancel
+                        wire:loading.attr="disabled" wire:target="savePost,closePostModal"
+                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+                    <span wire:loading.remove wire:target="closePostModal" class="flex items-center justify-center gap-1.5">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                        Cancel
+                    </span>
+                    <span wire:loading wire:target="closePostModal" class="flex items-center justify-center gap-1.5">
+                        <i class="fas fa-spinner fa-spin text-[10px]"></i>
+                        Cancel
+                    </span>
                 </button>
             </div>
         </div>
@@ -2544,30 +2605,54 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         </div>
                     @else
                         <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
+                                wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $editingJobId }})"
                                 class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                            <i class="fas fa-circle-play text-white text-sm"></i>
+                            <span wire:loading.remove wire:target="confirmToggleStatus({{ $editingJobId }})">
+                                <i class="fas fa-circle-play text-white text-sm"></i>
+                            </span>
+                            <span wire:loading wire:target="confirmToggleStatus({{ $editingJobId }})">
+                                <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                            </span>
                             <span class="mtip">Activate</span>
                         </button>
                     @endif
                 @else
                     <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
+                            wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $editingJobId }})"
                             class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                        <i class="fas fa-circle-pause text-white text-sm"></i>
+                        <span wire:loading.remove wire:target="confirmToggleStatus({{ $editingJobId }})">
+                            <i class="fas fa-circle-pause text-white text-sm"></i>
+                        </span>
+                        <span wire:loading wire:target="confirmToggleStatus({{ $editingJobId }})">
+                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                        </span>
                         <span class="mtip">Deactivate</span>
                     </button>
                 @endif
                 @php $editJobCanShare = !$editJobDeadlinePassed && $editJobIsActive; @endphp
                 @if($editJobCanShare)
                     <button wire:click="openShareModal({{ $editingJobId }})" type="button"
+                            wire:loading.attr="disabled" wire:target="openShareModal({{ $editingJobId }})"
                             class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <span wire:loading.remove wire:target="openShareModal({{ $editingJobId }})">
+                            <i class="fas fa-share-nodes text-white text-sm"></i>
+                        </span>
+                        <span wire:loading wire:target="openShareModal({{ $editingJobId }})">
+                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                        </span>
                         <span class="mtip">Share</span>
                     </button>
                 @endif
                 @if(!$editJobIsActive)
                     <button wire:click="confirmDeleteJob({{ $editingJobId }})" type="button"
+                            wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $editingJobId }})"
                             class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                        <i class="fas fa-trash text-white text-sm"></i>
+                        <span wire:loading.remove wire:target="confirmDeleteJob({{ $editingJobId }})">
+                            <i class="fas fa-trash text-white text-sm"></i>
+                        </span>
+                        <span wire:loading wire:target="confirmDeleteJob({{ $editingJobId }})">
+                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                        </span>
                         <span class="mtip">Delete</span>
                     </button>
                 @endif
@@ -2578,17 +2663,29 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @endphp
                 @if($editJobCanShare)
                     <button wire:click="openShareModal({{ $editingJobId }})" type="button"
+                            wire:loading.attr="disabled" wire:target="openShareModal({{ $editingJobId }})"
                             class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <span wire:loading.remove wire:target="openShareModal({{ $editingJobId }})">
+                            <i class="fas fa-share-nodes text-white text-sm"></i>
+                        </span>
+                        <span wire:loading wire:target="openShareModal({{ $editingJobId }})">
+                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                        </span>
                         <span class="mtip">Share</span>
                     </button>
                 @endif
             @endif
             <button wire:click="closeEditModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closeEditModal"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
-                </svg>
+                <span wire:loading.remove wire:target="closeEditModal">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="closeEditModal">
+                    <i class="fas fa-spinner fa-spin text-white text-xs"></i>
+                </span>
                 <span class="mtip">Close</span>
             </button>
         </div>
@@ -2659,7 +2756,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      class="w-full h-full object-cover"
                                      onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                             </div>
-                            <p class="text-[10px] text-[#777777] mt-1 text-center">
+                            <p class="text-[10px] mt-1 text-center font-medium" style="color:#111111;">
                                 {{ $editingJob->job_image ? 'Custom photo uploaded' : 'Default photo' }}
                             </p>
                         </div>
@@ -2739,6 +2836,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                             Image removed — will use default on save.
                                         </p>
                                     </template>
+                                    <p class="text-[10px] mt-1.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
+                                    <div wire:loading wire:target="editJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
+                                        <i class="fas fa-spinner fa-spin text-xs"></i> Uploading…
+                                    </div>
                                 </div>
                             </template>
 
@@ -3032,9 +3133,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @if($editingJob && !$editJobIsActive && !$editIsAlumniDirectorJob)
                 <div x-show="editMode" x-cloak>
                     <button type="button" wire:click="saveEditJob"
-                            class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                        <i class="fas fa-floppy-disk text-xs"></i>
-                        Save Changes
+                            wire:loading.attr="disabled" wire:target="saveEditJob"
+                            class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
+                        <span wire:loading.remove wire:target="saveEditJob" class="flex items-center justify-center gap-2">
+                            <i class="fas fa-floppy-disk text-xs"></i>
+                            Save Changes
+                        </span>
+                        <span wire:loading wire:target="saveEditJob" class="flex items-center justify-center gap-2">
+                            <i class="fas fa-spinner fa-spin text-xs"></i>
+                            Saving…
+                        </span>
                     </button>
                 </div>
                 @elseif($editIsAlumniDirectorJob)
@@ -3228,10 +3336,17 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Job Posting
             </h2>
-            <button wire:click="closeShareModal" type="button" class="jm-share-close-btn" aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 2L12 12M12 2L2 12"/>
-                </svg>
+            <button wire:click="closeShareModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closeShareModal"
+                    class="jm-share-close-btn" aria-label="Close">
+                <span wire:loading.remove wire:target="closeShareModal">
+                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2L12 12M12 2L2 12"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="closeShareModal">
+                    <i class="fas fa-spinner fa-spin text-xs"></i>
+                </span>
                 <span class="tip">Close</span>
             </button>
         </div>
@@ -3357,25 +3472,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
                     </div>
                 </div>
-
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
-                    </div>
-                </div>
-
-                <button type="button" @click="copyLinkFn()"
-                        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
-                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
-                    </span>
-                    <div class="flex-1 text-left min-w-0">
-                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
-                    </div>
-                </button>
 
                 <p class="text-[10px] text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
             </div>

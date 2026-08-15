@@ -1566,21 +1566,35 @@ select.tw-select-arrow {
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
                            bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
         </div>
 
         {{-- Filtering / searching progress bar --}}
-        <div class="eo-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus">
+        <div class="eo-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
             <div class="eo-filter-progress-bar"></div>
         </div>
 
         {{-- ── TABLE WRAPPER (fixed-height card, scrolls internally — same pattern as Alumni Records) ── --}}
         <div class="relative flex-1 min-h-0 bg-white">
+
+            {{-- Centered loading spinner — big icon over the table itself,
+                 same pattern as the alumni-facing yearbook, instead of only
+                 the thin progress bar in the filter strip. --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
+
             <div id="eo-table-scroll"
                  class="scroll-c h-full overflow-y-auto transition-opacity duration-200 bg-white"
-                 wire:loading.class="opacity-60" wire:target="search,filterStatus">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
 
             @if($this->events->count() > 0)
 
@@ -1848,16 +1862,16 @@ select.tw-select-arrow {
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelDelete"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                        wire:loading.attr="disabled" wire:target="deleteEvent"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
                     <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
                 </button>
                 <button wire:click="deleteEvent"
                         wire:loading.attr="disabled"
                         wire:target="deleteEvent"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60">
-                    <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-xs"></i></span>
-                    Yes, Delete
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+                    <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Deleting…</span>
+                    <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-xs"></i>Yes, Delete</span>
                 </button>
             </div>
         </div>
@@ -1921,16 +1935,16 @@ select.tw-select-arrow {
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelSubmitConfirm"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                        wire:loading.attr="disabled" wire:target="confirmSubmitEvent"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
                     <i class="fas fa-xmark mr-1 text-xs"></i>Review Again
                 </button>
                 <button wire:click="confirmSubmitEvent"
                         wire:loading.attr="disabled"
                         wire:target="confirmSubmitEvent"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#7a3f91] hover:bg-[#5e2f72] transition cursor-pointer disabled:opacity-60">
-                    <span wire:loading wire:target="confirmSubmitEvent"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="confirmSubmitEvent"><i class="fas fa-paper-plane mr-1 text-xs"></i></span>
-                    Yes, Submit
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#7a3f91] hover:bg-[#5e2f72] transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+                    <span wire:loading wire:target="confirmSubmitEvent"><i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Submitting…</span>
+                    <span wire:loading.remove wire:target="confirmSubmitEvent"><i class="fas fa-paper-plane mr-1 text-xs"></i>Yes, Submit</span>
                 </button>
             </div>
         </div>
@@ -2065,7 +2079,7 @@ select.tw-select-arrow {
                                         <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:150px;">
                                             <img src="{{ $existingPhotoUrl }}" class="w-full h-full object-contain">
                                         </div>
-                                        <p class="text-xs font-semibold text-[#555555]">Current photo — click to change</p>
+                                        <p class="text-xs font-semibold mt-1" style="color:#111111;">Current photo. Click photo to update.</p>
                                     </div>
                                 @elseif($defaultPhotoExists)
                                     {{-- New event, no upload yet — show the real default event photo
@@ -2075,8 +2089,8 @@ select.tw-select-arrow {
                                         <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:120px;">
                                             <img src="{{ asset($defaultPhotoRelPath) }}" alt="Default event photo" class="w-full h-full object-contain">
                                         </div>
-                                        <p class="font-semibold text-xs text-[#555555] mt-1">Click to upload or drag &amp; drop</p>
-                                        <p class="text-[10px] text-[#777777]">JPG, PNG, WEBP — max 5 MB</p>
+                                        <p class="font-semibold text-xs mt-1" style="color:#111111;">JPG, PNG, WEBP — max 5 MB</p>
+                                        <p class="text-[10px] mt-0.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
                                     </div>
                                 @else
                                     {{-- New event, no upload yet, AND default-photo-event.jpg is
@@ -2091,8 +2105,8 @@ select.tw-select-arrow {
                                                 <path d="M34 52L46 41C47.1 40.05 48.75 40.05 49.85 41L62 52" stroke="#9B59B6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                                             </svg>
                                         </div>
-                                        <p class="font-semibold text-xs text-[#555555] mt-1">Click to upload or drag &amp; drop</p>
-                                        <p class="text-[10px] text-[#777777]">JPG, PNG, WEBP — max 5 MB</p>
+                                        <p class="font-semibold text-xs mt-1" style="color:#111111;">Click to upload or drag &amp; drop</p>
+                                        <p class="text-[10px] text-center font-medium" style="color:#111111;">JPG, PNG, WEBP — max 5 MB. Click photo to update.</p>
                                     </div>
                                 @endif
                             </label>
@@ -2109,8 +2123,8 @@ select.tw-select-arrow {
                                 <button type="button" wire:click="$set('removePhoto',false)" class="text-xs text-blue-600 underline">Undo</button>
                             </div>
                         @endif
-                        <div wire:loading wire:target="photo" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
-                            <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                        <div wire:loading wire:target="photo" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
+                            <i class="fas fa-spinner fa-spin text-xs"></i> Uploading…
                         </div>
                     </div>
                 </div>
@@ -2528,7 +2542,8 @@ select.tw-select-arrow {
                     </span>
                 </button>
                 <button type="button" wire:click="closeFormModal"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333]">
+                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent"
+                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">
                     <i class="fas fa-xmark mr-1 text-[10px]"></i>Cancel
                 </button>
             </div>
