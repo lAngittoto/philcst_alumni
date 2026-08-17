@@ -11,9 +11,23 @@ new class extends Component {
     use WithPagination;
 
     public string $search          = '';
-    public string $filterStatus    = '';
-    public string $filterRelevance = '';
-    public string $filterBatch     = '';
+
+    // Status is now a MULTI-SELECT (array of checked statuses) instead of
+    // a single-value dropdown, so e.g. "Employed" + "Self-Employed" can
+    // be viewed together — mirrors Alumni Records' alumniEmploymentStatuses.
+    public array  $filterStatuses  = [];
+
+    // Batch is now a FROM/TO range instead of a single-value dropdown —
+    // mirrors Alumni Records' alumniBatchFrom/alumniBatchTo.
+    public string $filterBatchFrom = '';
+    public string $filterBatchTo   = '';
+
+    /** Set while setSingleBatchYear()/clearFilterBatch()/setBatchRange()
+     *  are writing to filterBatchFrom/filterBatchTo directly, so the
+     *  updatedFilterBatchFrom()/updatedFilterBatchTo() hooks below don't
+     *  ALSO fire and refresh the table a second time in the same request. */
+    private bool $skipBatchHooks = false;
+
     public string $filterCourse    = '';
 
     public string $organizerBatch      = '';
@@ -50,7 +64,7 @@ new class extends Component {
     // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
 
-    // NOTE: search / filterRelevance / filterBatch / filterStatus / filterCourse
+    // NOTE: search / filterBatchFrom / filterBatchTo / filterStatuses / filterCourse
     // are all deliberately kept OUT of the query string now, so a plain page
     // refresh always resets every filter back to its default — same behavior
     // as the Job Management and Event Organizer tables. Deep-linking from the
@@ -89,11 +103,12 @@ new class extends Component {
         // clean URL — no ?course= or ?status= query params ever appear.
         $sessionFilter = session()->pull('organizer_employment_filter', null);
         if (is_array($sessionFilter)) {
-            $this->filterStatus = $sessionFilter['status'] ?? '';
-            $this->filterCourse = $sessionFilter['course'] ?? '';
+            $status = $sessionFilter['status'] ?? '';
+            $this->filterStatuses = $status !== '' ? [$status] : [];
+            $this->filterCourse   = $sessionFilter['course'] ?? '';
         } elseif (is_string($sessionFilter) && $sessionFilter !== '') {
             // backward-compat: older single-value session payload
-            $this->filterStatus = $sessionFilter;
+            $this->filterStatuses = [$sessionFilter];
         }
 
         // Seed the last-seen timestamp to "now" on first load
@@ -267,13 +282,21 @@ new class extends Component {
             });
         }
 
-        if ($this->filterStatus) {
-            $this->filterStatus === 'not_filled'
-                ? $q->whereNull('et.employment_status')
-                : $q->where('et.employment_status', $this->filterStatus);
+        if ($this->filterStatuses) {
+            $q->where(function ($w) {
+                foreach ($this->filterStatuses as $status) {
+                    if ($status === 'not_filled') {
+                        $w->orWhereNull('et.employment_status');
+                    } else {
+                        $w->orWhere('et.employment_status', $status);
+                    }
+                }
+            });
         }
-        if ($this->filterRelevance) $q->where('et.course_relevance', $this->filterRelevance);
-        if ($this->filterBatch)     $q->where('a.batch',             $this->filterBatch);
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $q->where('a.batch', '>=', $this->filterBatchFrom)
+              ->where('a.batch', '<=', $this->filterBatchTo);
+        }
         if ($this->filterCourse)    $q->where('a.course_code',       $this->filterCourse);
 
         $q->orderByRaw("CASE WHEN et.employment_status IS NULL THEN 1 ELSE 0 END")
@@ -305,15 +328,122 @@ new class extends Component {
     }
 
     public function updatingSearch(): void          { $this->resetPage(); }
-    public function updatingFilterStatus(): void    { $this->resetPage(); }
-    public function updatingFilterRelevance(): void { $this->resetPage(); }
-    public function updatingFilterBatch(): void     { $this->resetPage(); }
     public function updatingFilterCourse(): void    { $this->resetPage(); }
+
+    /** Toggles a single employment status in/out of the multi-select
+     *  filter — bound directly to each checkbox item in the Status
+     *  dropdown. Mirrors Alumni Records' toggleEmploymentStatus(). */
+    public function toggleFilterStatus(string $status): void
+    {
+        if (in_array($status, $this->filterStatuses, true)) {
+            $this->filterStatuses = array_values(array_diff($this->filterStatuses, [$status]));
+        } else {
+            $this->filterStatuses[] = $status;
+        }
+        $this->resetPage();
+    }
+
+    /** "All Statuses" inside the dropdown — clears the whole multi-select
+     *  in one round-trip. */
+    public function clearFilterStatuses(): void
+    {
+        $this->filterStatuses = [];
+        $this->resetPage();
+    }
+
+    /** "Select All" inside the dropdown — checks every status option. */
+    public function selectAllFilterStatuses(): void
+    {
+        $this->filterStatuses = ['employed', 'self_employed', 'unemployed', 'not_filled'];
+        $this->resetPage();
+    }
+
+    /** True only once BOTH ends of the batch range are set — a half-picked
+     *  range (just From, or just To) never scopes the query. */
+    private function batchRangeIsComplete(): bool
+    {
+        return $this->filterBatchFrom !== '' && $this->filterBatchTo !== '';
+    }
+
+    public function updatedFilterBatchFrom(): void
+    {
+        if ($this->skipBatchHooks) return;
+        $this->normalizeBatchRange();
+        // Don't fire a filter request yet if only "From" is picked — wait
+        // until "To" is also set (or both cleared) so a half-picked range
+        // never triggers a query, and picking From then To doesn't cause
+        // two separate table refreshes.
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo === '') {
+            return;
+        }
+        $this->resetPage();
+    }
+
+    public function updatedFilterBatchTo(): void
+    {
+        if ($this->skipBatchHooks) return;
+        $this->normalizeBatchRange();
+        // Mirror of updatedFilterBatchFrom() above.
+        if ($this->filterBatchTo !== '' && $this->filterBatchFrom === '') {
+            return;
+        }
+        $this->resetPage();
+    }
+
+    /** If "from" ends up later than "to" (or vice versa), swap them
+     *  instead of silently returning zero rows. */
+    private function normalizeBatchRange(): void
+    {
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== ''
+            && (int)$this->filterBatchFrom > (int)$this->filterBatchTo) {
+            [$this->filterBatchFrom, $this->filterBatchTo] = [$this->filterBatchTo, $this->filterBatchFrom];
+        }
+    }
+
+    /** Single-year quick pick from the default (non-range) Batch Year
+     *  list — sets From and To to the same year in ONE Livewire
+     *  round-trip instead of two separate $wire.set() calls. */
+    public function setSingleBatchYear(string $year): void
+    {
+        $this->skipBatchHooks = true;
+        $this->filterBatchFrom = $year;
+        $this->filterBatchTo   = $year;
+        $this->skipBatchHooks = false;
+        $this->resetPage();
+    }
+
+    /** "All Batch Years" — clears both ends of the range in one
+     *  round-trip, same reasoning as setSingleBatchYear() above. */
+    public function clearFilterBatch(): void
+    {
+        $this->skipBatchHooks = true;
+        $this->filterBatchFrom = '';
+        $this->filterBatchTo   = '';
+        $this->skipBatchHooks = false;
+        $this->resetPage();
+    }
+
+    /** Applies a From–To range in ONE Livewire round-trip. Bound to the
+     *  range picker's local Alpine state (not wire:model.live on the two
+     *  lists) so picking "From" alone never touches the server at all —
+     *  the request only fires once both ends are chosen. */
+    public function setBatchRange(string $from, string $to): void
+    {
+        $this->skipBatchHooks = true;
+        $this->filterBatchFrom = $from;
+        $this->filterBatchTo   = $to;
+        $this->skipBatchHooks = false;
+        $this->normalizeBatchRange();
+        $this->resetPage();
+    }
 
     public function clearFilters(): void
     {
-        $this->search = $this->filterStatus =
-        $this->filterRelevance = $this->filterBatch = $this->filterCourse = '';
+        $this->search          = '';
+        $this->filterStatuses  = [];
+        $this->filterBatchFrom = '';
+        $this->filterBatchTo   = '';
+        $this->filterCourse    = '';
         $this->resetPage();
     }
 
@@ -570,6 +700,7 @@ new class extends Component {
 <div class="flex flex-col">
 
 <div id="ae-hover-tip"
+     wire:ignore
      class="fixed bg-neutral-900 text-white text-[11px] font-semibold tracking-wide px-3 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-lg -translate-x-0"
      style="transform:translate(12px,-110%)">
     <i class="fas fa-eye mr-1.5"></i>View Details
@@ -860,7 +991,7 @@ new class extends Component {
             {{-- FILTER BAR --}}
             <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
                  wire:loading.class="opacity-60"
-                 wire:target="search,filterStatus,filterRelevance,filterBatch,filterCourse,clearFilters">
+                 wire:target="search,filterStatuses,filterBatchFrom,filterBatchTo,filterCourse,clearFilters">
 
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                     Filters
@@ -872,33 +1003,77 @@ new class extends Component {
                      x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
                     <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
+                           :class="q !== '' ? 'border-[#7a3f91] bg-[#EFF6FF] text-[#1D4ED8] font-semibold' : 'bg-white text-[#333333] font-medium'"
                            placeholder="Search name, ID, email or job…"
-                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-[#333333] bg-white text-sm py-2 pr-4 pl-9 rounded-lg font-medium placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
+                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
                            autocomplete="off" maxlength="100" spellcheck="false">
                 </div>
 
-                {{-- Status --}}
-                <select wire:model.live="filterStatus"
-                        class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium appearance-none cursor-pointer bg-no-repeat pr-9 hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10
-                               {{ $filterStatus ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}"
-                        style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
-                    <option value="">All Statuses</option>
-                    <option value="employed">Employed</option>
-                    <option value="self_employed">Self-Employed</option>
-                    <option value="unemployed">Unemployed</option>
-                    <option value="not_filled">Not Filled</option>
-                </select>
-
-                {{-- Relevance --}}
-                <select wire:model.live="filterRelevance"
-                        class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium appearance-none cursor-pointer bg-no-repeat pr-9 hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10
-                               {{ $filterRelevance ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}"
-                        style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
-                    <option value="">All Relevance</option>
-                    <option value="yes">Related to Program</option>
-                    <option value="partially">Partially Related</option>
-                    <option value="no">Not Related</option>
-                </select>
+                {{-- Status — MULTI-SELECT with real checkboxes. Checking a
+                     box toggles that status in/out of filterStatuses via
+                     toggleFilterStatus(); the dropdown stays open across
+                     clicks so e.g. "Employed" + "Self-Employed" can be
+                     checked together. A "Select All" checkbox sits in a
+                     sticky header row at the TOP of the list — tri-state:
+                     checked when every status is selected, indeterminate
+                     (dash) when some but not all are. --}}
+                @php $aeStatusOptions = [
+                    ['employed', 'Employed'],
+                    ['self_employed', 'Self-Employed'],
+                    ['unemployed', 'Unemployed'],
+                    ['not_filled', 'Not Filled'],
+                ]; @endphp
+                <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+                    <button type="button" @click.stop="open = !open"
+                            class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
+                                   {{ $filterStatuses ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
+                        <span class="truncate text-sm">
+                            @if(count($filterStatuses) === 0)
+                                All Statuses
+                            @elseif(count($filterStatuses) === 1)
+                                {{ $filterStatuses[0] === 'not_filled' ? 'Not Filled' : ucwords(str_replace('_', '-', $filterStatuses[0])) }}
+                            @else
+                                {{ count($filterStatuses) }} Statuses
+                            @endif
+                        </span>
+                        <i class="fas fa-chevron-down text-xs flex-shrink-0 transition-transform duration-150"
+                           :class="open ? 'rotate-180' : ''"></i>
+                    </button>
+                    <div x-show="open"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                         x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[180px] max-h-[220px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
+                         @click.stop>
+                        <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
+                            <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
+                                <input type="checkbox"
+                                       :checked="$wire.filterStatuses.length === {{ count($aeStatusOptions) }}"
+                                       :indeterminate="$wire.filterStatuses.length > 0 && $wire.filterStatuses.length < {{ count($aeStatusOptions) }}"
+                                       @change="$event.target.checked ? $wire.selectAllFilterStatuses() : $wire.clearFilterStatuses()"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
+                                Select All
+                            </label>
+                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterStatuses.length > 0">
+                                <span x-text="$wire.filterStatuses.length"></span> selected
+                            </span>
+                        </div>
+                        <div class="py-1">
+                            @foreach($aeStatusOptions as [$val, $label])
+                            <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                          {{ in_array($val, $filterStatuses, true) ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
+                                <input type="checkbox" wire:click="toggleFilterStatus('{{ $val }}')"
+                                       :checked="$wire.filterStatuses.includes('{{ $val }}')"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
+                                {{ $label }}
+                            </label>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
 
                 {{-- Programs (formerly "Courses") --}}
                 @if($courses->isNotEmpty())
@@ -913,15 +1088,44 @@ new class extends Component {
                     </select>
                 @endif
 
-                {{-- Batch --}}
+                {{-- Batch — FROM/TO range. Default view is a plain year
+                     list (click a year, done); "Add Range" swaps to two
+                     side-by-side scrollable year lists so a range like
+                     2020–2024 is opt-in rather than always-on. Range is
+                     all-or-nothing — picking only From (or only To)
+                     doesn't filter anything yet, and the trigger label
+                     says so explicitly. --}}
                 @if($batches->isNotEmpty())
-                    <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+                    <div class="relative"
+                         x-data="{
+                            open: false,
+                            rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
+                            rangeFrom: '{{ $filterBatchFrom }}',
+                            rangeTo: '{{ $filterBatchTo }}',
+                            selectYear(val){ $wire.setSingleBatchYear(val); this.open=false; },
+                            clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.open=false; },
+                            startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
+                            pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
+                            pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
+                            applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.open=false; } }
+                         }"
+                         @click.outside="open = false">
                         <button type="button"
                                 @click="open = !open"
                                 class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
-                                       {{ $filterBatch ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
+                                       {{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
                             <span class="truncate text-sm">
-                                {{ $filterBatch ? 'Batch ' . $filterBatch : 'All Batches' }}
+                                @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
+                                    Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
+                                @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
+                                    Batch {{ $filterBatchFrom }}
+                                @elseif($filterBatchFrom !== '')
+                                    Batch {{ $filterBatchFrom }} → pick end year
+                                @elseif($filterBatchTo !== '')
+                                    pick start year → Batch {{ $filterBatchTo }}
+                                @else
+                                    All Batches
+                                @endif
                             </span>
                             <i class="fas fa-chevron-down text-xs flex-shrink-0 transition-transform duration-150"
                                :class="open ? 'rotate-180' : ''"></i>
@@ -933,23 +1137,70 @@ new class extends Component {
                              x-transition:leave="transition ease-in duration-75"
                              x-transition:leave-start="opacity-100"
                              x-transition:leave-end="opacity-0 scale-95"
-                             class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[150px] max-h-[180px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]">
-                            <div class="py-1">
-                                <button type="button"
-                                        @click="$wire.set('filterBatch', ''); open = false"
-                                        class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
-                                               {{ !$filterBatch ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
-                                    All Batches
-                                </button>
-                                @foreach($batches as $b)
-                                    <button type="button"
-                                            @click="$wire.set('filterBatch', '{{ $b }}'); open = false"
+                             class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[150px]"
+                             @click.stop>
+
+                            {{-- Default view: plain year list --}}
+                            <template x-if="!rangeMode">
+                                <div class="py-1 max-h-[180px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]">
+                                    <button type="button" @click.stop="clearYear()"
                                             class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
-                                                   {{ $filterBatch == $b ? 'bg-purple-100 text-purple-800 font-semibold' : 'text-[#333333]' }}">
-                                        Batch {{ $b }}
+                                                   {{ ($filterBatchFrom === '' && $filterBatchTo === '') ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
+                                        All Batches
                                     </button>
-                                @endforeach
-                            </div>
+                                    @foreach($batches as $b)
+                                        <button type="button" @click.stop="selectYear('{{ $b }}')"
+                                                class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                                       {{ ($filterBatchFrom == $b && $filterBatchTo == $b) ? 'bg-purple-100 text-purple-800 font-semibold' : 'text-[#333333]' }}">
+                                            Batch {{ $b }}
+                                        </button>
+                                    @endforeach
+                                    <div class="h-px bg-[#E8E0F0] my-1"></div>
+                                    <button type="button" @click.stop="startRange()"
+                                            class="w-full text-left px-3 py-2 text-sm font-semibold flex items-center gap-1.5 text-[#7a3f91] hover:bg-purple-50 transition-colors">
+                                        <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                                    </button>
+                                </div>
+                            </template>
+
+                            {{-- Range view: two side-by-side scrollable
+                                 year lists. Local Alpine state only —
+                                 nothing sent to the server until both
+                                 sides are picked. --}}
+                            <template x-if="rangeMode">
+                                <div class="p-2" style="width:220px;">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]">From</span>
+                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]">To</span>
+                                    </div>
+                                    <div class="flex items-start gap-2">
+                                        <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                            @foreach($batches as $b)
+                                            <button type="button" @click.stop="pickFrom('{{ $b }}')"
+                                                    :class="{'bg-purple-100 text-purple-800 font-semibold':rangeFrom==='{{ $b }}'}"
+                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors text-[#333333]">{{ $b }}</button>
+                                            @endforeach
+                                        </div>
+                                        <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                            @foreach($batches as $b)
+                                            <button type="button" @click.stop="pickTo('{{ $b }}')"
+                                                    :class="{'bg-purple-100 text-purple-800 font-semibold':rangeTo==='{{ $b }}'}"
+                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors text-[#333333]">{{ $b }}</button>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2 mt-3">
+                                        <button type="button" @click.stop="rangeMode=false"
+                                                class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                            Back to List
+                                        </button>
+                                        <button type="button" @click.stop="clearYear(); rangeMode=false;"
+                                                class="flex-1 text-xs font-semibold text-[#7a3f91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                            Clear
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 @endif
@@ -965,6 +1216,42 @@ new class extends Component {
                     <span class="hidden sm:inline">Reset</span>
                 </button>
 
+                {{-- ── Active filter badges ── shows which filters are
+                     applied and how many results each narrows down to,
+                     sitting right beside Reset in the same filter row.
+                     Only rendered when at least one filter is active. --}}
+                @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
+                @if($search !== '')
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
+                    <i class="fas fa-search text-[10px]"></i>"{{ $search }}"
+                    &mdash; {{ number_format($rows->total()) }} result(s)
+                </span>
+                @endif
+                @if(!empty($filterStatuses))
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
+                    <i class="fas fa-briefcase text-[10px]"></i>
+                    @if(count($filterStatuses) === 1)
+                        {{ $filterStatuses[0] === 'not_filled' ? 'Not Filled' : ucwords(str_replace('_', '-', $filterStatuses[0])) }}
+                    @else
+                        {{ count($filterStatuses) }} Statuses
+                    @endif
+                    &mdash; {{ number_format($rows->total()) }} result(s)
+                </span>
+                @endif
+                @if($filterCourse !== '')
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
+                    <i class="fas fa-graduation-cap text-[10px]"></i>{{ $filterCourse }}
+                    &mdash; {{ number_format($rows->total()) }} result(s)
+                </span>
+                @endif
+                @if($filterBatchFrom !== '' && $filterBatchTo !== '')
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
+                    <i class="fas fa-calendar text-[10px]"></i>{{ $filterBatchFrom === $filterBatchTo ? 'Batch ' . $filterBatchFrom : 'Batch ' . $filterBatchFrom . '–' . $filterBatchTo }}
+                    &mdash; {{ number_format($rows->total()) }} result(s)
+                </span>
+                @endif
+                @endif
+
                 {{-- Fullscreen toggle — mobile & tablet only. Expands the
                      alumni table to cover the whole screen so it's easier
                      to browse the list on smaller devices. Hidden on
@@ -979,15 +1266,12 @@ new class extends Component {
                 </button>
             </div>
 
-            {{-- TABLE WRAPPER — always flex-1 so the empty state fills the
-                 same fixed height as when rows are present; the block never
-                 shrinks or resizes when a filter returns zero results. --}}
             <div class="relative flex flex-col flex-1 min-h-0">
 
                 {{-- Centered loading spinner — big icon over the table itself,
                      same pattern as Job Management / Event Organizer. --}}
                 <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                     wire:loading.flex wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
+                     wire:loading.flex wire:target="search,filterStatuses,filterBatchFrom,filterBatchTo,filterCourse,clearFilters,previousPage,nextPage">
                     <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
                 </div>
 
@@ -999,7 +1283,7 @@ new class extends Component {
                             [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
                             hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]"
                      wire:loading.class="opacity-40 pointer-events-none"
-                     wire:target="search,filterStatus,filterBatch,filterCourse,filterRelevance,clearFilters,previousPage,nextPage">
+                     wire:target="search,filterStatuses,filterBatchFrom,filterBatchTo,filterCourse,clearFilters,previousPage,nextPage">
 
                     {{-- ── DESKTOP / TABLET: table view ── --}}
                     <table class="w-full bg-white border-collapse hidden md:table">
@@ -1210,21 +1494,21 @@ new class extends Component {
                     </div>
                     <div>
                         <p class="font-semibold text-base text-[#333333]">
-                            @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
+                            @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
                                 No alumni match your filters
                             @else
                                 No alumni found
                             @endif
                         </p>
                         <p class="text-sm mt-1 text-[#555555]">
-                            @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
+                            @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
                                 Try clearing your filters to see all alumni.
                             @else
                                 No verified alumni are registered under your college yet.
                             @endif
                         </p>
                     </div>
-                    @if($search || $filterStatus || $filterBatch || $filterCourse || $filterRelevance)
+                    @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
                         <button wire:click="clearFilters"
                                 class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91]">
                             <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
@@ -1250,7 +1534,7 @@ new class extends Component {
                     Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                     of <strong class="text-white font-bold">{{ $total }}</strong>
                     alumni
-                    @if($filterStatus || $filterBatch || $filterCourse || $filterRelevance || $search)
+                    @if($filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse || $search)
                         <span class="text-white/50 text-xs ml-1">(filtered)</span>
                     @endif
                 </p>
@@ -1716,7 +2000,17 @@ new class extends Component {
     // AND a wider viewport, so on phones/tablets (touch input) this tip
     // never becomes visible — touch taps don't fire mousemove at all, so
     // there's no tooltip text shown on mobile.
-    var tip = document.getElementById('ae-hover-tip');
+    // NOTE: do NOT cache the tooltip element in a module-level var.
+    // Livewire's morph can recreate #ae-hover-tip itself (e.g. when the
+    // table flips from populated -> empty-state -> populated again after
+    // a filter + clear-filter cycle), which leaves an old cached reference
+    // pointing at a detached node — writes to it are silent no-ops, so the
+    // tooltip stops appearing even though row binding still works fine.
+    // Resolving it fresh on every mousemove/mouseleave/click is cheap and
+    // guarantees we're always touching the node that's actually on screen.
+    function getTip() {
+        return document.getElementById('ae-hover-tip');
+    }
     function isHoverCapable() {
         return window.matchMedia('(hover: hover) and (pointer: fine)').matches
             && window.innerWidth > 768;
@@ -1726,15 +2020,18 @@ new class extends Component {
             if (row._aeTipBound) return;
             row._aeTipBound = true;
             row.addEventListener('mousemove', function (e) {
+                var tip = getTip();
                 if (!tip || !isHoverCapable()) return;
                 tip.style.left = e.clientX + 'px';
                 tip.style.top  = e.clientY + 'px';
                 tip.style.opacity = '1';
             });
             row.addEventListener('mouseleave', function () {
+                var tip = getTip();
                 if (tip) tip.style.opacity = '0';
             });
             row.addEventListener('click', function () {
+                var tip = getTip();
                 if (tip) tip.style.opacity = '0';
             });
         });
