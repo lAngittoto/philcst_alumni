@@ -35,14 +35,21 @@
     .rp-header p  { margin: 2px 0 0; font-size: 10px; color: #555555; }
     .rp-meta      { font-size: 10px; color: #555555; white-space: nowrap; line-height: 1.5; }
 
-    /* FIX: table-layout:fixed + border-collapse:collapse
-       — avoids dompdf having to auto-measure column widths from
-       content (which gets very slow at 1000+ rows), and collapsed
-       borders render faster than "separate" mode. */
+    /* FIX (borders kept vanishing / landing randomly): dompdf's
+       border-collapse:collapse has known bugs where shared borders
+       between adjacent table rows get dropped or merged inconsistently
+       — that's why some rows had a line, some didn't, no matter how the
+       cell heights were adjusted. Switching to border-collapse:separate
+       with border-spacing:0 makes every <td> paint its OWN border
+       independently instead of trying to share/merge one with its
+       neighbor, which is what dompdf handles reliably. Visually
+       identical spacing (border-spacing:0 removes the gaps separate
+       mode normally adds between cells). */
     table {
         width: 100%;
         table-layout: fixed;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         margin-bottom: 6px;
     }
     thead th {
@@ -65,7 +72,7 @@
         overflow: hidden;
     }
 
-    tbody tr td { border-top: none; }
+    tbody tr:first-child td { border-top: none; }
 
     /* FIX (biggest win): removed border-radius entirely.
        Rounded-corner rendering is one of the slowest operations in

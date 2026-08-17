@@ -230,24 +230,55 @@ new class extends Component {
             $target = Alumni::find($alumniId);
             if (!$target) return null;
 
-            $position = $q->where(function ($s) use ($target) {
-                    $s->where('course_code', '<', $target->course_code)
-                      ->orWhere(function ($s2) use ($target) {
-                          $s2->where('course_code', $target->course_code)
-                             ->where('last_name', '<', $target->last_name);
-                      })
-                      ->orWhere(function ($s2) use ($target) {
-                          $s2->where('course_code', $target->course_code)
-                             ->where('last_name', $target->last_name)
-                             ->where('first_name', '<', $target->first_name);
-                      })
-                      ->orWhere(function ($s2) use ($target) {
-                          $s2->where('course_code', $target->course_code)
-                             ->where('last_name', $target->last_name)
-                             ->where('first_name', $target->first_name)
-                             ->where('id', '<', $target->id);
-                      });
-                })->count();
+            // Mirrors alumniRecords()'s ordering exactly: when a batch
+            // range is active, `batch` leads the comparison so the page
+            // math lines up with the on-screen (now batch-grouped) order.
+            if ($rangeComplete) {
+                $position = $q->where(function ($s) use ($target) {
+                        $s->where('batch', '<', $target->batch)
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('batch', $target->batch)
+                                 ->where('course_code', '<', $target->course_code);
+                          })
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('batch', $target->batch)
+                                 ->where('course_code', $target->course_code)
+                                 ->where('last_name', '<', $target->last_name);
+                          })
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('batch', $target->batch)
+                                 ->where('course_code', $target->course_code)
+                                 ->where('last_name', $target->last_name)
+                                 ->where('first_name', '<', $target->first_name);
+                          })
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('batch', $target->batch)
+                                 ->where('course_code', $target->course_code)
+                                 ->where('last_name', $target->last_name)
+                                 ->where('first_name', $target->first_name)
+                                 ->where('id', '<', $target->id);
+                          });
+                    })->count();
+            } else {
+                $position = $q->where(function ($s) use ($target) {
+                        $s->where('course_code', '<', $target->course_code)
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('course_code', $target->course_code)
+                                 ->where('last_name', '<', $target->last_name);
+                          })
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('course_code', $target->course_code)
+                                 ->where('last_name', $target->last_name)
+                                 ->where('first_name', '<', $target->first_name);
+                          })
+                          ->orWhere(function ($s2) use ($target) {
+                              $s2->where('course_code', $target->course_code)
+                                 ->where('last_name', $target->last_name)
+                                 ->where('first_name', $target->first_name)
+                                 ->where('id', '<', $target->id);
+                          });
+                    })->count();
+            }
         } else {
             $target = Alumni::find($alumniId);
             if (!$target) return null;
@@ -621,7 +652,21 @@ new class extends Component {
         // export controller (RegistrarAlumniExportController) uses this
         // EXACT same ordering so what's on screen is always what gets
         // exported, in the same order, every time.
-        if ($hasActiveFilter) {
+        //
+        // FIX (batch range not grouped by year): when a From–To batch
+        // range is active, `batch` now leads the sort (ascending, so
+        // From's year appears first and To's year last) — previously
+        // batch wasn't part of the sort at all here, so a 2021–2025
+        // range came back grouped by course_code/name instead of
+        // reading year-by-year. Program/name/id stay as the
+        // tie-breakers within each batch year.
+        if ($this->batchRangeIsComplete()) {
+            $q->orderBy('batch')
+              ->orderBy('course_code')
+              ->orderBy('last_name')
+              ->orderBy('first_name')
+              ->orderBy('id');
+        } elseif ($hasActiveFilter) {
             $q->orderBy('course_code')
               ->orderBy('last_name')
               ->orderBy('first_name')
@@ -1043,7 +1088,20 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     .ar-report-menu-item.item-print:hover { background: #ECECEC; border-color: #E0E0E0; }
     .ar-report-menu-item.item-print .ar-item-icon { background: #555555; color: #fff; }
 
+    /* FIX (export buttons need distinct disabled reasons): the plain
+       `:disabled { cursor: wait }` state used to cover both "an export
+       is actively running" AND "there's nothing to export" — those are
+       different situations for the user, so the zero-results case now
+       gets its own class with a `not-allowed` cursor (nothing to wait
+       for) and no hover feedback, instead of implying something is
+       processing. */
     .ar-report-menu-item:disabled { opacity: .55; cursor: wait; }
+    .ar-report-menu-item.ar-no-results:disabled {
+        opacity: .45; cursor: not-allowed;
+    }
+    .ar-report-menu-item.ar-no-results:disabled:hover {
+        background: inherit; border-color: transparent;
+    }
 
     /* ── Header row: always single row, button pinned top-right ──── */
     .ar-header-row {
@@ -1081,6 +1139,20 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     }
     .ar-dropdown-item:hover { background: #F5F0FA; color: #7A3F91; }
     .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
+
+    /* FIX (range picker selected year hard to read): the From/To picker
+       buttons reused .ar-dropdown-item.active as-is — a light lilac fill
+       with purple text, which reads fine in the single flat year list
+       but got lost inside the tighter, border-radius:0 two-column range
+       list. Range picks now get a solid, high-contrast active state
+       (solid purple fill + white text) instead, so it's obvious at a
+       glance which year is selected on each side. */
+    .ar-range-item.active {
+        background: #7A3F91 !important;
+        color: #ffffff !important;
+        font-weight: 700;
+    }
+    .ar-range-item.active:hover { background: #6B3680 !important; color: #ffffff !important; }
     .ar-dropdown-trigger {
         display: inline-flex; align-items: center; gap: 6px;
         padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 8px;
@@ -1432,7 +1504,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 </div>
 
                 <button type="button" @click="$store.report.doExport('pdf', $wire)"
-                        :disabled="$store.report.exporting" class="ar-report-menu-item item-pdf">
+                        :disabled="$store.report.exporting || count === '0'"
+                        :class="{ 'ar-no-results': count === '0' }" class="ar-report-menu-item item-pdf">
                     <span class="ar-item-icon">
                         <i class="fas fa-spinner animate-spin" x-show="$store.report.exportingType==='pdf'" style="display:none;"></i>
                         <i class="fas fa-file-pdf" x-show="$store.report.exportingType!=='pdf'"></i>
@@ -1441,7 +1514,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 </button>
 
                 <button type="button" @click="$store.report.doExport('excel', $wire)"
-                        :disabled="$store.report.exporting" class="ar-report-menu-item item-excel">
+                        :disabled="$store.report.exporting || count === '0'"
+                        :class="{ 'ar-no-results': count === '0' }" class="ar-report-menu-item item-excel">
                     <span class="ar-item-icon">
                         <i class="fas fa-spinner animate-spin" x-show="$store.report.exportingType==='excel'" style="display:none;"></i>
                         <i class="fas fa-file-excel" x-show="$store.report.exportingType!=='excel'"></i>
@@ -1450,7 +1524,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 </button>
 
                 <button type="button" @click="$store.report.doExport('print', $wire)"
-                        :disabled="$store.report.exporting" class="ar-report-menu-item item-print">
+                        :disabled="$store.report.exporting || count === '0'"
+                        :class="{ 'ar-no-results': count === '0' }" class="ar-report-menu-item item-print">
                     <span class="ar-item-icon">
                         <i class="fas fa-spinner animate-spin" x-show="$store.report.exportingType==='print'" style="display:none;"></i>
                         <i class="fas fa-print" x-show="$store.report.exportingType!=='print'"></i>
@@ -1618,19 +1693,24 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                          the whole range at once. --}}
                     <template x-if="rangeMode">
                         <div class="p-2" style="width:220px;">
+                            {{-- FIX: the From/To labels now show the picked
+                                 year inline (e.g. "From: 2021") instead of
+                                 a bare "From" that gave no confirmation of
+                                 what was actually selected. Blank until a
+                                 year is picked on that side. --}}
                             <div class="flex items-center gap-2 mb-1">
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">From</span>
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">To</span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
                             </div>
                             <div class="flex items-start gap-2">
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batches as $b)
-                                    <button type="button" @click.stop="pickFrom('{{ $b }}')" :class="{'active':rangeFrom==='{{ $b }}'}" class="ar-dropdown-item" style="border-radius:0;">{{ $b }}</button>
+                                    <button type="button" @click.stop="pickFrom('{{ $b }}')" :class="{'active':rangeFrom==='{{ $b }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
                                     @endforeach
                                 </div>
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batches as $b)
-                                    <button type="button" @click.stop="pickTo('{{ $b }}')" :class="{'active':rangeTo==='{{ $b }}'}" class="ar-dropdown-item" style="border-radius:0;">{{ $b }}</button>
+                                    <button type="button" @click.stop="pickTo('{{ $b }}')" :class="{'active':rangeTo==='{{ $b }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
                                     @endforeach
                                 </div>
                             </div>
@@ -1847,7 +1927,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40 pointer-events-none" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
@@ -2839,32 +2919,39 @@ compressImage(file, maxW, maxH, quality) {
             && window.innerWidth > 768;
     }
 
-    function bindRows() {
-        document.querySelectorAll('.ar-row').forEach(function (row) {
-            if (row._arTipBound) return;
-            row._arTipBound = true;
-            row.addEventListener('mousemove', function (e) {
-                if (!tip || !isHoverCapable()) return;
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.classList.add('visible');
-            });
-            row.addEventListener('mouseleave', function () { if (tip) tip.classList.remove('visible'); });
-            row.addEventListener('click',      function () { if (tip) tip.classList.remove('visible'); });
-        });
-    }
+    // FIX (View Details tip kept disappearing / not reappearing after
+    // filtering): the old approach bound 'mousemove' listeners directly
+    // on each .ar-row, then had to re-bind + retry-guess the tip's
+    // visibility every time Livewire morphed the table after a filter
+    // — because a morphed-away row never fires 'mouseleave', and a
+    // freshly morphed-in row never fires an initial 'mousemove' until
+    // the mouse actually moves again. That's fundamentally fragile: it
+    // depends on catching every morph at the right moment.
+    //
+    // Fixed properly with ONE delegated 'mousemove' listener on the
+    // document itself. This never needs rebinding — it doesn't care
+    // whether the row underneath is the original DOM node or a brand
+    // new one from a morph, since it re-checks "what's under the mouse
+    // right now" on every single mouse movement, filtering or not. No
+    // retries, no stale bindings, no dependency on Livewire's update
+    // timing at all.
+    document.addEventListener('mousemove', function (e) {
+        if (!tip || !isHoverCapable()) return;
+        var row = e.target.closest ? e.target.closest('.ar-row') : null;
+        if (row) {
+            tip.style.left = e.clientX + 'px';
+            tip.style.top  = e.clientY + 'px';
+            tip.classList.add('visible');
+        } else {
+            tip.classList.remove('visible');
+        }
+    }, { passive: true });
 
-    bindRows();
-    document.addEventListener('livewire:updated', bindRows);
-
-    // ── Fix: the hover tooltip (#ar-hover-tip) is only hidden on
-    //    'mouseleave' or 'click' on a row. When the user arrives at this
-    //    page via SPA navigation (e.g. clicking a notification, which
-    //    calls Livewire.navigate()) instead of a real mousemove/mouseleave
-    //    cycle, the tooltip's 'visible' class can carry over from
-    //    whatever it was showing on the previous page and gets stuck
-    //    displayed at the last known mouse position. Explicitly hide it
-    //    on every navigation lifecycle event so it always starts hidden. ──
+    // ── Fix: the hover tooltip (#ar-hover-tip) must also hide when the
+    //    user arrives via SPA navigation (Livewire.navigate(), e.g. from
+    //    a notification click) instead of a real mousemove/mouseleave
+    //    cycle — otherwise its 'visible' class can carry over from the
+    //    previous page and get stuck showing at the last mouse position. ──
     function hideHoverTip() {
         if (tip) tip.classList.remove('visible');
     }
@@ -2873,10 +2960,11 @@ compressImage(file, maxW, maxH, quality) {
     document.addEventListener('livewire:navigated', hideHoverTip);
     document.addEventListener('livewire:load', hideHoverTip);
 
-    // Also hide the tooltip the instant a row is clicked to open the
-    // profile modal — otherwise it can linger on top of the modal
-    // (including its close button) if the mouse hasn't moved yet.
-    document.addEventListener('livewire:updated', hideHoverTip);
+    // Hide the instant a row is clicked (opening the profile modal) —
+    // filtering never reaches this, only an actual row click does.
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('.ar-row, .ar-mrow')) hideHoverTip();
+    });
 
     // ── Auto-scroll to the first highlighted row (arrived from a
     //    notification click) — runs once per page load, after the
