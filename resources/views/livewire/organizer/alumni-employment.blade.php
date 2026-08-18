@@ -3,13 +3,14 @@
 <?php
 
 use Livewire\Volt\Component;
-use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
 use Illuminate\Support\Facades\DB;
 
 new class extends Component {
 
     use WithPagination;
+
+    protected string $paginationTheme = 'tailwind';
 
     public string $search          = '';
 
@@ -29,7 +30,10 @@ new class extends Component {
      *  ALSO fire and refresh the table a second time in the same request. */
     private bool $skipBatchHooks = false;
 
-    public string $filterCourse    = '';
+    // Programs is now a MULTI-SELECT (array of checked course codes)
+    // instead of a single-value dropdown, so several programs can be
+    // viewed together — mirrors Alumni Records' alumniCourses.
+    public array $filterCourses = [];
 
     public string $organizerBatch      = '';
     public string $organizerDepartment = '';
@@ -50,10 +54,22 @@ new class extends Component {
     public bool  $showModal = false;
     public array $modalData = [];
 
+    // ── Compare Tool state ────────────────────────────────────────────────
+    public bool   $showCompareModal = false;
+    public string $compareCourseA   = '';
+    public string $compareBatchA    = '';
+    public string $compareCourseB   = '';
+    public string $compareBatchB    = '';
+    public array  $compareResultA   = [];
+    public array  $compareResultB   = [];
+    public string $compareInsight   = '';
+    public bool   $compareRan       = false;
+    public string $compareError     = '';
+
     // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
 
-    // NOTE: search / filterBatchFrom / filterBatchTo / filterStatuses / filterCourse
+    // NOTE: search / filterBatchFrom / filterBatchTo / filterStatuses / filterCourses
     // are all deliberately kept OUT of the query string now, so a plain page
     // refresh always resets every filter back to its default — same behavior
     // as the Job Management and Event Organizer tables. Deep-linking from the
@@ -94,7 +110,8 @@ new class extends Component {
         if (is_array($sessionFilter)) {
             $status = $sessionFilter['status'] ?? '';
             $this->filterStatuses = $status !== '' ? [$status] : [];
-            $this->filterCourse   = $sessionFilter['course'] ?? '';
+            $course = $sessionFilter['course'] ?? '';
+            $this->filterCourses  = $course !== '' ? [$course] : [];
         } elseif (is_string($sessionFilter) && $sessionFilter !== '') {
             // backward-compat: older single-value session payload
             $this->filterStatuses = [$sessionFilter];
@@ -104,24 +121,20 @@ new class extends Component {
         // so we don't flood notifications for old records
         $this->lastSeenEmpAt = now()->toDateTimeString();
 
-        $this->computeStats();
+        // computeStats() no longer needs to run here — with() calls it
+        // on every render (including the first), so cards are correct
+        // from initial paint without doing the work twice.
     }
 
-    /**
-     * Recomputes every sidebar stat card using the SAME organizer scoping +
-     * active filters (search / filterStatuses / filterBatchFrom-To /
-     * filterCourse) as filteredAlumniQuery()/with() — so the cards always
-     * describe exactly the rows currently shown in the table, not the
-     * organizer's org-wide totals. Called from mount(), every filter
-     * update hook below, and checkEmploymentUpdates() polling.
-     */
     public function computeStats(): void
     {
-        $base = $this->filteredAlumniQuery();
+        $base = $this->baseAlumniQuery();
 
-        $this->totalAlumni = (clone $base)->distinct()->count('a.id');
+        $this->totalAlumni = (clone $base)->count();
 
-        $withEmp = (clone $base)->whereNotNull('et.employment_status');
+        $withEmp = (clone $base)
+            ->join('employment_trackings as et', 'alumni.id', '=', 'et.alumni_id')
+            ->whereNull('et.deleted_at');
 
         $this->totalEmployed   = (clone $withEmp)->where('et.employment_status', 'employed')->count();
         $this->totalSelf       = (clone $withEmp)->where('et.employment_status', 'self_employed')->count();
@@ -216,9 +229,6 @@ new class extends Component {
         }
     }
 
-    /** Organizer scoping ONLY (batch + allowed course codes) — no on-screen
-     *  filters applied. Used as the base for the unfiltered/org-wide reads
-     *  elsewhere (e.g. checkEmploymentUpdates()). */
     private function baseAlumniQuery(): \Illuminate\Database\Query\Builder
     {
         $q = DB::table('alumni')->whereNull('alumni.deleted_at');
@@ -230,25 +240,93 @@ new class extends Component {
             $q->whereIn('alumni.course_code', $this->allowedCourseCodes);
         }
 
+        // Cards reflect whatever is currently filtered — same scoping the
+        // table itself uses (search / status / program / batch range) —
+        // so the numbers on the side always match what's on screen.
+        if ($this->search) {
+            $s = '%' . $this->search . '%';
+            $q->where(function ($w) use ($s) {
+                $w->where(DB::raw("CONCAT(COALESCE(alumni.first_name,''), ' ', COALESCE(alumni.last_name,''))"), 'like', $s)
+                  ->orWhere('alumni.student_id', 'like', $s)
+                  ->orWhere('alumni.email', 'like', $s)
+                  ->orWhereExists(function ($sub) use ($s) {
+                      $sub->select(DB::raw(1))
+                          ->from('employment_trackings as et_s')
+                          ->whereColumn('et_s.alumni_id', 'alumni.id')
+                          ->whereNull('et_s.deleted_at')
+                          ->where(function ($w2) use ($s) {
+                              $w2->where('et_s.company_name', 'like', $s)
+                                 ->orWhere('et_s.job_title', 'like', $s);
+                          });
+                  });
+            });
+        }
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $q->where('alumni.batch', '>=', $this->filterBatchFrom)
+              ->where('alumni.batch', '<=', $this->filterBatchTo);
+        }
+        if (!empty($this->filterCourses)) {
+            $q->whereIn('alumni.course_code', $this->filterCourses);
+        }
+        if (!empty($this->filterStatuses)) {
+            $q->where(function ($w) {
+                foreach ($this->filterStatuses as $status) {
+                    if ($status === 'not_filled') {
+                        $w->orWhereNotExists(function ($sub) {
+                            $sub->select(DB::raw(1))
+                                ->from('employment_trackings as et_f')
+                                ->whereColumn('et_f.alumni_id', 'alumni.id')
+                                ->whereNull('et_f.deleted_at');
+                        });
+                    } else {
+                        $w->orWhereExists(function ($sub) use ($status) {
+                            $sub->select(DB::raw(1))
+                                ->from('employment_trackings as et_f')
+                                ->whereColumn('et_f.alumni_id', 'alumni.id')
+                                ->whereNull('et_f.deleted_at')
+                                ->where('et_f.employment_status', $status);
+                        });
+                    }
+                }
+            });
+        }
+
         return $q;
     }
 
-    /**
-     * Single source of truth for the alumni+employment query used by BOTH
-     * the on-screen table (with()) and the stat cards (computeStats()), so
-     * the cards always reflect the SAME organizer scoping + active filters
-     * (search / filterStatuses / filterBatchFrom-To / filterCourse) as
-     * whatever rows are currently showing in the table below them. Pass an
-     * alias prefix ('a'/'et' are always used here) — callers add their own
-     * ->select() and ->orderBy() on top of what's returned.
-     */
-    private function filteredAlumniQuery(): \Illuminate\Database\Query\Builder
+    public function with(): array
     {
+        // Cards recompute on every render so they always reflect the
+        // currently-applied filters (search/status/program/batch range),
+        // not just the organizer-wide totals from mount().
+        $this->computeStats();
+
         $q = DB::table('alumni as a')
             ->leftJoin('employment_trackings as et', function ($j) {
                 $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
             })
-            ->whereNull('a.deleted_at');
+            ->whereNull('a.deleted_at')
+            ->select([
+                'a.id',
+                'a.student_id',
+                'a.profile_photo',
+                'a.email',
+                DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
+                'a.course_code',
+                'a.course_name',
+                'a.batch',
+                'et.employment_status',
+                'et.company_name',
+                'et.job_title',
+                'et.employment_type',
+                'et.work_location',
+                'et.date_hired',
+                'et.career_path',
+                'et.education_status',
+                'et.course_relevance',
+                'et.unemployment_status',
+                'et.updated_at as emp_updated_at',
+            ]);
 
         if ($this->organizerBatch) {
             $q->where('a.batch', $this->organizerBatch);
@@ -283,48 +361,22 @@ new class extends Component {
             $q->where('a.batch', '>=', $this->filterBatchFrom)
               ->where('a.batch', '<=', $this->filterBatchTo);
         }
-        if ($this->filterCourse) {
-            $q->where('a.course_code', $this->filterCourse);
+        if (!empty($this->filterCourses)) {
+            $q->whereIn('a.course_code', $this->filterCourses);
         }
 
-        return $q;
-    }
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $q->orderBy('a.batch')
+              ->orderByRaw("CASE WHEN et.employment_status IS NULL THEN 1 ELSE 0 END")
+              ->orderBy('a.last_name')
+              ->orderBy('a.id');
+        } else {
+            $q->orderByRaw("CASE WHEN et.employment_status IS NULL THEN 1 ELSE 0 END")
+              ->orderBy('a.last_name')
+              ->orderBy('a.id');
+        }
 
-    public function with(): array
-    {
-        // Recompute the sidebar stat cards on every request that reaches
-        // with() — i.e. every filter change (search, status, batch range,
-        // course) — so the cards always match whatever the table below
-        // them is currently showing, not a stale org-wide total.
-        $this->computeStats();
-
-        $q = $this->filteredAlumniQuery()
-            ->select([
-                'a.id',
-                'a.student_id',
-                'a.profile_photo',
-                'a.email',
-                DB::raw("TRIM(CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))) AS full_name"),
-                'a.course_code',
-                'a.course_name',
-                'a.batch',
-                'et.employment_status',
-                'et.company_name',
-                'et.job_title',
-                'et.employment_type',
-                'et.work_location',
-                'et.date_hired',
-                'et.career_path',
-                'et.education_status',
-                'et.course_relevance',
-                'et.unemployment_status',
-                'et.updated_at as emp_updated_at',
-            ]);
-
-        $q->orderByRaw("CASE WHEN et.employment_status IS NULL THEN 1 ELSE 0 END")
-          ->orderBy('a.last_name');
-
-        $rows = $q->paginate(20);
+        $rows = $q->paginate(100);
 
         $rows->getCollection()->transform(function ($row) {
             $row->career_path_arr = $row->career_path
@@ -350,7 +402,40 @@ new class extends Component {
     }
 
     public function updatingSearch(): void          { $this->resetPage(); }
-    public function updatingFilterCourse(): void    { $this->resetPage(); }
+
+    /** Toggles a single program/course code in/out of the multi-select
+     *  filter — bound directly to each checkbox item in the Programs
+     *  dropdown. Mirrors Alumni Records' toggleProgramCode(). */
+    public function toggleFilterCourse(string $code): void
+    {
+        if (in_array($code, $this->filterCourses, true)) {
+            $this->filterCourses = array_values(array_diff($this->filterCourses, [$code]));
+        } else {
+            $this->filterCourses[] = $code;
+        }
+        $this->resetPage();
+    }
+
+    /** "All Programs" inside the dropdown — clears the whole multi-select
+     *  in one round-trip. */
+    public function clearFilterCourses(): void
+    {
+        $this->filterCourses = [];
+        $this->resetPage();
+    }
+
+    /** "Select All" inside the dropdown — checks every program code
+     *  currently visible to this organizer (respects allowedCourseCodes
+     *  scoping, same as the dropdown list itself). */
+    public function selectAllFilterCourses(): void
+    {
+        $this->filterCourses = DB::table('courses')
+            ->when(!empty($this->allowedCourseCodes),
+                fn($q) => $q->whereIn('code', $this->allowedCourseCodes))
+            ->pluck('code')
+            ->toArray();
+        $this->resetPage();
+    }
 
     /** Toggles a single employment status in/out of the multi-select
      *  filter — bound directly to each checkbox item in the Status
@@ -465,39 +550,8 @@ new class extends Component {
         $this->filterStatuses  = [];
         $this->filterBatchFrom = '';
         $this->filterBatchTo   = '';
-        $this->filterCourse    = '';
+        $this->filterCourses   = [];
         $this->resetPage();
-    }
-
-    /** Human-readable summary of the currently active filters, shown
-     *  inside the Generate Reports dropdown so the organizer knows
-     *  exactly what will be included before exporting. Mirrors Alumni
-     *  Records' activeFilterSummary(). */
-    #[Computed]
-    public function activeFilterSummary(): string
-    {
-        $parts = [];
-
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-            $parts[] = $this->filterBatchFrom === $this->filterBatchTo
-                ? 'Batch ' . $this->filterBatchFrom
-                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo;
-        }
-        if ($this->filterCourse !== '') {
-            $parts[] = $this->filterCourse;
-        }
-        if (!empty($this->filterStatuses)) {
-            $labels = [
-                'employed'      => 'Employed',
-                'self_employed' => 'Self-Employed',
-                'unemployed'    => 'Unemployed',
-                'not_filled'    => 'Not Filled',
-            ];
-            $parts[] = implode(', ', array_map(fn($s) => $labels[$s] ?? ucfirst($s), $this->filterStatuses));
-        }
-        if ($this->search !== '') $parts[] = 'Search: "' . $this->search . '"';
-
-        return count($parts) ? implode(' · ', $parts) : 'All assigned alumni (no filters applied)';
     }
 
     public function viewDetail(int $alumniId): void
@@ -547,100 +601,208 @@ new class extends Component {
         $this->dispatch('open-sidebar');
     }
 
-}; ?>
+    // ── Compare Tool: opens the modal ─────────────────────────────────────
+    public function openCompareModal(): void
+    {
+        $this->showCompareModal = true;
+        $this->compareRan       = false;
+        $this->compareResultA   = [];
+        $this->compareResultB   = [];
+        $this->compareInsight   = '';
+        $this->compareError     = '';
+        $this->dispatch('close-sidebar');
+    }
 
-<style>
-    /* ── Generate Reports button — matches Alumni Records' ar-report-* ── */
-    .ae-report-btn {
-        position: relative;
-        display: flex; align-items: center; justify-content: center;
-        width: 40px; height: 40px;
-        border-radius: 10px;
-        background: linear-gradient(135deg,#475569,#64748b);
-        border: 1.5px solid transparent;
-        color: #fff;
-        cursor: pointer;
-        transition: all .15s;
-        font-size: 15px;
-        flex-shrink: 0;
-        box-shadow: 0 2px 8px rgba(71,85,105,.35);
+    // ── Compare Tool: when a Program is picked/changed, the Batch dropdown
+    // for that same group should only ever show batches that actually
+    // exist for that program (instead of every batch in the system). If
+    // the previously selected batch doesn't exist for the newly picked
+    // program, it gets cleared automatically so an invalid combo can't
+    // linger in the form.
+    public function updatedCompareCourseA(): void
+    {
+        if ($this->compareBatchA !== '' && !in_array($this->compareBatchA, $this->batchesForCourse($this->compareCourseA))) {
+            $this->compareBatchA = '';
+        }
+        $this->compareError = '';
     }
-    .ae-report-btn:hover,
-    .ae-report-btn-active { background: linear-gradient(135deg,#334155,#475569); box-shadow: 0 3px 10px rgba(71,85,105,.5); }
-    .ae-report-btn:disabled { opacity: .7; cursor: wait; }
-    .ae-report-tip {
-        position: absolute;
-        top: calc(100% + 8px); right: 0;
-        background: #1a1a1a; color: #fff;
-        font-size: 10px; font-weight: 600; letter-spacing: .05em;
-        padding: 5px 11px; border-radius: 7px; white-space: nowrap;
-        pointer-events: none; opacity: 0; transition: opacity .15s ease;
-        z-index: 9999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+
+    public function updatedCompareCourseB(): void
+    {
+        if ($this->compareBatchB !== '' && !in_array($this->compareBatchB, $this->batchesForCourse($this->compareCourseB))) {
+            $this->compareBatchB = '';
+        }
+        $this->compareError = '';
     }
-    .ae-report-tip::before {
-        content: '';
-        position: absolute; bottom: 100%; right: 12px;
-        border: 5px solid transparent; border-bottom-color: #1a1a1a;
+
+    public function updatedCompareBatchA(): void { $this->compareError = ''; }
+    public function updatedCompareBatchB(): void { $this->compareError = ''; }
+
+    // ── Returns the batches that actually have alumni records for the
+    // given program (or all organizer-scoped batches if no program is
+    // selected), so the Batch dropdown never offers a combination with
+    // zero possible results.
+    public function batchesForCourse(string $course): array
+    {
+        return DB::table('alumni')
+            ->whereNull('alumni.deleted_at')
+            ->when($course !== '', fn($q) => $q->where('alumni.course_code', $course))
+            ->when($this->organizerBatch !== '', fn($q) => $q->where('alumni.batch', $this->organizerBatch))
+            ->when(!empty($this->allowedCourseCodes), fn($q) => $q->whereIn('alumni.course_code', $this->allowedCourseCodes))
+            ->distinct()
+            ->orderBy('alumni.batch', 'desc')
+            ->pluck('alumni.batch')
+            ->filter(fn($b) => $b !== null && $b !== '')
+            ->values()
+            ->toArray();
     }
-    .ae-report-btn:hover .ae-report-tip { opacity: 1; }
-    @media (max-width: 768px), (hover: none) {
-        .ae-report-tip { display: none !important; }
+
+    public function closeCompareModal(): void
+    {
+        $this->showCompareModal = false;
+        $this->dispatch('open-sidebar');
     }
-    .ae-report-menu {
-        position: absolute; top: calc(100% + 8px); right: 0;
-        width: min(260px, calc(100vw - 24px));
-        background: #fff;
-        border: 1.5px solid #E8E0F0; border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(122,63,145,.18);
-        z-index: 500; padding: 6px;
+
+    // ── FIXED: fully-qualified every column so nothing is ambiguous once
+    // the query joins `alumni` with `employment_trackings` (both tables
+    // have a `deleted_at` column, and both `alumni` and `courses` can have
+    // a `course_code`-like column depending on schema, so every reference
+    // below is explicitly prefixed with `alumni.`). This is what caused:
+    // "Column 'deleted_at' in where clause is ambiguous".
+    private function computeGroupStats(string $course, string $batch): array
+    {
+        $base = DB::table('alumni')->whereNull('alumni.deleted_at');
+
+        if ($course) $base->where('alumni.course_code', $course);
+        if ($batch)  $base->where('alumni.batch', $batch);
+
+        // still respect organizer scoping so an organizer can't peek outside
+        // their assigned department/batch
+        if ($this->organizerBatch) {
+            $base->where('alumni.batch', $this->organizerBatch);
+        }
+        if (!empty($this->allowedCourseCodes)) {
+            $base->whereIn('alumni.course_code', $this->allowedCourseCodes);
+        }
+
+        $total = (clone $base)->count();
+
+        $withEmp = (clone $base)
+            ->join('employment_trackings as et', 'alumni.id', '=', 'et.alumni_id')
+            ->whereNull('et.deleted_at');
+
+        $employed   = (clone $withEmp)->where('et.employment_status', 'employed')->count();
+        $self       = (clone $withEmp)->where('et.employment_status', 'self_employed')->count();
+        $unemployed = (clone $withEmp)->where('et.employment_status', 'unemployed')->count();
+        $working    = $employed + $self;
+
+        $rate = $total > 0 ? round(($working / $total) * 100, 1) : 0.0;
+
+        $courseName = $course
+            ? (DB::table('courses')->where('code', $course)->value('name') ?: $course)
+            : 'All Programs';
+
+        return [
+            'course'     => $courseName,
+            'batch'      => $batch ?: 'All Batches',
+            'total'      => $total,
+            'employed'   => $employed,
+            'self'       => $self,
+            'unemployed' => $unemployed,
+            'working'    => $working,
+            'rate'       => $rate,
+        ];
     }
-    .ae-report-menu-message {
-        padding: 10px 10px 11px;
-        margin-bottom: 4px;
-        border-bottom: 1px solid #F0ECF5;
+
+    // ── Compare Tool: runs the comparison + builds the simple insight text ─
+    public function runCompare(): void
+    {
+        $this->compareError   = '';
+        $this->compareRan     = false;
+        $this->compareResultA = [];
+        $this->compareResultB = [];
+        $this->compareInsight = '';
+
+        // Require each group to be narrowed down by at least a Program or
+        // a Batch — comparing "All Programs · All Batches" against itself
+        // is not a meaningful comparison and would just show 2 identical
+        // whole-college totals.
+        if ($this->compareCourseA === '' && $this->compareBatchA === '') {
+            $this->compareError = 'Please select a Program or Batch for Group A.';
+            return;
+        }
+        if ($this->compareCourseB === '' && $this->compareBatchB === '') {
+            $this->compareError = 'Please select a Program or Batch for Group B.';
+            return;
+        }
+
+        // Block comparing a group against itself (identical Program + Batch).
+        if ($this->compareCourseA === $this->compareCourseB && $this->compareBatchA === $this->compareBatchB) {
+            $this->compareError = 'Group A and Group B are identical. Please choose a different Program or Batch to compare.';
+            return;
+        }
+
+        // Guard against a Batch that doesn't actually belong to the chosen
+        // Program (can only happen if the client posts a stale value).
+        if ($this->compareBatchA !== '' && !in_array($this->compareBatchA, $this->batchesForCourse($this->compareCourseA))) {
+            $this->compareError = 'The selected Batch for Group A is not available for that Program.';
+            return;
+        }
+        if ($this->compareBatchB !== '' && !in_array($this->compareBatchB, $this->batchesForCourse($this->compareCourseB))) {
+            $this->compareError = 'The selected Batch for Group B is not available for that Program.';
+            return;
+        }
+
+        $this->compareResultA = $this->computeGroupStats($this->compareCourseA, $this->compareBatchA);
+        $this->compareResultB = $this->computeGroupStats($this->compareCourseB, $this->compareBatchB);
+        $this->compareRan     = true;
+
+        $a = $this->compareResultA;
+        $b = $this->compareResultB;
+
+        $labelA = $a['course'] . ' · ' . $a['batch'];
+        $labelB = $b['course'] . ' · ' . $b['batch'];
+
+        if ($a['total'] === 0 && $b['total'] === 0) {
+            $this->compareInsight = "No alumni records found for either group yet, so a comparison can't be made.";
+            return;
+        }
+
+        if ($a['total'] === 0) {
+            $this->compareInsight = "{$labelA} has no alumni records yet, so only {$labelB} can be evaluated ({$b['rate']}% employment rate).";
+            return;
+        }
+
+        if ($b['total'] === 0) {
+            $this->compareInsight = "{$labelB} has no alumni records yet, so only {$labelA} can be evaluated ({$a['rate']}% employment rate).";
+            return;
+        }
+
+        $diff = round(abs($a['rate'] - $b['rate']), 1);
+
+        if ($diff < 0.5) {
+            $this->compareInsight = "Based on the results, {$labelA} and {$labelB} have almost the same employment rate ({$a['rate']}% vs {$b['rate']}%) — growth is basically even between the two.";
+            return;
+        }
+
+        if ($a['rate'] > $b['rate']) {
+            $this->compareInsight = "Based on the results, mas mataas ang growth ng employment ng {$labelA} ({$a['rate']}%) kumpara sa {$labelB} ({$b['rate']}%) — that's a {$diff} point difference.";
+        } else {
+            $this->compareInsight = "Based on the results, mas mataas ang growth ng employment ng {$labelB} ({$b['rate']}%) kumpara sa {$labelA} ({$a['rate']}%) — that's a {$diff} point difference.";
+        }
     }
-    .ae-report-menu-message .lbl {
-        font-size: .6rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: .07em; color: #7A3F91; display: block; margin-bottom: 3px;
+
+    public function resetCompare(): void
+    {
+        $this->compareCourseA = $this->compareBatchA = '';
+        $this->compareCourseB = $this->compareBatchB = '';
+        $this->compareResultA = $this->compareResultB = [];
+        $this->compareInsight = '';
+        $this->compareRan     = false;
+        $this->compareError   = '';
     }
-    .ae-report-menu-message .txt {
-        font-size: .75rem; font-weight: 600; color: #111111; line-height: 1.35;
-    }
-    .ae-report-menu-message .cnt {
-        font-size: .68rem; font-weight: 500; color: #333333; margin-top: 3px; display: block;
-    }
-    .ae-report-menu-item {
-        display: flex; align-items: center; gap: 9px; width: 100%;
-        padding: 9px 10px; border-radius: 8px;
-        margin-bottom: 4px;
-        font-size: .82rem; font-weight: 600; color: #333333;
-        border: 1.5px solid transparent; cursor: pointer; text-align: left;
-        transition: background .12s, border-color .12s, opacity .12s;
-    }
-    .ae-report-menu-item:last-child { margin-bottom: 0; }
-    .ae-report-menu-item .ae-item-icon {
-        width: 22px; height: 22px; border-radius: 6px;
-        display: flex; align-items: center; justify-content: center;
-        flex-shrink: 0; font-size: 11px;
-    }
-    .ae-report-menu-item .ae-item-label { flex: 1; }
-    .ae-report-menu-item.item-pdf   { background: #FEF2F2; border-color: #FEE2E2; }
-    .ae-report-menu-item.item-pdf:hover   { background: #FEE2E2; border-color: #FECACA; }
-    .ae-report-menu-item.item-pdf .ae-item-icon { background: #DC2626; color: #fff; }
-    .ae-report-menu-item.item-excel { background: #ECFDF5; border-color: #D1FAE5; }
-    .ae-report-menu-item.item-excel:hover { background: #D1FAE5; border-color: #A7F3D0; }
-    .ae-report-menu-item.item-excel .ae-item-icon { background: #059669; color: #fff; }
-    .ae-report-menu-item.item-print { background: #F5F5F5; border-color: #EDEDED; }
-    .ae-report-menu-item.item-print:hover { background: #ECECEC; border-color: #E0E0E0; }
-    .ae-report-menu-item.item-print .ae-item-icon { background: #555555; color: #fff; }
-    .ae-report-menu-item:disabled { opacity: .55; cursor: wait; }
-    .ae-report-menu-item.ae-no-results:disabled {
-        opacity: .45; cursor: not-allowed;
-    }
-    .ae-report-menu-item.ae-no-results:disabled:hover {
-        background: inherit; border-color: transparent;
-    }
-</style>
+
+}; ?>
 
 <div class="flex flex-col">
 
@@ -703,91 +865,27 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Generate Reports button --}}
-        <div class="relative shrink-0" wire:ignore
-             x-data="{
-                summary: 'All assigned alumni (no filters applied)',
-                count: '0',
-                _observer: null,
-                syncFromSource(){
-                    const src = document.getElementById('ae-report-summary-source');
-                    if (!src) return;
-                    this.summary = src.dataset.summary;
-                    this.count   = src.dataset.count;
-                },
-                watchSource(){
-                    const src = document.getElementById('ae-report-summary-source');
-                    if (!src || this._observer) return;
-                    this._observer = new MutationObserver(() => this.syncFromSource());
-                    this._observer.observe(src, { attributes: true, attributeFilter: ['data-summary', 'data-count'] });
-                }
-             }"
-             x-init="
-                window.__aeEnsureReportStore && window.__aeEnsureReportStore();
-                syncFromSource();
-                watchSource();
-             "
-             @click.outside="$store.empReport.open=false" wire:key="ae-report-dropdown">
-            <button type="button" @click.stop="$store.empReport.toggle()" class="ae-report-btn"
-                    :disabled="$store.empReport.exporting"
-                    :class="{ 'ae-report-btn-active': $store.empReport.open }">
-                <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exporting" style="display:none;"></i>
-                <i class="fas fa-chart-column" x-show="!$store.empReport.exporting"></i>
-                <span class="ae-report-tip">Generate Reports</span>
+        {{-- COMPARE TOOL BUTTON — icon-only now. Hover shows a small
+             tooltip that just says "Compare Tool", no extra description
+             text underneath it anymore. --}}
+        <div class="relative group shrink-0">
+            <button type="button"
+                    wire:click="openCompareModal"
+                    wire:loading.attr="disabled" wire:target="openCompareModal"
+                    aria-label="Compare Tool"
+                    class="inline-flex items-center justify-center w-11 h-11 rounded-xl text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110 disabled:opacity-60 disabled:cursor-wait">
+                <i class="fa-solid fa-code-compare text-base" wire:loading.remove wire:target="openCompareModal"></i>
+                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="openCompareModal"></i>
             </button>
-
-            <div x-show="$store.empReport.open"
-                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                 class="ae-report-menu" style="display:none;" @click="setTimeout(() => syncFromSource(), 0)">
-
-                <div class="ae-report-menu-message">
-                    <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
-                    <span class="txt" x-text="summary"></span>
-                    <span class="cnt" x-text="count + ' matching record(s)'"></span>
-                </div>
-
-                <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
-                        :disabled="$store.empReport.exporting || count === '0'"
-                        :class="{ 'ae-no-results': count === '0' }" class="ae-report-menu-item item-pdf">
-                    <span class="ae-item-icon">
-                        <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exportingType==='pdf'" style="display:none;"></i>
-                        <i class="fas fa-file-pdf" x-show="$store.empReport.exportingType!=='pdf'"></i>
-                    </span>
-                    <span class="ae-item-label">Export as PDF</span>
-                </button>
-
-                <button type="button" @click="$store.empReport.doExport('excel', $wire)"
-                        :disabled="$store.empReport.exporting || count === '0'"
-                        :class="{ 'ae-no-results': count === '0' }" class="ae-report-menu-item item-excel">
-                    <span class="ae-item-icon">
-                        <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exportingType==='excel'" style="display:none;"></i>
-                        <i class="fas fa-file-excel" x-show="$store.empReport.exportingType!=='excel'"></i>
-                    </span>
-                    <span class="ae-item-label">Export as Excel</span>
-                </button>
-
-                <button type="button" @click="$store.empReport.doExport('print', $wire)"
-                        :disabled="$store.empReport.exporting || count === '0'"
-                        :class="{ 'ae-no-results': count === '0' }" class="ae-report-menu-item item-print">
-                    <span class="ae-item-icon">
-                        <i class="fas fa-spinner animate-spin" x-show="$store.empReport.exportingType==='print'" style="display:none;"></i>
-                        <i class="fas fa-print" x-show="$store.empReport.exportingType!=='print'"></i>
-                    </span>
-                    <span class="ae-item-label">Print Current View</span>
-                </button>
+            {{-- Tooltip: icon-only trigger, text-only tooltip. Hidden on
+                 mobile (hidden sm:block) since touch devices don't have a
+                 real hover state — the tooltip would otherwise get stuck
+                 visible after a tap. --}}
+            <div class="hidden sm:block pointer-events-none absolute right-0 top-full mt-2 rounded-lg bg-neutral-900 text-white text-xs font-semibold px-3 py-1.5 shadow-xl opacity-0 scale-95 origin-top-right transition-all duration-150 group-hover:opacity-100 group-hover:scale-100 z-50 whitespace-nowrap">
+                Compare Tool
             </div>
         </div>
     </div>
-
-    {{-- Hidden source for the "Report will include" text inside the
-         wire:ignore'd report dropdown above — same pattern as Alumni
-         Records: this span re-renders normally on every Livewire
-         update, and Alpine watches it via MutationObserver to keep the
-         wire:ignore'd dropdown's summary/count text live. --}}
-    <span id="ae-report-summary-source" class="hidden"
-          data-summary="{{ $this->activeFilterSummary }}"
-          data-count="{{ number_format($rows->total()) }}"></span>
 
     {{-- BODY: stat cards visually moved to the RIGHT side of the table via
          CSS `order`. Both columns always fill the same fixed height
@@ -811,7 +909,10 @@ new class extends Component {
                     [&::-webkit-scrollbar]:w-[5px]
                     [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
                     [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
-                    hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]">
+                    hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]
+                    transition-opacity duration-200"
+             wire:loading.class="opacity-50"
+             wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
 
             {{-- Total Alumni --}}
             <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
@@ -1000,7 +1101,7 @@ new class extends Component {
             {{-- FILTER BAR --}}
             <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
                  wire:loading.class="opacity-60"
-                 wire:target="search,filterStatuses,filterBatchFrom,filterBatchTo,filterCourse,clearFilters">
+                 wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
 
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                     Filters
@@ -1011,8 +1112,8 @@ new class extends Component {
                      wire:ignore
                      x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
-                    <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
-                           :class="q !== '' ? 'border-[#7a3f91] bg-[#EFF6FF] text-[#1D4ED8] font-semibold' : 'bg-white text-[#333333] font-medium'"
+                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
+                           :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
                            placeholder="Search name, ID, email or job…"
                            class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
                            autocomplete="off" maxlength="100" spellcheck="false">
@@ -1032,8 +1133,14 @@ new class extends Component {
                     ['unemployed', 'Unemployed'],
                     ['not_filled', 'Not Filled'],
                 ]; @endphp
-                <div class="relative" x-data="{ open: false }" @click.outside="open = false">
-                    <button type="button" @click.stop="open = !open"
+                <div class="relative"
+                     x-data="{
+                        get open(){ return $store.aeFilters.isOpen('status'); },
+                        toggle(){ $store.aeFilters.toggle('status'); },
+                        close(){ $store.aeFilters.close('status'); }
+                     }"
+                     @click.outside="close()" wire:key="status-dropdown">
+                    <button type="button" @click.stop="toggle()"
                             class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
                                    {{ $filterStatuses ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
                         <span class="truncate text-sm">
@@ -1060,25 +1167,22 @@ new class extends Component {
                         <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
                             <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
                                 <input type="checkbox"
-                                       id="ae-status-select-all"
-                                       data-indeterminate="{{ (count($filterStatuses) > 0 && count($filterStatuses) < count($aeStatusOptions)) ? '1' : '0' }}"
-                                       @checked(count($filterStatuses) === count($aeStatusOptions))
+                                       :checked="$wire.filterStatuses.length === {{ count($aeStatusOptions) }}"
+                                       :indeterminate="$wire.filterStatuses.length > 0 && $wire.filterStatuses.length < {{ count($aeStatusOptions) }}"
                                        @change="$event.target.checked ? $wire.selectAllFilterStatuses() : $wire.clearFilterStatuses()"
                                        class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
                                 Select All
                             </label>
-                            @if(count($filterStatuses) > 0)
-                            <span class="text-xs font-bold text-[#7a3f91] select-none">
-                                {{ count($filterStatuses) }} selected
+                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterStatuses.length > 0">
+                                <span x-text="$wire.filterStatuses.length"></span> selected
                             </span>
-                            @endif
                         </div>
                         <div class="py-1">
                             @foreach($aeStatusOptions as [$val, $label])
                             <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors
                                           {{ in_array($val, $filterStatuses, true) ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
                                 <input type="checkbox" wire:click="toggleFilterStatus('{{ $val }}')"
-                                       @checked(in_array($val, $filterStatuses, true))
+                                       :checked="$wire.filterStatuses.includes('{{ $val }}')"
                                        class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
                                 {{ $label }}
                             </label>
@@ -1087,17 +1191,73 @@ new class extends Component {
                     </div>
                 </div>
 
-                {{-- Programs (formerly "Courses") --}}
+                {{-- Programs — MULTI-SELECT with real checkboxes. Checking
+                     a box toggles that program in/out of filterCourses via
+                     toggleFilterCourse(); the dropdown stays open across
+                     clicks so several programs can be checked together.
+                     A "Select All" checkbox sits in a sticky header row at
+                     the TOP of the list — tri-state: checked when every
+                     program is selected, indeterminate (dash) when some
+                     but not all are. Mirrors the Status dropdown above and
+                     Alumni Records' Program filter exactly. --}}
                 @if($courses->isNotEmpty())
-                    <select wire:model.live="filterCourse"
-                            class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium appearance-none cursor-pointer bg-no-repeat pr-9 hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10
-                                   {{ $filterCourse ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}"
-                            style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;); background-position:right .6rem center; background-size:1.25em 1.25em;">
-                        <option value="">All Programs</option>
-                        @foreach($courses as $c)
-                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
-                        @endforeach
-                    </select>
+                <div class="relative"
+                     x-data="{
+                        get open(){ return $store.aeFilters.isOpen('course'); },
+                        toggle(){ $store.aeFilters.toggle('course'); },
+                        close(){ $store.aeFilters.close('course'); }
+                     }"
+                     @click.outside="close()" wire:key="course-dropdown">
+                    <button type="button" @click.stop="toggle()"
+                            class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
+                                   {{ $filterCourses ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
+                        <span class="truncate text-sm">
+                            @if(count($filterCourses) === 0)
+                                All Programs
+                            @elseif(count($filterCourses) === 1)
+                                {{ $filterCourses[0] }}
+                            @else
+                                {{ count($filterCourses) }} Programs
+                            @endif
+                        </span>
+                        <i class="fas fa-chevron-down text-xs flex-shrink-0 transition-transform duration-150"
+                           :class="open ? 'rotate-180' : ''"></i>
+                    </button>
+                    <div x-show="open"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95 -translate-y-1"
+                         x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[220px] max-h-[260px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
+                         @click.stop>
+                        <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
+                            <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
+                                <input type="checkbox"
+                                       :checked="$wire.filterCourses.length === {{ $courses->count() }}"
+                                       :indeterminate="$wire.filterCourses.length > 0 && $wire.filterCourses.length < {{ $courses->count() }}"
+                                       @change="$event.target.checked ? $wire.selectAllFilterCourses() : $wire.clearFilterCourses()"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
+                                Select All
+                            </label>
+                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterCourses.length > 0">
+                                <span x-text="$wire.filterCourses.length"></span> selected
+                            </span>
+                        </div>
+                        <div class="py-1">
+                            @foreach($courses as $c)
+                            <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                          {{ in_array($c->code, $filterCourses, true) ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
+                                <input type="checkbox" wire:click="toggleFilterCourse('{{ $c->code }}')"
+                                       :checked="$wire.filterCourses.includes('{{ $c->code }}')"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
+                                {{ $c->name ?? $c->code }}
+                            </label>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
                 @endif
 
                 {{-- Batch — FROM/TO range. Default view is a plain year
@@ -1110,20 +1270,22 @@ new class extends Component {
                 @if($batches->isNotEmpty())
                     <div class="relative"
                          x-data="{
-                            open: false,
+                            get open(){ return $store.aeFilters.isOpen('batch'); },
+                            toggle(){ $store.aeFilters.toggle('batch'); },
+                            close(){ $store.aeFilters.close('batch'); },
                             rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
                             rangeFrom: '{{ $filterBatchFrom }}',
                             rangeTo: '{{ $filterBatchTo }}',
-                            selectYear(val){ $wire.setSingleBatchYear(val); this.open=false; },
-                            clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.open=false; },
+                            selectYear(val){ $wire.setSingleBatchYear(val); this.close(); },
+                            clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
                             startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
                             pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
                             pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
-                            applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.open=false; } }
+                            applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
                          }"
-                         @click.outside="open = false">
+                         @click.outside="close()" wire:key="batch-dropdown">
                         <button type="button"
-                                @click="open = !open"
+                                @click.stop="toggle()"
                                 class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
                                        {{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
                             <span class="truncate text-sm">
@@ -1182,22 +1344,22 @@ new class extends Component {
                             <template x-if="rangeMode">
                                 <div class="p-2" style="width:220px;">
                                     <div class="flex items-center gap-2 mb-1">
-                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]">From</span>
-                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]">To</span>
+                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
+                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
                                     </div>
                                     <div class="flex items-start gap-2">
                                         <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                             @foreach($batches as $b)
                                             <button type="button" @click.stop="pickFrom('{{ $b }}')"
-                                                    :class="{'bg-purple-100 text-purple-800 font-semibold':rangeFrom==='{{ $b }}'}"
-                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors text-[#333333]">{{ $b }}</button>
+                                                    :class="rangeFrom==='{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333]'"
+                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors">{{ $b }}</button>
                                             @endforeach
                                         </div>
                                         <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                             @foreach($batches as $b)
                                             <button type="button" @click.stop="pickTo('{{ $b }}')"
-                                                    :class="{'bg-purple-100 text-purple-800 font-semibold':rangeTo==='{{ $b }}'}"
-                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors text-[#333333]">{{ $b }}</button>
+                                                    :class="rangeTo==='{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333]'"
+                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors">{{ $b }}</button>
                                             @endforeach
                                         </div>
                                     </div>
@@ -1228,40 +1390,31 @@ new class extends Component {
                     <span class="hidden sm:inline">Reset</span>
                 </button>
 
-                {{-- ── Active filter badges ── shows which filters are
-                     applied and how many results each narrows down to,
-                     sitting right beside Reset in the same filter row.
-                     Only rendered when at least one filter is active. --}}
-                @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
-                @if($search !== '')
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
-                    <i class="fas fa-search text-[10px]"></i>"{{ $search }}"
-                    &mdash; {{ number_format($rows->total()) }} result(s)
-                </span>
-                @endif
-                @if(!empty($filterStatuses))
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
-                    <i class="fas fa-briefcase text-[10px]"></i>
-                    @if(count($filterStatuses) === 1)
-                        {{ $filterStatuses[0] === 'not_filled' ? 'Not Filled' : ucwords(str_replace('_', '-', $filterStatuses[0])) }}
-                    @else
-                        {{ count($filterStatuses) }} Statuses
-                    @endif
-                    &mdash; {{ number_format($rows->total()) }} result(s)
-                </span>
-                @endif
-                @if($filterCourse !== '')
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
-                    <i class="fas fa-graduation-cap text-[10px]"></i>{{ $filterCourse }}
-                    &mdash; {{ number_format($rows->total()) }} result(s)
-                </span>
-                @endif
-                @if($filterBatchFrom !== '' && $filterBatchTo !== '')
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]">
-                    <i class="fas fa-calendar text-[10px]"></i>{{ $filterBatchFrom === $filterBatchTo ? 'Batch ' . $filterBatchFrom : 'Batch ' . $filterBatchFrom . '–' . $filterBatchTo }}
-                    &mdash; {{ number_format($rows->total()) }} result(s)
-                </span>
-                @endif
+                {{-- ── Active filters badge ── ONE combined pill beside
+                     Reset showing what's filtered and the result count,
+                     instead of a separate pill per filter (which used to
+                     wrap onto its own row once 2+ filters were active). --}}
+                @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourses)
+                    @php
+                        $aeActiveParts = [];
+                        if ($search !== '') $aeActiveParts[] = '"' . $search . '"';
+                        if (!empty($filterStatuses)) {
+                            $aeActiveParts[] = count($filterStatuses) === 1
+                                ? ($filterStatuses[0] === 'not_filled' ? 'Not Filled' : ucwords(str_replace('_', '-', $filterStatuses[0])))
+                                : count($filterStatuses) . ' Statuses';
+                        }
+                        if (!empty($filterCourses)) {
+                            $aeActiveParts[] = count($filterCourses) === 1 ? $filterCourses[0] : count($filterCourses) . ' Programs';
+                        }
+                        if ($filterBatchFrom !== '' && $filterBatchTo !== '') {
+                            $aeActiveParts[] = $filterBatchFrom === $filterBatchTo ? 'Batch ' . $filterBatchFrom : 'Batch ' . $filterBatchFrom . '–' . $filterBatchTo;
+                        }
+                    @endphp
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0] truncate max-w-[260px]">
+                        <i class="fas fa-filter text-[10px] flex-shrink-0"></i>
+                        <span class="truncate">{{ implode(' · ', $aeActiveParts) }}</span>
+                        <span class="flex-shrink-0">&mdash; {{ number_format($rows->total()) }} result(s)</span>
+                    </span>
                 @endif
 
                 {{-- Fullscreen toggle — mobile & tablet only. Expands the
@@ -1283,7 +1436,7 @@ new class extends Component {
                 {{-- Centered loading spinner — big icon over the table itself,
                      same pattern as Job Management / Event Organizer. --}}
                 <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                     wire:loading.flex wire:target="search,filterStatuses,filterBatchFrom,filterBatchTo,filterCourse,clearFilters,previousPage,nextPage">
+                     wire:loading.flex wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters,previousPage,nextPage,gotoPage">
                     <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
                 </div>
 
@@ -1295,7 +1448,7 @@ new class extends Component {
                             [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
                             hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]"
                      wire:loading.class="opacity-40 pointer-events-none"
-                     wire:target="search,filterStatuses,filterBatchFrom,filterBatchTo,filterCourse,clearFilters,previousPage,nextPage">
+                     wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters,previousPage,nextPage,gotoPage">
 
                     {{-- ── DESKTOP / TABLET: table view ── --}}
                     <table class="w-full bg-white border-collapse hidden md:table">
@@ -1506,21 +1659,21 @@ new class extends Component {
                     </div>
                     <div>
                         <p class="font-semibold text-base text-[#333333]">
-                            @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
+                            @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourses)
                                 No alumni match your filters
                             @else
                                 No alumni found
                             @endif
                         </p>
                         <p class="text-sm mt-1 text-[#555555]">
-                            @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
+                            @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourses)
                                 Try clearing your filters to see all alumni.
                             @else
                                 No verified alumni are registered under your college yet.
                             @endif
                         </p>
                     </div>
-                    @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse)
+                    @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourses)
                         <button wire:click="clearFilters"
                                 class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91]">
                             <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
@@ -1546,7 +1699,7 @@ new class extends Component {
                     Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                     of <strong class="text-white font-bold">{{ $total }}</strong>
                     alumni
-                    @if($filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourse || $search)
+                    @if($filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourses || $search)
                         <span class="text-white/50 text-xs ml-1">(filtered)</span>
                     @endif
                 </p>
@@ -1561,7 +1714,7 @@ new class extends Component {
                     </button>
 
                     @if($pgStart > 1)
-                        <button wire:click="$set('page', 1)"
+                        <button wire:click="gotoPage(1)"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                         @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
@@ -1572,7 +1725,7 @@ new class extends Component {
                             <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                          bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                         @else
-                            <button wire:click="$set('page', {{ $p }})"
+                            <button wire:click="gotoPage({{ $p }})"
                                     class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                            bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                         @endif
@@ -1580,7 +1733,7 @@ new class extends Component {
 
                     @if($pgEnd < $lp)
                         @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                        <button wire:click="$set('page', {{ $lp }})"
+                        <button wire:click="gotoPage({{ $lp }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                     @endif
@@ -1797,8 +1950,235 @@ new class extends Component {
 @endif
 
 
+{{-- COMPARE TOOL MODAL — bigger fixed height on desktop so everything
+     (form + results + insight) fits without needing to scroll, full
+     screen on mobile. --}}
+@if($showCompareModal)
+<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
+     x-data
+     wire:click.self="closeCompareModal"
+     @keydown.escape.window="$wire.closeCompareModal()">
+    <div class="bg-white rounded-none sm:rounded-2xl w-full h-full sm:h-[760px] sm:max-w-3xl sm:max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border-0 sm:border sm:border-[#E8E0F0]"
+         @click.stop
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
+         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0">
+
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-gradient-to-r from-[#7a3f91] to-[#9b59b6]">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                    <i class="fa-solid fa-code-compare text-white text-sm"></i>
+                </div>
+                <div>
+                    <p class="font-semibold text-white text-sm leading-snug">Employment Compare Tool</p>
+                    <p class="text-xs text-white/70 mt-0.5">Compare programs or batches side by side</p>
+                </div>
+            </div>
+            <button type="button"
+                    wire:click="closeCompareModal"
+                    wire:loading.attr="disabled" wire:target="closeCompareModal"
+                    class="relative group/close2 w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
+                <i class="fa-solid fa-xmark text-base" wire:loading.remove wire:target="closeCompareModal"></i>
+                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="closeCompareModal"></i>
+                <span class="hidden sm:block pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close2:opacity-100 transition-opacity duration-150">Close</span>
+            </button>
+        </div>
+
+        {{-- Body — the modal itself is now tall enough (h-[760px]) that
+             the form + results + insight all fit without scrolling in
+             the common case; overflow-y-auto stays only as a safety net
+             for smaller screens or extra-long content. --}}
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+
+            {{-- Validation error banner --}}
+            @if($compareError)
+                <div class="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
+                    <i class="fa-solid fa-triangle-exclamation text-red-500 text-sm mt-0.5 flex-shrink-0"></i>
+                    <p class="text-sm font-medium text-red-700 leading-snug">{{ $compareError }}</p>
+                </div>
+            @endif
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                {{-- GROUP A --}}
+                <div class="bg-[#F9F7FC] rounded-xl border border-[#E8E0F0] p-4">
+                    <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-3 flex items-center gap-1.5">
+                        <span class="w-5 h-5 rounded-full bg-[#7a3f91] text-white flex items-center justify-center text-[10px]">A</span>
+                        Group A
+                    </p>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Program</label>
+                    <select wire:model.live="compareCourseA"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                        <option value="">All Programs</option>
+                        @foreach($courses as $c)
+                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
+                        @endforeach
+                    </select>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
+                    <select wire:model.live="compareBatchA"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                        <option value="">All Batches</option>
+                        @foreach($this->batchesForCourse($compareCourseA) as $b)
+                            <option value="{{ $b }}">Batch {{ $b }}</option>
+                        @endforeach
+                    </select>
+                    @if(empty($this->batchesForCourse($compareCourseA)))
+                        <p class="text-xs text-[#999999] mt-1.5 italic">No batches available for this program yet.</p>
+                    @endif
+                </div>
+
+                {{-- GROUP B --}}
+                <div class="bg-[#F9F7FC] rounded-xl border border-[#E8E0F0] p-4">
+                    <p class="text-xs font-bold uppercase tracking-widest text-[#9b59b6] mb-3 flex items-center gap-1.5">
+                        <span class="w-5 h-5 rounded-full bg-[#9b59b6] text-white flex items-center justify-center text-[10px]">B</span>
+                        Group B
+                    </p>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Program</label>
+                    <select wire:model.live="compareCourseB"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
+                        <option value="">All Programs</option>
+                        @foreach($courses as $c)
+                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
+                        @endforeach
+                    </select>
+                    <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
+                    <select wire:model.live="compareBatchB"
+                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
+                        <option value="">All Batches</option>
+                        @foreach($this->batchesForCourse($compareCourseB) as $b)
+                            <option value="{{ $b }}">Batch {{ $b }}</option>
+                        @endforeach
+                    </select>
+                    @if(empty($this->batchesForCourse($compareCourseB)))
+                        <p class="text-xs text-[#999999] mt-1.5 italic">No batches available for this program yet.</p>
+                    @endif
+                </div>
+            </div>
+
+            {{-- Results --}}
+            @if($compareRan)
+                <div class="border-t border-[#E8E0F0] pt-4 space-y-4">
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {{-- Result A --}}
+                        <div class="rounded-xl border border-[#E8E0F0] p-4 {{ ($compareResultA['rate'] ?? 0) >= ($compareResultB['rate'] ?? 0) && ($compareResultA['total'] ?? 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-white' }}">
+                            <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-1">{{ $compareResultA['course'] ?? '—' }} · {{ $compareResultA['batch'] ?? '—' }}</p>
+                            <p class="text-3xl font-bold text-[#333333] leading-none">{{ $compareResultA['rate'] ?? 0 }}%</p>
+                            <p class="text-xs text-[#666666] mt-1">Employment Rate</p>
+                            <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Total Alumni</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['total'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Working</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['working'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Employed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['employed'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Unemployed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultA['unemployed'] ?? 0 }}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Result B --}}
+                        <div class="rounded-xl border border-[#E8E0F0] p-4 {{ ($compareResultB['rate'] ?? 0) > ($compareResultA['rate'] ?? 0) && ($compareResultB['total'] ?? 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-white' }}">
+                            <p class="text-xs font-bold uppercase tracking-widest text-[#9b59b6] mb-1">{{ $compareResultB['course'] ?? '—' }} · {{ $compareResultB['batch'] ?? '—' }}</p>
+                            <p class="text-3xl font-bold text-[#333333] leading-none">{{ $compareResultB['rate'] ?? 0 }}%</p>
+                            <p class="text-xs text-[#666666] mt-1">Employment Rate</p>
+                            <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Total Alumni</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['total'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Working</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['working'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Employed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['employed'] ?? 0 }}</p>
+                                </div>
+                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
+                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Unemployed</p>
+                                    <p class="font-bold text-[#333333]">{{ $compareResultB['unemployed'] ?? 0 }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- AI-style simple insight, with highlighted text --}}
+                    @if($compareInsight)
+                        <div class="rounded-xl border border-purple-200 bg-gradient-to-br from-[#F9F7FC] to-purple-50 p-4 flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
+                                <i class="fa-solid fa-wand-magic-sparkles text-white text-xs"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#7a3f91] mb-1">Insight</p>
+                                <p class="text-sm leading-relaxed text-[#333333]">
+                                    <mark class="bg-yellow-200/70 text-[#333333] px-1 rounded font-semibold">{{ $compareInsight }}</mark>
+                                </p>
+                            </div>
+                        </div>
+                    @endif
+
+                </div>
+            @endif
+
+        </div>
+
+        {{-- Actions — pinned at the very bottom of the modal, below the
+             form and results, so the flow reads top-to-bottom: pick
+             groups → see results → act (Compare again / Reset) last. --}}
+        <div class="flex-shrink-0 flex items-center gap-2 px-5 py-4 border-t border-[#E8E0F0] bg-white">
+            <button type="button"
+                    wire:click="runCompare"
+                    wire:loading.attr="disabled"
+                    wire:target="runCompare"
+                    class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110 disabled:opacity-60">
+                <i class="fa-solid fa-chart-simple text-sm" wire:loading.remove wire:target="runCompare"></i>
+                <i class="fa-solid fa-spinner fa-spin text-sm" wire:loading wire:target="runCompare"></i>
+                Compare Now
+            </button>
+            <button type="button"
+                    wire:click="resetCompare"
+                    wire:loading.attr="disabled" wire:target="resetCompare"
+                    class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-wait">
+                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetCompare"></i>
+                <i class="fas fa-spinner fa-spin text-sm" wire:loading wire:target="resetCompare"></i>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
+        </div>
+    </div>
+</div>
+@endif
+
 <script>
 (function () {
+    // ── Shared filter-dropdown store ────────────────────────────────────
+    // Tracks which single filter dropdown is currently open (status,
+    // course, batch) so opening one automatically closes any other that
+    // was left open — only one dropdown shown at a time instead of them
+    // stacking on top of each other. Mirrors Alumni Records' arFilters.
+    function registerFilterDropdownStore() {
+        if (!window.Alpine) return;
+        if (window.Alpine.store('aeFilters')) return;
+        window.Alpine.store('aeFilters', {
+            openKey: '',
+            isOpen(key) { return this.openKey === key; },
+            toggle(key) { this.openKey = (this.openKey === key) ? '' : key; },
+            close(key) { if (this.openKey === key) this.openKey = ''; },
+            closeAll() { this.openKey = ''; },
+        });
+    }
+    if (window.Alpine) registerFilterDropdownStore();
+    document.addEventListener('alpine:init', registerFilterDropdownStore);
+
     // ── Row hover tooltip (desktop only) ────────────────────────────────────
     // isHoverCapable() requires BOTH a real hover-capable pointer (mouse)
     // AND a wider viewport, so on phones/tablets (touch input) this tip
@@ -1907,174 +2287,6 @@ new class extends Component {
             startEmpPolling();
         }
     });
-})();
-</script>
-
-<script>
-(function () {
-    // ── Generate Reports (PDF / Excel / Print) — mirrors Alumni Records'
-    // Alpine.store('report'), but under its own name ('empReport') and
-    // pointed at the organizer employment export endpoint, so both pages
-    // can coexist without clashing if they're ever mounted together
-    // (e.g. via wire:navigate keeping stale scripts around).
-    function registerReportStore() {
-        if (!window.Alpine) return;
-        if (window.Alpine.store('empReport')) return;
-
-        window.Alpine.store('empReport', {
-            open: false,
-            exporting: false,
-            exportingType: '',
-            _lastToggle: 0,
-            _lastExport: 0,
-
-            toggle() {
-                const now = Date.now();
-                if (now - this._lastToggle < 150) return;
-                this._lastToggle = now;
-                this.open = !this.open;
-            },
-
-            async readErrorMessage(res, fallback) {
-                try {
-                    const data = await res.clone().json();
-                    if (data && data.message) return data.message;
-                } catch (e) { /* not JSON — fall through */ }
-                return fallback;
-            },
-
-            async doExport(type, wire) {
-                const now = Date.now();
-                if (this.exporting || now - this._lastExport < 400) return;
-                this._lastExport = now;
-                this.exporting = true;
-                this.exportingType = type;
-                this.open = false;
-
-                const label = type === 'excel' ? 'Excel file' : type === 'print' ? 'print view' : 'PDF';
-                window.dispatchEvent(new CustomEvent('flash-message', {
-                    detail: { type: 'info', message: 'Generating your ' + label + '… this only takes a moment.' }
-                }));
-
-                // NOTE: read every filter via wire.$wire.get('propName') /
-                // wire.$wire.propName, NOT wire.propName directly. The `wire`
-                // argument here is the raw Alpine $wire proxy, but on this
-                // Alpine/Livewire build, accessing a public property directly
-                // off it (wire.search, wire.filterBatchFrom, ...) can resolve
-                // to the property's reactive accessor FUNCTION rather than its
-                // value, which then gets stringified into the URL as literal
-                // "() => {...}" text. wire.$wire.get() (the documented Livewire
-                // JS API) always returns the real, resolved value regardless of
-                // how the proxy exposes it -- this is the same access pattern
-                // already used safely elsewhere on this page (e.g. $wire.search
-                // in the search box's x-data, $wire.filterBatchFrom in the
-                // batch-range picker).
-                const getProp = (name, fallback) => {
-                    if (!wire) return fallback;
-                    try {
-                        const wireApi = wire.$wire || wire;
-                        const val = (typeof wireApi.get === 'function')
-                            ? wireApi.get(name)
-                            : wireApi[name];
-                        return (val === undefined || val === null) ? fallback : val;
-                    } catch (e) {
-                        return fallback;
-                    }
-                };
-
-                const filterStatusesVal = getProp('filterStatuses', []);
-
-                const params = new URLSearchParams({
-                    type: type,
-                    search: getProp('search', ''),
-                    batch_from: getProp('filterBatchFrom', ''),
-                    batch_to: getProp('filterBatchTo', ''),
-                    course: getProp('filterCourse', ''),
-                    status: Array.isArray(filterStatusesVal) ? filterStatusesVal.join(',') : '',
-                });
-                const url = '/coordinator/alumni/employment/export?' + params.toString();
-
-                try {
-                    if (type === 'print') {
-                        const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-                        if (!res.ok) {
-                            const msg = await this.readErrorMessage(res, 'Print generation failed. Please try again.');
-                            throw new Error(msg);
-                        }
-                        const html = await res.text();
-
-                        const oldFrame = document.getElementById('ae-print-frame');
-                        if (oldFrame) oldFrame.remove();
-
-                        const frame = document.createElement('iframe');
-                        frame.id = 'ae-print-frame';
-                        frame.style.position = 'fixed';
-                        frame.style.right = '0';
-                        frame.style.bottom = '0';
-                        frame.style.width = '0';
-                        frame.style.height = '0';
-                        frame.style.border = '0';
-
-                        let printFired = false;
-                        const firePrintOnce = () => {
-                            if (printFired) return;
-                            printFired = true;
-                            frame.contentWindow.focus();
-                            frame.contentWindow.print();
-                        };
-                        frame.onload = () => setTimeout(firePrintOnce, 150);
-
-                        document.body.appendChild(frame);
-
-                        const doc = frame.contentWindow.document;
-                        doc.open();
-                        doc.write(html);
-                        doc.close();
-
-                        setTimeout(firePrintOnce, 200);
-                    } else {
-                        const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-                        if (!res.ok) {
-                            const msg = await this.readErrorMessage(
-                                res,
-                                type === 'excel' ? 'Excel export failed. Please try again.' : 'PDF export failed. Please try again.'
-                            );
-                            throw new Error(msg);
-                        }
-
-                        const blob = await res.blob();
-                        const disposition = res.headers.get('Content-Disposition') || '';
-                        let filename = type === 'excel' ? 'alumni-employment.xlsx' : 'alumni-employment.pdf';
-                        const match = disposition.match(/filename="?([^"]+)"?/);
-                        if (match) filename = match[1];
-
-                        const blobUrl = window.URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = blobUrl;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        window.URL.revokeObjectURL(blobUrl);
-                    }
-                } catch (e) {
-                    window.dispatchEvent(new CustomEvent('flash-message', {
-                        detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
-                    }));
-                } finally {
-                    this.exporting = false;
-                    this.exportingType = '';
-                }
-            }
-        });
-    }
-
-    window.__aeEnsureReportStore = registerReportStore;
-
-    if (window.Alpine) registerReportStore();
-    document.addEventListener('alpine:init', registerReportStore);
-    document.addEventListener('livewire:init', registerReportStore);
-    document.addEventListener('livewire:navigated', registerReportStore);
 })();
 </script>
 
