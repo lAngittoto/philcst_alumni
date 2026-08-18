@@ -10,6 +10,7 @@ use App\Http\Controllers\CourseController;
 use App\Http\Controllers\DirectorNotificationController;
 use App\Http\Controllers\EmploymentTrackingExportController;
 use App\Http\Controllers\MessengerController;
+use App\Http\Controllers\OrganizerAlumniExportController;
 use App\Http\Controllers\OrganizerController;
 use App\Http\Controllers\RegistrarAlumniExportController;
 use App\Http\Controllers\RegistrarNotificationController;
@@ -61,6 +62,10 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
     Route::view('/coordinator/reports',          'organizer.reports')                   ->name('organizer.reports');
     Route::view('/coordinator/message/hub',      'organizer.chat-alumni-wrapper')       ->name('organizer.chat/alumni');
     Route::view('/coordinator/yearbook',         'organizer.yearbook-wrapper')          ->name('organizer.yearbook');
+
+    // ── Alumni Employment: Generate Reports (PDF / Excel / Print export) ───
+    Route::get('/coordinator/alumni/employment/export', [OrganizerAlumniExportController::class, 'export'])
+        ->name('organizer.alumni-employment.export');
 
     // ── Coordinator Notification API ──────────────────────────────────────
     Route::get('/coordinator/notifications',                [CoordinatorNotificationController::class, 'index']);

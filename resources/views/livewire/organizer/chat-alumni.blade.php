@@ -93,6 +93,64 @@ new class extends Component {
     // ── Online presence timeout (minutes) — 1 min = offline ──────────────
     private int $onlineMinutes = 1;
 
+    // ── Profanity filter (English + Tagalog) — mirrors the alumni-side
+    //    messenger filter word-for-word so coordinator messages get the
+    //    same censoring instead of bypassing it entirely. ──────────────────
+    private static array $bannedWords = [
+        // English
+        'fuck', 'fucking', 'fucker', 'fck', 'motherfucker',
+        'shit', 'shitty', 'bullshit',
+        'bitch', 'bitches',
+        'asshole', 'ass',
+        'dick', 'cock', 'pussy', 'cunt',
+        'bastard', 'slut', 'whore',
+        'nigger', 'nigga',
+        'retard', 'retarded',
+        // Tagalog
+        'putangina', 'putang ina', 'putanginamo', 'putanginamu',
+        'tangina', 'tanginamo', 'tang ina',
+        'gago', 'gaga', 'gagu',
+        'ulol', 'ulul',
+        'bobo', 'boba',
+        'tarantado', 'tarantada',
+        'hayop', 'hayup',
+        'leche', 'lecheng',
+        'punyeta', 'punyeta ka',
+        'peste', 'pesteng',
+        'kingina', 'kinginamo',
+        'siraulo', 'sira ulo',
+        'engot',
+        'pakyu',
+        'pucha', 'puchang',
+        'yawa',
+        // Pangasinan
+        'baoninam', 'putang inam',
+    ];
+
+    private static function filterProfanity(string $text): string
+    {
+        foreach (self::$bannedWords as $word) {
+            // Allow spaces/dashes/underscores BETWEEN letters (basic evasion
+            // resistance) and repeated letters (e.g. "puuutangina"), without
+            // swallowing the whitespace that follows the whole word.
+            $letters = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
+            $last    = count($letters) - 1;
+            $pattern = implode('', array_map(
+                fn($ch, $i) => preg_quote($ch, '/') . '+' . ($i < $last ? '[\s\-_]*' : ''),
+                $letters,
+                array_keys($letters)
+            ));
+
+            $text = preg_replace_callback(
+                '/\b' . $pattern . '\b/iu',
+                fn($m) => str_repeat('*', mb_strlen($m[0])),
+                $text
+            ) ?? $text;
+        }
+
+        return $text;
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Cache key helpers
     // ─────────────────────────────────────────────────────────────────────
@@ -813,6 +871,23 @@ new class extends Component {
                 ]);
             }
         } catch (\Throwable) {}
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Search highlight — mirrors Alumni Records' light-blue <mark> style
+    // ─────────────────────────────────────────────────────────────────────
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="org-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1584,6 +1659,8 @@ new class extends Component {
         $body = trim($this->body);
         if ($body === '' || ! $this->roomId) return;
 
+        $body = self::filterProfanity($body);
+
         $msgId = DB::table('chat_messages')->insertGetId([
             'room_id'     => $this->roomId,
             'sender_type' => 'organizer',
@@ -1691,8 +1768,9 @@ new class extends Component {
     public function saveEdit(): void
     {
         if (! $this->editingId || trim($this->editBody) === '') return;
+        $body = self::filterProfanity(trim($this->editBody));
         DB::table('chat_messages')->where('id', $this->editingId)->where('sender_type','organizer')->where('sender_id',$this->coordinatorId)
-            ->update(['body'=>trim($this->editBody),'edited_at'=>now(),'updated_at'=>now()]);
+            ->update(['body'=>$body,'edited_at'=>now(),'updated_at'=>now()]);
         $this->editingId = null; $this->editBody = '';
         $this->loadMessages();
     }
@@ -2051,7 +2129,56 @@ new class extends Component {
 
         #org-room-list > div { transition: transform .18s ease, opacity .18s ease; }
 
-        .org-bubble { transform-origin: bottom; }
+        /* ── Search highlight — same light-blue mark as Alumni Records ── */
+        mark.org-hl {
+            background: #BFDBFE;
+            color: inherit;
+            border-radius: 2px;
+            padding: 0 1px;
+            font-weight: 700;
+        }
+
+        .org-bubble { transform-origin: bottom; position: relative; }
+
+        /* ── Open-message indicator — clearly marks which bubble's
+             toolbar is currently active. Stronger ring + soft glow,
+             plus a slight lift so it visibly separates from the rest. ── */
+        .org-bubble-open {
+            box-shadow:
+                0 0 0 2px #6b2490,
+                0 0 0 5px rgba(107,36,144,.18),
+                0 6px 18px rgba(107,36,144,.28) !important;
+            transform: translateY(-1px);
+        }
+
+        /* ── Loading spinner shown while toggleToolbar() round-trips ── */
+        .org-bubble-spinner {
+            display: none;
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #6b2490;
+            color: #ffffff;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            box-shadow: 0 2px 8px rgba(107,36,144,.4);
+            z-index: 2;
+        }
+        .org-bubble-loading .org-bubble-spinner { display: flex; }
+        .org-bubble-loading { opacity: .85; }
+
+        /* ── Smooth message entrance — new/rendered messages ease in
+             instead of popping in abruptly ── */
+        .org-msg-in { animation: orgMsgIn .22s ease-out both; }
+        @keyframes orgMsgIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
         @keyframes orgPop {
             from { opacity: 0; transform: translateY(6px) scale(.97); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -2172,32 +2299,33 @@ new class extends Component {
             position: absolute;
             left: 50%;
             transform: translateX(-50%);
-            bottom: 14px;
+            bottom: 18px;
             display: flex;
-            gap: 8px;
+            gap: 10px;
             z-index: 50;
             pointer-events: none;
         }
         .org-scroll-nav .org-scroll-btn { pointer-events: auto; }
         .org-scroll-btn {
-            width: 36px;
-            height: 36px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
             background: #ffffff;
-            border: 1px solid #ddd3e8;
+            border: 2px solid #6b2490;
             color: #6b2490;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
-            box-shadow: 0 2px 10px rgba(107,36,144,.20);
+            font-size: 15px;
+            box-shadow: 0 4px 16px rgba(107,36,144,.30);
             cursor: pointer;
             transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
         }
         .org-scroll-btn:hover {
-            background: #f2e8f9;
+            background: #6b2490;
+            color: #ffffff;
             transform: translateY(-2px);
-            box-shadow: 0 4px 14px rgba(107,36,144,.28);
+            box-shadow: 0 6px 20px rgba(107,36,144,.38);
         }
         .org-scroll-btn:active { transform: translateY(0) scale(.94); }
 
@@ -2228,27 +2356,24 @@ new class extends Component {
             background: #FDECEC; color: #DC2626; flex-shrink: 0;
         }
 
-        /* ── Search filtering progress bar (matches yearbook style) ─────── */
-        .org-filter-progress-track {
-            height: 2px;
-            width: 100%;
-            overflow: hidden;
-            background: transparent;
-            position: relative;
-            flex-shrink: 0;
+        /* ── Search filtering spinner — bouncing dots ("...") ─────────────── */
+        .org-filter-spinner {
+            display: inline-flex;
+            align-items: center;
+            gap: 2.5px;
         }
-        .org-filter-progress-bar {
-            position: absolute;
-            top: 0; left: 0;
-            height: 100%;
-            width: 40%;
-            border-radius: 99px;
+        .org-filter-spinner span {
+            width: 4px; height: 4px;
+            border-radius: 50%;
             background: #6b2490;
-            animation: orgFilterProgress 1s ease-in-out infinite;
+            animation: orgDotBounce .9s ease-in-out infinite;
         }
-        @keyframes orgFilterProgress {
-            0%   { left: -40%; }
-            100% { left: 100%; }
+        .org-filter-spinner span:nth-child(1) { animation-delay: 0s; }
+        .org-filter-spinner span:nth-child(2) { animation-delay: .15s; }
+        .org-filter-spinner span:nth-child(3) { animation-delay: .3s; }
+        @keyframes orgDotBounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: .5; }
+            30% { transform: translateY(-3px); opacity: 1; }
         }
 
         /* ── Smoother room-list & message list transitions ──────────────── */
@@ -2403,7 +2528,6 @@ new class extends Component {
             background-repeat: repeat;
             background-size: 340px 340px, 300px 300px;
             background-position: 20px 40px, 90px 220px;
-            animation: orgBubbleDriftUp 26s linear infinite;
         }
         .org-bubble-bg::after {
             background-image:
@@ -2412,7 +2536,6 @@ new class extends Component {
             background-repeat: repeat;
             background-size: 260px 260px, 180px 180px;
             background-position: 180px 120px, 40px 260px;
-            animation: orgBubbleDriftDown 32s linear infinite;
         }
         .org-bubble-layer {
             background-image:
@@ -2420,24 +2543,6 @@ new class extends Component {
             background-repeat: repeat;
             background-size: 220px 220px;
             background-position: 250px 60px;
-            animation: orgBubbleDriftDiag 38s linear infinite;
-        }
-        @keyframes orgBubbleDriftUp {
-            from { background-position: 20px 40px, 90px 220px; }
-            to   { background-position: 20px -300px, 90px -80px; }
-        }
-        @keyframes orgBubbleDriftDown {
-            from { background-position: 180px 120px, 40px 260px; }
-            to   { background-position: 180px 380px, 40px 440px; }
-        }
-        @keyframes orgBubbleDriftDiag {
-            from { background-position: 250px 60px; }
-            to   { background-position: -70px 340px; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-            .org-bubble-bg::before,
-            .org-bubble-bg::after,
-            .org-bubble-layer { animation: none; }
         }
         .org-bubble-bg > * { position: relative; z-index: 1; }
 
@@ -2455,7 +2560,7 @@ new class extends Component {
             padding: 0 8%;
         }
         .org-watermark span {
-            font-size: clamp(20px, 5vw, 56px);
+            font-size: clamp(48px, 11vw, 140px);
             font-weight: 900;
             color: #6b2490;
             opacity: 0.07;
@@ -2512,27 +2617,27 @@ new class extends Component {
             </p>
         </div>
 
-        {{-- Search bar --}}
+        {{-- Search bar — Alpine-buffered like Alumni Records so typing
+             never waits on a server round-trip per keystroke; only the
+             debounced value hits the wire, so it stays smooth even while
+             the 2.5s unified poll is running. --}}
         <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0 bg-white">
-            <div class="relative">
+            <div class="relative" wire:ignore
+                 x-data="{ q:'', init(){ this.q=$wire.roomSearch??''; $wire.$watch('roomSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#aaaaaa] text-xs pointer-events-none"></i>
-                <input wire:model.live.debounce.300ms="roomSearch"
-                       type="text"
+                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('roomSearch',q)"
                        placeholder="Search chats…"
-                       class="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-[#ddd3e8] bg-[#f9f7fc] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/15 transition placeholder-[#aaaaaa]"/>
-                @if($roomSearch !== '')
-                <button wire:click="$set('roomSearch','')"
+                       autocomplete="off" spellcheck="false"
+                       class="w-full pl-9 pr-8 py-2 text-sm rounded-xl border border-[#ddd3e8] bg-[#f9f7fc] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/15 transition placeholder-[#aaaaaa]"/>
+                <div wire:loading wire:target="roomSearch" class="absolute right-2.5 top-1/2 -translate-y-1/2">
+                    <span class="org-filter-spinner"><span></span><span></span><span></span></span>
+                </div>
+                <button type="button" x-show="q !== ''" x-cloak @click="q=''; $wire.set('roomSearch','')"
+                        wire:loading.remove wire:target="roomSearch"
                         class="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-[#aaaaaa] hover:text-[#333333] hover:bg-[#f0eaf7] transition">
                     <i class="fa-solid fa-xmark text-xs"></i>
                 </button>
-                @endif
             </div>
-        </div>
-
-        {{-- Filtering progress bar — shows while room search / list is
-             resolving on the server, mirrors the yearbook page's UX --}}
-        <div class="org-filter-progress-track flex-shrink-0" wire:loading wire:target="roomSearch">
-            <div class="org-filter-progress-bar"></div>
         </div>
 
         {{-- Chat count label --}}
@@ -2592,10 +2697,10 @@ new class extends Component {
                                           @if($isActive)      font-semibold text-[#6b2490]
                                           @elseif($hasUnread) font-bold text-[#1a1a1a]
                                           @else               font-semibold text-[#333333] @endif">
-                                    @if($r['type'] === 'staff') Staff Chat
-                                    @elseif($r['type'] === 'college') {{ $department }}
-                                    @elseif($r['type'] === 'course') {{ strtoupper($r['course_code']) }}
-                                    @else {{ $r['name'] }}
+                                    @if($r['type'] === 'staff') {!! $this->highlight('Staff Chat', $roomSearch) !!}
+                                    @elseif($r['type'] === 'college') {!! $this->highlight($department, $roomSearch) !!}
+                                    @elseif($r['type'] === 'course') {!! $this->highlight(strtoupper($r['course_code']), $roomSearch) !!}
+                                    @else {!! $this->highlight($r['name'], $roomSearch) !!}
                                     @endif
                                 </p>
                                 <div class="flex items-center gap-1 flex-shrink-0">
@@ -2666,7 +2771,7 @@ new class extends Component {
                         <i class="fa-solid fa-thumbtack" style="font-size:10px;"></i>
                     </button>
                     <span class="org-tooltip top-full right-0 mt-2 px-2.5 py-1.5 rounded-lg">
-                        {{ $isPinnedRm ? 'Unpin room' : 'Pin to top' }}
+                        {{ $isPinnedRm ? 'Unpin' : 'Pin' }}
                     </span>
                 </div>
 
@@ -2743,15 +2848,19 @@ new class extends Component {
                 </div>
             </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
-                <button wire:click="togglePins"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer"
+                <button wire:click="togglePins" wire:loading.attr="disabled" wire:target="togglePins"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer disabled:opacity-60"
                         style="{{ $showPins ? 'background:rgba(255,255,255,.28);color:#fff;border-color:rgba(255,255,255,.40);' : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.20);' }}">
-                    <i class="fa-solid fa-thumbtack text-xs"></i><span class="hidden sm:inline ml-1">Pins</span>
+                    <i class="fa-solid fa-thumbtack text-xs" wire:loading.remove wire:target="togglePins"></i>
+                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePins"></i>
+                    <span class="hidden sm:inline ml-1">Pins</span>
                 </button>
-                <button wire:click="toggleMembers"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer"
+                <button wire:click="toggleMembers" wire:loading.attr="disabled" wire:target="toggleMembers"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer disabled:opacity-60"
                         style="{{ $showMembers ? 'background:rgba(255,255,255,.28);color:#fff;border-color:rgba(255,255,255,.40);' : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.20);' }}">
-                    <i class="fa-solid fa-user-group text-xs"></i><span class="hidden sm:inline ml-1">Members</span>
+                    <i class="fa-solid fa-user-group text-xs" wire:loading.remove wire:target="toggleMembers"></i>
+                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="toggleMembers"></i>
+                    <span class="hidden sm:inline ml-1">Members</span>
                 </button>
             </div>
         </div>
@@ -2760,7 +2869,7 @@ new class extends Component {
             <div class="flex flex-col flex-1 min-w-0">
 
                 {{-- Message list --}}
-                <div id="org-chat-body-wrap" class="flex-1 min-h-0 flex flex-col org-bubble-bg"
+                <div id="org-chat-body-wrap" class="relative flex-1 min-h-0 flex flex-col org-bubble-bg"
                      x-data="{
                          nearBottom: true,
                          scrollDir: null,
@@ -2836,7 +2945,7 @@ new class extends Component {
                             </div>
                             @endif
 
-                            <div wire:key="org-msg-{{ $msg['id'] }}" class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}">
+                            <div wire:key="org-msg-{{ $msg['id'] }}" class="org-msg-in flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}">
 
                                 @if(! $msg['is_mine'])
                                 <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
@@ -2981,10 +3090,14 @@ new class extends Component {
                                             $formatted = preg_replace('/@(everyone|\w+(?:\s\w+)?)/u', '<span class="'.$mentionClass.'">@$1</span>', $safe);
                                         @endphp
                                         <button wire:click.stop="toggleToolbar({{ $msg['id'] }})"
-                                             class="org-bubble text-left px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words w-full cursor-pointer shadow-sm {{ $bubbleCls }} {{ $toolbarOpen ? 'ring-2 ring-[#6b2490]/30' : '' }}"
+                                             wire:loading.class="org-bubble-loading" wire:target="toggleToolbar({{ $msg['id'] }})"
+                                             class="org-bubble text-left px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words w-full cursor-pointer shadow-sm {{ $bubbleCls }} {{ $toolbarOpen ? 'org-bubble-open' : '' }}"
                                              style="{{ $bubbleBg }}">
                                             {!! $formatted !!}
                                             @if($msg['edited'])<span class="text-xs opacity-50 ml-1 italic">(edited)</span>@endif
+                                            <span class="org-bubble-spinner" wire:loading wire:target="toggleToolbar({{ $msg['id'] }})">
+                                                <i class="fa-solid fa-spinner fa-spin"></i>
+                                            </span>
                                         </button>
                                         @endif
 
@@ -3124,8 +3237,10 @@ new class extends Component {
                         <div class="h-10"></div>
                     </div>
 
-                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav ─────────────── --}}
-                    <div class="org-scroll-nav">
+                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav ───────────────
+                         wire:ignore.self keeps Livewire's poll-driven morph from
+                         touching this node mid Alpine transition. --}}
+                    <div class="org-scroll-nav" wire:ignore.self>
                         <button type="button" class="org-scroll-btn"
                                 x-show="scrollDir === 'up'"
                                 x-transition:enter="transition ease-out duration-150"
@@ -3222,7 +3337,7 @@ new class extends Component {
                                 @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-xl border border-[#ddd3e8] bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"
+                                class="w-full resize-none rounded-xl border-2 border-[#6b2490]/40 bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
                         <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
@@ -3267,8 +3382,10 @@ new class extends Component {
                         <i class="fa-solid fa-user-group text-[#6b2490]"></i>
                         <p class="text-sm font-semibold text-[#333333] flex-1 uppercase tracking-wide">Members <span class="text-xs font-semibold text-[#999999] ml-1">({{ count($alumni) + count($coordinators) }})</span>@if($onlineCount > 0)<span class="ml-1 text-xs font-semibold text-emerald-600">· {{ $onlineCount }} online</span>@endif</p>
                     @endif
-                    <button wire:click="closeSidePanel" class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer">
-                        <i class="fa-solid fa-xmark text-sm"></i>
+                    <button wire:click="closeSidePanel" wire:loading.attr="disabled" wire:target="closeSidePanel"
+                            class="w-7 h-7 flex items-center justify-center rounded-lg text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer disabled:opacity-60">
+                        <i class="fa-solid fa-xmark text-sm" wire:loading.remove wire:target="closeSidePanel"></i>
+                        <i class="fa-solid fa-spinner fa-spin text-sm" wire:loading wire:target="closeSidePanel"></i>
                     </button>
                 </div>
 
@@ -3295,9 +3412,17 @@ new class extends Component {
                         @endif
                         <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0">
                             <p class="text-xs font-semibold text-[#6b2490] uppercase tracking-widest mb-2 px-1"><i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($staffCoords) }}</p>
-                            <div class="relative">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
-                                <input wire:model.live.debounce.300ms="memberSearch" type="text" placeholder="Search staff…"
+                            <div class="relative" wire:ignore
+                                 x-data="{ q:'', init(){ this.q=$wire.memberSearch??''; $wire.$watch('memberSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"
+                                   wire:loading.class="opacity-0" wire:target="memberSearch"></i>
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 hidden"
+                                      wire:loading.class.remove="hidden" wire:target="memberSearch">
+                                    <span class="org-filter-spinner"><span></span><span></span><span></span></span>
+                                </span>
+                                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('memberSearch',q)"
+                                       placeholder="Search staff…"
+                                       autocomplete="off" spellcheck="false"
                                        class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
                             </div>
                         </div>
@@ -3370,10 +3495,17 @@ new class extends Component {
                         </div>
                         @endif
                         <div class="px-3 py-2.5 border-b border-[#ddd3e8] flex-shrink-0">
-                            <div class="relative">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
-                                <input wire:model.live.debounce.300ms="memberSearch" type="text"
+                            <div class="relative" wire:ignore
+                                 x-data="{ q:'', init(){ this.q=$wire.memberSearch??''; $wire.$watch('memberSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"
+                                   wire:loading.class="opacity-0" wire:target="memberSearch"></i>
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 hidden"
+                                      wire:loading.class.remove="hidden" wire:target="memberSearch">
+                                    <span class="org-filter-spinner"><span></span><span></span><span></span></span>
+                                </span>
+                                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('memberSearch',q)"
                                        placeholder="{{ $isCollegeRoom ? 'Search all alumni…' : ($isCourseRoom?'Search all alumni…':'Search alumni…') }}"
+                                       autocomplete="off" spellcheck="false"
                                        class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#ddd3e8] bg-[#fafafa] focus:outline-none focus:border-[#6b2490] focus:ring-1 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"/>
                             </div>
                         </div>
