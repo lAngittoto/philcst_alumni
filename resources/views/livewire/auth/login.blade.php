@@ -901,14 +901,19 @@ new #[Layout('app')] class extends Component {
             the login "stopping" then suddenly jumping to the dashboard.
             Now the loading feel is continuous from click to page change.
 
-            NOTE: no x-cloak / fade-in transition here on purpose — the
-            redirect can fire almost instantly, and a fade-in plus x-cloak
-            was causing the browser to skip painting this overlay
-            entirely before the page navigated away, so it never actually
-            appeared. It now shows immediately and solidly (no transparency)
-            the moment "redirecting" flips true.
+            NOTE: x-cloak here does NOT re-add the fade-in bug — it only
+            forces `display:none` via CSS on the very first paint, before
+            Alpine has finished initializing and evaluating x-show. That
+            gap is exactly what was showing this overlay for a split
+            second on a plain page load or right after logout (redirecting
+            defaults to false, but there's a brief window before Alpine
+            confirms that). Once Alpine finishes init, x-cloak is removed
+            and x-show takes over instantly — the "no fade, shows solidly
+            the instant redirecting flips true" behavior during a real
+            login submit is unchanged.
         --}}
         <div x-show="redirecting"
+             x-cloak
              class="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 rounded-2xl"
              style="background:#7A3F91;">
             <span class="flex gap-1.5">

@@ -2051,7 +2051,7 @@ new class extends Component {
 
         #org-room-list > div { transition: transform .18s ease, opacity .18s ease; }
 
-        .org-bubble { transform-origin: bottom; animation: orgPop .14s ease-out; }
+        .org-bubble { transform-origin: bottom; }
         @keyframes orgPop {
             from { opacity: 0; transform: translateY(6px) scale(.97); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -2115,27 +2115,18 @@ new class extends Component {
         }
 
         /* ── Pin/Unpin tooltip fix ────────────────────────────────────────
-           FIX: previously this tooltip was hard to see / sometimes never
-           appeared. Two things fought each other: (1) the generic
-           .org-tooltip rule hides tooltips entirely below 640px, and
-           (2) even on desktop the Alpine x-show toggled the *wrapper's*
-           inline display:none, which raced against the CSS opacity
-           transition on hover, so the label could flash or stay hidden.
-
-           This override forces the pin tooltip specifically to always be
-           a real, solid, high-contrast block whenever its wrapper is
-           shown (on any screen size), with its own guaranteed background/
-           color/padding — it no longer depends on the shared hover-opacity
-           animation to become legible. ── */
+           Tooltip only appears when hovering the pin BUTTON itself, not
+           whenever the wrapper (button + tooltip) becomes visible on room
+           row hover. Kept the solid/high-contrast styling from before —
+           just gated behind :hover again instead of forced permanently
+           visible, which was showing "Pin to top" the instant the row
+           was hovered (before the button itself was even touched). ── */
         #org-room-list .org-pin-tooltip-wrap {
             z-index: 950;
         }
         #org-room-list .org-pin-tooltip-wrap .org-tooltip {
-            display: block !important;
             position: absolute;
             z-index: 951;
-            opacity: 1 !important;
-            transform: none !important;
             white-space: normal;
             max-width: 140px;
             text-align: center;
@@ -2149,6 +2140,14 @@ new class extends Component {
             letter-spacing: .02em;
             line-height: 1.3;
             pointer-events: none;
+            display: block;
+            opacity: 0;
+            transform: translateY(-2px);
+            transition: opacity .16s ease, transform .16s ease;
+        }
+        #org-room-list .org-pin-tooltip-wrap:hover .org-tooltip {
+            opacity: 1;
+            transform: translateY(0);
         }
 
         #org-chat-header { position: relative; z-index: 10; }

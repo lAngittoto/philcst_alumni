@@ -991,8 +991,7 @@ new class extends Component {
      style="position:fixed;pointer-events:none;z-index:99999;display:none;
             background:#1a1a1a;color:#fff;font-size:10px;font-weight:700;
             letter-spacing:.06em;padding:5px 11px;border-radius:7px;
-            white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.22);
-            transform:translate(14px,-50%);">
+            white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.22);">
 </div>
 
 <style>
@@ -1027,6 +1026,23 @@ new class extends Component {
     .stat-card-self-emp:hover  { border-color: #93c5fd !important; }
     .stat-card-unemployed:hover{ border-color: #fcd34d !important; }
     .stat-card-nofill:hover    { border-color: #d1d5db !important; }
+
+    /* ── Stat cards row stays pinned at the top of the scroll area so
+       they never get scrolled out of view — including when a single
+       Batch Year or a Batch Year range is applied and the page
+       auto-scrolls itself down to #emp-charts-row-1 to confirm the
+       filter took effect (see selectYear()/applyRangeIfComplete() in
+       the Batch Year dropdown below). Without this, that auto-scroll
+       carries the 5 cards (Submitted/Employed/Self-Employed/
+       Unemployed/No Record) up and out of the viewport along with it,
+       which is what looked like the cards "disappearing". Background
+       matches the page's own bg-gray-100 (not the purple panel bg)
+       since this row sits directly on the page background, not inside
+       a white/purple card. z-index sits above the chart cards below
+       it but below the filter bar's dropdown popups (z-index 50/500)
+       and the loading spinner overlay (z-index 20 — fine, spinner
+       should still show through/above during a wire:loading request). ── */
+
 
     /* Location bar fill animation */
     .loc-bar-fill { transition: width .7s cubic-bezier(.4,0,.2,1); }
@@ -1160,6 +1176,17 @@ new class extends Component {
     }
     .ar-dropdown-item:hover { background: #F5F0FA; color: #7A3F91; }
     .ar-dropdown-item.active { background: #F0E6F8; color: #7A3F91; }
+    /* Range picker selected year — solid high-contrast active state
+       (matches Alumni Records' range picker) instead of the light
+       lilac .ar-dropdown-item.active fill, which reads fine in the
+       flat year list but got lost in the tighter, border-radius:0
+       two-column range list. */
+    .ar-range-item.active {
+        background: #7A3F91 !important;
+        color: #ffffff !important;
+        font-weight: 700;
+    }
+    .ar-range-item.active:hover { background: #6B3680 !important; color: #ffffff !important; }
     .ar-dropdown-trigger {
         display: inline-flex; align-items: center; gap: 6px;
         padding: 9px 12px; border: 1.5px solid #E8E0F0; border-radius: 8px;
@@ -1534,34 +1561,19 @@ new class extends Component {
                     selectYear(val){
                         $wire.setSingleBatchYear(val);
                         this.close();
-                        this.$nextTick(() => {
-                            setTimeout(() => {
-                                var target = document.getElementById('emp-charts-row-1');
-                                if (target) {
-                                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }
-                            }, 150);
-                        });
                     },
                     clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
                     startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
                     pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
                     pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
+                    rangeApplyTimer: null,
                     applyRangeIfComplete(){
                         if(this.rangeFrom!=='' && this.rangeTo!==''){
-                            $wire.setBatchRange(this.rangeFrom, this.rangeTo);
-                            this.close();
-                            // auto-scroll down to the charts so the applied
-                            // range is immediately visible instead of the
-                            // user having to scroll manually to confirm it
-                            this.$nextTick(() => {
-                                setTimeout(() => {
-                                    var target = document.getElementById('emp-charts-row-1');
-                                    if (target) {
-                                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    }
-                                }, 150);
-                            });
+                            clearTimeout(this.rangeApplyTimer);
+                            this.rangeApplyTimer = setTimeout(() => {
+                                $wire.setBatchRange(this.rangeFrom, this.rangeTo);
+                                this.close();
+                            }, 200);
                         }
                     }
                  }"
@@ -1618,18 +1630,18 @@ new class extends Component {
                     <template x-if="rangeMode">
                         <div class="p-2" style="width:220px;">
                             <div class="flex items-center gap-2 mb-1">
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">From</span>
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">To</span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
                             </div>
                             <div class="flex items-start gap-2">
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickFrom('{{ $year }}')" :class="{'active':rangeFrom==='{{ $year }}'}" class="ar-dropdown-item" style="border-radius:0;">{{ $year }}</button>
+                                    <button type="button" @click.stop="pickFrom('{{ $year }}')" :class="{'active':rangeFrom==='{{ $year }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickTo('{{ $year }}')" :class="{'active':rangeTo==='{{ $year }}'}" class="ar-dropdown-item" style="border-radius:0;">{{ $year }}</button>
+                                    <button type="button" @click.stop="pickTo('{{ $year }}')" :class="{'active':rangeTo==='{{ $year }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
                             </div>
@@ -1767,8 +1779,15 @@ new class extends Component {
     </div>
 
 <div class="relative flex-1 h-full overflow-y-auto"
+     id="emp-scroll-container"
      style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
-     @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80">
+     @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80; sessionStorage.setItem('emp-scroll-pos', $event.target.scrollTop);"
+     x-init="
+        var savedPos = sessionStorage.getItem('emp-scroll-pos');
+        if (savedPos !== null) {
+            setTimeout(() => { $el.scrollTop = parseInt(savedPos, 10); }, 100);
+        }
+     ">
 
 <div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
      wire:loading.class="opacity-40 pointer-events-none" wire:target="toggleFilterCourse,clearFilterCourse,selectAllFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange" style="transition:opacity .2s ease;">
@@ -1793,7 +1812,7 @@ new class extends Component {
             ['no_record'    , $totalNotFilled, 'fa-circle-question'   , 'bg-gray-100'   , 'text-[#333333]'  , 'stat-card-nofill'    , 'No Record'     , $nfRate.'% of total alumni'],
         ];
     @endphp
-    <div class="stat-cards-grid flex gap-3 flex-wrap xl:flex-nowrap">
+    <div id="stat-cards-row" class="stat-cards-grid flex gap-3 flex-wrap xl:flex-nowrap">
         @foreach($statCards as [$filter, $count, $icon, $iconBg, $iconColor, $hoverClass, $label, $rate])
         @php
             // "Submitted" doesn't map to a single employment_status on the
@@ -1859,11 +1878,12 @@ new class extends Component {
     {{-- ── CHARTS ROW 1 ── --}}
     <div id="emp-charts-row-1" class="charts-row-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" style="height:300px;">
 
-        {{-- Status Donut --}}
-        <div onclick="empOpenModal('','',null)"
-             data-tip="View All Employment Records"
-             class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                    transition-all cursor-pointer flex flex-col overflow-hidden">
+        {{-- Status Donut — not clickable (no dedicated "all statuses" filter
+             view to open), so no onclick/data-tip/cursor-pointer here.
+             Chart.js's own built-in hover tooltip on the donut slices
+             still works as-is (separate mechanism, untouched). --}}
+        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm
+                    flex flex-col overflow-hidden">
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-[#10b981] shrink-0"></span>
                 <div class="flex flex-col min-w-0">
@@ -2929,19 +2949,33 @@ new class extends Component {
                 ? text
                 : '<i class="fas fa-eye" style="font-size:.6rem;margin-right:5px;"></i>' + text;
             tip.style.display = 'block';
-            moveTip(e);
+            moveTip(e, el);
         }
 
-        function moveTip(e) {
+        function moveTip(e, el) {
             if (!isHoverCapable()) return;
-            var x = e.clientX;
-            var y = e.clientY;
             var tw = tip.offsetWidth;
+            var th = tip.offsetHeight;
             var vw = window.innerWidth;
-            var left = x + 14;
-            if (left + tw > vw - 8) left = x - tw - 14;
+
+            var card = el ? el.closest('.stat-card') : null;
+
+            if (card) {
+                var rect = card.getBoundingClientRect();
+                var left = rect.left + (rect.width / 2) - (tw / 2);
+                if (left < 8) left = 8;
+                if (left + tw > vw - 8) left = vw - tw - 8;
+                tip.style.left = left + 'px';
+                tip.style.top  = (rect.top - th - 8) + 'px';
+                return;
+            }
+
+            var x  = e.clientX;
+            var left = x - (tw / 2);
+            if (left < 8) left = 8;
+            if (left + tw > vw - 8) left = vw - tw - 8;
             tip.style.left = left + 'px';
-            tip.style.top  = y + 'px';
+            tip.style.top  = '12px';
         }
 
         function hideTip() {
@@ -2976,7 +3010,7 @@ new class extends Component {
                 hideTip();
                 return;
             }
-            if (currentTarget) moveTip(e);
+            if (currentTarget) moveTip(e, currentTarget);
         }, true);
 
         document.addEventListener('mouseout', function(e) {
@@ -3076,7 +3110,9 @@ new class extends Component {
         });
     }
 
-    function buildDonut(id, data) {
+    function buildDonut(id, data, opts) {
+        opts = opts || {};
+        var clickable = opts.clickable !== false;
         if (!data || !data.labels) return;
         var canvas = document.getElementById(id);
         if (!canvas) return;
@@ -3157,6 +3193,7 @@ new class extends Component {
                     },
                 },
                 onClick: function(event, elements) {
+                    if (!clickable) return;
                     if (event && event.native) event.native.stopPropagation();
                     if (!elements || !elements.length) return;
                     var idx    = elements[0].index;
@@ -3475,7 +3512,7 @@ new class extends Component {
             }
         }
 
-        buildDonut('chartStatus',    d.status);
+        buildDonut('chartStatus',    d.status, { clickable: false });
         buildDonut('chartRelevance', d.relevance);
         buildBatchBar(allBatchData, batchPageIndex);
         buildTrendLine(allTrendData, trendPageIndex);

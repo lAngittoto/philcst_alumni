@@ -15,14 +15,17 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 class EmploymentTrackingExportController extends Controller
 {
     /**
-     * GET /registrar/employment-tracking/export?type=pdf|excel|print&program=&batch=
+     * GET /registrar/employment-tracking/export?type=pdf|excel|print&program=&batch_from=&batch_to=
      *
      * IMPORTANT: this mirrors the dashboard SCOPE, not the drill-down
      * modal. The Generate Reports button only ever sends `type`,
-     * `program`, and `batch` (see the empReport Alpine store's
+     * `program` (comma-separated when multiple are selected), and
+     * `batch_from`/`batch_to` (see the empReport Alpine store's
      * doExport()) — whatever Program/Batch Year filter is active up
-     * top in the dashboard. There is no `filter`/`course` param coming
-     * in from that button, so getFilteredRecords() must not depend on
+     * top in the dashboard. Batch is all-or-nothing: the button only
+     * sends both batch_from and batch_to when a full range is applied,
+     * never just one. There is no `filter`/`course` param coming in
+     * from that button, so getFilteredRecords() must not depend on
      * those — it needs to return the SAME population as the
      * dashboard's own computeStats() (every alumnus in scope, LEFT
      * JOINed to their latest employment record so "No Record" alumni
@@ -272,17 +275,30 @@ class EmploymentTrackingExportController extends Controller
      * Human-readable scope text — reflects EXACTLY the Program / Batch
      * Year filter active on the dashboard when Generate Reports was
      * clicked (mirrors activeReportFilterSummary() in the Volt
-     * component). No more "filter"/"course" params — those belonged to
-     * the old per-segment modal export, which this button doesn't use.
+     * component). Program is comma-separated when multiple are
+     * selected (multi-select filter); Batch is a from/to range sent as
+     * batch_from/batch_to, all-or-nothing — the frontend only ever
+     * sends both or neither, so a single leftover value here is
+     * treated as "no batch filter" rather than guessed at.
      */
     private function filterSummary(Request $request): string
     {
-        $program = trim((string) $request->query('program', ''));
-        $batch   = trim((string) $request->query('batch', ''));
+        $program   = trim((string) $request->query('program', ''));
+        $batchFrom = trim((string) $request->query('batch_from', ''));
+        $batchTo   = trim((string) $request->query('batch_to', ''));
 
         $parts = [];
-        if ($program !== '') $parts[] = $program;
-        if ($batch !== '')   $parts[] = 'Batch ' . $batch;
+        if ($program !== '') {
+            $programs = array_filter(array_map('trim', explode(',', $program)));
+            if (count($programs) > 0) {
+                $parts[] = implode(', ', $programs);
+            }
+        }
+        if ($batchFrom !== '' && $batchTo !== '') {
+            $parts[] = $batchFrom === $batchTo
+                ? 'Batch ' . $batchFrom
+                : 'Batch ' . $batchFrom . '–' . $batchTo;
+        }
 
         return count($parts) ? implode(' · ', $parts) : 'All Programs · All Batch Years';
     }
@@ -295,12 +311,22 @@ class EmploymentTrackingExportController extends Controller
             ->groupBy('et_inner.alumni_id');
     }
 
-    private function baseAlumniQuery(string $program, string $batch)
+    /**
+     * Program filter is multi-select on the dashboard (comma-separated
+     * course codes); Batch is a from/to range sent as
+     * batch_from/batch_to. Both from/to must be present for the range
+     * to apply — matches the frontend, which only ever sends both or
+     * neither (never a half-picked range).
+     */
+    private function baseAlumniQuery(array $programs, string $batchFrom, string $batchTo)
     {
         $q = DB::table('alumni as a')->whereNull('a.deleted_at');
 
-        if ($program !== '') $q->where('a.course_code', $program);
-        if ($batch !== '')   $q->where('a.batch', $batch);
+        if (count($programs) > 0) $q->whereIn('a.course_code', $programs);
+        if ($batchFrom !== '' && $batchTo !== '') {
+            [$lo, $hi] = $batchFrom <= $batchTo ? [$batchFrom, $batchTo] : [$batchTo, $batchFrom];
+            $q->whereBetween('a.batch', [$lo, $hi]);
+        }
 
         return $q;
     }
@@ -316,10 +342,15 @@ class EmploymentTrackingExportController extends Controller
      */
     private function getFilteredRecords(Request $request)
     {
-        $program = trim((string) $request->query('program', ''));
-        $batch   = trim((string) $request->query('batch', ''));
+        $programParam = trim((string) $request->query('program', ''));
+        $programs     = $programParam !== ''
+            ? array_values(array_filter(array_map('trim', explode(',', $programParam))))
+            : [];
 
-        return $this->baseAlumniQuery($program, $batch)
+        $batchFrom = trim((string) $request->query('batch_from', ''));
+        $batchTo   = trim((string) $request->query('batch_to', ''));
+
+        return $this->baseAlumniQuery($programs, $batchFrom, $batchTo)
             ->leftJoinSub($this->latestEmpSubquery(), 'latest_et', fn($j) => $j->on('a.id', '=', 'latest_et.alumni_id'))
             ->leftJoin('employment_trackings as et', fn($j) => $j->on('et.id', '=', 'latest_et.max_id')->whereNull('et.deleted_at'))
             ->select([
