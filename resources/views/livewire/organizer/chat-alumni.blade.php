@@ -93,27 +93,32 @@ new class extends Component {
     // ── Online presence timeout (minutes) — 1 min = offline ──────────────
     private int $onlineMinutes = 1;
 
-    // ── Profanity filter (English + Tagalog) — mirrors the alumni-side
-    //    messenger filter word-for-word so coordinator messages get the
-    //    same censoring instead of bypassing it entirely. ──────────────────
+    // ── Profanity filter (English + Tagalog + Pangasinan) — mirrors the
+    //    alumni-side messenger filter word-for-word so coordinator messages
+    //    get the same censoring instead of bypassing it entirely. There is
+    //    no "report chat" feature in this system, so this filter is the
+    //    ONLY line of defense against foul language — it runs on every
+    //    send/edit rather than relying on after-the-fact moderation. ──────
     private static array $bannedWords = [
         // English
-        'fuck', 'fucking', 'fucker', 'fck', 'motherfucker',
-        'shit', 'shitty', 'bullshit',
-        'bitch', 'bitches',
-        'asshole', 'ass',
-        'dick', 'cock', 'pussy', 'cunt',
-        'bastard', 'slut', 'whore',
+        'fuck', 'fucking', 'fucker', 'fck', 'motherfucker', 'motherfucking',
+        'shit', 'shitty', 'bullshit', 'shithead',
+        'bitch', 'bitches', 'bitchy',
+        'asshole', 'ass', 'jackass',
+        'dick', 'dickhead', 'cock', 'pussy', 'cunt',
+        'bastard', 'slut', 'whore', 'hoe',
         'nigger', 'nigga',
         'retard', 'retarded',
+        'douche', 'douchebag',
+        'wanker', 'twat', 'prick',
         // Tagalog
-        'putangina', 'putang ina', 'putanginamo', 'putanginamu',
+        'putangina', 'putang ina', 'putanginamo', 'putanginamu', 'puta',
         'tangina', 'tanginamo', 'tang ina',
         'gago', 'gaga', 'gagu',
         'ulol', 'ulul',
         'bobo', 'boba',
         'tarantado', 'tarantada',
-        'hayop', 'hayup',
+        'hayop', 'hayup', 'hayop ka',
         'leche', 'lecheng',
         'punyeta', 'punyeta ka',
         'peste', 'pesteng',
@@ -123,8 +128,32 @@ new class extends Component {
         'pakyu',
         'pucha', 'puchang',
         'yawa',
+        'inutil',
+        'demonyo', 'demonyo ka',
+        'lintik', 'lintik ka',
+        'kupal',
+        'ungas',
+        'jabidah',
+        'burat',
+        'iyot', 'kantot', 'kantotan',
+        'titi', 'puke', 'pekpek',
+        'tite', 'etits',
+        'malandi', 'malibog',
         // Pangasinan
         'baoninam', 'putang inam',
+        'satanas', 'satanas ka',
+        'kabastusan',
+        'aroba', 'arobam',
+        'anak na puta',
+        'ukininam', 'kininam', 'ukinam',
+        'tarugsi', 'tarugsi ka',
+        'olyanan', 'olyanan mo',
+        'gademon', 'gademit',
+        'sinmot', 'inmot',
+        'yawa ka', 'yawan mo',
+        'anak ti puta',
+        'lastog', 'lastog mo',
+        'ukinnam', 'ukinnac',
     ];
 
     private static function filterProfanity(string $text): string
@@ -240,9 +269,24 @@ new class extends Component {
 
     /**
      * ── Builds the "View Event" deep-link URL ───────────────────────────────
+     *    ADMIN events are alumni-facing announcements, so they still link to
+     *    the alumni Upcoming Events page. ORGANIZER events are events THIS
+     *    coordinator (or a colleague) manages, so "View Event" on that card
+     *    should land the coordinator on their own Event Management table —
+     *    not the alumni page — with ?highlight_event=ID so the row auto-opens
+     *    View Details instead of just scrolling the table into view.
      */
     private function eventsUrl(int $id, string $type = 'ADMIN'): string
     {
+        if ($type === 'ORGANIZER') {
+            try {
+                $path = route('organizer.event/organizer', [], false);
+            } catch (\Throwable) {
+                $path = '/coordinator/event/management';
+            }
+            return $path . '?highlight_event=' . $id;
+        }
+
         try {
             $path = route('upcoming.events', [], false);
         } catch (\Throwable) {
@@ -1393,13 +1437,14 @@ new class extends Component {
 
         $this->refreshOnlineCount();
 
-        if ($isStaff) {
-            $this->loadStaffMembers();
-        } else {
-            $this->loadAlumni();
-            $this->loadCoordinators();
-        }
-
+        // NOTE: loadAlumni() / loadCoordinators() / loadStaffMembers() are
+        // intentionally NOT called here anymore. They fetch + map the
+        // FULL roster for the room (up to 100+ rows, each resolving a
+        // photo URL) — real work that's only needed once the Members
+        // panel is actually opened. toggleMembers() already loads them
+        // lazily on demand, so calling them here too was pure duplicate
+        // work blocking every single room switch. This was the main
+        // cause of "matagal mag-open ng messages".
         $this->loadTypingIndicators();
 
         // Update just THIS room's active/unread flags locally instead of
@@ -1561,11 +1606,23 @@ new class extends Component {
     {
         if (! $this->roomId) return;
 
+        // PERFORMANCE FIX: this used to fetch the room's ENTIRE message
+        // history with no limit — on an older/busier room (staff chat,
+        // a big college GC, etc.) that can be thousands of rows getting
+        // fetched + mapped on every single room open, which is the main
+        // reason opening a chat felt slow. Now it grabs only the most
+        // recent 100 (fetched newest-first so the LIMIT actually keeps
+        // the recent ones, then flipped back to chronological order for
+        // display) — same behavior any normal chat app uses; older
+        // messages can be loaded on scroll-up later if needed.
         $rows = DB::table('chat_messages as m')
             ->where('m.room_id', $this->roomId)
             ->whereNull('m.deleted_at')
-            ->orderBy('m.created_at')
+            ->orderByDesc('m.created_at')
+            ->limit(100)
             ->get(['m.id','m.sender_type','m.sender_id','m.body','m.reply_to_id','m.edited_at','m.created_at'])
+            ->reverse()
+            ->values()
             ->toArray();
 
         $aIds = collect($rows)->where('sender_type', 'alumni')->pluck('sender_id')->unique();
@@ -1808,7 +1865,7 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function react(int $msgId, string $reaction): void
     {
-        if (! in_array($reaction, ['heart','purple','like','dislike'], true)) return;
+        if (! in_array($reaction, ['heart','purple','like','dislike','happy','sad'], true)) return;
         $existing = DB::table('chat_reactions')->where('message_id',$msgId)->where('reactor_type','organizer')->where('reactor_id',$this->coordinatorId)->first();
         if ($existing) {
             $existing->reaction === $reaction
@@ -2033,7 +2090,14 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     // @mention autocomplete
     // ─────────────────────────────────────────────────────────────────────
-    public function updatedBody(string $value): void
+    // NOTE: body is now a DEFERRED wire:model (no network call per
+    // keystroke — huge perf win + fixes the Enter-to-send race where the
+    // server-side $body hadn't synced yet when sendMessage() fired).
+    // Because of that, Livewire's automatic updatedBody() hook no longer
+    // reliably runs per keystroke, so @mention detection is now triggered
+    // explicitly from the client (only when "@" is actually being typed,
+    // debounced) via checkMentions() below instead.
+    public function checkMentions(string $value): void
     {
         if (preg_match('/@(\w*)$/', $value, $m)) {
             $q = $m[1];
@@ -2072,6 +2136,12 @@ new class extends Component {
         } else {
             $this->showMentions = false; $this->mentionSuggestions = [];
         }
+    }
+
+    public function closeMentions(): void
+    {
+        $this->showMentions = false;
+        $this->mentionSuggestions = [];
     }
 
     public function selectMention(string $name): void
@@ -2170,6 +2240,16 @@ new class extends Component {
         }
         .org-bubble-loading .org-bubble-spinner { display: flex; }
         .org-bubble-loading { opacity: .85; }
+
+        /* ── Inset variant — used inside overflow:hidden containers (e.g.
+             the shared job/event post card) where the default -8px
+             overflow position would get clipped. Sits just inside the
+             top-right corner instead. ── */
+        .org-bubble-spinner-inset {
+            top: 8px;
+            right: 8px;
+            z-index: 5;
+        }
 
         /* ── Smooth message entrance — new/rendered messages ease in
              instead of popping in abruptly ── */
@@ -2294,38 +2374,47 @@ new class extends Component {
         .org-reactions-popup-list::-webkit-scrollbar-thumb { background: #c9aee0; border-radius: 999px; }
         .org-reactions-popup-list::-webkit-scrollbar-thumb:hover { background: #ad8ac7; }
 
-        /* ── Scroll-to-top / scroll-to-bottom floating nav ──────────────── */
+        /* ── Scroll-to-top / scroll-to-bottom floating nav — matches
+             Alumni Messenger's msgr-scroll-nav design exactly (lighter
+             36px button, thin border, softer shadow, no wire:ignore so
+             it never desyncs from Livewire's own re-renders). Centered
+             horizontally in the message column via left:50% +
+             translateX(-50%) on the container itself, so it stays
+             dead-center regardless of which single button (up/down) is
+             visible at a given moment. ── */
         .org-scroll-nav {
             position: absolute;
             left: 50%;
+            right: auto;
+            top: auto;
+            bottom: 14px;
             transform: translateX(-50%);
-            bottom: 18px;
             display: flex;
-            gap: 10px;
+            width: max-content;
+            gap: 8px;
             z-index: 50;
             pointer-events: none;
         }
         .org-scroll-nav .org-scroll-btn { pointer-events: auto; }
         .org-scroll-btn {
-            width: 44px;
-            height: 44px;
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
             background: #ffffff;
-            border: 2px solid #6b2490;
+            border: 1px solid #ddd3e8;
             color: #6b2490;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 15px;
-            box-shadow: 0 4px 16px rgba(107,36,144,.30);
+            font-size: 12px;
+            box-shadow: 0 2px 10px rgba(107,36,144,.20);
             cursor: pointer;
             transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
         }
         .org-scroll-btn:hover {
-            background: #6b2490;
-            color: #ffffff;
+            background: #f3eef8;
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(107,36,144,.38);
+            box-shadow: 0 4px 14px rgba(107,36,144,.28);
         }
         .org-scroll-btn:active { transform: translateY(0) scale(.94); }
 
@@ -2382,6 +2471,26 @@ new class extends Component {
         }
         .org-room-fade {
             animation: orgFadeUp .16s ease-out both;
+        }
+
+        /* ── Active room glow — makes the currently-open chat unmistakable
+             in the sidebar (soft purple glow + a solid accent bar on the
+             left edge), on top of the existing bg/border/bold-text state. ── */
+        @keyframes orgActiveGlow {
+            0%, 100% { box-shadow: 0 0 0 1px rgba(107,36,144,.18), 0 2px 10px rgba(107,36,144,.16); }
+            50%      { box-shadow: 0 0 0 1px rgba(107,36,144,.30), 0 4px 16px rgba(107,36,144,.30); }
+        }
+        .org-room-active {
+            animation: orgActiveGlow 2.2s ease-in-out infinite;
+            position: relative;
+        }
+        .org-room-active::before {
+            content: '';
+            position: absolute;
+            left: -1px; top: 8px; bottom: 8px;
+            width: 3px;
+            border-radius: 3px;
+            background: linear-gradient(180deg,#8b35b8,#6b2490);
         }
 
         @media (max-width: 768px) {
@@ -2547,44 +2656,11 @@ new class extends Component {
         .org-bubble-bg > * { position: relative; z-index: 1; }
 
         #org-chat-body-wrap { position: relative; }
-        .org-watermark {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            pointer-events: none;
-            z-index: 0;
-            user-select: none;
-            padding: 0 8%;
-        }
-        .org-watermark span {
-            font-size: clamp(48px, 11vw, 140px);
-            font-weight: 900;
-            color: #6b2490;
-            opacity: 0.07;
-            letter-spacing: .04em;
-            white-space: normal;
-            text-align: center;
-            transform: rotate(-6deg);
-            line-height: 1.15;
-            max-width: 90%;
-        }
         #msg-list { position: relative; z-index: 1; background: transparent; }
     </style>
 
     @php
         $defaultAv = asset('storage/alumni-photos/default.png');
-
-        $watermarkText = '';
-        if ($isStaffRoom) {
-            $watermarkText = 'STAFF';
-        } elseif ($isCollegeRoom) {
-            $watermarkText = mb_strtoupper(trim($department));
-        } elseif ($isCourseRoom || (! $isStaffRoom && $room)) {
-            $watermarkText = strtoupper($room['course_code'] ?? '');
-        }
     @endphp
 
     {{-- ══════════════════════════════════════════════════════════════════
@@ -2669,7 +2745,7 @@ new class extends Component {
                         wire:loading.class="opacity-70"
                         wire:target="selectRoom({{ $r['id'] }})"
                         class="w-full text-left rounded-xl px-3 py-3 transition-all border cursor-pointer
-                               @if($isActive)      border-[#c49bdb] bg-[#f2e8f9]
+                               @if($isActive)      org-room-active border-[#c49bdb] bg-[#f2e8f9]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
                                @else               border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa] @endif">
 
@@ -2704,6 +2780,11 @@ new class extends Component {
                                     @endif
                                 </p>
                                 <div class="flex items-center gap-1 flex-shrink-0">
+                                    @if($isActive)
+                                    <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-white px-1.5 py-0.5 rounded-full flex-shrink-0" style="background:#6b2490;">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-white flex-shrink-0" style="animation: orgFadeUp .16s ease-out both;"></span>Open
+                                    </span>
+                                    @endif
                                     @if($hasUnread && ! $isActive)
                                     <span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 animate-pulse"></span>
                                     @endif
@@ -2725,7 +2806,6 @@ new class extends Component {
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} members</span>
                                 @else
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-graduation-cap text-[9px] mr-0.5"></i>Batch {{ $r['batch'] }}</span>
-                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ strtoupper($r['course_code']) }}</span>
                                 @endif
                             </div>
 
@@ -2887,12 +2967,6 @@ new class extends Component {
 
                     <div class="org-bubble-layer" aria-hidden="true"></div>
 
-                    @if($watermarkText !== '')
-                    <div class="org-watermark" aria-hidden="true">
-                        <span>{{ $watermarkText }}</span>
-                    </div>
-                    @endif
-
                     <div id="msg-list"
                          class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
                          x-init="lastTop = $el.scrollTop; $el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
@@ -3019,7 +3093,11 @@ new class extends Component {
                                             $ppCompleted = $ppIsEvent && ($pp['is_completed'] ?? false);
                                         @endphp
                                         <div wire:click.stop="toggleToolbar({{ $msg['id'] }})"
-                                             class="msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
+                                             wire:loading.class="org-bubble-loading" wire:target="toggleToolbar({{ $msg['id'] }})"
+                                             class="msgr-post-card cursor-pointer relative {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
+                                            <span class="org-bubble-spinner org-bubble-spinner-inset" wire:loading wire:target="toggleToolbar({{ $msg['id'] }})">
+                                                <i class="fa-solid fa-spinner fa-spin"></i>
+                                            </span>
                                             <div class="msgr-post-thumb">
                                                 @if($ppAvailable)
                                                     @if(! empty($pp['image']))
@@ -3061,8 +3139,14 @@ new class extends Component {
                                                 @if($ppAvailable)
                                                 <div class="msgr-post-thumb-overlay">
                                                     <a href="{{ $pp['url'] }}" wire:navigate @click.stop
-                                                       class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#4a1863] text-xs font-bold shadow-md inline-flex items-center gap-1.5">
-                                                        <i class="fa-solid fa-eye"></i>View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}
+                                                       x-data="{ going: false }"
+                                                       @click="going = true"
+                                                       @livewire:navigate.window="going = false"
+                                                       class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#4a1863] text-xs font-bold shadow-md inline-flex items-center gap-1.5"
+                                                       :class="{ 'opacity-70 pointer-events-none': going }">
+                                                        <i class="fa-solid fa-spinner fa-spin" x-show="going" style="display:none;"></i>
+                                                        <i class="fa-solid fa-eye" x-show="!going"></i>
+                                                        <span x-text="going ? 'Opening…' : 'View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}'"></span>
                                                     </a>
                                                 </div>
                                                 @endif
@@ -3101,22 +3185,28 @@ new class extends Component {
                                         </button>
                                         @endif
 
-                                        {{-- Action toolbar --}}
+                                        {{-- Action toolbar — redesigned to match Alumni Messenger's
+                                             msgr-reaction-toolbar: no border (cleaner shadow-only
+                                             card), single fixed row (no flex-wrap, so the toolbar's
+                                             height never changes and nothing beneath it shifts),
+                                             6 reactions instead of 4, and each tooltip wrap gets its
+                                             own x-data scope so hover state never leaks between
+                                             buttons. --}}
                                         @if($toolbarOpen)
                                         <div class="org-reaction-toolbar absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }}
-                                                    flex flex-wrap items-center gap-0.5 bg-white border border-[#ddd3e8] rounded-2xl px-2 py-1.5 shadow-xl whitespace-nowrap animate-[orgPop_.14s_ease-out]"
-                                             @click.stop>
-                                            @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎'] as $rk=>$re)
-                                            <div class="relative org-tooltip-wrap">
+                                                    flex items-center gap-0.5 bg-white rounded-2xl px-2 py-1.5 shadow-xl whitespace-nowrap animate-[orgPop_.14s_ease-out]"
+                                             x-data @click.stop>
+                                            @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'] as $rk=>$re)
+                                            <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="react({{ $msg['id'] }},'{{ $rk }}')"
                                                         class="w-9 h-9 flex items-center justify-center rounded-xl text-xl leading-none transition-all duration-150 cursor-pointer hover:scale-125 active:scale-110 {{ $msg['my_reaction']===$rk?'bg-[#f2e8f9] ring-2 ring-[#6b2490]':'hover:bg-[#f9f5fd]' }}">{{ $re }}</button>
                                                 <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">{{ ucfirst($rk) }}</span>
                                             </div>
                                             @endforeach
 
-                                            <span class="w-px h-5 bg-[#ddd3e8] mx-0.5 flex-shrink-0"></span>
+                                            <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
-                                            <div class="relative org-tooltip-wrap">
+                                            <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="setReply({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer hover:bg-[#f2e8f9] hover:text-[#6b2490] transition-all duration-150">
                                                     <i class="fa-solid fa-reply text-xs"></i>
@@ -3124,7 +3214,7 @@ new class extends Component {
                                                 <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Reply</span>
                                             </div>
 
-                                            <div class="relative org-tooltip-wrap">
+                                            <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="togglePin({{ $msg['id'] }})"
                                                         @if(! $canTogglePin) disabled @endif
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-150
@@ -3139,9 +3229,9 @@ new class extends Component {
                                             </div>
 
                                             @if($msg['is_mine'])
-                                            <span class="w-px h-5 bg-[#ddd3e8] mx-0.5 flex-shrink-0"></span>
+                                            <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
-                                            <div class="relative org-tooltip-wrap">
+                                            <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="startEdit({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer hover:bg-[#f2e8f9] hover:text-[#6b2490] transition-all duration-150">
                                                     <i class="fa-solid fa-pen text-xs"></i>
@@ -3149,7 +3239,7 @@ new class extends Component {
                                                 <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Edit</span>
                                             </div>
 
-                                            <div class="relative org-tooltip-wrap">
+                                            <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="askDeleteConfirmation({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer hover:bg-red-50 hover:text-red-600 transition-all duration-150">
                                                     <i class="fa-solid fa-trash-can text-xs"></i>
@@ -3168,7 +3258,7 @@ new class extends Component {
                                                 <button wire:click="closeReactionsPopup" class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer"><i class="fa-solid fa-xmark text-xs"></i></button>
                                             </div>
                                             <div class="org-reactions-popup-list">
-                                                @php $emojiMap=['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
+                                                @php $emojiMap=['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢']; @endphp
                                                 @foreach($reactionsPopupData as $rKey=>$rGroup)
                                                 <div class="px-3.5 py-2 border-b border-[#ddd3e8] last:border-0">
                                                     <div class="flex items-center gap-1.5 mb-1.5">
@@ -3237,10 +3327,18 @@ new class extends Component {
                         <div class="h-10"></div>
                     </div>
 
-                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav ───────────────
-                         wire:ignore.self keeps Livewire's poll-driven morph from
-                         touching this node mid Alpine transition. --}}
-                    <div class="org-scroll-nav" wire:ignore.self>
+                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav (matches
+                         Alumni Messenger's design/behavior) — centered at the
+                         bottom of the thread, not pinned to a side. scrollDir
+                         comes from the shared x-data scope on
+                         #org-chat-body-wrap above, so this shows an up-arrow
+                         while actively scrolling up, a down-arrow while
+                         scrolling down, and fades out shortly after you stop
+                         moving. No wire:ignore here (matches the working
+                         Alumni Messenger reference) so it never desyncs from
+                         Livewire's own re-renders, which was causing it to
+                         appear to "jump" position. --}}
+                    <div class="org-scroll-nav">
                         <button type="button" class="org-scroll-btn"
                                 x-show="scrollDir === 'up'"
                                 x-transition:enter="transition ease-out duration-150"
@@ -3330,11 +3428,22 @@ new class extends Component {
                     <div class="flex items-end gap-2">
                         <div class="flex-1 relative">
                             <textarea id="chat-input"
-                                wire:model.live.debounce.200ms="body"
+                                wire:model="body"
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? '')))) }}… (@ to mention)"
                                 rows="1"
-                                @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.sendMessage();}"
+                                x-data="{
+                                    _mTimer: null,
+                                    checkMention(el){
+                                        clearTimeout(this._mTimer);
+                                        this._mTimer = setTimeout(() => {
+                                            if (/@(\w*)$/.test(el.value)) { $wire.body = el.value; $wire.checkMentions(el.value); }
+                                            else if ($wire.showMentions) { $wire.body = el.value; $wire.closeMentions(); }
+                                        }, 180);
+                                    }
+                                }"
+                                @input="checkMention($el)"
+                                @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.body=$el.value;$wire.sendMessage();}"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
                                 class="w-full resize-none rounded-xl border-2 border-[#6b2490]/40 bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"

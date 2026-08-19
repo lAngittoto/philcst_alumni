@@ -110,6 +110,23 @@ new class extends Component {
             $this->autoRejectExpiredPendingEvents();
             $this->autoCompleteExpiredEvents();
         }
+
+        // ── Deep-link: arriving from a "View Event" card shared in chat ────
+        //    (organizer/chat-alumni.blade.php's [[EVENT:ORGANIZER:id]]
+        //    preview card links here with ?highlight_event=ID). Previously
+        //    this just landed on the plain table — the coordinator still
+        //    had to find and click the right row themselves. Now, if the
+        //    ID is valid and belongs to this coordinator, View Details
+        //    opens automatically for that exact event, same as clicking it.
+        $highlightId = (int) request()->query('highlight_event', 0);
+        if ($highlightId > 0) {
+            $owned = OrganizerEvent::where('id', $highlightId)
+                ->where('organizer_id', $orgId)
+                ->exists();
+            if ($owned) {
+                $this->viewEvent($highlightId);
+            }
+        }
     }
 
     // ── Auto-ops: NO event-management-updated dispatch (no notif for auto events) ──
@@ -3219,6 +3236,18 @@ select.tw-select-arrow {
 
     bindRows();
     document.addEventListener('livewire:updated', bindRows);
+})();
+
+// ── Deep-link cleanup: strip ?highlight_event=ID from the address bar
+//    once mount() has already consumed it to auto-open View Details.
+//    Without this, refreshing the page (or hitting Back later) would
+//    keep re-opening the same event's modal every time. ─────────────────
+(function () {
+    var url = new URL(window.location.href);
+    if (url.searchParams.has('highlight_event')) {
+        url.searchParams.delete('highlight_event');
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    }
 })();
 </script>
 
