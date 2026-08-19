@@ -3,6 +3,7 @@
 <?php
 
 use Livewire\Volt\Component;
+use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
 use Illuminate\Support\Facades\DB;
 
@@ -11,6 +12,13 @@ new class extends Component {
     use WithPagination;
 
     protected string $paginationTheme = 'tailwind';
+
+    // Keeps ?page= (and every other tracked prop) OUT of the URL — a
+    // plain page refresh/link should always be the clean
+    // /coordinator/alumni/employment, never
+    // /coordinator/alumni/employment?page=1. Mirrors Alumni Records'
+    // queryString() override.
+    protected function queryString(): array { return []; }
 
     public string $search          = '';
 
@@ -53,18 +61,6 @@ new class extends Component {
 
     public bool  $showModal = false;
     public array $modalData = [];
-
-    // ── Compare Tool state ────────────────────────────────────────────────
-    public bool   $showCompareModal = false;
-    public string $compareCourseA   = '';
-    public string $compareBatchA    = '';
-    public string $compareCourseB   = '';
-    public string $compareBatchB    = '';
-    public array  $compareResultA   = [];
-    public array  $compareResultB   = [];
-    public string $compareInsight   = '';
-    public bool   $compareRan       = false;
-    public string $compareError     = '';
 
     // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
@@ -167,6 +163,67 @@ new class extends Component {
             ->whereIn('et.employment_status', ['employed', 'self_employed'])
             ->where('et.course_relevance', 'no')
             ->count();
+    }
+
+    /** Human-readable summary of whatever filters are currently active,
+     *  shown inside the Generate Reports dropdown ("Report will
+     *  include…") — mirrors activeFilterSummary() in Alumni Records. */
+    #[Computed]
+    public function activeFilterSummary(): string
+    {
+        $parts = [];
+
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $parts[] = $this->filterBatchFrom === $this->filterBatchTo
+                ? 'Batch ' . $this->filterBatchFrom
+                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo;
+        }
+        if (!empty($this->filterCourses)) {
+            $parts[] = implode(', ', $this->filterCourses);
+        }
+        if (!empty($this->filterStatuses)) {
+            $labels = [
+                'employed'      => 'Employed',
+                'self_employed' => 'Self-Employed',
+                'unemployed'    => 'Unemployed',
+                'not_filled'    => 'Not Filled',
+            ];
+            $parts[] = implode(', ', array_map(fn($s) => $labels[$s] ?? $s, $this->filterStatuses));
+        }
+        if ($this->search !== '') {
+            $parts[] = 'Search: "' . $this->search . '"';
+        }
+
+        return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
+    }
+
+    /** Count of records matching the currently-applied filters — shown
+     *  next to the summary text in the Generate Reports dropdown. Uses
+     *  the same scoping/filters as baseAlumniQuery() so the number the
+     *  organizer sees before exporting always matches the export. */
+    #[Computed]
+    public function activeFilterCount(): int
+    {
+        return (clone $this->baseAlumniQuery())->count();
+    }
+
+    /** Wraps every occurrence of the current search term in a <mark> tag
+     *  so it lights up light-blue in the table — mirrors highlight() in
+     *  Alumni Records. Returns the text HTML-escaped either way, so this
+     *  is always safe to output with {!! !!}. */
+    public function highlight(?string $text, string $search): string
+    {
+        $text = $text ?? '';
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="ae-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
     }
 
     // ── called by JS polling every 15s to check for new emp updates ──────
@@ -601,207 +658,6 @@ new class extends Component {
         $this->dispatch('open-sidebar');
     }
 
-    // ── Compare Tool: opens the modal ─────────────────────────────────────
-    public function openCompareModal(): void
-    {
-        $this->showCompareModal = true;
-        $this->compareRan       = false;
-        $this->compareResultA   = [];
-        $this->compareResultB   = [];
-        $this->compareInsight   = '';
-        $this->compareError     = '';
-        $this->dispatch('close-sidebar');
-    }
-
-    // ── Compare Tool: when a Program is picked/changed, the Batch dropdown
-    // for that same group should only ever show batches that actually
-    // exist for that program (instead of every batch in the system). If
-    // the previously selected batch doesn't exist for the newly picked
-    // program, it gets cleared automatically so an invalid combo can't
-    // linger in the form.
-    public function updatedCompareCourseA(): void
-    {
-        if ($this->compareBatchA !== '' && !in_array($this->compareBatchA, $this->batchesForCourse($this->compareCourseA))) {
-            $this->compareBatchA = '';
-        }
-        $this->compareError = '';
-    }
-
-    public function updatedCompareCourseB(): void
-    {
-        if ($this->compareBatchB !== '' && !in_array($this->compareBatchB, $this->batchesForCourse($this->compareCourseB))) {
-            $this->compareBatchB = '';
-        }
-        $this->compareError = '';
-    }
-
-    public function updatedCompareBatchA(): void { $this->compareError = ''; }
-    public function updatedCompareBatchB(): void { $this->compareError = ''; }
-
-    // ── Returns the batches that actually have alumni records for the
-    // given program (or all organizer-scoped batches if no program is
-    // selected), so the Batch dropdown never offers a combination with
-    // zero possible results.
-    public function batchesForCourse(string $course): array
-    {
-        return DB::table('alumni')
-            ->whereNull('alumni.deleted_at')
-            ->when($course !== '', fn($q) => $q->where('alumni.course_code', $course))
-            ->when($this->organizerBatch !== '', fn($q) => $q->where('alumni.batch', $this->organizerBatch))
-            ->when(!empty($this->allowedCourseCodes), fn($q) => $q->whereIn('alumni.course_code', $this->allowedCourseCodes))
-            ->distinct()
-            ->orderBy('alumni.batch', 'desc')
-            ->pluck('alumni.batch')
-            ->filter(fn($b) => $b !== null && $b !== '')
-            ->values()
-            ->toArray();
-    }
-
-    public function closeCompareModal(): void
-    {
-        $this->showCompareModal = false;
-        $this->dispatch('open-sidebar');
-    }
-
-    // ── FIXED: fully-qualified every column so nothing is ambiguous once
-    // the query joins `alumni` with `employment_trackings` (both tables
-    // have a `deleted_at` column, and both `alumni` and `courses` can have
-    // a `course_code`-like column depending on schema, so every reference
-    // below is explicitly prefixed with `alumni.`). This is what caused:
-    // "Column 'deleted_at' in where clause is ambiguous".
-    private function computeGroupStats(string $course, string $batch): array
-    {
-        $base = DB::table('alumni')->whereNull('alumni.deleted_at');
-
-        if ($course) $base->where('alumni.course_code', $course);
-        if ($batch)  $base->where('alumni.batch', $batch);
-
-        // still respect organizer scoping so an organizer can't peek outside
-        // their assigned department/batch
-        if ($this->organizerBatch) {
-            $base->where('alumni.batch', $this->organizerBatch);
-        }
-        if (!empty($this->allowedCourseCodes)) {
-            $base->whereIn('alumni.course_code', $this->allowedCourseCodes);
-        }
-
-        $total = (clone $base)->count();
-
-        $withEmp = (clone $base)
-            ->join('employment_trackings as et', 'alumni.id', '=', 'et.alumni_id')
-            ->whereNull('et.deleted_at');
-
-        $employed   = (clone $withEmp)->where('et.employment_status', 'employed')->count();
-        $self       = (clone $withEmp)->where('et.employment_status', 'self_employed')->count();
-        $unemployed = (clone $withEmp)->where('et.employment_status', 'unemployed')->count();
-        $working    = $employed + $self;
-
-        $rate = $total > 0 ? round(($working / $total) * 100, 1) : 0.0;
-
-        $courseName = $course
-            ? (DB::table('courses')->where('code', $course)->value('name') ?: $course)
-            : 'All Programs';
-
-        return [
-            'course'     => $courseName,
-            'batch'      => $batch ?: 'All Batches',
-            'total'      => $total,
-            'employed'   => $employed,
-            'self'       => $self,
-            'unemployed' => $unemployed,
-            'working'    => $working,
-            'rate'       => $rate,
-        ];
-    }
-
-    // ── Compare Tool: runs the comparison + builds the simple insight text ─
-    public function runCompare(): void
-    {
-        $this->compareError   = '';
-        $this->compareRan     = false;
-        $this->compareResultA = [];
-        $this->compareResultB = [];
-        $this->compareInsight = '';
-
-        // Require each group to be narrowed down by at least a Program or
-        // a Batch — comparing "All Programs · All Batches" against itself
-        // is not a meaningful comparison and would just show 2 identical
-        // whole-college totals.
-        if ($this->compareCourseA === '' && $this->compareBatchA === '') {
-            $this->compareError = 'Please select a Program or Batch for Group A.';
-            return;
-        }
-        if ($this->compareCourseB === '' && $this->compareBatchB === '') {
-            $this->compareError = 'Please select a Program or Batch for Group B.';
-            return;
-        }
-
-        // Block comparing a group against itself (identical Program + Batch).
-        if ($this->compareCourseA === $this->compareCourseB && $this->compareBatchA === $this->compareBatchB) {
-            $this->compareError = 'Group A and Group B are identical. Please choose a different Program or Batch to compare.';
-            return;
-        }
-
-        // Guard against a Batch that doesn't actually belong to the chosen
-        // Program (can only happen if the client posts a stale value).
-        if ($this->compareBatchA !== '' && !in_array($this->compareBatchA, $this->batchesForCourse($this->compareCourseA))) {
-            $this->compareError = 'The selected Batch for Group A is not available for that Program.';
-            return;
-        }
-        if ($this->compareBatchB !== '' && !in_array($this->compareBatchB, $this->batchesForCourse($this->compareCourseB))) {
-            $this->compareError = 'The selected Batch for Group B is not available for that Program.';
-            return;
-        }
-
-        $this->compareResultA = $this->computeGroupStats($this->compareCourseA, $this->compareBatchA);
-        $this->compareResultB = $this->computeGroupStats($this->compareCourseB, $this->compareBatchB);
-        $this->compareRan     = true;
-
-        $a = $this->compareResultA;
-        $b = $this->compareResultB;
-
-        $labelA = $a['course'] . ' · ' . $a['batch'];
-        $labelB = $b['course'] . ' · ' . $b['batch'];
-
-        if ($a['total'] === 0 && $b['total'] === 0) {
-            $this->compareInsight = "No alumni records found for either group yet, so a comparison can't be made.";
-            return;
-        }
-
-        if ($a['total'] === 0) {
-            $this->compareInsight = "{$labelA} has no alumni records yet, so only {$labelB} can be evaluated ({$b['rate']}% employment rate).";
-            return;
-        }
-
-        if ($b['total'] === 0) {
-            $this->compareInsight = "{$labelB} has no alumni records yet, so only {$labelA} can be evaluated ({$a['rate']}% employment rate).";
-            return;
-        }
-
-        $diff = round(abs($a['rate'] - $b['rate']), 1);
-
-        if ($diff < 0.5) {
-            $this->compareInsight = "Based on the results, {$labelA} and {$labelB} have almost the same employment rate ({$a['rate']}% vs {$b['rate']}%) — growth is basically even between the two.";
-            return;
-        }
-
-        if ($a['rate'] > $b['rate']) {
-            $this->compareInsight = "Based on the results, mas mataas ang growth ng employment ng {$labelA} ({$a['rate']}%) kumpara sa {$labelB} ({$b['rate']}%) — that's a {$diff} point difference.";
-        } else {
-            $this->compareInsight = "Based on the results, mas mataas ang growth ng employment ng {$labelB} ({$b['rate']}%) kumpara sa {$labelA} ({$a['rate']}%) — that's a {$diff} point difference.";
-        }
-    }
-
-    public function resetCompare(): void
-    {
-        $this->compareCourseA = $this->compareBatchA = '';
-        $this->compareCourseB = $this->compareBatchB = '';
-        $this->compareResultA = $this->compareResultB = [];
-        $this->compareInsight = '';
-        $this->compareRan     = false;
-        $this->compareError   = '';
-    }
-
 }; ?>
 
 <div class="flex flex-col">
@@ -812,6 +668,110 @@ new class extends Component {
      style="transform:translate(12px,-110%)">
     <i class="fas fa-eye mr-1.5"></i>View Details
 </div>
+
+<style>
+    /* ── Search highlight — mirrors Alumni Records' mark.ar-hl ────── */
+    mark.ae-hl {
+        background: #BFDBFE;
+        color: inherit;
+        border-radius: 2px;
+        padding: 0 1px;
+        font-weight: 700;
+    }
+
+    /* ── Generate Reports button — cloned styling from Alumni Records
+         (neutral slate color, top-right placement, hover tooltip + a
+         dropdown with PDF / Excel / Print options). */
+    .ae-report-btn {
+        position: relative;
+        display: flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px;
+        border-radius: 10px;
+        background: linear-gradient(135deg,#475569,#64748b);
+        border: 1.5px solid transparent;
+        color: #fff;
+        cursor: pointer;
+        transition: all .15s;
+        font-size: 15px;
+        flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(71,85,105,.35);
+    }
+    .ae-report-btn:hover,
+    .ae-report-btn-active { background: linear-gradient(135deg,#334155,#475569); box-shadow: 0 3px 10px rgba(71,85,105,.5); }
+    .ae-report-btn:disabled { opacity: .7; cursor: wait; }
+    .ae-report-tip {
+        position: absolute;
+        top: calc(100% + 8px); right: 0;
+        background: #1a1a1a; color: #fff;
+        font-size: 10px; font-weight: 600; letter-spacing: .05em;
+        padding: 5px 11px; border-radius: 7px; white-space: nowrap;
+        pointer-events: none; opacity: 0; transition: opacity .15s ease;
+        z-index: 9999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    }
+    .ae-report-tip::before {
+        content: '';
+        position: absolute; bottom: 100%; right: 12px;
+        border: 5px solid transparent; border-bottom-color: #1a1a1a;
+    }
+    .ae-report-btn:hover .ae-report-tip { opacity: 1; }
+    @media (max-width: 768px), (hover: none) {
+        .ae-report-tip { display: none !important; }
+    }
+    .ae-report-menu {
+        position: absolute; top: calc(100% + 8px); right: 0;
+        width: min(260px, calc(100vw - 24px));
+        background: #fff;
+        border: 1.5px solid #E8E0F0; border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(122,63,145,.18);
+        z-index: 500; padding: 6px;
+    }
+    .ae-report-menu-message {
+        padding: 10px 10px 11px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid #F0ECF5;
+    }
+    .ae-report-menu-message .lbl {
+        font-size: .6rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .07em; color: #7A3F91; display: block; margin-bottom: 3px;
+    }
+    .ae-report-menu-message .txt {
+        font-size: .75rem; font-weight: 600; color: #111111; line-height: 1.35;
+    }
+    .ae-report-menu-message .cnt {
+        font-size: .68rem; font-weight: 500; color: #333333; margin-top: 3px; display: block;
+    }
+    .ae-report-menu-item {
+        display: flex; align-items: center; gap: 9px; width: 100%;
+        padding: 9px 10px; border-radius: 8px;
+        margin-bottom: 4px;
+        font-size: .82rem; font-weight: 600; color: #333333;
+        border: 1.5px solid transparent; cursor: pointer; text-align: left;
+        transition: background .12s, border-color .12s, opacity .12s;
+    }
+    .ae-report-menu-item:last-child { margin-bottom: 0; }
+    .ae-report-menu-item .ae-item-icon {
+        width: 22px; height: 22px; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0; font-size: 11px;
+    }
+    .ae-report-menu-item .ae-item-label { flex: 1; }
+    .ae-report-menu-item.item-pdf   { background: #FEF2F2; border-color: #FEE2E2; }
+    .ae-report-menu-item.item-pdf:hover   { background: #FEE2E2; border-color: #FECACA; }
+    .ae-report-menu-item.item-pdf .ae-item-icon { background: #DC2626; color: #fff; }
+    .ae-report-menu-item.item-excel { background: #ECFDF5; border-color: #D1FAE5; }
+    .ae-report-menu-item.item-excel:hover { background: #D1FAE5; border-color: #A7F3D0; }
+    .ae-report-menu-item.item-excel .ae-item-icon { background: #059669; color: #fff; }
+    .ae-report-menu-item.item-print { background: #F5F5F5; border-color: #EDEDED; }
+    .ae-report-menu-item.item-print:hover { background: #ECECEC; border-color: #E0E0E0; }
+    .ae-report-menu-item.item-print .ae-item-icon { background: #555555; color: #fff; }
+    .ae-report-menu-item:disabled { opacity: .55; cursor: wait; }
+    .ae-report-menu-item.ae-no-results:disabled {
+        opacity: .45; cursor: not-allowed;
+    }
+    .ae-report-menu-item.ae-no-results:disabled:hover {
+        background: inherit; border-color: transparent;
+    }
+</style>
 
 {{-- FLASH TOAST --}}
 <div
@@ -865,27 +825,95 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- COMPARE TOOL BUTTON — icon-only now. Hover shows a small
-             tooltip that just says "Compare Tool", no extra description
-             text underneath it anymore. --}}
-        <div class="relative group shrink-0">
-            <button type="button"
-                    wire:click="openCompareModal"
-                    wire:loading.attr="disabled" wire:target="openCompareModal"
-                    aria-label="Compare Tool"
-                    class="inline-flex items-center justify-center w-11 h-11 rounded-xl text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110 disabled:opacity-60 disabled:cursor-wait">
-                <i class="fa-solid fa-code-compare text-base" wire:loading.remove wire:target="openCompareModal"></i>
-                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="openCompareModal"></i>
+        {{-- GENERATE REPORTS BUTTON — same PDF/Excel/Print export flow as
+             Alumni Records, pointed at
+             /coordinator/alumni/employment/export (OrganizerAlumniExportController). --}}
+        <div class="relative shrink-0" wire:ignore
+             x-data="{
+                summary: 'All alumni records (no filters applied)',
+                count: '0',
+                _observer: null,
+                syncFromSource(){
+                    const src = document.getElementById('ae-report-summary-source');
+                    if (!src) return;
+                    this.summary = src.dataset.summary;
+                    this.count   = src.dataset.count;
+                },
+                watchSource(){
+                    const src = document.getElementById('ae-report-summary-source');
+                    if (!src || this._observer) return;
+                    this._observer = new MutationObserver(() => this.syncFromSource());
+                    this._observer.observe(src, { attributes: true, attributeFilter: ['data-summary', 'data-count'] });
+                }
+             }"
+             x-init="
+                window.__aeEnsureReportStore && window.__aeEnsureReportStore();
+                syncFromSource();
+                watchSource();
+             "
+             @click.outside="$store.aeReport.open=false" wire:key="ae-report-dropdown">
+            <button type="button" @click.stop="$store.aeReport.toggle()" class="ae-report-btn"
+                    :disabled="$store.aeReport.exporting"
+                    :class="{ 'ae-report-btn-active': $store.aeReport.open }">
+                <i class="fas fa-spinner animate-spin" x-show="$store.aeReport.exporting" style="display:none;"></i>
+                <i class="fas fa-chart-column" x-show="!$store.aeReport.exporting"></i>
+                <span class="ae-report-tip">Generate Reports</span>
             </button>
-            {{-- Tooltip: icon-only trigger, text-only tooltip. Hidden on
-                 mobile (hidden sm:block) since touch devices don't have a
-                 real hover state — the tooltip would otherwise get stuck
-                 visible after a tap. --}}
-            <div class="hidden sm:block pointer-events-none absolute right-0 top-full mt-2 rounded-lg bg-neutral-900 text-white text-xs font-semibold px-3 py-1.5 shadow-xl opacity-0 scale-95 origin-top-right transition-all duration-150 group-hover:opacity-100 group-hover:scale-100 z-50 whitespace-nowrap">
-                Compare Tool
+
+            <div x-show="$store.aeReport.open"
+                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                 class="ae-report-menu" style="display:none;" @click="setTimeout(() => syncFromSource(), 0)">
+
+                <div class="ae-report-menu-message">
+                    <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
+                    <span class="txt" x-text="summary"></span>
+                    <span class="cnt" x-text="count + ' matching record(s)'"></span>
+                </div>
+
+                <button type="button" @click="$store.aeReport.doExport('pdf', $wire)"
+                        :disabled="$store.aeReport.exporting || count === '0'"
+                        :class="{ 'ae-no-results': count === '0' }" class="ae-report-menu-item item-pdf">
+                    <span class="ae-item-icon">
+                        <i class="fas fa-spinner animate-spin" x-show="$store.aeReport.exportingType==='pdf'" style="display:none;"></i>
+                        <i class="fas fa-file-pdf" x-show="$store.aeReport.exportingType!=='pdf'"></i>
+                    </span>
+                    <span class="ae-item-label">Export as PDF</span>
+                </button>
+
+                <button type="button" @click="$store.aeReport.doExport('excel', $wire)"
+                        :disabled="$store.aeReport.exporting || count === '0'"
+                        :class="{ 'ae-no-results': count === '0' }" class="ae-report-menu-item item-excel">
+                    <span class="ae-item-icon">
+                        <i class="fas fa-spinner animate-spin" x-show="$store.aeReport.exportingType==='excel'" style="display:none;"></i>
+                        <i class="fas fa-file-excel" x-show="$store.aeReport.exportingType!=='excel'"></i>
+                    </span>
+                    <span class="ae-item-label">Export as Excel</span>
+                </button>
+
+                <button type="button" @click="$store.aeReport.doExport('print', $wire)"
+                        :disabled="$store.aeReport.exporting || count === '0'"
+                        :class="{ 'ae-no-results': count === '0' }" class="ae-report-menu-item item-print">
+                    <span class="ae-item-icon">
+                        <i class="fas fa-spinner animate-spin" x-show="$store.aeReport.exportingType==='print'" style="display:none;"></i>
+                        <i class="fas fa-print" x-show="$store.aeReport.exportingType!=='print'"></i>
+                    </span>
+                    <span class="ae-item-label">Print Current View</span>
+                </button>
             </div>
         </div>
+
     </div>
+
+    {{-- Hidden source for the "Report will include" text inside the
+         wire:ignore'd report dropdown above — same pattern as Alumni
+         Records: this span re-renders normally on every Livewire
+         update, and Alpine watches it via MutationObserver so the
+         dropdown text stays live without breaking the Alpine store's
+         persistence (which wire:ignore protects). --}}
+    <span id="ae-report-summary-source" class="hidden"
+          data-summary="{{ $this->activeFilterSummary }}"
+          data-count="{{ number_format($this->activeFilterCount) }}"></span>
 
     {{-- BODY: stat cards visually moved to the RIGHT side of the table via
          CSS `order`. Both columns always fill the same fixed height
@@ -1163,14 +1191,17 @@ new class extends Component {
                          x-transition:leave-start="opacity-100"
                          x-transition:leave-end="opacity-0 scale-95"
                          class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[180px] max-h-[220px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
+                         style="display:none;"
                          @click.stop>
                         <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
-                            <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
+                            <label class="flex items-center gap-2 text-xs font-semibold select-none"
+                                   :class="$wire.filterStatuses.length === 0 ? 'text-[#999999] cursor-not-allowed' : 'text-[#333333] cursor-pointer'">
                                 <input type="checkbox"
                                        :checked="$wire.filterStatuses.length === {{ count($aeStatusOptions) }}"
                                        :indeterminate="$wire.filterStatuses.length > 0 && $wire.filterStatuses.length < {{ count($aeStatusOptions) }}"
+                                       :disabled="$wire.filterStatuses.length === 0"
                                        @change="$event.target.checked ? $wire.selectAllFilterStatuses() : $wire.clearFilterStatuses()"
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">
                                 Select All
                             </label>
                             <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterStatuses.length > 0">
@@ -1231,14 +1262,17 @@ new class extends Component {
                          x-transition:leave-start="opacity-100"
                          x-transition:leave-end="opacity-0 scale-95"
                          class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[220px] max-h-[260px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
+                         style="display:none;"
                          @click.stop>
                         <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
-                            <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
+                            <label class="flex items-center gap-2 text-xs font-semibold select-none"
+                                   :class="$wire.filterCourses.length === 0 ? 'text-[#999999] cursor-not-allowed' : 'text-[#333333] cursor-pointer'">
                                 <input type="checkbox"
                                        :checked="$wire.filterCourses.length === {{ $courses->count() }}"
                                        :indeterminate="$wire.filterCourses.length > 0 && $wire.filterCourses.length < {{ $courses->count() }}"
+                                       :disabled="$wire.filterCourses.length === 0"
                                        @change="$event.target.checked ? $wire.selectAllFilterCourses() : $wire.clearFilterCourses()"
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">
                                 Select All
                             </label>
                             <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterCourses.length > 0">
@@ -1312,6 +1346,7 @@ new class extends Component {
                              x-transition:leave-start="opacity-100"
                              x-transition:leave-end="opacity-0 scale-95"
                              class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[150px]"
+                             style="display:none;"
                              @click.stop>
 
                             {{-- Default view: plain year list --}}
@@ -1507,7 +1542,7 @@ new class extends Component {
                                              alt="{{ $row->full_name }}"
                                              class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                         <div class="min-w-0">
-                                            <p class="font-semibold text-sm leading-snug truncate uppercase text-[#333333]">{{ $row->full_name }}</p>
+                                            <p class="font-semibold text-sm leading-snug truncate uppercase text-[#333333]">{!! $this->highlight($row->full_name, $this->search) !!}</p>
 
                                             {{-- Compact inline row for info hidden at this container width.
                                                  Status badge and job title/unemployment note both collapse
@@ -1544,7 +1579,7 @@ new class extends Component {
 
                                 <td class="px-4 py-3.5 hidden @[860px]:table-cell">
                                     @if($row->job_title)
-                                        <p class="font-semibold text-sm leading-snug uppercase text-[#333333]">{{ $row->job_title }}</p>
+                                        <p class="font-semibold text-sm leading-snug uppercase text-[#333333]">{!! $this->highlight($row->job_title, $this->search) !!}</p>
                                     @elseif($row->employment_status === 'unemployed')
                                         <span class="text-sm italic text-[#999999]">
                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
@@ -1557,7 +1592,7 @@ new class extends Component {
                                 <td class="px-4 py-3.5 hidden @[1120px]:table-cell">
                                     @if($row->email ?? null)
                                         <p class="text-sm font-medium truncate max-w-[200px] text-[#333333]" title="{{ $row->email }}">
-                                            {{ $row->email }}
+                                            {!! $this->highlight($row->email, $this->search) !!}
                                         </p>
                                     @else
                                         <span class="text-sm text-[#cccccc]">—</span>
@@ -1620,7 +1655,7 @@ new class extends Component {
                                  class="w-10 h-10 rounded-lg object-cover flex-shrink-0 ring-1 ring-[#E8E0F0]">
 
                             <div class="flex-1 min-w-0">
-                                <p class="font-semibold text-sm uppercase truncate text-[#333333]">{{ $row->full_name }}</p>
+                                <p class="font-semibold text-sm uppercase truncate text-[#333333]">{!! $this->highlight($row->full_name, $this->search) !!}</p>
 
                                 <div class="flex items-center gap-1.5 mt-1 flex-wrap">
                                     <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
@@ -1636,7 +1671,7 @@ new class extends Component {
                                         {{ $statusLabel }}
                                     </span>
                                     @if($row->job_title)
-                                        <span class="text-xs font-medium truncate text-[#555555]">{{ $row->job_title }}</span>
+                                        <span class="text-xs font-medium truncate text-[#555555]">{!! $this->highlight($row->job_title, $this->search) !!}</span>
                                     @elseif($row->employment_status === 'unemployed')
                                         <span class="text-xs italic text-[#999999]">
                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '' }}
@@ -1949,217 +1984,152 @@ new class extends Component {
 </div>
 @endif
 
-
-{{-- COMPARE TOOL MODAL — bigger fixed height on desktop so everything
-     (form + results + insight) fits without needing to scroll, full
-     screen on mobile. --}}
-@if($showCompareModal)
-<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
-     x-data
-     wire:click.self="closeCompareModal"
-     @keydown.escape.window="$wire.closeCompareModal()">
-    <div class="bg-white rounded-none sm:rounded-2xl w-full h-full sm:h-[760px] sm:max-w-3xl sm:max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border-0 sm:border sm:border-[#E8E0F0]"
-         @click.stop
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
-         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0">
-
-        {{-- Header --}}
-        <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-gradient-to-r from-[#7a3f91] to-[#9b59b6]">
-            <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-                    <i class="fa-solid fa-code-compare text-white text-sm"></i>
-                </div>
-                <div>
-                    <p class="font-semibold text-white text-sm leading-snug">Employment Compare Tool</p>
-                    <p class="text-xs text-white/70 mt-0.5">Compare programs or batches side by side</p>
-                </div>
-            </div>
-            <button type="button"
-                    wire:click="closeCompareModal"
-                    wire:loading.attr="disabled" wire:target="closeCompareModal"
-                    class="relative group/close2 w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-base" wire:loading.remove wire:target="closeCompareModal"></i>
-                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="closeCompareModal"></i>
-                <span class="hidden sm:block pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close2:opacity-100 transition-opacity duration-150">Close</span>
-            </button>
-        </div>
-
-        {{-- Body — the modal itself is now tall enough (h-[760px]) that
-             the form + results + insight all fit without scrolling in
-             the common case; overflow-y-auto stays only as a safety net
-             for smaller screens or extra-long content. --}}
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
-
-            {{-- Validation error banner --}}
-            @if($compareError)
-                <div class="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
-                    <i class="fa-solid fa-triangle-exclamation text-red-500 text-sm mt-0.5 flex-shrink-0"></i>
-                    <p class="text-sm font-medium text-red-700 leading-snug">{{ $compareError }}</p>
-                </div>
-            @endif
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-                {{-- GROUP A --}}
-                <div class="bg-[#F9F7FC] rounded-xl border border-[#E8E0F0] p-4">
-                    <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-3 flex items-center gap-1.5">
-                        <span class="w-5 h-5 rounded-full bg-[#7a3f91] text-white flex items-center justify-center text-[10px]">A</span>
-                        Group A
-                    </p>
-                    <label class="block text-xs font-semibold text-[#555555] mb-1">Program</label>
-                    <select wire:model.live="compareCourseA"
-                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
-                        <option value="">All Programs</option>
-                        @foreach($courses as $c)
-                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
-                        @endforeach
-                    </select>
-                    <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
-                    <select wire:model.live="compareBatchA"
-                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
-                        <option value="">All Batches</option>
-                        @foreach($this->batchesForCourse($compareCourseA) as $b)
-                            <option value="{{ $b }}">Batch {{ $b }}</option>
-                        @endforeach
-                    </select>
-                    @if(empty($this->batchesForCourse($compareCourseA)))
-                        <p class="text-xs text-[#999999] mt-1.5 italic">No batches available for this program yet.</p>
-                    @endif
-                </div>
-
-                {{-- GROUP B --}}
-                <div class="bg-[#F9F7FC] rounded-xl border border-[#E8E0F0] p-4">
-                    <p class="text-xs font-bold uppercase tracking-widest text-[#9b59b6] mb-3 flex items-center gap-1.5">
-                        <span class="w-5 h-5 rounded-full bg-[#9b59b6] text-white flex items-center justify-center text-[10px]">B</span>
-                        Group B
-                    </p>
-                    <label class="block text-xs font-semibold text-[#555555] mb-1">Program</label>
-                    <select wire:model.live="compareCourseB"
-                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium mb-3 focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
-                        <option value="">All Programs</option>
-                        @foreach($courses as $c)
-                            <option value="{{ $c->code }}">{{ $c->name ?? $c->code }}</option>
-                        @endforeach
-                    </select>
-                    <label class="block text-xs font-semibold text-[#555555] mb-1">Batch</label>
-                    <select wire:model.live="compareBatchB"
-                            class="w-full border border-[#E8E0F0] bg-white text-sm py-2 px-3 rounded-lg font-medium focus:outline-none focus:border-[#9b59b6] focus:ring-2 focus:ring-[#9b59b6]/10">
-                        <option value="">All Batches</option>
-                        @foreach($this->batchesForCourse($compareCourseB) as $b)
-                            <option value="{{ $b }}">Batch {{ $b }}</option>
-                        @endforeach
-                    </select>
-                    @if(empty($this->batchesForCourse($compareCourseB)))
-                        <p class="text-xs text-[#999999] mt-1.5 italic">No batches available for this program yet.</p>
-                    @endif
-                </div>
-            </div>
-
-            {{-- Results --}}
-            @if($compareRan)
-                <div class="border-t border-[#E8E0F0] pt-4 space-y-4">
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {{-- Result A --}}
-                        <div class="rounded-xl border border-[#E8E0F0] p-4 {{ ($compareResultA['rate'] ?? 0) >= ($compareResultB['rate'] ?? 0) && ($compareResultA['total'] ?? 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-white' }}">
-                            <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-1">{{ $compareResultA['course'] ?? '—' }} · {{ $compareResultA['batch'] ?? '—' }}</p>
-                            <p class="text-3xl font-bold text-[#333333] leading-none">{{ $compareResultA['rate'] ?? 0 }}%</p>
-                            <p class="text-xs text-[#666666] mt-1">Employment Rate</p>
-                            <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Total Alumni</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultA['total'] ?? 0 }}</p>
-                                </div>
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Working</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultA['working'] ?? 0 }}</p>
-                                </div>
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Employed</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultA['employed'] ?? 0 }}</p>
-                                </div>
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Unemployed</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultA['unemployed'] ?? 0 }}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {{-- Result B --}}
-                        <div class="rounded-xl border border-[#E8E0F0] p-4 {{ ($compareResultB['rate'] ?? 0) > ($compareResultA['rate'] ?? 0) && ($compareResultB['total'] ?? 0) > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-white' }}">
-                            <p class="text-xs font-bold uppercase tracking-widest text-[#9b59b6] mb-1">{{ $compareResultB['course'] ?? '—' }} · {{ $compareResultB['batch'] ?? '—' }}</p>
-                            <p class="text-3xl font-bold text-[#333333] leading-none">{{ $compareResultB['rate'] ?? 0 }}%</p>
-                            <p class="text-xs text-[#666666] mt-1">Employment Rate</p>
-                            <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Total Alumni</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultB['total'] ?? 0 }}</p>
-                                </div>
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Working</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultB['working'] ?? 0 }}</p>
-                                </div>
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Employed</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultB['employed'] ?? 0 }}</p>
-                                </div>
-                                <div class="bg-white/70 rounded-lg px-2 py-1.5 border border-black/5">
-                                    <p class="text-[10px] uppercase font-semibold text-[#999999]">Unemployed</p>
-                                    <p class="font-bold text-[#333333]">{{ $compareResultB['unemployed'] ?? 0 }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {{-- AI-style simple insight, with highlighted text --}}
-                    @if($compareInsight)
-                        <div class="rounded-xl border border-purple-200 bg-gradient-to-br from-[#F9F7FC] to-purple-50 p-4 flex items-start gap-3">
-                            <div class="w-8 h-8 rounded-lg bg-[#7a3f91] flex items-center justify-center flex-shrink-0">
-                                <i class="fa-solid fa-wand-magic-sparkles text-white text-xs"></i>
-                            </div>
-                            <div class="min-w-0">
-                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#7a3f91] mb-1">Insight</p>
-                                <p class="text-sm leading-relaxed text-[#333333]">
-                                    <mark class="bg-yellow-200/70 text-[#333333] px-1 rounded font-semibold">{{ $compareInsight }}</mark>
-                                </p>
-                            </div>
-                        </div>
-                    @endif
-
-                </div>
-            @endif
-
-        </div>
-
-        {{-- Actions — pinned at the very bottom of the modal, below the
-             form and results, so the flow reads top-to-bottom: pick
-             groups → see results → act (Compare again / Reset) last. --}}
-        <div class="flex-shrink-0 flex items-center gap-2 px-5 py-4 border-t border-[#E8E0F0] bg-white">
-            <button type="button"
-                    wire:click="runCompare"
-                    wire:loading.attr="disabled"
-                    wire:target="runCompare"
-                    class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md transition active:scale-95 cursor-pointer bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] hover:brightness-110 disabled:opacity-60">
-                <i class="fa-solid fa-chart-simple text-sm" wire:loading.remove wire:target="runCompare"></i>
-                <i class="fa-solid fa-spinner fa-spin text-sm" wire:loading wire:target="runCompare"></i>
-                Compare Now
-            </button>
-            <button type="button"
-                    wire:click="resetCompare"
-                    wire:loading.attr="disabled" wire:target="resetCompare"
-                    class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-wait">
-                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetCompare"></i>
-                <i class="fas fa-spinner fa-spin text-sm" wire:loading wire:target="resetCompare"></i>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-        </div>
-    </div>
-</div>
-@endif
-
 <script>
 (function () {
+    // ── Generate Reports store ──────────────────────────────────────────
+    // Handles the PDF/Excel/Print export flow for this page, hitting
+    // /coordinator/alumni/employment/export (OrganizerAlumniExportController).
+    // Mirrors Alumni Records' window.Alpine.store('report') but under its
+    // own key ('aeReport') so both stores can coexist without clobbering
+    // each other if ever loaded on the same page.
+    function registerReportStore() {
+        if (!window.Alpine) return;
+        if (window.Alpine.store('aeReport')) return;
+
+        window.Alpine.store('aeReport', {
+            open: false,
+            exporting: false,
+            exportingType: '',
+            _lastToggle: 0,
+            _lastExport: 0,
+
+            toggle() {
+                const now = Date.now();
+                if (now - this._lastToggle < 150) return;
+                this._lastToggle = now;
+                this.open = !this.open;
+            },
+
+            async readErrorMessage(res, fallback) {
+                try {
+                    const data = await res.clone().json();
+                    if (data && data.message) return data.message;
+                } catch (e) {
+                    // response wasn't JSON — fall through to generic message
+                }
+                return fallback;
+            },
+
+            async doExport(type, wire) {
+                const now = Date.now();
+                if (this.exporting || now - this._lastExport < 400) return;
+                this._lastExport = now;
+                this.exporting = true;
+                this.exportingType = type;
+                this.open = false;
+
+                const label = type === 'excel' ? 'Excel file' : type === 'print' ? 'print view' : 'PDF';
+                window.dispatchEvent(new CustomEvent('flash-message', {
+                    detail: { type: 'info', message: 'Generating your ' + label + '… this only takes a moment.' }
+                }));
+
+                const params = new URLSearchParams({
+                    type: type,
+                    search: (wire && wire.search) || '',
+                    batch_from: (wire && wire.filterBatchFrom) || '',
+                    batch_to: (wire && wire.filterBatchTo) || '',
+                    // OrganizerAlumniExportController only reads a single
+                    // `course` value (unlike Alumni Records' whereIn), so
+                    // only the first selected Program is sent here — if
+                    // several are checked in the filter, the export is
+                    // scoped to the first one.
+                    course: (wire && wire.filterCourses && wire.filterCourses[0]) || '',
+                    status: (wire && wire.filterStatuses && wire.filterStatuses.join(',')) || '',
+                });
+                const url = '/coordinator/alumni/employment/export?' + params.toString();
+
+                try {
+                    if (type === 'print') {
+                        const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!res.ok) {
+                            const msg = await this.readErrorMessage(res, 'Print generation failed. Please try again.');
+                            throw new Error(msg);
+                        }
+                        const html = await res.text();
+
+                        const oldFrame = document.getElementById('ae-print-frame');
+                        if (oldFrame) oldFrame.remove();
+
+                        const frame = document.createElement('iframe');
+                        frame.id = 'ae-print-frame';
+                        frame.style.position = 'fixed';
+                        frame.style.right = '0';
+                        frame.style.bottom = '0';
+                        frame.style.width = '0';
+                        frame.style.height = '0';
+                        frame.style.border = '0';
+
+                        let printFired = false;
+                        const firePrintOnce = () => {
+                            if (printFired) return;
+                            printFired = true;
+                            frame.contentWindow.focus();
+                            frame.contentWindow.print();
+                        };
+                        frame.onload = () => setTimeout(firePrintOnce, 150);
+
+                        document.body.appendChild(frame);
+
+                        const doc = frame.contentWindow.document;
+                        doc.open();
+                        doc.write(html);
+                        doc.close();
+
+                        setTimeout(firePrintOnce, 200);
+                    } else {
+                        const res = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                        if (!res.ok) {
+                            const msg = await this.readErrorMessage(
+                                res,
+                                type === 'excel' ? 'Excel export failed. Please try again.' : 'PDF export failed. Please try again.'
+                            );
+                            throw new Error(msg);
+                        }
+
+                        const blob = await res.blob();
+                        const disposition = res.headers.get('Content-Disposition') || '';
+                        let filename = type === 'excel' ? 'alumni-employment.xlsx' : 'alumni-employment.pdf';
+                        const match = disposition.match(/filename="?([^"]+)"?/);
+                        if (match) filename = match[1];
+
+                        const blobUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        window.URL.revokeObjectURL(blobUrl);
+                    }
+                } catch (e) {
+                    window.dispatchEvent(new CustomEvent('flash-message', {
+                        detail: { type: 'error', message: e && e.message ? e.message : 'Export failed. Please try again.' }
+                    }));
+                } finally {
+                    this.exporting = false;
+                    this.exportingType = '';
+                }
+            }
+        });
+    }
+
+    window.__aeEnsureReportStore = registerReportStore;
+
+    if (window.Alpine) registerReportStore();
+    document.addEventListener('alpine:init', registerReportStore);
+    document.addEventListener('livewire:init', registerReportStore);
+    document.addEventListener('livewire:navigated', registerReportStore);
+
     // ── Shared filter-dropdown store ────────────────────────────────────
     // Tracks which single filter dropdown is currently open (status,
     // course, batch) so opening one automatically closes any other that
