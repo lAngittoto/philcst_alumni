@@ -13,6 +13,11 @@
     @livewireStyles
 
     <style>
+        /* ── Disable Livewire wire:navigate top progress bar (nprogress) ── */
+        #nprogress {
+            display: none !important;
+        }
+
         [x-cloak] { display: none !important; }
         .no-scrollbar {
             -ms-overflow-style: none;
@@ -57,7 +62,15 @@
         }
 
         .bell-badge { pointer-events: none; }
-        .notif-item { cursor: pointer; position: relative; }
+        .notif-item {
+            cursor: pointer;
+            position: relative;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
 
         .notif-close-wrap {
             position: relative;
@@ -96,6 +109,63 @@
         .notif-close-wrap:hover .notif-close-tip { opacity: 1; }
         @media (max-width: 1023px) {
             .notif-close-tip { display: none !important; }
+        }
+
+        /* ── Delete icon (only shown once a notif is 30+ days old) ──
+           Sits at the end of the time row, next to the timestamp.
+           Red icon by default so it's visible right away in the
+           sidebar (not just on hover), with a slightly deeper red +
+           light-red bg on hover for feedback. */
+        .notif-delete-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            border: none;
+            background: transparent;
+            color: #DC2626;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .notif-delete-btn:hover {
+            background: #FDE8E8;
+            color: #B91C1C;
+        }
+        .notif-delete-btn i { font-size: .95rem; pointer-events: none; }
+
+        .notif-delete-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            right: 0;
+            background: #DC2626;
+            color: #fff;
+            font-size: .62rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            padding: 4px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(2px);
+            transition: opacity .12s ease, transform .12s ease;
+            z-index: 10;
+        }
+        .notif-delete-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            right: 7px;
+            border: 4px solid transparent;
+            border-top-color: #DC2626;
+        }
+        .notif-delete-btn:hover .notif-delete-tooltip {
+            opacity: 1;
+            transform: translateY(0);
         }
 
         /* ── Read/Unread section divider ─────────────────────────── */
@@ -604,6 +674,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            deleteToast: { show: false, message: '' },
 
             async init() {
                 if (window.__coordLoggingOut) return;
@@ -627,6 +698,7 @@
 
             async _fetch() {
                 if (window.__coordLoggingOut) return;
+                if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
                 try {
                     var res = await window.fetch('/coordinator/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -644,210 +716,215 @@
 
             // ─────────────────────────────────────────────────────────────────
             //  PROCESS NOTIFS
-            //  - Chat/message notifs   : group by day
-            //  - Employment notifs     : EXCLUDED — not shown to organizer/coordinator at all
-            //  - Self job-action notifs: group by day + action (created/updated/
-            //                            activated/deactivated/deleted), ×N badge
-            //  - Self event-action notifs: group by day + action (created/updated/
-            //                            resubmitted/deleted), ×N badge
-            //  - Event notifs          : show individually (APPROVED, REJECTED, UPDATED only)
-            //  - Everything else       : show individually
+            //  - Employment notifs : EXCLUDED — not shown to organizer/coordinator at all
+            //  - Event notifs      : grouped PER EVENT into a single row that
+            //                         shows a status chain, e.g.
+            //                         "Submitted -> Pending", "Submitted -> Approved",
+            //                         "Resubmitted -> Rejected", and so on. This
+            //                         replaces the old behavior of separate
+            //                         "Event Approved" / "Event Rejected" /
+            //                         "You Submitted an Event" rows for the
+            //                         same event.
+            //  - Everything else   : shown individually, no grouping
             // ─────────────────────────────────────────────────────────────────
             _processNotifs(rows) {
                 var result = [];
-                var msgMap = new Map();
-                var selfJobMap = new Map();
-                var selfEventMap = new Map();
+                var eventGroups = {}; // event_id -> merged notif row
+                var chatGroups = {};  // 'room::YYYY-MM-DD' -> merged chat notif row (×N per day)
 
-                Array.from(rows)
-                    .sort(function (a, b) {
-                        return new Date(b.created_at) - new Date(a.created_at);
-                    })
-                    .forEach(function (n) {
-                        var rawDedup = n.dedup_key || '';
+                // Human-readable step label per underlying action, used to
+                // build the "Step -> Step" chain title for event notifs.
+                var eventStepLabel = {
+                    'created':     'Submitted',
+                    'resubmitted': 'Resubmitted',
+                    'updated':     'Updated',
+                    'deleted':     'Deleted',
+                    'approved':    'Approved',
+                    'rejected':    'Rejected',
+                    'pending':     'Pending',
+                };
 
-                        var isMsgEvent = (
-                            rawDedup.startsWith('message-received::') ||
-                            n.icon === 'comments'
-                        );
+                // Oldest -> newest so the chain reads left-to-right in the
+                // order things actually happened for that event.
+                var sorted = Array.from(rows).sort(function (a, b) {
+                    return new Date(a.created_at) - new Date(b.created_at);
+                });
 
-                        var isEventNotif = (
-                            rawDedup.startsWith('event-management::') ||
-                            n.icon === 'calendar-check' ||
-                            n.icon === 'calendar'
-                        );
+                sorted.forEach(function (n) {
+                    var rawDedup = n.dedup_key || '';
 
-                        // Employment notifs are intentionally excluded from the
-                        // organizer/coordinator notification list — skip entirely.
-                        var isEmpNotif = (
-                            rawDedup.startsWith('employment::') ||
-                            n.icon === 'chart-line'
-                        );
-                        if (isEmpNotif) return;
+                    var isEventSelfNotif = rawDedup.startsWith('event-self::');
+                    var isEventMgmtNotif = rawDedup.startsWith('event-management::');
+                    var isEventNotif = (
+                        isEventSelfNotif ||
+                        isEventMgmtNotif ||
+                        n.icon === 'calendar-check' ||
+                        n.icon === 'calendar'
+                    );
 
-                        // Self job-action notifs (organizer posting/editing/
-                        // activating/deactivating/deleting their OWN job).
-                        var isSelfJobNotif = rawDedup.startsWith('job-self::');
+                    // Employment notifs are intentionally excluded from the
+                    // organizer/coordinator notification list — skip entirely.
+                    var isEmpNotif = (
+                        rawDedup.startsWith('employment::') ||
+                        n.icon === 'chart-line'
+                    );
+                    if (isEmpNotif) return;
 
-                        // Self event-action notifs (organizer creating/editing/
-                        // resubmitting/deleting their OWN event).
-                        var isSelfEventNotif = rawDedup.startsWith('event-self::');
+                    if (isEventNotif) {
+                        var parts  = rawDedup.split('::');
+                        var action = parts.length >= 2 ? parts[1] : '';
 
-                        if (isEventNotif) {
-                            var action = '';
-                            var parts = rawDedup.split('::');
-                            if (parts.length >= 2) action = parts[1];
-                            // 'updated' intentionally excluded here — it's
-                            // redundant with the event-self "You Updated an
-                            // Event" notif, which already covers the
-                            // organizer editing their own event. Only
-                            // approved/rejected (Alumni Director decisions)
-                            // are shown from this generic event channel.
-                            var allowedActions = ['approved', 'rejected'];
-                            if (allowedActions.indexOf(action) === -1) return;
+                        // 'updated' from the director-facing channel is
+                        // still excluded — redundant with the organizer's
+                        // own "Updated" step. Every other event action
+                        // (created, resubmitted, updated [self], deleted,
+                        // approved, rejected) feeds the per-event chain.
+                        if (isEventMgmtNotif && action !== 'approved' && action !== 'rejected') {
+                            return;
                         }
 
-                        // ── Timestamp used for display + sorting ──
-                        // IMPORTANT: this must ALWAYS be n.created_at — never
-                        // n.updated_at. updated_at changes the moment a
-                        // notification row is marked as read (Eloquent
-                        // "touch"), which previously caused an older
-                        // notification to jump to the top of the list (and
-                        // show a "just now" time) the instant it was opened,
-                        // making the whole list look out of order and several
-                        // unrelated items appear to share the same time.
-                        var nTimestamp = n.created_at;
+                        // The real numeric event id always sits at the END
+                        // of the dedup_key, but the number of '::' segments
+                        // before it differs between the two channels:
+                        //   event-management::{action}::{id}
+                        //   event-self::{action}::{day}::{id}
+                        // Grabbing a fixed index (e.g. parts[2]) silently
+                        // pulled the DAY STRING instead of the id for
+                        // event-self rows whenever n.event_id came back
+                        // empty from the server — which split "Rejected"
+                        // and "Submitted → Pending" into two separate
+                        // groups for the same event instead of one chain.
+                        // Always take the LAST segment instead.
+                        var eventId = n.event_id || (parts.length >= 3 ? parts[parts.length - 1] : null) || ('noid-' + n.id);
+                        var group = eventGroups[eventId];
 
-                        if (isMsgEvent) {
-                            var day      = nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown';
-                            var groupKey = 'message_day::' + day;
+                        if (!group) {
+                            group = Object.assign({}, n, {
+                                count:       1,
+                                _ids:        [],
+                                _chainSteps: [],
+                                created_at:  n.created_at,
+                            });
+                            eventGroups[eventId] = group;
+                            result.push(group);
+                        }
 
-                            if (msgMap.has(groupKey)) {
-                                var g = msgMap.get(groupKey);
-                                g.count = (Number(g.count) || 1) + (Number(n.count) || 1);
-                                if (!n.read) g.read = false;
-                                g._ids.push(n.id);
-                                if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
-                                    g.created_at = nTimestamp;
-                                }
-                                g.title   = 'Chat Messages';
-                                g.message = g.count + ' new chat message(s) today.';
-                            } else {
-                                var initCount = Number(n.count) || 1;
-                                msgMap.set(groupKey, Object.assign({}, n, {
-                                    count:      initCount,
-                                    _ids:       [n.id],
-                                    created_at: nTimestamp || n.created_at,
-                                    title:      'Chat Messages',
-                                    message:    initCount + ' new chat message(s) today.',
-                                    icon:       'comments',
-                                }));
-                            }
+                        group._ids.push(n.id);
 
-                        } else if (isSelfJobNotif) {
-                            // dedup_key shape: job-self::{action}::{YYYY-MM-DD}::{jobId}
-                            var sjParts  = rawDedup.split('::');
-                            var sjAction = sjParts[1] || 'updated';
-                            var sjDay    = sjParts[2] || (nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown');
-                            var sjKey    = 'job-self_day::' + sjAction + '::' + sjDay;
+                        // Append this step to the chain (skip consecutive
+                        // duplicates, e.g. two "updated" rows in a row).
+                        var stepLabel = eventStepLabel[action] || (n.title || 'Update');
+                        var lastStep  = group._chainSteps[group._chainSteps.length - 1];
+                        if (stepLabel !== lastStep) {
+                            group._chainSteps.push(stepLabel);
+                        }
 
-                            var sjTitleMap = {
-                                'created':      'Job Posted',
-                                'updated':      'Job Updated',
-                                'activated':    'Job Activated',
-                                'deactivated':  'Job Deactivated',
-                                'deleted':      'Job Deleted',
-                            };
-                            var sjIconMap = {
-                                'created':      'briefcase',
-                                'updated':      'pen-to-square',
-                                'activated':    'circle-check',
-                                'deactivated':  'circle-pause',
-                                'deleted':      'trash',
-                            };
+                        // Latest row in the chain drives the icon, message,
+                        // link, unread state, and the display timestamp —
+                        // the group should always look/act like its most
+                        // recent status.
+                        group.icon        = n.icon;
+                        group.message     = n.message;
+                        group.link_route  = n.link_route;
+                        group.link_label  = n.link_label;
+                        group.event_id    = n.event_id || group.event_id;
+                        group.read        = n.read;
+                        group.created_at  = n.created_at;
 
-                            if (selfJobMap.has(sjKey)) {
-                                var sg = selfJobMap.get(sjKey);
-                                sg.count = (Number(sg.count) || 1) + 1;
-                                if (!n.read) sg.read = false;
-                                sg._ids.push(n.id);
-                                if (nTimestamp && new Date(nTimestamp) > new Date(sg.created_at)) {
-                                    sg.created_at   = nTimestamp;
-                                    sg._latestTitle = n.job_title || n.message || sg._latestTitle;
-                                }
-                                var sLabel = sjTitleMap[sjAction] || 'Job Updated';
-                                sg.title   = sg.count + ' ' + sLabel + (sg.count > 1 ? 's' : '') + ' Today';
-                                sg.message = 'Latest: "' + (sg._latestTitle || 'a job posting') + '". ' + sg.count + ' total today.';
-                            } else {
-                                var sInitLabel = sjTitleMap[sjAction] || 'Job Updated';
-                                selfJobMap.set(sjKey, Object.assign({}, n, {
-                                    count:        1,
-                                    _ids:         [n.id],
-                                    created_at:   nTimestamp || n.created_at,
-                                    title:        '1 ' + sInitLabel + ' Today',
-                                    message:      n.message || (sInitLabel + '.'),
-                                    icon:         sjIconMap[sjAction] || 'briefcase',
-                                    _latestTitle: n.job_title || '',
-                                }));
-                            }
-
-                        } else if (isSelfEventNotif) {
-                            // dedup_key shape: event-self::{action}::{YYYY-MM-DD}::{eventId}
-                            var seParts  = rawDedup.split('::');
-                            var seAction = seParts[1] || 'updated';
-                            var seDay    = seParts[2] || (nTimestamp ? new Date(nTimestamp).toISOString().slice(0, 10) : 'unknown');
-                            var seKey    = 'event-self_day::' + seAction + '::' + seDay;
-
-                            var seTitleMap = {
-                                'created':      'Event Submitted',
-                                'updated':      'Event Updated',
-                                'resubmitted':  'Event Resubmitted',
-                                'deleted':      'Event Deleted',
-                            };
-                            var seIconMap = {
-                                'created':      'calendar-plus',
-                                'updated':      'pen',
-                                'resubmitted':  'rotate-right',
-                                'deleted':      'calendar-xmark',
-                            };
-
-                            if (selfEventMap.has(seKey)) {
-                                var eg = selfEventMap.get(seKey);
-                                eg.count = (Number(eg.count) || 1) + 1;
-                                if (!n.read) eg.read = false;
-                                eg._ids.push(n.id);
-                                if (nTimestamp && new Date(nTimestamp) > new Date(eg.created_at)) {
-                                    eg.created_at   = nTimestamp;
-                                    eg._latestTitle = n.event_title || n.message || eg._latestTitle;
-                                }
-                                var eLabel = seTitleMap[seAction] || 'Event Updated';
-                                eg.title   = eg.count + ' ' + eLabel + (eg.count > 1 ? 's' : '') + ' Today';
-                                eg.message = 'Latest: "' + (eg._latestTitle || 'an event') + '". ' + eg.count + ' total today.';
-                            } else {
-                                var eInitLabel = seTitleMap[seAction] || 'Event Updated';
-                                selfEventMap.set(seKey, Object.assign({}, n, {
-                                    count:        1,
-                                    _ids:         [n.id],
-                                    created_at:   nTimestamp || n.created_at,
-                                    title:        '1 ' + eInitLabel + ' Today',
-                                    message:      n.message || (eInitLabel + '.'),
-                                    icon:         seIconMap[seAction] || 'calendar-plus',
-                                    _latestTitle: n.event_title || '',
-                                }));
-                            }
-
+                        // Build the "Step -> Step" chain title — only the
+                        // MOST RECENT real action plus its outcome, e.g.
+                        // "Resubmitted → Pending" or "Resubmitted →
+                        // Approved", instead of replaying the entire
+                        // history ("Submitted → Rejected → Resubmitted →
+                        // Approved"). If still awaiting a director decision
+                        // (last action was created/resubmitted/updated),
+                        // append a trailing "Pending" step. A bare outcome
+                        // with no earlier step recorded (straight
+                        // Submit -> Approve, no reject/resubmit in
+                        // between) still gets "Submitted" prepended so the
+                        // title is never a standalone "Approved"/"Rejected".
+                        var lastRealStep = group._chainSteps[group._chainSteps.length - 1];
+                        var prevRealStep = group._chainSteps[group._chainSteps.length - 2] || 'Submitted';
+                        var awaitingActions = ['created', 'resubmitted', 'updated'];
+                        var chain;
+                        if (awaitingActions.indexOf(action) !== -1) {
+                            chain = [lastRealStep, 'Pending'];
                         } else {
-                            result.push(Object.assign({}, n, {
-                                count:      Number(n.count) || 1,
-                                _ids:       [n.id],
-                                created_at: nTimestamp || n.created_at,
-                            }));
+                            chain = [prevRealStep, lastRealStep];
                         }
-                    });
+                        group.title = chain.join(' \u2192 ');
 
-                msgMap.forEach(function (v) { result.push(v); });
-                selfJobMap.forEach(function (v) { result.push(v); });
-                selfEventMap.forEach(function (v) { result.push(v); });
+                        return;
+                    }
+
+                    // ── Chat/message notifs: grouped PER ROOM PER DAY so a
+                    //    burst of messages in the same room on the same day
+                    //    collapses into a single "×N" row instead of a long
+                    //    unbroken wall of separate "New Message" entries. ──
+                    var isChatNotif = (
+                        rawDedup.startsWith('message-received::') ||
+                        n.icon === 'comments'
+                    );
+
+                    if (isChatNotif) {
+                        var dayBucket = (n.created_at ? new Date(n.created_at) : new Date());
+                        var dayKey = dayBucket.getFullYear() + '-' +
+                            String(dayBucket.getMonth() + 1).padStart(2, '0') + '-' +
+                            String(dayBucket.getDate()).padStart(2, '0');
+
+                        // Room name is embedded in the saved message text
+                        // (" sent a message in {room}"/" in {room} · ...").
+                        // Fall back to the whole message if it can't be
+                        // parsed so grouping still works, just less finely.
+                        var roomMatch = /sent a message in ([^:."]+)/i.exec(n.message || '');
+                        var roomKey = roomMatch ? roomMatch[1].trim() : (n.message || 'chat');
+
+                        var chatKey = roomKey + '::' + dayKey;
+                        var cgroup = chatGroups[chatKey];
+
+                        if (!cgroup) {
+                            cgroup = Object.assign({}, n, {
+                                count:      1,
+                                _ids:       [],
+                                created_at: n.created_at,
+                            });
+                            chatGroups[chatKey] = cgroup;
+                            result.push(cgroup);
+                        } else {
+                            cgroup.count += 1;
+                        }
+
+                        cgroup._ids.push(n.id);
+
+                        // Latest message in the group drives the visible
+                        // title/message/read-state/timestamp, with a ×N
+                        // suffix once more than one message has landed.
+                        cgroup.icon        = n.icon;
+                        cgroup.message     = n.message;
+                        cgroup.link_route  = n.link_route;
+                        cgroup.link_label  = n.link_label;
+                        cgroup.read        = n.read;
+                        cgroup.created_at  = n.created_at;
+                        cgroup.title       = 'New Message' + (cgroup.count > 1 ? ' ×' + cgroup.count : '');
+
+                        return;
+                    }
+
+                    // ── Timestamp used for display + sorting ──
+                    // IMPORTANT: this must ALWAYS be n.created_at — never
+                    // n.updated_at. updated_at changes the moment a
+                    // notification row is marked as read (Eloquent
+                    // "touch"), which previously caused an older
+                    // notification to jump to the top of the list (and
+                    // show a "just now" time) the instant it was opened,
+                    // making the whole list look out of order and several
+                    // unrelated items appear to share the same time.
+                    result.push(Object.assign({}, n, {
+                        count:      1,
+                        _ids:       [n.id],
+                        created_at: n.created_at,
+                    }));
+                });
 
                 // Unread items float to the top (newest first), read items
                 // sit below (also newest first). This guarantees a single,
@@ -926,6 +1003,72 @@
                         } catch (e) { /* ignore */ }
                     }
                 }
+            },
+
+            // Deletes a notification MESSAGE only — never the underlying
+            // job, event, or chat data that generated it. This just clears
+            // the row(s) from the `notifications` table so the panel/list
+            // gets shorter; the actual data this notif was about is
+            // untouched.
+            //
+            // Only ever called for notifs that are 30+ days old (enforced
+            // by the x-show on the delete button in the markup), so this
+            // is purely a "clean up old noise" action, not a moderation
+            // action on real data.
+            async deleteNotif(item) {
+                if (window.__coordLoggingOut) return;
+                var ids = item._ids || [item.id];
+                var self = this;
+                this._deleting = true;
+                this._showDeleteToast('Notification deleted');
+
+                // Give the slide-out leave transition time to play before
+                // actually removing the item from the array — removing it
+                // immediately would skip straight past x-transition:leave.
+                await new Promise(function (resolve) { setTimeout(resolve, 250); });
+                this.items = this.items.filter(function (n) { return n !== item; });
+
+                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                var failedIds = [];
+
+                for (var i = 0; i < ids.length; i++) {
+                    try {
+                        var res = await window.fetch('/coordinator/notifications/' + ids[i], {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN':     csrf,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            }
+                        });
+                        if (res.status === 419) { window.__coordShowSessionExpired(); }
+                        if (!res.ok) failedIds.push(ids[i]);
+                    } catch (e) {
+                        failedIds.push(ids[i]);
+                    }
+                }
+
+                this._deleting = false;
+
+                // If any delete calls actually failed server-side, put the
+                // item back rather than silently losing it from view while
+                // it still exists in the DB.
+                if (failedIds.length > 0) {
+                    await this._fetch();
+                    this._showDeleteToast('Delete failed, please try again');
+                }
+            },
+
+            // Small self-clearing toast shown at the edge of the notif
+            // panel. Re-triggerable: calling this again while a toast is
+            // already showing resets its timer instead of stacking.
+            _showDeleteToast(message) {
+                var self = this;
+                this.deleteToast.message = message;
+                this.deleteToast.show = true;
+                if (this._toastTimer) clearTimeout(this._toastTimer);
+                this._toastTimer = setTimeout(function () {
+                    self.deleteToast.show = false;
+                }, 2200);
             },
         };
     };
@@ -1119,6 +1262,7 @@
                 message:    msgMap[action]   || (d.title || 'An event') + ' was ' + action + '.',
                 link_route: 'organizer.event/organizer',
                 link_label: 'View Events',
+                event_id:   d.id || null,
                 dedup_key:  'event-management::' + action + '::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
@@ -1250,6 +1394,7 @@
                 event_title: d.title || '',
                 link_route:  'organizer.event/organizer',
                 link_label:  'View Events',
+                event_id:    d.id || null,
                 dedup_key:   'event-self::' + action + '::' + _todayStr() + '::' + (d.id || 0),
             });
         });
@@ -1653,6 +1798,30 @@
         </span>
     </div>
 
+    {{-- Delete toast — slides in ABOVE the list, inside the panel --}}
+    <div
+        x-show="$store.coordNotifs && $store.coordNotifs.deleteToast.show"
+        x-cloak
+        x-transition:enter="transition ease-out duration-200"
+        x-transition:enter-start="opacity-0 -translate-y-2"
+        x-transition:enter-end="opacity-100 translate-y-0"
+        x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="opacity-100 translate-y-0"
+        x-transition:leave-end="opacity-0 -translate-y-2"
+        style="
+            background: #ECFDF3;
+            border-bottom: 1px solid #BBF7D0;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        ">
+        <i class="fas fa-circle-check" style="font-size:13px; color:#16A34A;"></i>
+        <span style="font-size:12.5px; font-weight:600; color:#15803D;"
+              x-text="$store.coordNotifs ? $store.coordNotifs.deleteToast.message : ''"></span>
+    </div>
+
     {{-- Scrollable notification list --}}
     <div class="notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 420px;">
 
@@ -1671,7 +1840,11 @@
 
         <template x-if="$store.coordNotifs">
             <template x-for="(notif, notifIdx) in $store.coordNotifs.items" :key="notif.id">
-                <div>
+                <div
+                    x-transition:leave="transition ease-in duration-250"
+                    x-transition:leave-start="opacity-100 translate-x-0"
+                    x-transition:leave-end="opacity-0 translate-x-full"
+                    style="overflow: hidden;">
                     <div class="coord-notif-divider"
                          x-show="notif.read && notifIdx > 0 && !$store.coordNotifs.items[notifIdx - 1].read"
                          x-cloak>
@@ -1682,12 +1855,35 @@
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
                     :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
+                    oncontextmenu="return false;"
+                    ondragstart="return false;"
                     @click.stop="
                         $store.coordNotifs.markRead(notif);
                         $store.coordNotifs.close();
                         if (notif.link_route) {
-                            const url = window.__coordRouteMap[notif.link_route] || '/organizer/dashboard';
-                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                            let url = window.__coordRouteMap[notif.link_route] || '/organizer/dashboard';
+                            if (notif.link_route === 'organizer.event/organizer' && notif.event_id) {
+                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_event=' + encodeURIComponent(notif.event_id);
+                            }
+
+                            const targetPath = url.split('?')[0];
+                            const isSameLocation = window.location.pathname === targetPath;
+
+                            // ── Already on Event Management? Skip the URL/reload
+                            //    entirely — dispatch straight to the mounted
+                            //    Livewire component so it opens View Details
+                            //    (or the resubmit form) immediately, no page
+                            //    flash, sidebar close/open transition plays
+                            //    normally like any other click. ──
+                            if (isSameLocation && notif.link_route === 'organizer.event/organizer' && notif.event_id && window.Livewire) {
+                                Livewire.dispatch('open-view-event', { id: Number(notif.event_id) });
+                            } else if (isSameLocation) {
+                                window.location.href = url;
+                            } else if (window.Livewire) {
+                                Livewire.navigate(url);
+                            } else {
+                                window.location.href = url;
+                            }
                         }
                     ">
 
@@ -1706,28 +1902,6 @@
                                 <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
-
-                                {{-- Count badge: grouped chat messages --}}
-                                <span
-                                    x-show="Number(notif.count) > 1 && notif.icon === 'comments'"
-                                    x-cloak
-                                    class="inline-flex items-center justify-center
-                                           min-w-[22px] h-5 rounded-full px-1.5
-                                           text-[10px] font-black text-white leading-none"
-                                    style="background:#7A3F91;"
-                                    x-text="'×' + Number(notif.count)">
-                                </span>
-
-                                {{-- Count badge: grouped self job-action + self event-action notifs --}}
-                                <span
-                                    x-show="Number(notif.count) > 1 && ['briefcase','pen-to-square','circle-check','circle-pause','trash','calendar-plus','pen','calendar-xmark','rotate-right'].includes(notif.icon)"
-                                    x-cloak
-                                    class="inline-flex items-center justify-center
-                                           min-w-[22px] h-5 rounded-full px-1.5
-                                           text-[10px] font-black text-white leading-none"
-                                    style="background:#6D28D9;"
-                                    x-text="'×' + Number(notif.count)">
-                                </span>
 
                                 {{-- Job badge — posted by Alumni Director --}}
                                 <span
@@ -1789,26 +1963,6 @@
                                     DELETED BY ALUMNI DIRECTOR
                                 </span>
 
-                                {{-- Event Approved badge --}}
-                                <span
-                                    x-show="notif.icon === 'calendar-check' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:#059669;">
-                                    EVENT
-                                </span>
-
-                                {{-- Event Rejected badge --}}
-                                <span
-                                    x-show="notif.icon === 'calendar' && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:#DC2626;">
-                                    EVENT
-                                </span>
-
                                 {{-- Chat Message badge --}}
                                 <span
                                     x-show="notif.icon === 'comments' && !notif.read"
@@ -1843,16 +1997,28 @@
                            x-text="notif.message">
                         </p>
 
-                        <div class="flex items-center gap-1 mt-2">
-                            <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                            <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                  x-text="notif.created_at
-                                      ? new Date(notif.created_at).toLocaleString('en-PH',{
-                                          month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit',second:'2-digit'
-                                        })
-                                      : ''">
+                        <div class="flex items-center justify-between gap-1 mt-2">
+                            <span class="flex items-center gap-1">
+                                <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
+                                <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
+                                      x-text="notif.created_at
+                                          ? new Date(notif.created_at).toLocaleString('en-PH',{
+                                              month:'short',day:'numeric',year:'numeric',
+                                              hour:'2-digit',minute:'2-digit',second:'2-digit'
+                                            })
+                                          : ''">
+                                </span>
                             </span>
+
+                            <button type="button"
+                                    class="notif-delete-btn"
+                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                    x-cloak
+                                    @click.stop="$store.coordNotifs && $store.coordNotifs.deleteNotif(notif)"
+                                    aria-label="Delete notification">
+                                <i class="fas fa-trash-can"></i>
+                                <span class="notif-delete-tooltip">Delete</span>
+                            </button>
                         </div>
                     </div>
 
@@ -1863,8 +2029,8 @@
     </div>
 
     {{-- Panel Footer --}}
-    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
-        <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
+    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FFFFFF;">
+        <p style="font-size:13px;color:#555555;font-weight:500;letter-spacing:0.01em;">
             Click a notification to view and mark as read
         </p>
     </div>

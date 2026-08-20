@@ -72,6 +72,7 @@ Route::middleware(['auth', 'organizer.password.ensure'])->group(function () {
     Route::post('/coordinator/notifications',               [CoordinatorNotificationController::class, 'store']);
     Route::patch('/coordinator/notifications/read-all',     [CoordinatorNotificationController::class, 'markAllRead']);
     Route::patch('/coordinator/notifications/{n}/read',     [CoordinatorNotificationController::class, 'markRead']);
+    Route::delete('/coordinator/notifications/{n}',         [CoordinatorNotificationController::class, 'destroy']);
 });
 
 // ===================================

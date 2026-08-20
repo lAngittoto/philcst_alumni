@@ -36,6 +36,13 @@ class CoordinatorNotificationController extends Controller
             'link_route' => 'nullable|string|max:191',
             'link_label' => 'nullable|string|max:100',
             'dedup_key'  => 'nullable|string|max:191',
+            // ── event_id: the underlying OrganizerEvent id for event-related
+            //    notifs (submit/resubmit/approved/rejected). Lets the
+            //    frontend build a ?highlight_event={id} deep-link so
+            //    clicking the notif opens that exact event's View Details
+            //    instead of just landing on the events list. Nullable —
+            //    non-event notifs (jobs, chat, alumni) omit it entirely. ──
+            'event_id'   => 'nullable|integer',
         ]);
 
         $userId = Auth::id();
@@ -60,6 +67,7 @@ class CoordinatorNotificationController extends Controller
             'link_route' => $data['link_route'] ?? null,
             'link_label' => $data['link_label'] ?? null,
             'dedup_key'  => $data['dedup_key']  ?? null,
+            'event_id'   => $data['event_id']   ?? null,
             'read'       => false,
         ]);
 
@@ -87,6 +95,21 @@ class CoordinatorNotificationController extends Controller
         CoordinatorNotification::where('user_id', Auth::id())
             ->where('read', false)
             ->update(['read' => true]);
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Delete a single notification MESSAGE only — never the underlying
+     * event/job/chat data it was about. Available for any notification
+     * from the delete button in the panel.
+     */
+    public function destroy(CoordinatorNotification $n)
+    {
+        // Ensure the notification belongs to the authenticated user
+        abort_if($n->user_id !== Auth::id(), 403);
+
+        $n->delete();
 
         return response()->json(['status' => 'ok']);
     }

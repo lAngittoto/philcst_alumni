@@ -14,6 +14,7 @@ class CoordinatorNotification extends Model
         'link_route',
         'link_label',
         'dedup_key',
+        'event_id',
         'read',
     ];
 

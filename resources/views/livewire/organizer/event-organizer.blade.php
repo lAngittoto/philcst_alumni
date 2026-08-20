@@ -4,6 +4,7 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use App\Models\OrganizerEvent;
@@ -126,6 +127,27 @@ new class extends Component {
             if ($owned) {
                 $this->viewEvent($highlightId);
             }
+        }
+    }
+
+    // ── Same-page notif click: when the organizer clicks an event notif
+    //    while already sitting on Event Management, the sidebar dispatches
+    //    this Livewire event instead of doing a full page reload — no
+    //    ?highlight_event= URL trip needed, no page flash, the left
+    //    sidebar's close/open transition plays normally, and View Details
+    //    (or the resubmit form, depending on status) opens instantly. ──
+    #[On('open-view-event')]
+    public function openViewEventFromNotif(int $id): void
+    {
+        $orgId = $this->organizerId;
+        if (!$orgId) return;
+
+        $owned = OrganizerEvent::where('id', $id)
+            ->where('organizer_id', $orgId)
+            ->exists();
+
+        if ($owned) {
+            $this->viewEvent($id);
         }
     }
 
@@ -480,6 +502,21 @@ public function viewEvent(int $id): void
 
 public function closeFormModal(): void
 {
+    // ── Auto-filter: same idea as closeViewModal() — after closing the
+    //    edit/resubmit form for an existing event, snap the filter pill to
+    //    that event's current status so the organizer lands back on the
+    //    right slice of the table (e.g. resubmitting a REJECTED event
+    //    turns it PENDING again, so the list auto-filters to "Pending"). ──
+    if ($this->editingEventId) {
+        $status = OrganizerEvent::where('id', $this->editingEventId)
+            ->where('organizer_id', $this->organizerId)
+            ->value('status');
+        if ($status && in_array($status, ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'], true)) {
+            $this->filterStatus = $status;
+            $this->resetPage();
+        }
+    }
+
     $this->showFormModal = false;
     $this->resetFormFields();
     $this->dispatch('open-sidebar');
@@ -840,6 +877,45 @@ public function closeFormModal(): void
         }
         $this->dispatch('event-self-action', id: $selfEventId, title: trim($this->title), action: $selfAction);
 
+        // ── Resubmit resets the event's status-chain notif back to
+        //    "Submitted → Pending", REPLACING whatever Approved/Rejected
+        //    row was there before — matched by event_id (same column the
+        //    director's approve/reject uses) so only 1 status row ever
+        //    shows for this event. ──
+        if ($this->isResubmitting && $selfEventId) {
+            try {
+                $dedupKey = 'event-management::resubmitted::' . $selfEventId;
+                $existing = DB::table('coordinator_notifications')
+                    ->where('user_id', Auth::id())
+                    ->where('link_route', 'organizer.event/organizer')
+                    ->where('event_id', $selfEventId)
+                    ->first();
+
+                $payload = [
+                    'icon'       => 'rotate-right',
+                    'title'      => 'Submitted → Pending',
+                    'message'    => "You resubmitted '" . trim($this->title) . "' for Alumni Director review.",
+                    'link_route' => 'organizer.event/organizer',
+                    'link_label' => 'View Events',
+                    'event_id'   => $selfEventId,
+                    'dedup_key'  => $dedupKey,
+                    'read'       => 0,
+                    'updated_at' => now(),
+                ];
+
+                if ($existing) {
+                    DB::table('coordinator_notifications')
+                        ->where('id', $existing->id)
+                        ->update($payload + ['created_at' => now()]);
+                } else {
+                    DB::table('coordinator_notifications')->insert($payload + [
+                        'user_id'    => Auth::id(),
+                        'created_at' => now(),
+                    ]);
+                }
+            } catch (\Throwable) {}
+        }
+
 Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->showFormModal = false;
         $this->resetFormFields();
@@ -848,6 +924,21 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
 
    public function closeViewModal(): void
 {
+    // ── Auto-filter: after closing View Details, snap the table's filter
+    //    pill to whatever status this event is currently sitting at (e.g.
+    //    closing a COMPLETED event's details auto-filters the list to
+    //    "Completed") so the organizer lands right back on the relevant
+    //    slice of the table instead of the unfiltered/previous view. ──
+    if ($this->viewingEventId) {
+        $status = OrganizerEvent::where('id', $this->viewingEventId)
+            ->where('organizer_id', $this->organizerId)
+            ->value('status');
+        if ($status && in_array($status, ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'], true)) {
+            $this->filterStatus = $status;
+            $this->resetPage();
+        }
+    }
+
     $this->showViewModal = false;
     $this->viewingEventId = null;
     $this->dispatch('open-sidebar');
@@ -1201,12 +1292,22 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
 };
 ?>
 
-<div class="flex flex-col" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
+{{-- wire:poll keeps this list + the open View modal "live" — same 3s
+     cadence as the notif bell's chat poller, so an Approve/Reject/Resubmit
+     done elsewhere (e.g. by the Alumni Director) shows up here without a
+     manual refresh. Computed props (events, viewingEvent) re-evaluate on
+     every poll tick automatically. --}}
+<div class="flex flex-col" wire:poll.3000ms
+     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
 
 <style>
 @keyframes modalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
+}
+@keyframes eoImgShimmer {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
 }
 @keyframes slideInFull {
     from { opacity:0; }
@@ -1493,8 +1594,10 @@ select.tw-select-arrow {
 
             <div class="relative inline-flex group">
                 <button wire:click="openCreateModal"
+                        wire:loading.attr="disabled" wire:target="openCreateModal"
                         class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] {{ !$this->hasAlumni ? 'opacity-60 cursor-not-allowed' : '' }}">
-                    <i class="fas fa-plus text-sm"></i>
+                    <i class="fas fa-plus text-sm" wire:loading.remove wire:target="openCreateModal"></i>
+                    <i class="fas fa-spinner fa-spin text-sm" wire:loading wire:target="openCreateModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
                     <i class="fas fa-plus text-[9px] mr-1"></i>Submit Event
@@ -2005,11 +2108,28 @@ select.tw-select-arrow {
                 </div>
             </div>
             @endif
+            @if(($isEditing || $isResubmitting) && $editingEventId)
+            <div class="relative inline-flex group">
+                <button wire:click="confirmDelete({{ $editingEventId }})" type="button"
+                        wire:loading.attr="disabled" wire:target="confirmDelete({{ $editingEventId }})"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
+                        aria-label="Delete event">
+                    <i class="fas fa-trash-can text-white text-sm" wire:loading.remove wire:target="confirmDelete({{ $editingEventId }})"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmDelete({{ $editingEventId }})"></i>
+                </button>
+                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                    Delete
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                </div>
+            </div>
+            @endif
             <div class="relative inline-flex group">
                 <button wire:click="closeFormModal" type="button"
+                        wire:loading.attr="disabled" wire:target="closeFormModal"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm"></i>
+                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeFormModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeFormModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close
@@ -2136,7 +2256,7 @@ select.tw-select-arrow {
 
                 <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Courses
+                        Programs
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
                             <span class="ml-auto inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-200 text-purple-800 text-[10px] font-bold">
@@ -2156,14 +2276,29 @@ select.tw-select-arrow {
                         </div>
 
                         @if(count($this->availableCourses) > 0)
-                            <div class="flex items-center justify-between">
-                                <span class="text-xs font-semibold uppercase tracking-wider text-[#555555]">Select courses</span>
-                                <div class="flex gap-2">
-                                    <button type="button"
-                                            wire:click="$set('selectedCourses', {{ json_encode($this->availableCourses) }})"
-                                            class="text-xs font-semibold hover:underline text-[#7a3f91]">
-                                        <i class="fas fa-check-double mr-0.5 text-[10px]"></i>All
-                                    </button>
+                            <div class="flex items-center justify-between"
+                                 x-data="{
+                                     get allChecked() {
+                                         const total = {{ count($this->availableCourses) }};
+                                         return total > 0 && $wire.selectedCourses.length === total;
+                                     },
+                                     toggleAll(e) {
+                                         if (e.target.checked) {
+                                             $wire.set('selectedCourses', {{ json_encode($this->availableCourses) }});
+                                         } else {
+                                             $wire.set('selectedCourses', []);
+                                         }
+                                     }
+                                 }">
+                                <span class="text-xs font-semibold uppercase tracking-wider text-[#555555]">Select programs</span>
+                                <div class="flex items-center gap-3">
+                                    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                        <input type="checkbox"
+                                               :checked="allChecked"
+                                               @change="toggleAll($event)"
+                                               class="accent-purple-600 w-3.5 h-3.5 flex-shrink-0">
+                                        <span class="text-xs font-semibold text-[#7a3f91] leading-none">Select All</span>
+                                    </label>
                                     @if(count($selectedCourses) > 0)
                                         <button type="button" wire:click="$set('selectedCourses', [])"
                                                 class="text-xs font-semibold hover:text-red-500 text-[#555555]">Clear</button>
@@ -2194,7 +2329,7 @@ select.tw-select-arrow {
                         @else
                             <div class="text-center py-2">
                                 <i class="fas fa-inbox text-xl block mb-1 text-gray-200"></i>
-                                <p class="text-xs text-[#555555]">No courses available yet.</p>
+                                <p class="text-xs text-[#555555]">No programs available yet.</p>
                             </div>
                         @endif
 
@@ -2506,7 +2641,7 @@ select.tw-select-arrow {
                             </li>
                             <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
                                 <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
-                                <span>Choose correct courses so the right alumni are notified.</span>
+                                <span>Choose correct programs so the right alumni are notified.</span>
                             </li>
                             <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
                                 <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
@@ -2547,9 +2682,14 @@ select.tw-select-arrow {
                     </span>
                 </button>
                 <button type="button" wire:click="closeFormModal"
-                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent"
+                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,closeFormModal"
                         class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">
-                    <i class="fas fa-xmark mr-1 text-[10px]"></i>Cancel
+                    <span wire:loading.remove wire:target="closeFormModal">
+                        <i class="fas fa-xmark mr-1 text-[10px]"></i>Cancel
+                    </span>
+                    <span wire:loading wire:target="closeFormModal">
+                        <i class="fas fa-spinner fa-spin mr-1 text-[10px]"></i>Closing…
+                    </span>
                 </button>
             </div>
         </div>
@@ -2601,6 +2741,22 @@ select.tw-select-arrow {
                 </div>
             @endif
 
+            @if(!$isApproved && !$isCompleted && in_array($ev->status, ['PENDING', 'REJECTED']))
+                <div class="relative inline-flex group">
+                    <button wire:click="confirmDelete({{ $ev->id }})" type="button"
+                            wire:loading.attr="disabled" wire:target="confirmDelete({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
+                            aria-label="Delete event">
+                        <i class="fas fa-trash-can text-white text-sm" wire:loading.remove wire:target="confirmDelete({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmDelete({{ $ev->id }})"></i>
+                    </button>
+                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                        Delete
+                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                    </div>
+                </div>
+            @endif
+
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
                         wire:loading.attr="disabled" wire:target="closeViewModal"
@@ -2623,9 +2779,22 @@ select.tw-select-arrow {
 
             @if($hasPhoto)
             <div class="w-full px-5 pt-5 pb-3 flex-shrink-0">
-                <div class="relative w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50">
+                <div class="relative w-full rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50"
+                     x-data="{ imgLoaded: false }" style="min-height: 120px;">
+                    {{-- Skeleton shimmer shown until the image actually
+                         finishes decoding — otherwise the modal looks
+                         "stuck"/slow while the photo streams in. --}}
+                    <div x-show="!imgLoaded" x-cloak
+                         class="absolute inset-0 flex items-center justify-center"
+                         style="background: linear-gradient(90deg,#f3f4f6 25%,#e9e6f0 37%,#f3f4f6 63%); background-size: 400% 100%; animation: eoImgShimmer 1.4s ease-in-out infinite;">
+                        <i class="fas fa-image text-gray-300 text-2xl"></i>
+                    </div>
                     <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
-                         class="w-full object-contain block" style="max-height: 200px;">
+                         loading="eager" fetchpriority="high" decoding="async"
+                         x-on:load="imgLoaded = true"
+                         x-bind:class="imgLoaded ? 'opacity-100' : 'opacity-0'"
+                         class="w-full object-contain block transition-opacity duration-200"
+                         style="max-height: 200px;">
                     <div class="absolute top-3 right-3">
                         @if($isCompleted)
                             <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-700/90 backdrop-blur-sm text-white text-xs font-bold tracking-wide">Completed</span>

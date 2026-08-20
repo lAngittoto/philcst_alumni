@@ -129,7 +129,7 @@ new class extends Component {
         }
     }
 
-    private function notifyOrganizerEvent(?int $organizerId, string $icon, string $title, string $message, string $dedupKey): void
+    private function notifyOrganizerEvent(?int $organizerId, string $icon, string $title, string $message, string $dedupKey, ?int $eventId = null): void
     {
         if (!$organizerId) return;
 
@@ -140,24 +140,41 @@ new class extends Component {
 
         if (!$userId) return;
 
+        // ── One notification ROW per event, not one per status change. ──
+        // The frontend's per-event grouping keys off the event_id column
+        // (see _processNotifs in the sidebar JS), so THAT is what we match
+        // on here — not dedup_key, which still varies per action
+        // ("event-management::approved::{id}" vs "...rejected::{id}") so
+        // the frontend can tell approve apart from reject. Matching on
+        // event_id is what makes this overwrite the existing
+        // "Submitted -> Pending" row in place instead of inserting a
+        // second row next to it.
         try {
-            $exists = DB::table('coordinator_notifications')
+            $existing = DB::table('coordinator_notifications')
                 ->where('user_id', $userId)
-                ->where('dedup_key', $dedupKey)
-                ->exists();
+                ->where('link_route', 'organizer.event/organizer')
+                ->where('event_id', $eventId)
+                ->first();
 
-            if (! $exists) {
-                DB::table('coordinator_notifications')->insert([
+            $payload = [
+                'icon'       => $icon,
+                'title'      => $title,
+                'message'    => $message,
+                'link_label' => 'View Events',
+                'event_id'   => $eventId,
+                'dedup_key'  => $dedupKey,
+                'read'       => 0,
+                'updated_at' => now(),
+            ];
+
+            if ($existing) {
+                DB::table('coordinator_notifications')
+                    ->where('id', $existing->id)
+                    ->update($payload + ['created_at' => now()]);
+            } else {
+                DB::table('coordinator_notifications')->insert($payload + [
                     'user_id'    => $userId,
-                    'icon'       => $icon,
-                    'title'      => $title,
-                    'message'    => $message,
-                    'link_route' => 'organizer.event/organizer',
-                    'link_label' => 'View Events',
-                    'dedup_key'  => $dedupKey,
-                    'read'       => 0,
                     'created_at' => now(),
-                    'updated_at' => now(),
                 ]);
             }
         } catch (\Throwable) {}
@@ -604,7 +621,8 @@ new class extends Component {
                 'Event Approved',
                 "Your event '{$this->approveEventTitle}' has been approved by the Alumni Director"
                     . (trim($this->approveRemarks) ? " — Remarks: " . trim($this->approveRemarks) : '') . ".",
-                'event-management::approved::' . $this->approveEventId
+                'event-management::approved::' . $this->approveEventId,
+                $this->approveEventId
             );
 
             // ── Refresh director bell so approved events clear from pending count ──
@@ -674,7 +692,8 @@ new class extends Component {
                 'calendar',
                 'Event Rejected',
                 "Your event '{$this->rejectEventTitle}' was rejected by the Alumni Director — Reason: {$this->rejectRemarks}",
-                'event-management::rejected::' . $this->rejectEventId
+                'event-management::rejected::' . $this->rejectEventId,
+                $this->rejectEventId
             );
 
             // ── Refresh director bell so rejected events clear from pending count ──
