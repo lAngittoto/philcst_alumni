@@ -210,6 +210,22 @@ new class extends Component {
             $this->philcstName     = $philcst->label;
             $this->philcstLocation = $philcst->default_location ?? '';
         }
+
+        // ── Deep-link: arriving from a "View Post" job card shared in chat ──
+        //    (organizer/chat-alumni.blade.php's [[JOB:id]] preview card links
+        //    here with ?highlight_job=ID). If the ID is valid, viewJob() opens
+        //    automatically for that exact job — same as clicking its row.
+        //    viewJob() itself already decides View (read-only, ACTIVE jobs)
+        //    vs Edit (INACTIVE jobs) — no extra branching needed here.
+        $highlightId = (int) request()->query('highlight_job', 0);
+        if ($highlightId > 0) {
+            try {
+                $this->viewJob($highlightId);
+            } catch (\Throwable $e) {
+                // Invalid id, not owned, or deleted — silently ignore and
+                // land on the plain table instead of a 500/abort.
+            }
+        }
     }
 
     public function updatingSearch()       { $this->resetPage(); }
@@ -1745,7 +1761,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <table class="w-full bg-white border-collapse table-fixed">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest w-10 text-[#555555]">#</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Type</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Company</th>
@@ -1760,16 +1775,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             $isAlumniDirector = is_null($job->organizer_id);
                             $isActive         = $job->status === 'ACTIVE';
                             $canShare         = !$isDeadlinePassed && $isActive;
-                            $rowNum           = ($this->jobPostings->currentPage() - 1) * $this->jobPostings->perPage() + $index + 1;
                         @endphp
                         <tr class="transition-colors duration-100 cursor-pointer bg-white hover:bg-[#f5f0fa]"
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="job-row-{{ $job->id }}"
                             data-eo-row>
-
-                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
-                            </td>
 
                             <td class="px-4 py-3.5">
                                 <div class="max-w-[240px]">
@@ -1808,113 +1818,58 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
 
-                                    @if($canShare)
-                                        <div class="relative inline-flex group" data-eo-share>
-                                            <button type="button" wire:click.stop="openShareModal({{ $job->id }})"
-                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $job->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
-                                                <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $job->id }})"></i>
-                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $job->id }})"></i>
-                                            </button>
-                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                Share
-                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                            </div>
+                                    {{-- Share --}}
+                                    <div class="relative inline-flex group" data-eo-share>
+                                        <button type="button"
+                                                @if($canShare) wire:click.stop="openShareModal({{ $job->id }})" @endif
+                                                wire:loading.attr="disabled" wire:target="openShareModal({{ $job->id }})"
+                                                @disabled(!$canShare)
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-50 disabled:hover:border-blue-200 {{ $canShare ? 'cursor-pointer' : '' }}">
+                                            <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $job->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $job->id }})"></i>
+                                        </button>
+                                        <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                            Share
+                                            <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                         </div>
-                                    @else
-                                        <div class="relative inline-flex group" data-eo-share>
-                                            <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
-                                                <i class="fas fa-share-nodes"></i>
-                                            </span>
-                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                {{ $isDeadlinePassed ? 'Deadline Passed' : 'Inactive' }}
-                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                            </div>
-                                        </div>
-                                    @endif
+                                    </div>
 
-                                    @if(!$isAlumniDirector)
-                                        @if($isActive)
-                                            <div class="relative inline-flex group" data-eo-share>
-                                                <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
-                                                        wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400 disabled:opacity-60 disabled:cursor-wait">
-                                                    <i class="fas fa-circle-pause" wire:loading.remove wire:target="confirmToggleStatus({{ $job->id }})"></i>
-                                                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleStatus({{ $job->id }})"></i>
-                                                </button>
-                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Deactivate
-                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                </div>
-                                            </div>
-                                            <div class="relative inline-flex group" data-eo-share>
-                                                <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-gray-50 text-gray-300 border border-gray-200 cursor-not-allowed">
-                                                    <i class="fas fa-trash text-[10px]"></i>
-                                                </span>
-                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Deactivate first to delete
-                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                </div>
-                                            </div>
-                                        @elseif(!$isDeadlinePassed)
-                                            <div class="relative inline-flex group" data-eo-share>
-                                                <button type="button" wire:click.stop="confirmToggleStatus({{ $job->id }})"
-                                                        wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
-                                                    <i class="fas fa-circle-play" wire:loading.remove wire:target="confirmToggleStatus({{ $job->id }})"></i>
-                                                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleStatus({{ $job->id }})"></i>
-                                                </button>
-                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Activate
-                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                </div>
-                                            </div>
-                                            <div class="relative inline-flex group" data-eo-share>
-                                                <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
-                                                        wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
-                                                    <i class="fas fa-trash text-[10px]" wire:loading.remove wire:target="confirmDeleteJob({{ $job->id }})"></i>
-                                                    <i class="fas fa-spinner fa-spin text-[10px]" wire:loading wire:target="confirmDeleteJob({{ $job->id }})"></i>
-                                                </button>
-                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Delete
-                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                </div>
-                                            </div>
-                                        @else
-                                            <div class="relative inline-flex group" data-eo-share>
-                                                <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-red-50 text-red-400 border border-red-200 cursor-not-allowed">
-                                                    <i class="fas fa-calendar-xmark"></i>
-                                                </span>
-                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Update deadline to activate
-                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                </div>
-                                            </div>
-                                            <div class="relative inline-flex group" data-eo-share>
-                                                <button type="button" wire:click.stop="confirmDeleteJob({{ $job->id }})"
-                                                        wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
-                                                    <i class="fas fa-trash text-[10px]" wire:loading.remove wire:target="confirmDeleteJob({{ $job->id }})"></i>
-                                                    <i class="fas fa-spinner fa-spin text-[10px]" wire:loading wire:target="confirmDeleteJob({{ $job->id }})"></i>
-                                                </button>
-                                                <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                    Delete
-                                                    <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                                </div>
-                                            </div>
-                                        @endif
-                                    @else
-                                        <div class="relative inline-flex group" data-eo-share>
-                                            <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-purple-50 text-purple-400 border border-purple-200 cursor-not-allowed">
-                                                <i class="fas fa-lock text-[10px]"></i>
-                                            </span>
-                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                Posted by Alumni Director
-                                                <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                            </div>
+                                    @php
+                                        $canToggle = !$isAlumniDirector && !$isDeadlinePassed;
+                                        $canDelete = !$isAlumniDirector && !$isActive;
+                                    @endphp
+
+                                    {{-- Activate / Deactivate --}}
+                                    <div class="relative inline-flex group" data-eo-share>
+                                        <button type="button"
+                                                @if($canToggle) wire:click.stop="confirmToggleStatus({{ $job->id }})" @endif
+                                                wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $job->id }})"
+                                                @disabled(!$canToggle)
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition {{ $isActive ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400 disabled:hover:bg-amber-50 disabled:hover:border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:hover:bg-emerald-50 disabled:hover:border-emerald-200' }} disabled:opacity-40 disabled:cursor-not-allowed {{ $canToggle ? 'cursor-pointer' : '' }}">
+                                            <i class="fas {{ $isActive ? 'fa-circle-pause' : 'fa-circle-play' }}" wire:loading.remove wire:target="confirmToggleStatus({{ $job->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleStatus({{ $job->id }})"></i>
+                                        </button>
+                                        <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                            {{ $isActive ? 'Deactivate' : 'Activate' }}
+                                            <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                         </div>
-                                    @endif
+                                    </div>
+
+                                    {{-- Delete --}}
+                                    <div class="relative inline-flex group" data-eo-share>
+                                        <button type="button"
+                                                @if($canDelete) wire:click.stop="confirmDeleteJob({{ $job->id }})" @endif
+                                                wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $job->id }})"
+                                                @disabled(!$canDelete)
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-50 disabled:hover:border-red-200 {{ $canDelete ? 'cursor-pointer' : '' }}">
+                                            <i class="fas fa-trash text-[10px]" wire:loading.remove wire:target="confirmDeleteJob({{ $job->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin text-[10px]" wire:loading wire:target="confirmDeleteJob({{ $job->id }})"></i>
+                                        </button>
+                                        <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                            Delete
+                                            <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
+                                        </div>
+                                    </div>
 
                                 </div>
                             </td>

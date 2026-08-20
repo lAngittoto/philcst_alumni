@@ -1596,12 +1596,11 @@ select.tw-select-arrow {
             </div>
 
             <div id="eo-table-scroll"
-                 class="scroll-c h-full overflow-y-auto transition-opacity duration-200 bg-white"
+                 class="scroll-c h-full overflow-y-auto overflow-x-auto transition-opacity duration-200 bg-white"
                  wire:loading.class="opacity-50" wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
 
             @if($this->events->count() > 0)
 
-            <div class="overflow-x-auto bg-white">
                 <table class="w-full bg-white border-collapse">
                     <thead class="bg-white sticky top-0 z-10" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
@@ -1738,7 +1737,6 @@ select.tw-select-arrow {
                         @endforeach
                     </tbody>
                 </table>
-            </div>
 
             @else
             <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
@@ -2605,9 +2603,11 @@ select.tw-select-arrow {
 
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
+                        wire:loading.attr="disabled" wire:target="closeViewModal"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm"></i>
+                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeViewModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeViewModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close

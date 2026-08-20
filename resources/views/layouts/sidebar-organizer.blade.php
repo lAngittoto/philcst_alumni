@@ -191,7 +191,40 @@
             background: #F3EBFA;
             border: 1px solid #E0CFEE;
         }
-        .coord-nav-icon { transition: transform 0.2s ease; }
+        .coord-nav-icon { transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease; }
+
+        /* ── Color-coded nav icons — each destination gets its own accent
+           so the sidebar can be scanned by color, not just by label. ── */
+        .coord-nav-icon.clr-dashboard  { background: #DBEAFE !important; color: #2563EB !important; }
+        .coord-nav-icon.clr-event      { background: #DCFCE7 !important; color: #16A34A !important; }
+        .coord-nav-icon.clr-job        { background: #FEF3C7 !important; color: #C08A00 !important; }
+        .coord-nav-icon.clr-employment { background: #FFE4E6 !important; color: #E11D48 !important; }
+        .coord-nav-icon.clr-chat       { background: #E0E7FF !important; color: #4F46E5 !important; }
+        .coord-nav-icon.clr-yearbook   { background: #EDE9FE !important; color: #7C3AED !important; }
+
+        .coord-nav-link.is-active .coord-nav-icon {
+            background: #FFFFFF !important;
+            color: #7A3F91 !important;
+        }
+
+        /* ── Bell "wave" alert — soft expanding ring pulse behind the bell,
+           runs continuously while there is at least one unread notification. ── */
+        .coord-bell-wave {
+            position: absolute;
+            inset: -6px;
+            border-radius: 50%;
+            border: 2px solid #DC2626;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .coord-bell-wave.is-active {
+            animation: coord-bell-wave-pulse 2s ease-out infinite;
+        }
+        @keyframes coord-bell-wave-pulse {
+            0%   { transform: scale(0.7); opacity: 0.55; }
+            70%  { transform: scale(1.55); opacity: 0; }
+            100% { transform: scale(1.55); opacity: 0; }
+        }
 
         .coord-collapsible-text {
             opacity: 1;
@@ -1364,36 +1397,42 @@
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
                         'pattern' => 'coordinator/dashboard*',
+                        'color'   => 'clr-dashboard',
                     ],
                     [
                         'route'   => 'organizer.event/organizer',
                         'icon'    => 'calendar-check',
                         'label'   => 'Event Management',
                         'pattern' => 'coordinator/event/management*',
+                        'color'   => 'clr-event',
                     ],
                     [
                         'route'   => 'organizer.job/management',
                         'icon'    => 'briefcase',
                         'label'   => 'Job Management',
                         'pattern' => 'coordinator/job/management*',
+                        'color'   => 'clr-job',
                     ],
                     [
                         'route'   => 'organizer.alumni/employment',
                         'icon'    => 'chart-line',
                         'label'   => 'Employment Tracking',
                         'pattern' => 'coordinator/alumni/employment*',
+                        'color'   => 'clr-employment',
                     ],
                     [
                         'route'   => 'organizer.chat/alumni',
                         'icon'    => 'comments',
                         'label'   => 'Message Hub',
                         'pattern' => 'coordinator/message/hub*',
+                        'color'   => 'clr-chat',
                     ],
                     [
                         'route'   => 'organizer.yearbook',
                         'icon'    => 'book-open',
                         'label'   => 'Alumni Yearbook',
                         'pattern' => 'coordinator/yearbook*',
+                        'color'   => 'clr-yearbook',
                     ],
                 ];
             @endphp
@@ -1407,9 +1446,8 @@
                    class="coord-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 
-                    <div class="coord-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
-                         style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
-                                box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
+                    <div class="coord-nav-icon {{ $link['color'] }} w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
+                         style="box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
@@ -1501,6 +1539,8 @@
                 title="Notifications"
                 aria-label="Open notifications"
                 class="coord-topbar-bell">
+                <span class="coord-bell-wave"
+                      :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'is-active' : ''"></span>
                 <i class="bell-icon fas fa-bell"
                    :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'fa-shake' : ''"
                    style="font-size:20px; color:#7A3F91;

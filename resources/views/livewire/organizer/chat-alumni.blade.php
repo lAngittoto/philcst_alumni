@@ -257,14 +257,22 @@ new class extends Component {
     /**
      * ── Builds the "View Job" deep-link URL ─────────────────────────────────
      */
+    /**
+     * ── Builds the "View Post" deep-link URL for a shared job card ──────────
+     *    Lands the coordinator on their own Job Management table with
+     *    ?highlight_job=ID so the row auto-opens — same deep-link pattern as
+     *    eventsUrl()'s ORGANIZER branch below. NOTE: adjust the route name
+     *    ('organizer.job/management') if it doesn't match your routes/web.php;
+     *    the try/catch falls back to the literal path either way.
+     */
     private function jobsUrl(int $id): string
     {
         try {
-            $path = route('job.opportunities', [], false);
-        } catch (\Throwable) {
-            $path = '/job/opportunities';
+            $path = route('organizer.job/management', [], false);
+        } catch (\Throwable $e) {
+            $path = '/coordinator/job/management';
         }
-        return $path . '?job=' . $id;
+        return $path . '?highlight_job=' . $id;
     }
 
     /**
@@ -281,7 +289,7 @@ new class extends Component {
         if ($type === 'ORGANIZER') {
             try {
                 $path = route('organizer.event/organizer', [], false);
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 $path = '/coordinator/event/management';
             }
             return $path . '?highlight_event=' . $id;
@@ -289,7 +297,7 @@ new class extends Component {
 
         try {
             $path = route('upcoming.events', [], false);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
             $path = '/upcoming/events';
         }
         return $path . '?event=' . $id . '&type=' . $type;
@@ -320,7 +328,7 @@ new class extends Component {
                         'available' => true,
                     ];
                 }
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 // table/columns not found — fall through to the
                 // "unavailable" fallback card below.
             }
@@ -346,7 +354,7 @@ new class extends Component {
                 $event = $type === 'ADMIN'
                     ? \App\Models\AdminEvent::withoutTrashed()->where('id', $id)->first()
                     : \App\Models\OrganizerEvent::where('id', $id)->first();
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 $event = null;
             }
 
@@ -363,17 +371,35 @@ new class extends Component {
                 //    back to comparing event_end_date (or event_date if no
                 //    end date was set) against the current time, which
                 //    works the same way for AdminEvent too. ──────────────
-                $eventStatus  = strtoupper((string) ($event->status ?? ''));
-                $isCompleted  = $eventStatus === 'COMPLETED'
-                    || ($endWhen && Carbon::parse($endWhen)->isPast())
-                    || (! $endWhen && $when && Carbon::parse($when)->isPast());
+                //    Wrapped in its own try/catch: a malformed/unparseable
+                //    date value here used to throw uncaught, taking down
+                //    the ENTIRE selectRoom()/loadMessages() call with a
+                //    500 — one bad event record could break opening the
+                //    whole room. Now it just falls back to "not completed"
+                //    instead of crashing the page.
+                $eventStatus = strtoupper((string) ($event->status ?? ''));
+                $isCompleted = $eventStatus === 'COMPLETED';
+                if (! $isCompleted) {
+                    try {
+                        $isCompleted = ($endWhen && Carbon::parse($endWhen)->isPast())
+                            || (! $endWhen && $when && Carbon::parse($when)->isPast());
+                    } catch (\Throwable $e) {
+                        $isCompleted = false;
+                    }
+                }
+
+                $subtitle = $event->venue ?? '';
+                if ($when) {
+                    try { $subtitle = Carbon::parse($when)->format('M d, Y'); }
+                    catch (\Throwable $e) { /* keep venue fallback above */ }
+                }
 
                 return [
                     'type'         => 'event',
                     'id'           => $id,
                     'event_type'   => $type,
                     'title'        => $event->title ?? 'Event',
-                    'subtitle'     => $when ? Carbon::parse($when)->format('M d, Y') : ($event->venue ?? ''),
+                    'subtitle'     => $subtitle,
                     'image'        => $image,
                     'url'          => $this->eventsUrl($id, $type),
                     'available'    => true,
@@ -406,14 +432,14 @@ new class extends Component {
         if (preg_match('/\[\[JOB:(\d+)\]\]/i', $body, $m)) {
             $id = (int) $m[1];
             $title = null;
-            try { $title = DB::table('job_postings')->where('id', $id)->value('job_title'); } catch (\Throwable) {}
+            try { $title = DB::table('job_postings')->where('id', $id)->value('job_title'); } catch (\Throwable $e) {}
             return $title ? ('📌 Shared a job: ' . $title) : '📌 Shared a job opening';
         }
 
         if (preg_match('/\[\[EVENT:(ADMIN|ORGANIZER):(\d+)\]\]/i', $body, $m)) {
             $id = (int) $m[2];
             $title = null;
-            try { $title = DB::table('events')->where('id', $id)->whereNull('deleted_at')->value('title'); } catch (\Throwable) {}
+            try { $title = DB::table('events')->where('id', $id)->whereNull('deleted_at')->value('title'); } catch (\Throwable $e) {}
             return $title ? ('📅 Shared an event: ' . $title) : '📅 Shared an event';
         }
 
@@ -587,7 +613,7 @@ new class extends Component {
                     'updated_at'  => now(),
                 ]);
             }
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
 
         if (empty($this->deptCourseCodes)) return;
 
@@ -617,7 +643,7 @@ new class extends Component {
                     ]);
                 }
             }
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
 
         try {
             foreach ($this->deptCourseCodes as $code) {
@@ -637,7 +663,7 @@ new class extends Component {
                     ]);
                 }
             }
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -661,6 +687,34 @@ new class extends Component {
     //     for the heavier notification/read bookkeeping.
     // ─────────────────────────────────────────────────────────────────────
     public function unifiedPoll(): void
+    {
+        // ── Overlap guard ────────────────────────────────────────────────
+        // wire:poll fires every 2.5s regardless of whether the PREVIOUS
+        // tick's request has actually finished. On a slow query (DB under
+        // load, dev server hiccup, etc.) a tick can take several seconds —
+        // long enough for 1-3 more ticks to queue up and hit the server
+        // before the first one returns. Two overlapping requests mutating
+        // the same Livewire component snapshot is exactly what produced
+        // the ArgumentCountError / hydration-mismatch crashes: a request
+        // reads/writes component state while a sibling request is doing
+        // the same thing. A short server-side lock (keyed per coordinator,
+        // since Volt's anonymous class has no stable instance id we can
+        // rely on) makes any overlapping tick a harmless no-op instead of
+        // a race.
+        $lockKey = "chat_poll_lock.organizer.{$this->coordinatorId}";
+        if (Cache::has($lockKey)) {
+            return;
+        }
+        Cache::put($lockKey, true, now()->addSeconds(8));
+
+        try {
+            $this->runUnifiedPoll();
+        } finally {
+            Cache::forget($lockKey);
+        }
+    }
+
+    private function runUnifiedPoll(): void
     {
         $this->pollTick++;
 
@@ -829,7 +883,7 @@ new class extends Component {
 
                     $anyNewForBell = true;
                 }
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
                 // Fallback: if DB write fails, dispatch JS event so the old
                 // client-side path can still handle it
                 $this->dispatch('coord-message-received', [
@@ -914,7 +968,7 @@ new class extends Component {
                     'updated_at' => now(),
                 ]);
             }
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1138,7 +1192,25 @@ new class extends Component {
             ->get(['r.id', 'r.name', 'r.course_code', 'r.batch', 'r.department'])
             ->toArray();
 
-        $courseGcRooms = collect($courseGcRows)->map(function ($r) use ($search, $self) {
+        // ── PERF FIX: department coordinator online/total counts don't
+        //    depend on the room ($r) at all — the query inside the loop
+        //    below was identical on every single iteration, meaning a
+        //    department with 20 course rooms ran the exact same 2 queries
+        //    20 extra times per poll tick for nothing. Computed once here
+        //    and reused. This (plus the same fix in the batch-rooms loop
+        //    below) is most of what was pushing loadRooms() past 5-10s
+        //    under load, which caused overlapping polls and the crashes.
+        $deptCoordOnline = DB::table('organizer')
+            ->where('status', 'ACTIVE')->whereNull('deleted_at')
+            ->where('department', $self->department)
+            ->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))
+            ->count();
+        $deptCoordTotal = DB::table('organizer')
+            ->where('status', 'ACTIVE')->whereNull('deleted_at')
+            ->where('department', $self->department)
+            ->count();
+
+        $courseGcRooms = collect($courseGcRows)->map(function ($r) use ($search, $self, $deptCoordOnline, $deptCoordTotal) {
             // Extra safety net: even though the query above already excludes
             // '' and 'CLG_%', double-check here too — if this ever somehow
             // matches an internal marker, skip it from the course-GC list
@@ -1176,17 +1248,8 @@ new class extends Component {
             $totalCount  = (clone $baseAlumni)->count();
             $onlineCount = (clone $baseAlumni)->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))->count();
 
-            $coordOnline = DB::table('organizer')
-                ->where('status', 'ACTIVE')->whereNull('deleted_at')
-                ->where('department', $self->department)
-                ->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))
-                ->count();
-            $coordTotal  = DB::table('organizer')
-                ->where('status', 'ACTIVE')->whereNull('deleted_at')
-                ->where('department', $self->department)
-                ->count();
-            $onlineCount += $coordOnline;
-            $totalCount  += $coordTotal;
+            $onlineCount += $deptCoordOnline;
+            $totalCount  += $deptCoordTotal;
 
             $courseName  = DB::table('courses')->where('code', $r->course_code)->value('name') ?? strtoupper($r->course_code);
 
@@ -1244,7 +1307,7 @@ new class extends Component {
             ->get(['r.id', 'r.name', 'r.course_code', 'r.batch', 'r.department'])
             ->toArray();
 
-        $batchRooms = collect($rows)->map(function ($r) use ($search, $self) {
+        $batchRooms = collect($rows)->map(function ($r) use ($search, $self, $deptCoordOnline, $deptCoordTotal) {
             $latest = DB::table('chat_messages as m')
                 ->where('m.room_id', $r->id)
                 ->whereNull('m.deleted_at')
@@ -1273,17 +1336,8 @@ new class extends Component {
             $onlineCount = (clone $baseAlumni)->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))->count();
             $totalCount  = (clone $baseAlumni)->count();
 
-            $coordOnline = DB::table('organizer')
-                ->where('status', 'ACTIVE')->whereNull('deleted_at')
-                ->where('department', $self->department)
-                ->where('last_seen_at', '>=', now()->subMinutes($self->onlineMinutes))
-                ->count();
-            $coordTotal  = DB::table('organizer')
-                ->where('status', 'ACTIVE')->whereNull('deleted_at')
-                ->where('department', $self->department)
-                ->count();
-            $onlineCount += $coordOnline;
-            $totalCount  += $coordTotal;
+            $onlineCount += $deptCoordOnline;
+            $totalCount  += $deptCoordTotal;
 
             $isCurrentRoom = ($r->id === $self->roomId);
             $lastReadAt    = Cache::get($self->lastReadCacheKey($r->id));
@@ -1332,13 +1386,22 @@ new class extends Component {
 
         // ── MESSENGER-STYLE SORT ───────────────────────────────────────
         // Priority: pinned rooms first, unpinned after. Within EACH of
-        // those two groups: unread rooms bubble to the very top (so a red
-        // dot always surfaces before older read chats), then everything
-        // is ordered by most recent activity, and finally alphabetically
-        // for rooms that have no messages yet.
+        // those two groups: the room the coordinator currently has OPEN
+        // always sorts first — before unread even — so it can never
+        // scroll out of the visible list while they're actively reading
+        // it. (Previously the active room sorted purely by latest_ts like
+        // everything else, so as soon as ANOTHER room got a newer message
+        // during a poll tick, the open room would get pushed down and
+        // could scroll out of view — looking like its "active" indicator
+        // had disappeared, when really the whole row had just moved.)
+        // After that: unread rooms bubble up, then most recent activity,
+        // then alphabetical for rooms with no messages yet.
         $sortGroup = function ($group) {
-            $unread       = $group->filter(fn ($r) => $r['has_unread']);
-            $read         = $group->filter(fn ($r) => ! $r['has_unread']);
+            $active       = $group->filter(fn ($r) => $r['is_active']);
+            $rest         = $group->filter(fn ($r) => ! $r['is_active']);
+
+            $unread       = $rest->filter(fn ($r) => $r['has_unread']);
+            $read         = $rest->filter(fn ($r) => ! $r['has_unread']);
 
             $unreadWithMsg    = $unread->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
             $unreadWithoutMsg = $unread->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
@@ -1346,7 +1409,8 @@ new class extends Component {
             $readWithMsg    = $read->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
             $readWithoutMsg = $read->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
 
-            return $unreadWithMsg->merge($unreadWithoutMsg)
+            return $active
+                ->merge($unreadWithMsg)->merge($unreadWithoutMsg)
                 ->merge($readWithMsg)->merge($readWithoutMsg)
                 ->values();
         };
@@ -1481,7 +1545,7 @@ new class extends Component {
     {
         try {
             DB::table('organizer')->where('id', $this->coordinatorId)->update(['last_seen_at' => now()]);
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
     }
 
     public function refreshOnlineCount(): void
@@ -1539,7 +1603,7 @@ new class extends Component {
                 $this->totalCount  = $alumniTotal + $coordTotal;
                 $this->onlineCount = $alumniOnline + $coordOnline;
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
             $this->totalCount = $this->onlineCount = 0;
         }
     }
@@ -1555,7 +1619,7 @@ new class extends Component {
                 ['room_id' => $this->roomId, 'sender_type' => 'coordinator', 'sender_id' => $this->coordinatorId],
                 ['typed_at' => now(), 'updated_at' => now()]
             );
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
     }
 
     public function stopTyping(): void
@@ -1566,7 +1630,7 @@ new class extends Component {
                 ->where('sender_type', 'coordinator')
                 ->where('sender_id', $this->coordinatorId)
                 ->delete();
-        } catch (\Throwable) {}
+        } catch (\Throwable $e) {}
     }
 
     public function loadTypingIndicators(): void
@@ -1596,7 +1660,7 @@ new class extends Component {
                 }
             }
             $this->typingUsers = $names;
-        } catch (\Throwable) { $this->typingUsers = []; }
+        } catch (\Throwable $e) { $this->typingUsers = []; }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1682,7 +1746,18 @@ new class extends Component {
                 'sender_course'  => (! $isDir && ! $isCoord && $s) ? ($s->course_code ?? '') : '',
                 'sender_batch'   => (! $isDir && ! $isCoord && $s) ? (string)($s->batch ?? '') : '',
                 'body'           => $m->body,
-                'post_preview'   => $self->resolvePostPreview($m->body),
+                'post_preview'   => (function () use ($self, $m) {
+                    // Defensive: resolvePostPreview() touches DB/model
+                    // lookups + date parsing for shared job/event cards.
+                    // One malformed record here used to be able to crash
+                    // the ENTIRE room-open request with a 500 — now it
+                    // just renders that one message as plain text instead.
+                    try {
+                        return $self->resolvePostPreview($m->body);
+                    } catch (\Throwable $e) {
+                        return null;
+                    }
+                })(),
                 'edited'         => ! is_null($m->edited_at),
                 'is_mine'        => $isMe,
                 'is_director'    => $isDir,
@@ -2493,6 +2568,34 @@ new class extends Component {
             background: linear-gradient(180deg,#8b35b8,#6b2490);
         }
 
+        /* ── Active-room dot — bigger, persistent indicator that replaces
+             the old "Open" text pill. Pulses forever (infinite) as long
+             as this room stays selected — it never fades out or times
+             out on its own, since $isActive is derived fresh from the
+             component's own $roomId on every render/poll tick, not from
+             a one-shot timer. ── */
+        @keyframes orgActiveDotPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(107,36,144,.55); }
+            50%      { box-shadow: 0 0 0 5px rgba(107,36,144,0); }
+        }
+        .org-active-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #6b2490;
+            display: inline-block;
+            animation: orgActiveDotPulse 1.8s ease-in-out infinite;
+        }
+        /* Dot is ALWAYS present in the DOM (not conditionally inserted or
+           removed based on a condition) — only its visibility toggles via
+           this class. This avoids any chance of Livewire's poll-driven DOM
+           morph dropping/flickering the node, which is what could make the
+           indicator seem to "disappear" even while a room is still open. */
+        .org-active-dot-hidden {
+            visibility: hidden;
+            animation: none;
+        }
+
         @media (max-width: 768px) {
             #org-sidebar { display: none; }
             #org-sidebar.org-mobile-show { display: flex; width: 100% !important; }
@@ -2779,12 +2882,8 @@ new class extends Component {
                                     @else {!! $this->highlight($r['name'], $roomSearch) !!}
                                     @endif
                                 </p>
-                                <div class="flex items-center gap-1 flex-shrink-0">
-                                    @if($isActive)
-                                    <span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-white px-1.5 py-0.5 rounded-full flex-shrink-0" style="background:#6b2490;">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-white flex-shrink-0" style="animation: orgFadeUp .16s ease-out both;"></span>Open
-                                    </span>
-                                    @endif
+                                <div class="flex items-center gap-1.5 flex-shrink-0">
+                                    <span class="org-active-dot flex-shrink-0 {{ $isActive ? '' : 'org-active-dot-hidden' }}" title="Currently open"></span>
                                     @if($hasUnread && ! $isActive)
                                     <span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0 animate-pulse"></span>
                                     @endif
@@ -3136,17 +3235,18 @@ new class extends Component {
                                                     </p>
                                                 </div>
 
+                                                @php $ppTypeLabel = $pp['type'] === 'job' ? 'Job' : 'Event'; @endphp
                                                 @if($ppAvailable)
                                                 <div class="msgr-post-thumb-overlay">
-                                                    <a href="{{ $pp['url'] }}" wire:navigate @click.stop
+                                                    <a href="{{ $pp['url'] }}" wire:navigate
                                                        x-data="{ going: false }"
-                                                       @click="going = true"
+                                                       @click.stop="going = true"
                                                        @livewire:navigate.window="going = false"
                                                        class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#4a1863] text-xs font-bold shadow-md inline-flex items-center gap-1.5"
                                                        :class="{ 'opacity-70 pointer-events-none': going }">
                                                         <i class="fa-solid fa-spinner fa-spin" x-show="going" style="display:none;"></i>
                                                         <i class="fa-solid fa-eye" x-show="!going"></i>
-                                                        <span x-text="going ? 'Opening…' : 'View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}'"></span>
+                                                        <span x-text="going ? 'Opening...' : 'View {{ $ppTypeLabel }}'"></span>
                                                     </a>
                                                 </div>
                                                 @endif
