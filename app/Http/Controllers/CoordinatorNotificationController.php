@@ -43,6 +43,14 @@ class CoordinatorNotificationController extends Controller
             //    instead of just landing on the events list. Nullable —
             //    non-event notifs (jobs, chat, alumni) omit it entirely. ──
             'event_id'   => 'nullable|integer',
+            // ── job_id: same idea as event_id above, but for the underlying
+            //    JobPosting id on job-related notifs. Lets the frontend
+            //    build a ?highlight_job={id} deep-link so clicking a job
+            //    notification opens that exact job's View/Edit Details
+            //    instead of just landing on the jobs table. Nullable —
+            //    notifs where the job was deleted, or non-job notifs,
+            //    omit it entirely. ──
+            'job_id'     => 'nullable|integer',
         ]);
 
         $userId = Auth::id();
@@ -68,6 +76,7 @@ class CoordinatorNotificationController extends Controller
             'link_label' => $data['link_label'] ?? null,
             'dedup_key'  => $data['dedup_key']  ?? null,
             'event_id'   => $data['event_id']   ?? null,
+            'job_id'     => $data['job_id']     ?? null,
             'read'       => false,
         ]);
 

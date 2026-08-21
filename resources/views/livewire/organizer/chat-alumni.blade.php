@@ -1396,6 +1396,21 @@ new class extends Component {
         // had disappeared, when really the whole row had just moved.)
         // After that: unread rooms bubble up, then most recent activity,
         // then alphabetical for rooms with no messages yet.
+        //
+        // ── FIX: TRUE messenger-style sort, no pinned-group carve-out ──
+        //    Previously pinned rooms were sorted as their own group ABOVE
+        //    every unpinned room, so a pinned-but-read room (e.g. Staff
+        //    Chat) always sat above an unpinned room with a fresh unread
+        //    message — the red dot below a read room at the top looked
+        //    broken. Real messenger apps (Messenger, WhatsApp, Telegram)
+        //    don't do that: pin just means "shown with a pin icon", it
+        //    does not override unread priority. So now ALL rooms — pinned
+        //    or not — go through the same $sortGroup pass together:
+        //    active room open right now first, then unread (newest
+        //    activity first), then read (newest activity first), then
+        //    alphabetical for rooms with no messages yet. 'is_pinned_room'
+        //    is still computed and kept on each row for the pin icon in
+        //    the UI — it's just no longer a sort key. ──
         $sortGroup = function ($group) {
             $active       = $group->filter(fn ($r) => $r['is_active']);
             $rest         = $group->filter(fn ($r) => ! $r['is_active']);
@@ -1415,13 +1430,7 @@ new class extends Component {
                 ->values();
         };
 
-        $pinned   = $allRooms->filter(fn ($r) => $r['is_pinned_room']);
-        $unpinned = $allRooms->filter(fn ($r) => ! $r['is_pinned_room']);
-
-        $pinnedSorted   = $sortGroup($pinned);
-        $unpinnedSorted = $sortGroup($unpinned);
-
-        $this->rooms = $pinnedSorted->merge($unpinnedSorted)->values()->toArray();
+        $this->rooms = $sortGroup($allRooms)->values()->toArray();
     }
 
     // Public wrapper so it's callable from inside the collect()->map() closures

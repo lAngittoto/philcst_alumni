@@ -111,10 +111,10 @@
             .notif-close-tip { display: none !important; }
         }
 
-        /* ── Delete icon (only shown once a notif is 30+ days old) ──
+        /* ── Delete icon (only shown once notif is 30+ days old) ──
            Sits at the end of the time row, next to the timestamp.
-           Red icon by default so it's visible right away in the
-           sidebar (not just on hover), with a slightly deeper red +
+           Red icon by default so it's visible right away once it
+           appears (not just on hover), with a slightly deeper red +
            light-red bg on hover for feedback. */
         .notif-delete-btn {
             position: relative;
@@ -730,7 +730,20 @@
             _processNotifs(rows) {
                 var result = [];
                 var eventGroups = {}; // event_id -> merged notif row
-                var chatGroups = {};  // 'room::YYYY-MM-DD' -> merged chat notif row (×N per day)
+                var jobGroups   = {}; // job_id -> merged notif row (chain title)
+                var chatGroups  = {}; // 'room::YYYY-MM-DD' -> merged chat notif row (×N per day)
+
+                // Human-readable step label per underlying action, used to
+                // build the "Step -> Step" chain title for job notifs.
+                var jobStepLabel = {
+                    'created':         'You Posted a Job',
+                    'director_posted': 'Job Posted',
+                    'updated':         'Updated',
+                    'activated':       'Active',
+                    'deactivated':     'Inactive',
+                    'deleted':         'Deleted',
+                    'restored':        'Restored',
+                };
 
                 // Human-readable step label per underlying action, used to
                 // build the "Step -> Step" chain title for event notifs.
@@ -853,6 +866,90 @@
                             chain = [prevRealStep, lastRealStep];
                         }
                         group.title = chain.join(' \u2192 ');
+
+                        return;
+                    }
+
+                    // ── Job notifs: grouped PER JOB so the row always shows
+                    //    "You Posted a Job → <current status>" instead of a
+                    //    separate entry for every activate/deactivate/edit.
+                    //    Covers both the organizer's own actions (job-self::)
+                    //    and director-side actions on that same job
+                    //    (job-management::) so the chain reflects reality
+                    //    regardless of who last touched it. ──
+                    var isJobSelfNotif = rawDedup.startsWith('job-self::');
+                    var isJobMgmtNotif = rawDedup.startsWith('job-management::');
+                    var isJobNotif = isJobSelfNotif || isJobMgmtNotif;
+
+                    if (isJobNotif) {
+                        var jparts  = rawDedup.split('::');
+                        var jaction = jparts.length >= 2 ? jparts[1] : '';
+
+                        // Director-side "updated" is excluded — redundant
+                        // with the organizer's own "Updated" step, same
+                        // convention as the event chain above.
+                        if (isJobMgmtNotif && jaction === 'updated') {
+                            return;
+                        }
+
+                        // job-self::{action}::{day}::{jobId}  -> id is LAST
+                        // job-management::{action}::{jobId}   -> id is LAST
+                        var jobId = n.job_id || (jparts.length >= 3 ? jparts[jparts.length - 1] : null) || ('noid-' + n.id);
+                        var jgroup = jobGroups[jobId];
+
+                        if (!jgroup) {
+                            jgroup = Object.assign({}, n, {
+                                count:       1,
+                                _ids:        [],
+                                _chainSteps: [],
+                                created_at:  n.created_at,
+                            });
+                            jobGroups[jobId] = jgroup;
+                            result.push(jgroup);
+                        }
+
+                        jgroup._ids.push(n.id);
+
+                        // Append this step (skip consecutive duplicates).
+                        var jstepLabel = jobStepLabel[jaction] || (n.title || 'Update');
+                        var jlastStep  = jgroup._chainSteps[jgroup._chainSteps.length - 1];
+                        if (jstepLabel !== jlastStep) {
+                            jgroup._chainSteps.push(jstepLabel);
+                        }
+
+                        // A brand-new job posting goes live IMMEDIATELY —
+                        // there's no separate "activate" click/dispatch for
+                        // it (that only fires later, when the organizer
+                        // manually deactivates/reactivates it). Without
+                        // this, the row would sit forever as just "You
+                        // Posted a Job" with no outcome, since no
+                        // 'activated' event is ever fired for it. So the
+                        // moment the job is created/posted, immediately
+                        // chain on the "Active" outcome too.
+                        if ((jaction === 'created' || jaction === 'director_posted') && jgroup._chainSteps[jgroup._chainSteps.length - 1] !== 'Active') {
+                            jgroup._chainSteps.push('Active');
+                        }
+
+                        // Latest row drives icon/message/link/read state —
+                        // group always looks/acts like its most recent status.
+                        jgroup.icon        = n.icon;
+                        jgroup.message     = n.message;
+                        jgroup.link_route  = n.link_route;
+                        jgroup.link_label  = n.link_label;
+                        jgroup.job_id      = n.job_id || jgroup.job_id;
+                        jgroup.read        = n.read;
+                        jgroup.created_at  = n.created_at;
+
+                        // Title = "You Posted a Job → <current status>".
+                        // First step is always the post itself; everything
+                        // after collapses down to just the CURRENT status
+                        // (Active / Inactive / Deleted / Restored) so the
+                        // row never grows into a long replayed history.
+                        var jFirstStep = jgroup._chainSteps[0] || 'You Posted a Job';
+                        var jLastStep  = jgroup._chainSteps[jgroup._chainSteps.length - 1];
+                        jgroup.title = (jLastStep === jFirstStep)
+                            ? jFirstStep
+                            : jFirstStep + ' \u2192 ' + jLastStep;
 
                         return;
                     }
@@ -1011,10 +1108,9 @@
             // gets shorter; the actual data this notif was about is
             // untouched.
             //
-            // Only ever called for notifs that are 30+ days old (enforced
-            // by the x-show on the delete button in the markup), so this
-            // is purely a "clean up old noise" action, not a moderation
-            // action on real data.
+            // Available on every notif now (no age restriction) — purely
+            // a "clean up noise" action, not a moderation action on real
+            // data.
             async deleteNotif(item) {
                 if (window.__coordLoggingOut) return;
                 var ids = item._ids || [item.id];
@@ -1314,6 +1410,9 @@
                 link_route: 'organizer.job/management',
                 link_label: 'View Jobs',
                 dedup_key:  'job-management::' + action + '::' + (d.id || Math.floor(Date.now() / 60000)),
+                // ── job_id omitted on delete: the job row is gone, so a
+                //    highlight_job deep-link would just fail to load. ──
+                job_id:     (action !== 'deleted' && d.id) ? d.id : null,
             });
         });
 
@@ -1356,6 +1455,9 @@
                 link_route: 'organizer.job/management',
                 link_label: 'View Jobs',
                 dedup_key:  'job-self::' + action + '::' + _todayStr() + '::' + (d.id || 0),
+                // ── job_id omitted on delete: the job row is gone, so a
+                //    highlight_job deep-link would just fail to load. ──
+                job_id:     (action !== 'deleted' && d.id) ? d.id : null,
             });
         });
 
@@ -1864,6 +1966,8 @@
                             let url = window.__coordRouteMap[notif.link_route] || '/organizer/dashboard';
                             if (notif.link_route === 'organizer.event/organizer' && notif.event_id) {
                                 url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_event=' + encodeURIComponent(notif.event_id);
+                            } else if (notif.link_route === 'organizer.job/management' && notif.job_id) {
+                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_job=' + encodeURIComponent(notif.job_id);
                             }
 
                             const targetPath = url.split('?')[0];
@@ -1877,6 +1981,12 @@
                             //    normally like any other click. ──
                             if (isSameLocation && notif.link_route === 'organizer.event/organizer' && notif.event_id && window.Livewire) {
                                 Livewire.dispatch('open-view-event', { id: Number(notif.event_id) });
+                            } else if (isSameLocation && notif.link_route === 'organizer.job/management' && notif.job_id && window.Livewire) {
+                                // ── Same treatment for Job Management: already on
+                                //    the page? Dispatch straight to the mounted
+                                //    Livewire component so it opens View/Edit
+                                //    Details immediately instead of a full reload. ──
+                                Livewire.dispatch('open-view-job', { id: Number(notif.job_id) });
                             } else if (isSameLocation) {
                                 window.location.href = url;
                             } else if (window.Livewire) {
@@ -1903,9 +2013,14 @@
                                    style="font-size:13px;line-height:1.4;"
                                    x-text="notif.title"></p>
 
-                                {{-- Job badge — posted by Alumni Director --}}
+                                {{-- Job badge — posted by Alumni Director.
+                                     Keyed off dedup_key prefix (not icon)
+                                     since self-posted jobs share the same
+                                     'briefcase' icon and were wrongly
+                                     showing this badge on the organizer's
+                                     OWN posts before. --}}
                                 <span
-                                    x-show="notif.icon === 'briefcase' && !notif.read"
+                                    x-show="notif.icon === 'briefcase' && !notif.read && (notif.dedup_key || '').startsWith('job-management::')"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1915,7 +2030,7 @@
 
                                 {{-- Job activated badge — by Alumni Director --}}
                                 <span
-                                    x-show="notif.icon === 'circle-check' && !notif.read"
+                                    x-show="notif.icon === 'circle-check' && !notif.read && (notif.dedup_key || '').startsWith('job-management::')"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1925,7 +2040,7 @@
 
                                 {{-- Job deactivated badge — by Alumni Director --}}
                                 <span
-                                    x-show="notif.icon === 'circle-pause' && !notif.read"
+                                    x-show="notif.icon === 'circle-pause' && !notif.read && (notif.dedup_key || '').startsWith('job-management::')"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1935,7 +2050,7 @@
 
                                 {{-- Job restored badge — by Alumni Director --}}
                                 <span
-                                    x-show="notif.icon === 'rotate-left' && !notif.read"
+                                    x-show="notif.icon === 'rotate-left' && !notif.read && (notif.dedup_key || '').startsWith('job-management::')"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1945,7 +2060,7 @@
 
                                 {{-- Job updated badge — by Alumni Director --}}
                                 <span
-                                    x-show="notif.icon === 'pen-to-square' && !notif.read"
+                                    x-show="notif.icon === 'pen-to-square' && !notif.read && (notif.dedup_key || '').startsWith('job-management::')"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1955,7 +2070,7 @@
 
                                 {{-- Job deleted badge — by Alumni Director --}}
                                 <span
-                                    x-show="notif.icon === 'trash' && !notif.read"
+                                    x-show="notif.icon === 'trash' && !notif.read && (notif.dedup_key || '').startsWith('job-management::')"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1988,7 +2103,7 @@
                                   class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                         </div>
 
-                        <p class="text-[#666666] mt-1 leading-relaxed"
+                        <p class="text-[#333333] mt-1 leading-relaxed"
                            style="font-size:12px;
                                   display:-webkit-box;
                                   -webkit-line-clamp:2;
@@ -1999,8 +2114,8 @@
 
                         <div class="flex items-center justify-between gap-1 mt-2">
                             <span class="flex items-center gap-1">
-                                <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                                <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
+                                <i class="fas fa-clock" style="font-size:10px;color:#333333;"></i>
+                                <span style="font-size:11px;color:#333333;font-weight:500;"
                                       x-text="notif.created_at
                                           ? new Date(notif.created_at).toLocaleString('en-PH',{
                                               month:'short',day:'numeric',year:'numeric',
@@ -2011,9 +2126,9 @@
                             </span>
 
                             <button type="button"
-                                    class="notif-delete-btn"
                                     x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
                                     x-cloak
+                                    class="notif-delete-btn"
                                     @click.stop="$store.coordNotifs && $store.coordNotifs.deleteNotif(notif)"
                                     aria-label="Delete notification">
                                 <i class="fas fa-trash-can"></i>

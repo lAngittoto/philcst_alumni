@@ -3,6 +3,7 @@
 <?php
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use App\Models\JobPosting;
@@ -228,6 +229,21 @@ new class extends Component {
         }
     }
 
+    // ── Deep-link (same-page case): fired by sidebar-organizer_blade.php's
+    //    notification click handler when the organizer is ALREADY on Job
+    //    Management and clicks a job-related notification. Skips the
+    //    URL/reload path entirely and opens View/Edit Details straight
+    //    away — same treatment as 'open-view-event' on the events page. ──
+    #[On('open-view-job')]
+    public function openViewJobEvent(int $id): void
+    {
+        try {
+            $this->viewJob($id);
+        } catch (\Throwable $e) {
+            // Invalid id, not owned, or deleted — silently ignore.
+        }
+    }
+
     public function updatingSearch()       { $this->resetPage(); }
     public function updatingFilterStatus() { $this->resetPage(); }
     public function updatingFilterType()   { $this->resetPage(); }
@@ -414,7 +430,6 @@ public function openPostModal(): void
 {
     $this->guardAuth();
     $this->resetPostFields();
-    $this->postDeadline       = now()->setTimezone('Asia/Manila')->addMonth()->format('Y-m-d');
     $this->postTargetColleges = !empty($this->organizerCollege) ? [$this->organizerCollege] : [];
     $this->showPostModal      = true;
     $this->dispatch('close-sidebar');
@@ -451,12 +466,25 @@ public function closePostModal(): void
         if (!trim($this->postEmpType))  $errors['postEmpType']  = 'Employment type is required.';
         if (!trim($this->postExpLevel)) $errors['postExpLevel'] = 'Experience level is required.';
 
+        // Salary stays optional, but if the organizer types SOMETHING in
+        // it, it has to actually contain a number — free text like "doy"
+        // or "negotiable" alone isn't a salary. ₱/$ signs, commas, "/mo",
+        // "yearly", ranges, etc. are all still fine as long as at least
+        // one digit is present somewhere in the value.
+        if (trim($this->postSalary) !== '' && !preg_match('/\d/', $this->postSalary)) {
+            $errors['postSalary'] = 'Please include a numeric amount in the salary field (for example, ₱25,000 per month).';
+        }
+
         if (!trim($this->postDeadline)) {
             $errors['postDeadline'] = 'Deadline is required.';
         } else {
-            $deadline = \Carbon\Carbon::createFromFormat('Y-m-d', $this->postDeadline, 'Asia/Manila')->endOfDay();
-            if ($deadline->lt(now('Asia/Manila'))) {
-                $errors['postDeadline'] = 'Deadline must be today or in the future.';
+            // Deadline must be a future date — today itself is rejected
+            // too, since a job whose deadline is "today" is effectively
+            // useless (it would need to auto-deactivate the same day).
+            $deadlineDay = \Carbon\Carbon::createFromFormat('Y-m-d', $this->postDeadline, 'Asia/Manila')->startOfDay();
+            $todayDay    = now('Asia/Manila')->startOfDay();
+            if ($deadlineDay->lte($todayDay)) {
+                $errors['postDeadline'] = 'Deadline must be a future date — today or earlier is not allowed.';
             }
         }
 
@@ -484,7 +512,16 @@ public function closePostModal(): void
             }
         }
 
-        if (!empty($errors)) { $this->postErrors = $errors; return; }
+        if (!empty($errors)) {
+            $this->postErrors = $errors;
+            // Errors already render inline next to each field, but when the
+            // form is long the failing field(s) can be scrolled out of view
+            // — the person only sees the summary banner up top and has to
+            // hunt for what's actually wrong. Scroll the first invalid
+            // field into view so it's immediately visible.
+            $this->dispatch('scroll-to-first-error');
+            return;
+        }
 
         [$companyName, $companyType] = match($this->postOrgCategory) {
             'philcst' => [$this->philcstName,                      $this->philcstName],
@@ -702,12 +739,21 @@ public function openEditModal(int $id): void
         if (!trim($this->editEmpType))     $errors['editEmpType']     = 'Employment type is required.';
         if (!trim($this->editExpLevel))    $errors['editExpLevel']    = 'Experience level is required.';
 
+        // Same rule as the create form — optional, but must contain a
+        // number if the organizer types anything into it.
+        if (trim($this->editSalary) !== '' && !preg_match('/\d/', $this->editSalary)) {
+            $errors['editSalary'] = 'Please include a numeric amount in the salary field (for example, ₱25,000 per month).';
+        }
+
         if (!trim($this->editDeadline)) {
             $errors['editDeadline'] = 'Deadline is required.';
         } else {
-            $deadline = \Carbon\Carbon::createFromFormat('Y-m-d', $this->editDeadline, 'Asia/Manila')->endOfDay();
-            if ($deadline->lt(now('Asia/Manila'))) {
-                $errors['editDeadline'] = 'Deadline must be today or in the future.';
+            // Same rule as the create form — today itself is rejected,
+            // deadline must be strictly a future date.
+            $deadlineDay = \Carbon\Carbon::createFromFormat('Y-m-d', $this->editDeadline, 'Asia/Manila')->startOfDay();
+            $todayDay    = now('Asia/Manila')->startOfDay();
+            if ($deadlineDay->lte($todayDay)) {
+                $errors['editDeadline'] = 'Deadline must be a future date — today or earlier is not allowed.';
             }
         }
 
@@ -735,7 +781,11 @@ public function openEditModal(int $id): void
             }
         }
 
-        if (!empty($errors)) { $this->editErrors = $errors; return; }
+        if (!empty($errors)) {
+            $this->editErrors = $errors;
+            $this->dispatch('scroll-to-first-error');
+            return;
+        }
 
         $org = auth()->user()?->organizer;
         $duplicate = JobPosting::where('job_title', $this->sanitize($this->editJobTitle))
@@ -2120,20 +2170,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
     </div>
 
-    @if(count($postErrors))
-    <div class="bg-red-50 border-b border-red-200 px-6 lg:px-10 py-2 flex-shrink-0 flex items-start gap-3">
-        <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
-        <div class="flex-1 min-w-0">
-            <p class="font-semibold text-red-800 text-xs mb-0.5">Please fix the following:</p>
-            <ul class="text-red-700 text-xs flex flex-wrap gap-x-4 gap-y-0.5">
-                @foreach($postErrors as $err)
-                    <li class="flex items-center gap-1"><span class="text-red-400">&bull;</span>{{ $err }}</li>
-                @endforeach
-            </ul>
-        </div>
-    </div>
-    @endif
-
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Photo first, then Company --}}
@@ -2336,14 +2372,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Salary <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                                 </label>
-                                <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000/mo" maxlength="100"
-                                       class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                                <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000 per month" maxlength="100"
+                                       oninput="window.__eoFormatSalaryInput(this)"
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                @if(isset($postErrors['postSalary']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postSalary'] }}</p>@endif
                             </div>
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Deadline <span class="text-red-500">*</span></label>
+                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                    Deadline <span class="text-red-500">*</span>
+                                </label>
                                 <input wire:model.defer="postDeadline" type="date"
-                                       min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                       min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
+                                       oninput="window.__eoGuardDeadlineInput(this)"
+                                       onchange="window.__eoGuardDeadlineInput(this)"
+                                       onclick="window.__eoOpenDatePicker(this)"
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($postErrors['postDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                             </div>
                         </div>
@@ -2677,19 +2720,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     </div>
     @endif
 
-    @if(count($editErrors))
-    <div class="bg-red-50 border-b border-red-200 px-4 sm:px-6 py-2 flex-shrink-0 flex items-start gap-3">
-        <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
-        <div class="flex-1 min-w-0">
-            <p class="font-semibold text-red-800 text-xs mb-0.5">Please fix the following:</p>
-            <ul class="text-red-700 text-xs flex flex-wrap gap-x-4 gap-y-0.5">
-                @foreach($editErrors as $err)
-                    <li class="flex items-center gap-1"><span class="text-red-400">&bull;</span>{{ $err }}</li>
-                @endforeach
-            </ul>
-        </div>
-    </div>
-    @endif
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
@@ -2916,8 +2946,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 </label>
                                 <div x-show="!editMode" class="view-field-display text-sm">{{ $editSalary ?: 'Not disclosed' }}</div>
                                 <div x-show="editMode" x-cloak>
-                                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25k/mo"
-                                           class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25,000 per month"
+                                           oninput="window.__eoFormatSalaryInput(this)"
+                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                    @if(isset($editErrors['editSalary']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editSalary'] }}</p>@endif
                                 </div>
                             </div>
                             <div>
@@ -2930,8 +2962,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 </div>
                                 <div x-show="editMode" x-cloak>
                                     <input wire:model.defer="editDeadline" type="date"
-                                           min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}"
-                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                           min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
+                                           oninput="window.__eoGuardDeadlineInput(this)"
+                                           onchange="window.__eoGuardDeadlineInput(this)"
+                                           onclick="window.__eoOpenDatePicker(this)"
+                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
                                 </div>
                             </div>
@@ -3480,6 +3515,137 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     </div>
 </div>
 @endif
+
+<script>
+(function () {
+    // ── Live salary comma-formatter ──────────────────────────────────
+    // Auto-inserts thousands separators into any run of 4+ digits as the
+    // organizer types, WITHOUT forcing a strict numbers-only field — the
+    // ₱/$ symbol, "/mo", "yearly", "Negotiable", etc. are all left alone.
+    // Only the digit runs get commas; everything else in the string is
+    // untouched and stays exactly where the user typed it.
+    //
+    // Cursor position is preserved by measuring how many digits sit to
+    // the left of the caret before formatting, then walking the newly
+    // formatted string forward that many digits to place the caret back
+    // in the equivalent spot (so typing mid-string doesn't jump the
+    // cursor to the end).
+    function formatDigitRuns(raw) {
+        // Match a whole "number block" — digits AND any commas already
+        // sitting inside them — as ONE unit, not just raw consecutive
+        // digits. Matching digits alone made a comma already inserted
+        // mid-typing act as a hard break, so typing another digit right
+        // after an existing comma (e.g. "4,555" -> "4,5555") re-grouped
+        // only the piece after the comma and left the leading digit(s)
+        // stranded — producing "4,5,555" instead of "45,555".
+        return raw.replace(/[\d,]*\d[\d,]*/g, function (block) {
+            var digitsOnly = block.replace(/,/g, '');
+            if (digitsOnly.length < 4) return block; // too short to need grouping — leave as-is (and un-comma it)
+            return digitsOnly.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        });
+    }
+
+    window.__eoFormatSalaryInput = function (el) {
+        if (!el) return;
+        var raw = el.value;
+        var caret = el.selectionStart == null ? raw.length : el.selectionStart;
+
+        // Count digits strictly before the caret in the RAW string.
+        var digitsBeforeCaret = (raw.slice(0, caret).match(/\d/g) || []).length;
+
+        var formatted = formatDigitRuns(raw);
+        if (formatted === raw) return; // nothing changed, leave caret alone
+
+        el.value = formatted;
+
+        // Walk forward through the formatted string until we've passed
+        // the same number of digits, landing the caret right after them.
+        var seen = 0, pos = 0;
+        if (digitsBeforeCaret > 0) {
+            for (pos = 0; pos < formatted.length; pos++) {
+                if (/\d/.test(formatted[pos])) {
+                    seen++;
+                    if (seen === digitsBeforeCaret) { pos++; break; }
+                }
+            }
+        }
+        el.setSelectionRange(pos, pos);
+
+        // Keep Livewire's deferred model in sync with the formatted value
+        // (wire:model.defer only reads on its own 'input'/'change' event,
+        // and we didn't block that — this just makes sure el.value is
+        // already correct by the time Livewire reads it).
+    };
+
+    // ── Deadline hard guard ─────────────────────────────────────────
+    // The native <input type="date" min="..."> attribute blocks picking
+    // a past/today date from the calendar UI, but some browsers still
+    // let a date get typed in manually (keyboard entry into the M/D/Y
+    // segments) that lands before "min" without the picker stopping it.
+    // This clears the field immediately if that happens, so an invalid
+    // date never sits in the input even before the form is submitted —
+    // the server-side check is still the final source of truth, this is
+    // just an earlier, friendlier catch.
+    window.__eoGuardDeadlineInput = function (el) {
+        if (!el || !el.value) return;
+        var picked = new Date(el.value + 'T00:00:00');
+        if (isNaN(picked.getTime())) return;
+
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
+        var tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        if (picked.getTime() < tomorrow.getTime()) {
+            el.value = '';
+            // Brief visible red flash so it's clear the date got rejected
+            // rather than the field just mysteriously going blank.
+            el.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+            clearTimeout(el._eoDeadlineFlashTimer);
+            el._eoDeadlineFlashTimer = setTimeout(function () {
+                el.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+            }, 1200);
+        }
+    };
+
+    // ── Click anywhere in the date field to open the picker ────────────
+    // A native <input type="date"> only opens its calendar when you click
+    // the small icon on the right — clicking the text/box area just moves
+    // the text cursor. This makes the WHOLE input act like the icon, so
+    // one click anywhere in the box pops the picker open immediately.
+    window.__eoOpenDatePicker = function (el) {
+        if (!el) return;
+        if (typeof el.showPicker === 'function') {
+            try { el.showPicker(); } catch (e) { /* ignore — e.g. not user-triggered enough for some browsers */ }
+        }
+    };
+})();
+</script>
+
+<script>
+(function () {
+    // ── Scroll to first invalid field on validation failure ────────────
+    // The red summary banner at the top lists what's wrong, but on a long
+    // form the actual field (with its own inline error message) can be
+    // scrolled out of view — the person sees the banner and has to hunt
+    // for the field. This scrolls the first invalid field into view and
+    // focuses it as soon as Livewire dispatches 'scroll-to-first-error'.
+    window.addEventListener('scroll-to-first-error', function () {
+        // Wait a tick for Livewire to finish re-rendering the error classes
+        // onto the fields before querying for them.
+        setTimeout(function () {
+            var firstBad = document.querySelector(
+                '.border-red-400, .border-red-300'
+            );
+            if (!firstBad) return;
+            firstBad.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (typeof firstBad.focus === 'function') {
+                try { firstBad.focus({ preventScroll: true }); } catch (e) { firstBad.focus(); }
+            }
+        }, 50);
+    });
+})();
+</script>
 
 <script>
 (function () {
