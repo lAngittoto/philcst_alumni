@@ -515,7 +515,7 @@ new class extends Component {
     private function roomDisplayName(array $r): string
     {
         return match ($r['type'] ?? '') {
-            'staff'   => 'Staff Chat',
+            'staff'   => 'Coordinators/Director',
             'college' => $this->collegeDisplayLabel($r['department'] ?: $this->department),
             'course'  => $this->displayCourseLabel($r['course_code'] ?? '', $r['department'] ?? null) . ' · All Batches GC',
             default   => $r['name'] ?? 'Group Chat',
@@ -1046,12 +1046,12 @@ new class extends Component {
             }
 
             $matchesSearch = $search === ''
-                || str_contains(strtolower('Staff Chat'), strtolower($search));
+                || str_contains(strtolower('Coordinators/Director'), strtolower($search));
 
             if ($matchesSearch) {
                 $staffItem = [
                     'id'             => $staffRoomRow->id,
-                    'name'           => 'Staff Chat',
+                    'name'           => 'Coordinators/Director',
                     'course_code'    => '__director__',
                     'course_name'    => '',
                     'batch'          => 0,
@@ -1411,26 +1411,58 @@ new class extends Component {
         //    alphabetical for rooms with no messages yet. 'is_pinned_room'
         //    is still computed and kept on each row for the pin icon in
         //    the UI — it's just no longer a sort key. ──
-        $sortGroup = function ($group) {
-            $active       = $group->filter(fn ($r) => $r['is_active']);
-            $rest         = $group->filter(fn ($r) => ! $r['is_active']);
+        $this->rooms = $this->sortRoomGroup($allRooms)->values()->toArray();
+    }
 
-            $unread       = $rest->filter(fn ($r) => $r['has_unread']);
-            $read         = $rest->filter(fn ($r) => ! $r['has_unread']);
+    // ── Messenger-style room sort, extracted so it can be re-applied
+    //    after any in-place local update to $this->rooms (e.g. the
+    //    optimistic "move my room to top" update in sendMessage()),
+    //    not just inside the full loadRooms() rebuild.
+    //
+    //    Priority, TOP to BOTTOM:
+    //      1. Pinned rooms — ALWAYS first, no exceptions. Pinning a room
+    //         means "keep this at the top", full stop — it does not get
+    //         bumped by unread state or by which room is currently open.
+    //      2. Unpinned rooms.
+    //    Within EACH of those two groups, same sub-ordering applies:
+    //    currently-open room first, then unread (newest activity
+    //    first), then read (newest activity first), then alphabetical
+    //    for rooms with no messages yet.
+    //
+    //    'is_pinned_room' is now both the sort key AND the flag the UI
+    //    reads for the pin icon — keep the two in sync. ────────────────
+    private function sortRoomGroup($group)
+    {
+        $pinned   = $group->filter(fn ($r) => $r['is_pinned_room']);
+        $unpinned = $group->filter(fn ($r) => ! $r['is_pinned_room']);
 
-            $unreadWithMsg    = $unread->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
-            $unreadWithoutMsg = $unread->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+        return $this->sortWithinGroup($pinned)
+            ->merge($this->sortWithinGroup($unpinned))
+            ->values();
+    }
 
-            $readWithMsg    = $read->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
-            $readWithoutMsg = $read->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+    // Shared "currently-open → unread newest-first → read newest-first
+    // → alphabetical" ordering. Applied identically to the pinned group
+    // and the unpinned group so pinning only changes WHICH of those two
+    // groups a room belongs to — never how rooms are ordered within it.
+    private function sortWithinGroup($group)
+    {
+        $active = $group->filter(fn ($r) => $r['is_active']);
+        $rest   = $group->filter(fn ($r) => ! $r['is_active']);
 
-            return $active
-                ->merge($unreadWithMsg)->merge($unreadWithoutMsg)
-                ->merge($readWithMsg)->merge($readWithoutMsg)
-                ->values();
-        };
+        $unread = $rest->filter(fn ($r) => $r['has_unread']);
+        $read   = $rest->filter(fn ($r) => ! $r['has_unread']);
 
-        $this->rooms = $sortGroup($allRooms)->values()->toArray();
+        $unreadWithMsg    = $unread->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
+        $unreadWithoutMsg = $unread->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+
+        $readWithMsg    = $read->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
+        $readWithoutMsg = $read->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
+
+        return $active
+            ->merge($unreadWithMsg)->merge($unreadWithoutMsg)
+            ->merge($readWithMsg)->merge($readWithoutMsg)
+            ->values();
     }
 
     // Public wrapper so it's callable from inside the collect()->map() closures
@@ -1522,11 +1554,17 @@ new class extends Component {
 
         // Update just THIS room's active/unread flags locally instead of
         // re-querying the entire room list from scratch on every click.
-        $this->rooms = collect($this->rooms)->map(function ($r) use ($id) {
+        $updatedRooms = collect($this->rooms)->map(function ($r) use ($id) {
             $r['is_active']  = ($r['id'] === $id);
             if ($r['id'] === $id) $r['has_unread'] = false;
             return $r;
-        })->toArray();
+        });
+
+        // is_active is a sort key (see sortRoomGroup()), so re-sort right
+        // away — otherwise the newly-opened room stays wherever it was
+        // sitting until the next poll tick instead of jumping to its
+        // "currently open" slot immediately.
+        $this->rooms = $this->sortRoomGroup($updatedRooms)->values()->toArray();
 
         $this->dispatch('chat-scroll-bottom-force');
         $this->dispatch('chat-open-mobile');
@@ -1864,7 +1902,7 @@ new class extends Component {
         // still looks fresh immediately; the next poll tick reconciles
         // it fully (unread flags for other rooms, live counts, etc).
         $nowTs = now()->timestamp;
-        $this->rooms = collect($this->rooms)->map(function ($r) use ($body, $nowTs) {
+        $updatedRooms = collect($this->rooms)->map(function ($r) use ($body, $nowTs) {
             if ($r['id'] === $this->roomId) {
                 $r['latest_body']   = $body;
                 $r['latest_sender'] = $this->coordinatorFirstName ?: $this->coordinatorName;
@@ -1873,7 +1911,12 @@ new class extends Component {
                 $r['has_unread']    = false;
             }
             return $r;
-        })->toArray();
+        });
+
+        // Re-sort right away (same rule as loadRooms()) so the room I
+        // just sent in jumps to the top immediately instead of sitting
+        // in its old position until the next poll tick's full rebuild.
+        $this->rooms = $this->sortRoomGroup($updatedRooms)->values()->toArray();
 
         $this->dispatch('chat-scroll-bottom-force');
     }
@@ -2885,7 +2928,7 @@ new class extends Component {
                                           @if($isActive)      font-semibold text-[#6b2490]
                                           @elseif($hasUnread) font-bold text-[#1a1a1a]
                                           @else               font-semibold text-[#333333] @endif">
-                                    @if($r['type'] === 'staff') {!! $this->highlight('Staff Chat', $roomSearch) !!}
+                                    @if($r['type'] === 'staff') {!! $this->highlight('Coordinators/Director', $roomSearch) !!}
                                     @elseif($r['type'] === 'college') {!! $this->highlight($department, $roomSearch) !!}
                                     @elseif($r['type'] === 'course') {!! $this->highlight(strtoupper($r['course_code']), $roomSearch) !!}
                                     @else {!! $this->highlight($r['name'], $roomSearch) !!}
@@ -3010,7 +3053,7 @@ new class extends Component {
                          college room somehow still had isCourseRoom true.
                          displayCourseLabel() below always substitutes the
                          department label whenever the code is a marker. --}}
-                    @if($isStaffRoom) Staff Chat
+                    @if($isStaffRoom) Coordinators/Director
                     @elseif($isCollegeRoom) {{ $department }} · All Courses & Batches
                     @elseif($isCourseRoom) {{ $this->displayCourseLabel($room['course_code'] ?? '') }} · All Batches GC
                     @else Batch {{ $room['batch'] }} · {{ $this->displayCourseLabel($room['course_code'] ?? '') }}
@@ -3060,16 +3103,10 @@ new class extends Component {
                 <div id="org-chat-body-wrap" class="relative flex-1 min-h-0 flex flex-col org-bubble-bg"
                      x-data="{
                          nearBottom: true,
-                         scrollDir: null,
-                         dirTimer: null,
-                         lastTop: 0,
+                         nearTop: true,
                          onScroll(el) {
-                             const cur = el.scrollTop;
-                             this.scrollDir = cur < this.lastTop ? 'up' : (cur > this.lastTop ? 'down' : this.scrollDir);
-                             this.lastTop = cur;
+                             this.nearTop    = el.scrollTop < 120;
                              this.nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
-                             clearTimeout(this.dirTimer);
-                             this.dirTimer = setTimeout(() => { this.scrollDir = null; }, 1200);
                          }
                      }">
 
@@ -3077,9 +3114,9 @@ new class extends Component {
 
                     <div id="msg-list"
                          class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
-                         x-init="lastTop = $el.scrollTop; $el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
+                         x-init="onScroll($el); $el.addEventListener('scroll', () => onScroll($el));"
                          @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
-                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; scrollDir = null; })"
+                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; })"
                          @click="$wire.closeToolbar()">
 
                         @php
@@ -3436,39 +3473,41 @@ new class extends Component {
                         <div class="h-10"></div>
                     </div>
 
-                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav (matches
-                         Alumni Messenger's design/behavior) — centered at the
-                         bottom of the thread, not pinned to a side. scrollDir
-                         comes from the shared x-data scope on
-                         #org-chat-body-wrap above, so this shows an up-arrow
-                         while actively scrolling up, a down-arrow while
-                         scrolling down, and fades out shortly after you stop
-                         moving. No wire:ignore here (matches the working
-                         Alumni Messenger reference) so it never desyncs from
-                         Livewire's own re-renders, which was causing it to
-                         appear to "jump" position. --}}
+                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav — fixed,
+                         centered at the bottom of the thread. Each button's
+                         visibility is driven purely by DISTANCE from the top
+                         or bottom of the message list (nearTop / nearBottom
+                         from the shared x-data scope on #org-chat-body-wrap
+                         above) — never by "which way did the last pixel of
+                         scroll move", which used to make the button swap
+                         between up/down (and appear to jump around) on every
+                         tiny scroll wobble. Now: not near top → up-arrow
+                         shows; not near bottom → down-arrow shows; both can
+                         show together in the middle of a long thread. The
+                         wrapper's position never changes — only which
+                         button(s) inside it are visible. --}}
                     <div class="org-scroll-nav">
                         <button type="button" class="org-scroll-btn"
-                                x-show="scrollDir === 'up'"
+                                x-show="!nearTop"
                                 x-transition:enter="transition ease-out duration-150"
                                 x-transition:enter-start="opacity-0 translate-y-1"
                                 x-transition:enter-end="opacity-100 translate-y-0"
                                 x-transition:leave="transition ease-in duration-150"
                                 x-transition:leave-start="opacity-100"
                                 x-transition:leave-end="opacity-0"
-                                onclick="document.getElementById('msg-list').scrollBy({top:-300,behavior:'smooth'});"
+                                onclick="document.getElementById('msg-list').scrollTo({top:0,behavior:'smooth'});"
                                 style="display:none;">
                             <i class="fa-solid fa-arrow-up"></i>
                         </button>
                         <button type="button" class="org-scroll-btn"
-                                x-show="scrollDir === 'down'"
+                                x-show="!nearBottom"
                                 x-transition:enter="transition ease-out duration-150"
                                 x-transition:enter-start="opacity-0 translate-y-1"
                                 x-transition:enter-end="opacity-100 translate-y-0"
                                 x-transition:leave="transition ease-in duration-150"
                                 x-transition:leave-start="opacity-100"
                                 x-transition:leave-end="opacity-0"
-                                onclick="document.getElementById('msg-list').scrollBy({top:300,behavior:'smooth'});"
+                                onclick="const el=document.getElementById('msg-list'); el.scrollTo({top:el.scrollHeight,behavior:'smooth'});"
                                 style="display:none;">
                             <i class="fa-solid fa-arrow-down"></i>
                         </button>
@@ -3539,7 +3578,7 @@ new class extends Component {
                             <textarea id="chat-input"
                                 wire:model="body"
                                 wire:keyup.debounce.800ms="pingTyping"
-                                placeholder="Message {{ $isStaffRoom ? 'Staff Chat' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? '')))) }}… (@ to mention)"
+                                placeholder="Message {{ $isStaffRoom ? 'Coordinators/Director' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? '')))) }}… (@ to mention)"
                                 rows="1"
                                 x-data="{
                                     _mTimer: null,
