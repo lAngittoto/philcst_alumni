@@ -84,6 +84,11 @@ new class extends Component {
     // ── Tick counter — drives staggered work inside the single poll ───────
     public int $pollTick = 0;
 
+    // ── Last message id the poll actually rendered for the open room —
+    //    lets unifiedPoll() skip the expensive loadMessages() rebuild (and
+    //    the scroll-morph that comes with it) when nothing new arrived. ───
+    public int $lastRenderedMessageId = 0;
+
     // ── Toolbar-open message (mobile-friendly single toggle) ──────────────
     public ?int $openToolbarMsgId = null;
 
@@ -737,10 +742,34 @@ new class extends Component {
             $this->loadTypingIndicators();
         }
 
+        // ── FIX: messenger-style "don't touch the thread unless something
+        //    actually changed" ─────────────────────────────────────────────
+        //    Previously this called loadMessages() unconditionally every
+        //    2nd tick, which fully REPLACES $this->messages (a brand new
+        //    PHP array, brand new object identities) even when the room has
+        //    zero new activity. Livewire then re-morphs the entire #msg-list
+        //    DOM subtree on every one of those ticks. That morph is what was
+        //    causing the "jumps to the top" glitch: it could fire in the
+        //    middle of you just sitting there composing a message (BEFORE
+        //    you even hit send), because the poll doesn't know or care
+        //    whether you're mid-type — it just fires on its own clock.
+        //    Real messenger apps never touch the thread's scroll position
+        //    unless a message was actually added/changed. So now we cheaply
+        //    check the latest message id first (single scalar query, no
+        //    joins) and only do the expensive full loadMessages() rebuild +
+        //    scroll dispatch when that id actually moved.
         if ($this->pollTick % 2 === 0 && $this->roomId) {
-            $this->loadMessages();
-            $this->markRoomAsRead($this->roomId);
-            $this->dispatch('chat-scroll-bottom');
+            $latestId = (int) (DB::table('chat_messages')
+                ->where('room_id', $this->roomId)
+                ->whereNull('deleted_at')
+                ->max('id') ?? 0);
+
+            if ($latestId !== $this->lastRenderedMessageId) {
+                $this->lastRenderedMessageId = $latestId;
+                $this->loadMessages();
+                $this->markRoomAsRead($this->roomId);
+                $this->dispatch('chat-scroll-bottom');
+            }
         }
 
         if ($this->pollTick % 4 === 0) {
@@ -1034,13 +1063,22 @@ new class extends Component {
             $isCurrentRoom = ($staffRoomRow->id === $this->roomId);
             $lastReadAt    = Cache::get($self->lastReadCacheKey($staffRoomRow->id));
 
-            // ── Unread reflects "new activity in this room since I last
-            //    opened it" — it does NOT exclude the coordinator's own
-            //    sends (sharing an event/job, or a regular message). If
-            //    the room's last-read watermark is older than the latest
-            //    message, the room shows unread, full stop. ──────────────
+            // ── FIX: messenger-style unread — a room I just sent the
+            //    latest message in is NOT unread, full stop. Previously
+            //    "unread" only checked latest.created_at vs. lastReadAt,
+            //    which meant sending a message in Room B while Room A was
+            //    open flipped Room B to unread against yourself — every
+            //    room you had just posted in still showed the red dot,
+            //    so the sidebar looked like "everything is unread" the
+            //    moment you were active in more than one room. Real
+            //    messenger apps never mark your own outgoing message as
+            //    unread for you. ─────────────────────────────────────────
+            $isMyOwnLatest = $latest !== null
+                && $latest->sender_type === 'organizer'
+                && (int) $latest->sender_id === $this->coordinatorId;
+
             $hasUnread = false;
-            if (! $isCurrentRoom && $latest !== null) {
+            if (! $isCurrentRoom && ! $isMyOwnLatest && $latest !== null) {
                 $hasUnread = $lastReadAt === null
                     || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
@@ -1135,8 +1173,14 @@ new class extends Component {
             $isCurrentRoom = ($collegeRoomRow->id === $this->roomId);
             $lastReadAt    = Cache::get($self->lastReadCacheKey($collegeRoomRow->id));
 
+            // FIX: don't mark unread against my own latest send (see staff
+            // room block above for the full rationale).
+            $isMyOwnLatest = $latest !== null
+                && $latest->sender_type === 'organizer'
+                && (int) $latest->sender_id === $this->coordinatorId;
+
             $hasUnread = false;
-            if (! $isCurrentRoom && $latest !== null) {
+            if (! $isCurrentRoom && ! $isMyOwnLatest && $latest !== null) {
                 $hasUnread = $lastReadAt === null
                     || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
@@ -1256,8 +1300,13 @@ new class extends Component {
             $isCurrentRoom = ($r->id === $self->roomId);
             $lastReadAt    = Cache::get($self->lastReadCacheKey($r->id));
 
+            // FIX: don't mark unread against my own latest send.
+            $isMyOwnLatest = $latest !== null
+                && $latest->sender_type === 'organizer'
+                && (int) $latest->sender_id === $self->coordinatorId;
+
             $hasUnread = false;
-            if (! $isCurrentRoom && $latest !== null) {
+            if (! $isCurrentRoom && ! $isMyOwnLatest && $latest !== null) {
                 $hasUnread = $lastReadAt === null
                     || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
@@ -1342,8 +1391,13 @@ new class extends Component {
             $isCurrentRoom = ($r->id === $self->roomId);
             $lastReadAt    = Cache::get($self->lastReadCacheKey($r->id));
 
+            // FIX: don't mark unread against my own latest send.
+            $isMyOwnLatest = $latest !== null
+                && $latest->sender_type === 'organizer'
+                && (int) $latest->sender_id === $self->coordinatorId;
+
             $hasUnread = false;
-            if (! $isCurrentRoom && $latest !== null) {
+            if (! $isCurrentRoom && ! $isMyOwnLatest && $latest !== null) {
                 $hasUnread = $lastReadAt === null
                     || Carbon::parse($latest->created_at)->gt(Carbon::parse($lastReadAt));
             }
@@ -1536,6 +1590,7 @@ new class extends Component {
             ->where('room_id', $id)
             ->whereNull('deleted_at')
             ->max('id') ?? 0);
+        $this->lastRenderedMessageId = $maxId;
         $this->lastNotifiedMessageIds[$id] = $maxId;
         Cache::put($this->lastNotifiedCacheKey($id), $maxId, now()->addDays(30));
         $this->markRoomAsRead($id);
@@ -1887,6 +1942,7 @@ new class extends Component {
 
         $this->lastNotifiedMessageIds[$this->roomId] = (int) $msgId;
         Cache::put($this->lastNotifiedCacheKey($this->roomId), (int) $msgId, now()->addDays(30));
+        $this->lastRenderedMessageId = (int) $msgId;
         $this->markRoomAsRead($this->roomId);
         $this->notifyAlumniInRoom($body);
 
@@ -3104,19 +3160,51 @@ new class extends Component {
                      x-data="{
                          nearBottom: true,
                          nearTop: true,
+                         // ── Scroll-anchor bookkeeping ───────────────────────
+                         // Distance from the bottom of the scroll container,
+                         // captured right before Livewire morphs the DOM and
+                         // restored right after. This is what actually stops
+                         // the 'jumps to the top' glitch: without it, every
+                         // background poll re-render of #msg-list can shift
+                         // scrollTop back toward 0 as the browser reflows the
+                         // morphed nodes, even while you're just composing a
+                         // message and haven't sent anything yet. Anchoring
+                         // to 'distance from bottom' (not an absolute scrollTop)
+                         // means the fix keeps working even though the total
+                         // scrollHeight itself may have grown or shrunk from
+                         // whatever the morph changed.
+                         anchorBottomOffset: null,
                          onScroll(el) {
                              this.nearTop    = el.scrollTop < 120;
                              this.nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
+                         },
+                         captureAnchor(el) {
+                             this.anchorBottomOffset = el.scrollHeight - el.scrollTop - el.clientHeight;
+                         },
+                         restoreAnchor(el) {
+                             if (this.anchorBottomOffset === null) return;
+                             el.scrollTop = el.scrollHeight - el.clientHeight - this.anchorBottomOffset;
+                             this.anchorBottomOffset = null;
                          }
-                     }">
+                     }"
+                     x-init="
+                         $wire.$hook('morph.updating', ({ component }) => {
+                             const el = document.getElementById('msg-list');
+                             if (el && component.id === $wire.__instance.id) captureAnchor(el);
+                         });
+                         $wire.$hook('morph.updated', ({ component }) => {
+                             const el = document.getElementById('msg-list');
+                             if (el && component.id === $wire.__instance.id) $nextTick(() => restoreAnchor(el));
+                         });
+                     ">
 
                     <div class="org-bubble-layer" aria-hidden="true"></div>
 
                     <div id="msg-list"
                          class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
                          x-init="onScroll($el); $el.addEventListener('scroll', () => onScroll($el));"
-                         @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
-                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; })"
+                         @chat-scroll-bottom.window="if (nearBottom) { anchorBottomOffset = null; $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
+                         @chat-scroll-bottom-force.window="anchorBottomOffset = null; $nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; })"
                          @click="$wire.closeToolbar()">
 
                         @php

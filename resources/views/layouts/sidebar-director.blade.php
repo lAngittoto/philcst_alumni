@@ -1191,13 +1191,27 @@
             </button>
         </header>
 
-        {{-- Page content ── FIX: outer wrapper no longer scrolls the whole page.
-             Pages that manage their own internal scroll region (e.g. Manage
-             Coordinator's table-only scroll) now render correctly — only the
-             table body scrolls, everything else (header, filters, footer)
-             stays fixed in place. --}}
-        <div class="flex-1 overflow-hidden no-scrollbar bg-[#F5F5F5] p-4 lg:p-8 flex flex-col"
-             style="min-height: 0; -webkit-overflow-scrolling: touch;">
+        {{-- Page content ── FIX: default is now page-level SCROLL, not clip.
+             Root cause of "hindi ma-scroll sa dashboard" on mobile/tablet:
+             this wrapper used to be overflow-hidden unconditionally, so ANY
+             page whose content is taller than the viewport (e.g. the
+             director dashboard: account card + stat cards + breakdown
+             panels) had nowhere for the overflow to go — it was just
+             clipped, full stop, with no way to reach what's below the fold.
+             That's exactly the bug in the screenshot: stuck right at "Job
+             Postings" with no way down to the Coordinators/table section
+             below it.
+
+             Pages like Manage Coordinator that WANT a fixed-height shell
+             with only their own inner table scrolling (header/filters/
+             footer pinned) still get that — they just now opt IN to it
+             from inside their own component's root element (e.g.
+             `h-full overflow-hidden flex flex-col` on that page's outermost
+             div) instead of every page being forced into it from here.
+             Normal pages like the dashboard don't set that, so they now
+             fall through to this wrapper's default page-level scroll. --}}
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8 flex flex-col"
+             style="min-height: 0; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;">
             <div class="container mx-auto flex-1 min-h-0 flex flex-col">
                 @yield('content')
             </div>

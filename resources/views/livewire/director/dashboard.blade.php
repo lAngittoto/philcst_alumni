@@ -618,7 +618,7 @@ new class extends Component {
             <span class="text-xs text-gray-400 hidden sm:inline">Showing <strong class="text-gray-600">{{ $coordFrom }}–{{ $coordTo }}</strong> of <strong class="text-gray-600">{{ $coordTotal }}</strong></span>
         </div>
     </div>
-    <div class="flex-1 overflow-y-auto min-h-0 dir-scroll">
+    <div class="flex-1 overflow-auto min-h-0 dir-scroll overscroll-contain" style="-webkit-overflow-scrolling:touch;">
         <table class="w-full border-collapse" style="min-width:500px;">
             <thead class="sticky top-0 z-10" style="background:#f5f0fa;">
                 <tr class="border-b-2 border-[#E8E0F0]">

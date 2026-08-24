@@ -1569,8 +1569,8 @@ new class extends Component {
 <style>
 [x-cloak] { display: none !important; }
 
-/* ══ Fixed-height card, matches Manage Coordinator sizing exactly ══ */
-.job-table-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); }
+/* ══ Fixed-height card, mirrors job-management's flex-fill card ══ */
+.job-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
 @media (max-width: 640px) {
     .job-table-card {
@@ -1790,8 +1790,14 @@ select.tw-select-arrow {
             </span>
             <div class="relative inline-flex group">
                 <button wire:click="openPostModal"
-                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    <i class="fas fa-plus text-sm"></i>
+                        wire:loading.attr="disabled" wire:target="openPostModal"
+                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
+                    <span wire:loading.remove wire:target="openPostModal">
+                        <i class="fas fa-plus text-sm"></i>
+                    </span>
+                    <span wire:loading wire:target="openPostModal">
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
+                    </span>
                 </button>
                 <div class="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
                     <i class="fas fa-plus text-[9px] mr-1"></i>Post a Job
@@ -1890,7 +1896,12 @@ select.tw-select-arrow {
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
                 <span class="hidden sm:inline text-[#333333]">Reset</span>
             </button>
 
@@ -1929,11 +1940,10 @@ select.tw-select-arrow {
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
-                        <col style="width:6%;"><col style="width:32%;"><col style="width:20%;"><col style="width:14%;"><col style="width:14%;"><col style="width:14%;">
+                        <col style="width:34%;"><col style="width:22%;"><col style="width:15%;"><col style="width:14%;"><col style="width:15%;">
                     </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">#</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Coordinator</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Type</th>
@@ -1952,7 +1962,6 @@ select.tw-select-arrow {
                             $isUrgent         = $daysLeft <= 7 && !$isDeadlinePassed;
                             $organizerName    = $job->organizer?->name ?? null;
                             $organizerCollege = $job->_organizerCollege ?? null;
-                            $rowNum           = ($this->jobPostings->currentPage() - 1) * $this->jobPostings->perPage() + $index + 1;
                             $canShare         = $isActive && !$isDeadlinePassed;
                             $isDirectorJob    = is_null($job->organizer_id);
                         @endphp
@@ -1960,10 +1969,6 @@ select.tw-select-arrow {
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="job-row-{{ $job->id }}"
                             data-eo-row>
-
-                            <td class="px-4 py-3.5 text-xs font-semibold text-purple-400 text-center">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
-                            </td>
 
                             <td class="px-4 py-3.5 max-w-[200px]">
                                 <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isOrgDel ? 'line-through text-red-400' : 'text-[#333333]' }}">{{ $job->job_title }}</p>
@@ -2014,8 +2019,10 @@ select.tw-select-arrow {
                                     @if($isOrgDel)
                                         <div class="relative inline-flex group" data-eo-action>
                                             <button wire:click.stop="confirmRestore({{ $job->id }})" type="button"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400">
-                                                <i class="fas fa-rotate-left"></i>
+                                                    wire:loading.attr="disabled" wire:target="confirmRestore({{ $job->id }})"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmRestore({{ $job->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmRestore({{ $job->id }})"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                 Restore<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
@@ -2025,8 +2032,10 @@ select.tw-select-arrow {
                                         @if($canShare)
                                             <div class="relative inline-flex group" data-eo-action>
                                                 <button wire:click.stop="openShareJobModal({{ $job->id }})"
-                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400 transition cursor-pointer">
-                                                    <i class="fas fa-share-nodes"></i>
+                                                        wire:loading.attr="disabled" wire:target="openShareJobModal({{ $job->id }})"
+                                                        class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+                                                    <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareJobModal({{ $job->id }})"></i>
+                                                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareJobModal({{ $job->id }})"></i>
                                                 </button>
                                                 <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                     Share<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
@@ -2038,8 +2047,10 @@ select.tw-select-arrow {
                                             @if($isActive)
                                                 <div class="relative inline-flex group" data-eo-action>
                                                     <button wire:click.stop="confirmToggle({{ $job->id }})" type="button"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400">
-                                                        <i class="fas fa-circle-pause"></i>
+                                                            wire:loading.attr="disabled" wire:target="confirmToggle({{ $job->id }})"
+                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400 disabled:opacity-60 disabled:cursor-wait">
+                                                        <i class="fas fa-circle-pause" wire:loading.remove wire:target="confirmToggle({{ $job->id }})"></i>
+                                                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggle({{ $job->id }})"></i>
                                                     </button>
                                                     <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                         Deactivate<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
@@ -2048,8 +2059,10 @@ select.tw-select-arrow {
                                             @elseif(!$isDeadlinePassed)
                                                 <div class="relative inline-flex group" data-eo-action>
                                                     <button wire:click.stop="confirmToggle({{ $job->id }})" type="button"
-                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400">
-                                                        <i class="fas fa-circle-play"></i>
+                                                            wire:loading.attr="disabled" wire:target="confirmToggle({{ $job->id }})"
+                                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                        <i class="fas fa-circle-play" wire:loading.remove wire:target="confirmToggle({{ $job->id }})"></i>
+                                                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggle({{ $job->id }})"></i>
                                                     </button>
                                                     <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                                         Activate<span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>

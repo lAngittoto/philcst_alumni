@@ -684,15 +684,6 @@ new class extends Component {
     }
     .coord-mrow:active { background: #F0ECF5; }
 
-    /* Loading shimmer progress bar shown while filters are being applied */
-    .coord-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
-    .coord-filter-progress-bar {
-        position: absolute; top: 0; left: 0; height: 100%; width: 40%;
-        border-radius: 99px; background: linear-gradient(135deg, #7a3f91, #9b59b6);
-        animation: coordFilterProgress .7s ease-in-out infinite;
-    }
-    @keyframes coordFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
-
     /* ══ FIX #2: whole page layout is now locked/fixed — header, filter bar,
        and pagination bar never move. Only the table body area (.coord-scroll-area)
        scrolls internally. The outer wrapper div uses a hard height with
@@ -896,9 +887,11 @@ new class extends Component {
         <div class="flex items-center gap-2 shrink-0">
             <div class="relative group">
                 <button wire:click="openModal('registerCoordinator')"
-                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#7a3f91] hover:bg-[#5e2f72] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95"
+                        wire:loading.attr="disabled" wire:target="openModal('registerCoordinator')"
+                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#7a3f91] hover:bg-[#5e2f72] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                         aria-label="Register Coordinator">
-                    <i class="fas fa-user-plus text-white text-sm"></i>
+                    <i class="fas fa-user-plus text-white text-sm" wire:loading.remove wire:target="openModal('registerCoordinator')"></i>
+                    <i class="fas fa-spinner animate-spin text-white text-sm" wire:loading wire:target="openModal('registerCoordinator')"></i>
                 </button>
                 <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
@@ -910,9 +903,11 @@ new class extends Component {
 
             <div class="relative group">
                 <button wire:click="openModal('manageOrgCourses')"
-                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#1d4ed8] hover:bg-[#1e40af] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95"
+                        wire:loading.attr="disabled" wire:target="openModal('manageOrgCourses')"
+                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#1d4ed8] hover:bg-[#1e40af] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                         aria-label="Manage Colleges">
-                    <i class="fas fa-building-columns text-white text-sm"></i>
+                    <i class="fas fa-building-columns text-white text-sm" wire:loading.remove wire:target="openModal('manageOrgCourses')"></i>
+                    <i class="fas fa-spinner animate-spin text-white text-sm" wire:loading wire:target="openModal('manageOrgCourses')"></i>
                 </button>
                 <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
@@ -962,31 +957,40 @@ new class extends Component {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetCoordFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer">
-                <span wire:loading.remove wire:target="resetCoordFilters"><i class="fas fa-rotate-left text-xs"></i></span>
+                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none">
+                <i class="fas fa-rotate-left text-xs" wire:loading.remove wire:target="resetCoordFilters"></i>
                 <span wire:loading wire:target="resetCoordFilters">
-                    <svg class="animate-spin w-3.5 h-3.5 text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
+                    <i class="fas fa-spinner animate-spin text-xs"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
         </div>
 
-        {{-- Loading progress shimmer (mirrors alumni-records) --}}
-        <div class="coord-filter-progress-track" wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters">
-            <div class="coord-filter-progress-bar"></div>
-        </div>
-
         {{-- TABLE BODY — THIS is the only scrollable region in the whole page --}}
         <div class="bg-white flex-1 flex flex-col relative min-h-0" x-data="{ showTop: false }">
 
+            {{-- Center overlay spinner — mirrors Alumni Records: icon only,
+                 no background box, absolutely positioned over the table
+                 (not sticky/in-flow) so it never pushes the sticky <thead>
+                 down inside the scroll container. Pure overlay: floats on
+                 top, table layout stays completely undisturbed while
+                 filtering. Replaces the old thin shimmer progress bar,
+                 which read as visually "stuck" mid-filter. Also covers
+                 pagination (previousPage/nextPage/gotoPage/$set('page'))
+                 so flipping pages gets the same clear loading feedback
+                 as filtering. --}}
+            <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
+                 wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1)">
+                <div class="flex items-center justify-center" style="margin-top:16px;">
+                    <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
+                </div>
+            </div>
+
             <div id="coord-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="coord-scroll-area flex-1"
-                 wire:loading.class="pointer-events-none"
-                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters">
+                 class="coord-scroll-area flex-1 transition-opacity duration-200"
+                 wire:loading.class="opacity-40 pointer-events-none"
+                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1)">
 
                 @if($this->coordinatorRecords->count() > 0)
                 {{-- ── DESKTOP / TABLET: table view ── --}}
@@ -1010,7 +1014,9 @@ new class extends Component {
                             $dept        = $item->department;
                             $directMatch = \App\Models\Course::where('college', $dept)->exists();
                             $collegeName = $directMatch ? $dept : (\App\Models\Course::where('code', $dept)->value('college') ?? $dept);
-                            $deptCodes   = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('code')->toArray();
+                            // code => full course name, so each chip can show its full
+                            // name as a hover tooltip instead of just the short code.
+                            $deptCodeNames = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('name', 'code');
                         @endphp
                         <tr class="coord-row bg-white"
                             wire:key="coord-row-{{ $item->id }}"
@@ -1038,10 +1044,10 @@ new class extends Component {
                             </td>
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
                                 <span class="block font-semibold text-gray-800 text-sm leading-snug truncate">{{ $collegeName }}</span>
-                                @if(count($deptCodes))
+                                @if($deptCodeNames->isNotEmpty())
                                 <div class="flex flex-wrap gap-1 mt-1">
-                                    @foreach($deptCodes as $dc)
-                                        <span class="text-xs font-mono text-[#7a3f91]">{{ $dc }}</span>
+                                    @foreach($deptCodeNames as $dc => $dcName)
+                                        <span class="text-xs font-mono text-[#7a3f91] cursor-default" title="{{ $dcName ?: $dc }}">{{ $dc }}</span>
                                         @if(!$loop->last)<span class="text-gray-300 text-xs">·</span>@endif
                                     @endforeach
                                 </div>
@@ -1065,9 +1071,11 @@ new class extends Component {
                                             <button type="button"
                                                     data-coord-action
                                                     wire:click.stop="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"
-                                                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-50 border border-amber-300 text-amber-600 hover:bg-amber-100 hover:border-amber-400 transition-all duration-150 active:scale-95"
+                                                    wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"
+                                                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-50 border border-amber-300 text-amber-600 hover:bg-amber-100 hover:border-amber-400 transition-all duration-150 active:scale-95 disabled:opacity-50"
                                                     aria-label="Deactivate">
-                                                <i class="fas fa-ban text-xs"></i>
+                                                <i class="fas fa-ban text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"></i>
+                                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"></i>
                                             </button>
                                             <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
                                                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
@@ -1081,9 +1089,11 @@ new class extends Component {
                                             <button type="button"
                                                     data-coord-action
                                                     wire:click.stop="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"
-                                                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-600 hover:bg-emerald-100 hover:border-emerald-400 transition-all duration-150 active:scale-95"
+                                                    wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"
+                                                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-600 hover:bg-emerald-100 hover:border-emerald-400 transition-all duration-150 active:scale-95 disabled:opacity-50"
                                                     aria-label="Activate">
-                                                <i class="fas fa-circle-check text-xs"></i>
+                                                <i class="fas fa-circle-check text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"></i>
+                                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"></i>
                                             </button>
                                             <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
                                                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
@@ -1148,7 +1158,9 @@ new class extends Component {
                     </div>
                     @if($coordCollege || $coordSearch || $coordStatus)
                     <button wire:click="resetCoordFilters"
-                            class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
+                            wire:loading.attr="disabled" wire:target="resetCoordFilters"
+                            class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-60 disabled:pointer-events-none inline-flex items-center gap-1.5">
+                        <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="resetCoordFilters"></i>
                         Clear Filters
                     </button>
                     @endif
@@ -1234,11 +1246,13 @@ new class extends Component {
         </div>
         <div class="relative group/close">
             <button wire:click="closeModal"
-                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95"
+                    wire:loading.attr="disabled" wire:target="closeModal"
+                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                     aria-label="Close">
-                <svg class="w-3.5 h-3.5 stroke-white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14" fill="none">
+                <svg class="w-3.5 h-3.5 stroke-white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14" fill="none" wire:loading.remove wire:target="closeModal">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
+                <i class="fas fa-spinner animate-spin text-white text-xs" wire:loading wire:target="closeModal"></i>
             </button>
             <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
@@ -1262,7 +1276,9 @@ new class extends Component {
                         <p class="text-sm mt-0.5 text-emerald-800">{{ $coordinatorSuccess }}</p>
                     </div>
                     <button wire:click="closeModal"
-                            class="bg-[#7a3f91] text-white px-4 py-2 rounded-xl text-sm font-semibold shrink-0 hover:bg-[#5e2f72] transition">
+                            wire:loading.attr="disabled" wire:target="closeModal"
+                            class="bg-[#7a3f91] text-white px-4 py-2 rounded-xl text-sm font-semibold shrink-0 hover:bg-[#5e2f72] transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center gap-1.5">
+                        <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="closeModal"></i>
                         Done
                     </button>
                 </div>
@@ -1473,20 +1489,21 @@ new class extends Component {
 
                     <div class="flex flex-wrap gap-3 pb-2">
                         <button type="button" wire:click="closeModal"
-                                class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition">
+                                wire:loading.attr="disabled" wire:target="closeModal"
+                                class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
+                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="closeModal"></i>
                             Cancel
                         </button>
                         <button type="button" wire:click="resetCoordFormPublic"
-                                class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition">
+                                wire:loading.attr="disabled" wire:target="resetCoordFormPublic"
+                                class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
+                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="resetCoordFormPublic"></i>
                             Reset
                         </button>
                         <button type="submit" wire:loading.attr="disabled" wire:target="registerCoordinator"
                                 class="flex-1 px-6 py-3.5 rounded-xl text-sm font-semibold bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50">
-                            <span wire:loading wire:target="registerCoordinator">
-                                <svg class="animate-spin w-4 h-4 text-white inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                                </svg>
+                            <span wire:loading wire:target="registerCoordinator" class="inline-flex items-center gap-2">
+                                <i class="fas fa-spinner animate-spin"></i>
                                 Registering...
                             </span>
                             <span wire:loading.remove wire:target="registerCoordinator">Register Coordinator</span>
@@ -1582,14 +1599,16 @@ new class extends Component {
 
         {{-- Right: glassmorphism close button --}}
         <button type="button" wire:click="closeModal"
-                class="relative group/x inline-flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-95 shrink-0"
+                wire:loading.attr="disabled" wire:target="closeModal"
+                class="relative group/x inline-flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-95 shrink-0 disabled:opacity-60 disabled:pointer-events-none"
                 style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); backdrop-filter: blur(8px);"
                 onmouseover="this.style.background='rgba(255,255,255,0.28)'; this.style.borderColor='rgba(255,255,255,0.5)';"
                 onmouseout="this.style.background='rgba(255,255,255,0.15)'; this.style.borderColor='rgba(255,255,255,0.25)';"
                 aria-label="Close">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14" wire:loading.remove wire:target="closeModal">
                 <path d="M2 2L12 12M12 2L2 12"/>
             </svg>
+            <i class="fas fa-spinner animate-spin text-white text-xs" wire:loading wire:target="closeModal"></i>
             {{-- Tooltip below --}}
             <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/x:opacity-100 transition-opacity duration-150 z-50">
                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative shadow-lg">
@@ -1772,14 +1791,20 @@ new class extends Component {
                         @if($isProfileActive)
                             <button type="button"
                                     wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"
-                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 transition active:scale-95">
-                                <i class="fas fa-ban text-xs"></i> Deactivate
+                                    wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"
+                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 transition active:scale-95 disabled:opacity-60 disabled:pointer-events-none">
+                                <i class="fas fa-ban text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"></i>
+                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"></i>
+                                Deactivate
                             </button>
                         @else
                             <button type="button"
                                     wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"
-                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95">
-                                <i class="fas fa-circle-check text-xs"></i> Activate
+                                    wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"
+                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95 disabled:opacity-60 disabled:pointer-events-none">
+                                <i class="fas fa-circle-check text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"></i>
+                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"></i>
+                                Activate
                             </button>
                         @endif
                     </div>
@@ -1841,9 +1866,11 @@ new class extends Component {
                                 @if(!$editingProfileEmail)
                                 <div class="relative group/email-edit">
                                     <button type="button" wire:click="startEditingProfileEmail"
-                                            class="inline-flex items-center justify-center w-7 h-7 rounded-md text-[#7a3f91] border border-[#d4aaeb] bg-[#faf5ff] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95"
+                                            wire:loading.attr="disabled" wire:target="startEditingProfileEmail"
+                                            class="inline-flex items-center justify-center w-7 h-7 rounded-md text-[#7a3f91] border border-[#d4aaeb] bg-[#faf5ff] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                                             aria-label="Edit">
-                                        <i class="fas fa-pen text-[10px]"></i>
+                                        <i class="fas fa-pen text-[10px]" wire:loading.remove wire:target="startEditingProfileEmail"></i>
+                                        <i class="fas fa-spinner animate-spin text-[10px]" wire:loading wire:target="startEditingProfileEmail"></i>
                                     </button>
                                     <div class="absolute top-full right-0 mt-1.5 pointer-events-none opacity-0 group-hover/email-edit:opacity-100 transition-opacity duration-150 z-50">
                                         <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md whitespace-nowrap relative">
@@ -1862,8 +1889,10 @@ new class extends Component {
                                            @keydown.enter.prevent="$wire.updateProfileEmail()">
                                     <div class="flex gap-2 shrink-0">
                                         <button type="button" wire:click="cancelEditingProfileEmail"
-                                                class="px-3 py-2.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition">
-                                            Cancel
+                                                wire:loading.attr="disabled" wire:target="cancelEditingProfileEmail"
+                                                class="px-3 py-2.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none flex items-center gap-1.5">
+                                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="cancelEditingProfileEmail"></i>
+                                            <span wire:loading.remove wire:target="cancelEditingProfileEmail">Cancel</span>
                                         </button>
                                         <button type="button" wire:click="updateProfileEmail"
                                                 wire:loading.attr="disabled" wire:target="updateProfileEmail"
@@ -1882,12 +1911,21 @@ new class extends Component {
                         <div class="px-5 py-4">
                             <p class="vp-field-label">College Assignment</p>
                             @php
-                                $deptCodesForProfile = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('code');
+                                // code => full course name, for the hover tooltip on each chip.
+                                $deptCodeNamesForProfile = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('name', 'code');
                             @endphp
                             <div class="flex items-center gap-2 flex-wrap mt-0.5">
                                 <p class="vp-field-value">{{ $collegeName }}</p>
-                                @foreach($deptCodesForProfile as $deptCode)
-                                    <span class="inline-block px-2 py-0.5 bg-[#faf7fd] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-mono font-semibold">{{ $deptCode }}</span>
+                                @foreach($deptCodeNamesForProfile as $deptCode => $deptCodeName)
+                                    <div class="relative group/dept">
+                                        <span class="inline-block px-2 py-0.5 bg-[#faf7fd] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-mono font-semibold cursor-default">{{ $deptCode }}</span>
+                                        <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/dept:opacity-100 transition-opacity duration-150 z-50">
+                                            <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
+                                                <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
+                                                {{ $deptCodeName ?: $deptCode }}
+                                            </div>
+                                        </div>
+                                    </div>
                                 @endforeach
                             </div>
                         </div>
@@ -1921,11 +1959,13 @@ new class extends Component {
         <div class="flex items-center gap-2 shrink-0">
             <div class="relative group/close">
                 <button wire:click="closeModal"
-                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95"
+                        wire:loading.attr="disabled" wire:target="closeModal"
+                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                         aria-label="Close">
-                    <svg class="w-3.5 h-3.5 stroke-white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14" fill="none">
+                    <svg class="w-3.5 h-3.5 stroke-white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 14 14" fill="none" wire:loading.remove wire:target="closeModal">
                         <path d="M2 2L12 12M12 2L2 12"/>
                     </svg>
+                    <i class="fas fa-spinner animate-spin text-white text-xs" wire:loading wire:target="closeModal"></i>
                 </button>
                 <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
@@ -1994,7 +2034,12 @@ new class extends Component {
                     </div>
                     @endif
                     <div class="flex gap-3">
-                        <button wire:click="cancelAddingCourses" class="flex-1 sm:flex-none sm:w-36 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition">Cancel</button>
+                        <button wire:click="cancelAddingCourses"
+                                wire:loading.attr="disabled" wire:target="cancelAddingCourses"
+                                class="flex-1 sm:flex-none sm:w-36 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
+                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="cancelAddingCourses"></i>
+                            Cancel
+                        </button>
                         <button wire:click="saveCollegeCourses" wire:loading.attr="disabled" wire:target="saveCollegeCourses"
                                 class="flex-1 bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-50">
                             <span wire:loading wire:target="saveCollegeCourses"><i class="fas fa-spinner animate-spin"></i> Saving...</span>
@@ -2019,8 +2064,11 @@ new class extends Component {
                                    class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                    @keydown.enter.prevent="$wire.addCollege()">
                             <button wire:click="addCollege"
-                                    class="w-full bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2">
-                                <i class="fas fa-plus text-sm"></i> Add College
+                                    wire:loading.attr="disabled" wire:target="addCollege"
+                                    class="w-full bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none">
+                                <i class="fas fa-plus text-sm" wire:loading.remove wire:target="addCollege"></i>
+                                <i class="fas fa-spinner animate-spin text-sm" wire:loading wire:target="addCollege"></i>
+                                Add College
                             </button>
                             <p class="text-xs text-gray-400 text-center">After adding, assign departments to it.</p>
                         </div>
@@ -2070,7 +2118,12 @@ new class extends Component {
                                                        class="flex-1 px-3 py-2.5 border border-[#d4aaeb] rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                                        @keydown.enter.prevent="$wire.renameCollege()">
                                                 <div class="flex gap-2 shrink-0">
-                                                    <button wire:click="cancelRenamingCollege" class="px-3.5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-50 transition">Cancel</button>
+                                                    <button wire:click="cancelRenamingCollege"
+                                                            wire:loading.attr="disabled" wire:target="cancelRenamingCollege"
+                                                            class="px-3.5 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center gap-1.5">
+                                                        <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="cancelRenamingCollege"></i>
+                                                        Cancel
+                                                    </button>
                                                     <button wire:click="renameCollege" wire:loading.attr="disabled" wire:target="renameCollege"
                                                             class="px-3.5 py-2.5 bg-[#7a3f91] hover:bg-[#5e2f72] text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 disabled:opacity-50">
                                                         <span wire:loading wire:target="renameCollege"><i class="fas fa-spinner animate-spin text-xs"></i></span>
@@ -2112,9 +2165,11 @@ new class extends Component {
                                         <div class="flex items-center gap-1.5 shrink-0">
                                             <div class="relative group/a">
                                                 <button wire:click="startRenamingCollege('{{ addslashes($college) }}')"
-                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 hover:border-blue-400 transition-all duration-150 active:scale-95"
+                                                        wire:loading.attr="disabled" wire:target="startRenamingCollege('{{ addslashes($college) }}')"
+                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 hover:border-blue-400 transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                                                         aria-label="Rename">
-                                                    <i class="fas fa-pen-to-square text-xs"></i>
+                                                    <i class="fas fa-pen-to-square text-xs" wire:loading.remove wire:target="startRenamingCollege('{{ addslashes($college) }}')"></i>
+                                                    <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="startRenamingCollege('{{ addslashes($college) }}')"></i>
                                                 </button>
                                                 <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/a:opacity-100 transition-opacity z-50">
                                                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
@@ -2126,9 +2181,11 @@ new class extends Component {
                                             {{-- FIX #4: tooltip label simplified to just "Edit" (was "Departments") --}}
                                             <div class="relative group/b">
                                                 <button wire:click="startEditingCollege('{{ addslashes($college) }}')"
-                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[#f5eef9] border border-[#d4aaeb] text-[#7a3f91] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95"
+                                                        wire:loading.attr="disabled" wire:target="startEditingCollege('{{ addslashes($college) }}')"
+                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[#f5eef9] border border-[#d4aaeb] text-[#7a3f91] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                                                         aria-label="Edit">
-                                                    <i class="fas fa-pencil text-xs"></i>
+                                                    <i class="fas fa-pencil text-xs" wire:loading.remove wire:target="startEditingCollege('{{ addslashes($college) }}')"></i>
+                                                    <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="startEditingCollege('{{ addslashes($college) }}')"></i>
                                                 </button>
                                                 <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/b:opacity-100 transition-opacity z-50">
                                                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
@@ -2192,7 +2249,11 @@ new class extends Component {
             @endif
             <div class="flex gap-3">
                 <button wire:click="closeModal"
-                        class="flex-1 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition">Cancel</button>
+                        wire:loading.attr="disabled" wire:target="closeModal"
+                        class="flex-1 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
+                    <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="closeModal"></i>
+                    Cancel
+                </button>
                 <button wire:click="executeToggleCoordinatorStatus"
                         wire:loading.attr="disabled" wire:target="executeToggleCoordinatorStatus"
                         class="flex-1 px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-50

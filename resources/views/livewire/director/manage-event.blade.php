@@ -843,7 +843,8 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="min-height: calc(100vh - 120px);">
+<div class="flex flex-col" wire:poll.3000ms
+     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
 
 <style>
 @keyframes modalIn {
@@ -917,8 +918,8 @@ select.tw-select-arrow {
 }
 .dir-mrow:active { background: #F7F4FA; }
 
-/* ══ Table container height — mirrors .coord-table-card on Manage Coordinators ══ */
-.dir-table-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); }
+/* ══ Table container height — mirrors event-organizer's flex-fill card ══ */
+.dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
 @media (max-width: 640px) {
     .dir-table-card {
@@ -1000,7 +1001,8 @@ select.tw-select-arrow {
     <div class="dir-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center">
+        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterCollege">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
@@ -1077,7 +1079,12 @@ select.tw-select-arrow {
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
                            bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
@@ -1090,18 +1097,24 @@ select.tw-select-arrow {
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+
+            {{-- Centered loading spinner — mirrors event-organizer's table overlay --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
             @if($this->events->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white">
+            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white transition-opacity duration-200"
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
-                        <col style="width:6%;"><col style="width:28%;"><col style="width:18%;"><col style="width:20%;"><col style="width:14%;"><col style="width:14%;">
+                        <col style="width:32%;"><col style="width:20%;"><col style="width:22%;"><col style="width:12%;"><col style="width:14%;">
                     </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">#</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
@@ -1117,7 +1130,6 @@ select.tw-select-arrow {
                             $isPending   = $event->status === 'PENDING';
                             $isRejected  = $event->status === 'REJECTED';
                             $eventDate   = $event->event_date->setTimezone('Asia/Manila');
-                            $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
                             $rowCheckDate  = $event->event_date;
                             $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
                         @endphp
@@ -1125,10 +1137,6 @@ select.tw-select-arrow {
                             wire:click="viewEvent({{ $event->id }})"
                             wire:key="dir-event-row-{{ $event->id }}"
                             data-dir-row>
-
-                            <td class="px-4 sm:px-5 py-4 text-xs font-semibold text-purple-400 overflow-hidden">
-                                {{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}
-                            </td>
 
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
                                 <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
@@ -1179,10 +1187,12 @@ select.tw-select-arrow {
 
                                     @if($isCompleted || $isApproved)
                                         <button wire:click.stop="openShareModal({{ $event->id }})"
+                                                wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                 data-dir-action data-tip="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
-                                            <i class="fas fa-share-nodes"></i>
+                                                       bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                            <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                         </button>
                                     @endif
 
@@ -1195,17 +1205,21 @@ select.tw-select-arrow {
                                             </span>
                                         @else
                                             <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     data-dir-action data-tip="Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
-                                                <i class="fas fa-check"></i>
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
                                         @endif
                                         <button wire:click.stop="confirmReject({{ $event->id }})"
+                                                wire:loading.attr="disabled" wire:target="confirmReject({{ $event->id }})"
                                                 data-dir-action data-tip="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400">
-                                            <i class="fas fa-xmark"></i>
+                                                       bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                            <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $event->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $event->id }})"></i>
                                         </button>
                                     @endif
 
@@ -1218,10 +1232,12 @@ select.tw-select-arrow {
                                             </span>
                                         @else
                                             <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     data-dir-action data-tip="Re-Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400">
-                                                <i class="fas fa-rotate-left"></i>
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
                                         @endif
                                     @endif
@@ -1242,12 +1258,10 @@ select.tw-select-arrow {
                         $isPending   = $event->status === 'PENDING';
                         $isRejected  = $event->status === 'REJECTED';
                         $eventDate   = $event->event_date->setTimezone('Asia/Manila');
-                        $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
                         $rowCheckDate  = $event->event_date;
                         $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
                     @endphp
                     <div class="dir-mrow" wire:key="dir-event-mrow-{{ $event->id }}" wire:click="viewEvent({{ $event->id }})" data-dir-row>
-                        <span class="text-xs font-semibold text-purple-400 shrink-0 pt-0.5">{{ str_pad($rowNum, 2, '0', STR_PAD_LEFT) }}</span>
 
                         <div class="flex-1 min-w-0">
                             <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
@@ -1292,10 +1306,12 @@ select.tw-select-arrow {
                                 <div class="flex items-center gap-1.5" @click.stop>
                                     @if($isCompleted || $isApproved)
                                         <button wire:click.stop="openShareModal({{ $event->id }})"
+                                                wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                 aria-label="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400">
-                                            <i class="fas fa-share-nodes"></i>
+                                                       bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                            <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                         </button>
                                     @endif
 
@@ -1308,17 +1324,21 @@ select.tw-select-arrow {
                                             </span>
                                         @else
                                             <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     aria-label="Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
-                                                <i class="fas fa-check"></i>
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
                                         @endif
                                         <button wire:click.stop="confirmReject({{ $event->id }})"
+                                                wire:loading.attr="disabled" wire:target="confirmReject({{ $event->id }})"
                                                 aria-label="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-red-50 text-red-600 border border-red-200 active:bg-red-100 active:border-red-400">
-                                            <i class="fas fa-xmark"></i>
+                                                       bg-red-50 text-red-600 border border-red-200 active:bg-red-100 active:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                            <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $event->id }})"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $event->id }})"></i>
                                         </button>
                                     @endif
 
@@ -1331,10 +1351,12 @@ select.tw-select-arrow {
                                             </span>
                                         @else
                                             <button wire:click.stop="confirmApprove({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     aria-label="Re-Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400">
-                                                <i class="fas fa-rotate-left"></i>
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
                                         @endif
                                     @endif
@@ -1566,9 +1588,11 @@ select.tw-select-arrow {
         <div class="flex items-center gap-1.5">
             <div class="relative inline-flex group">
                 <button wire:click="closeFormModal" type="button"
+                        wire:loading.attr="disabled" wire:target="closeFormModal"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm"></i>
+                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeFormModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeFormModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close
@@ -1592,10 +1616,10 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
         {{-- LEFT COLUMN — Photo + Target --}}
-        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white"
+        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-visible lg:overflow-y-auto bg-white"
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
@@ -1973,9 +1997,11 @@ select.tw-select-arrow {
             @if($isApproved || $isCompleted)
                 <div class="relative inline-flex group">
                     <button type="button" wire:click="openShareModal({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
+                            wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Share event">
-                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <i class="fas fa-share-nodes text-white text-sm" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Share
@@ -1987,9 +2013,11 @@ select.tw-select-arrow {
             @if($isPending)
                 <div class="relative inline-flex group">
                     <button wire:click="confirmReject({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
+                            wire:loading.attr="disabled" wire:target="confirmReject({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Reject">
-                        <i class="fas fa-xmark text-white text-sm"></i>
+                        <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="confirmReject({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmReject({{ $ev->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Reject
@@ -2010,9 +2038,11 @@ select.tw-select-arrow {
                 @else
                 <div class="relative inline-flex group">
                     <button wire:click="confirmApprove({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
+                            wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Approve">
-                        <i class="fas fa-check text-white text-sm"></i>
+                        <i class="fas fa-check text-white text-sm" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Approve
@@ -2037,9 +2067,11 @@ select.tw-select-arrow {
                 @else
                 <div class="relative inline-flex group">
                     <button wire:click="confirmApprove({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24"
+                            wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
+                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Re-Approve">
-                        <i class="fas fa-rotate-left text-white text-sm"></i>
+                        <i class="fas fa-rotate-left text-white text-sm" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Re-Approve
@@ -2051,9 +2083,11 @@ select.tw-select-arrow {
 
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
+                        wire:loading.attr="disabled" wire:target="closeViewModal"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm"></i>
+                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeViewModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeViewModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close
