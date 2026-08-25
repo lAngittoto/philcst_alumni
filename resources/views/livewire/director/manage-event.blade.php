@@ -121,6 +121,18 @@ new class extends Component {
             $this->filterStatus = $statusMap[strtolower($incomingStatus)];
         }
 
+        // ─────────────────────────────────────────────────────────────────
+        // NEW: deep-link support for "View Event" coming from the director
+        // messenger's shared event-post card (?event={id} in the URL).
+        // 'type' is accepted too (ADMIN/ORGANIZER) but viewEvent() only
+        // needs the id — it looks the event up directly, same as a manual
+        // row click would.
+        // ─────────────────────────────────────────────────────────────────
+        $incomingEventId = request()->query('event');
+        if ($incomingEventId && ctype_digit((string) $incomingEventId)) {
+            $this->viewEvent((int) $incomingEventId);
+        }
+
         $cacheKey = 'director_events_auto_processed';
         if (! Cache::has($cacheKey)) {
             $this->autoRejectExpiredPendingEvents();

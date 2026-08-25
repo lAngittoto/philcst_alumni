@@ -115,26 +115,33 @@ new class extends Component {
 
     /**
      * ── Builds the "View Job" deep-link URL ─────────────────────────────────
+     * NOTE: this component only ever renders for an authenticated DIRECTOR
+     * (mount() aborts otherwise), so the link must point at the director's
+     * own job management page — NOT alumni.job-opportunities, which sits
+     * behind the 'alumni.onboarded' middleware and would bounce a director
+     * back to their dashboard as an unauthorized redirect.
      */
     private function jobsUrl(int $id): string
     {
         try {
-            $path = route('job.opportunities', [], false);
+            $path = route('director.job/management', [], false);
         } catch (\Throwable) {
-            $path = '/job/opportunities';
+            $path = '/director/job/management';
         }
         return $path . '?job=' . $id;
     }
 
     /**
      * ── Builds the "View Event" deep-link URL ───────────────────────────────
+     * Same reasoning as jobsUrl() above — points at the director's own
+     * event management page instead of the alumni-only upcoming.events route.
      */
     private function eventsUrl(int $id, string $type = 'ADMIN'): string
     {
         try {
-            $path = route('upcoming.events', [], false);
+            $path = route('director.event/management', [], false);
         } catch (\Throwable) {
-            $path = '/upcoming/events';
+            $path = '/director/event/management';
         }
         return $path . '?event=' . $id . '&type=' . $type;
     }
@@ -657,7 +664,78 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Messages – Send
+    // Profanity filter — censors bad words (English / Tagalog / Pangasinan)
+    // before a message is stored. Matches whole words only (word-boundary
+    // aware, accent/underscore-tolerant) and is case-insensitive, so it
+    // catches "TANGA", "TaNgA", etc. Leetspeak-lite (0→o, 1→i, 3→e, 4→a,
+    // 5→s, @→a) is normalized before matching so simple dodges like
+    // "t4nga" or "put4" still get caught. Each censored word is replaced
+    // with asterisks matching its original length (min 4 asterisks) so the
+    // shape of the sentence stays readable but the word itself is hidden.
+    // ─────────────────────────────────────────────────────────────────────
+    private array $profanityList = [
+        // ── English ──
+        'fuck', 'fucking', 'fucker', 'fuckin', 'motherfucker', 'shit', 'shitty',
+        'bullshit', 'bitch', 'bitches', 'asshole', 'ass', 'dick', 'dickhead',
+        'pussy', 'cunt', 'cock', 'bastard', 'whore', 'slut', 'nigger', 'nigga',
+        'faggot', 'fag', 'retard', 'retarded', 'damn', 'goddamn', 'douche',
+        'douchebag', 'twat', 'wanker', 'prick',
+
+        // ── Tagalog / Filipino ──
+        'putangina', 'putanginamo', 'putang ina', 'putang ina mo', 'puta',
+        'putragis', 'putrgis', 'gago', 'gaga', 'gagi', 'ulol', 'ulul',
+        'tanga', 'tangina', 'tang ina', 'bobo', 'boba', 'tarantado',
+        'tarantada', 'hayop', 'hayop ka', 'hinayupak', 'hinayupak ka',
+        'leche', 'lintik', 'lintik ka', 'peste', 'pesteng yawa', 'yawa',
+        'kupal', 'kingina', 'kinginamo', 'kinginamu', 'punyeta', 'punyemas',
+        'siraulo', 'engot', 'inutil', 'walanghiya', 'walang hiya',
+        'demonyo ka', 'buwisit', 'bwisit', 'salot', 'shunga', 'sunga',
+        'putanginamu', 'tangina mo', 'tang-ina',
+
+        // ── Pangasinan ──
+        'atagey', 'bilat', 'gago ka', 'akel ka', 'satanas ka', 'ukininam',
+        'kabir', 'anak na puta', 'yatak', 'ukinnam', 'ukininam ka',
+    ];
+
+    private function censorProfanity(string $text): string
+    {
+        // Normalize a copy for matching only — light leetspeak substitution
+        // so "b1tch"/"a$$" style dodges are still caught. We still censor
+        // based on positions found on this normalized string, but replace
+        // on the ORIGINAL string so casing of surrounding text is untouched.
+        $normalize = static function (string $s): string {
+            $s = mb_strtolower($s);
+            return strtr($s, [
+                '0' => 'o', '1' => 'i', '3' => 'e', '4' => 'a',
+                '5' => 's', '@' => 'a', '$' => 's',
+            ]);
+        };
+
+        foreach ($this->profanityList as $word) {
+            $wordNorm = $normalize($word);
+            // Allow spaces/hyphens/underscores between letters of multi-word
+            // entries, and treat non-letter characters as word boundaries.
+            $pattern = '/(?<![\p{L}\p{N}])' . preg_quote($wordNorm, '/') . '(?![\p{L}\p{N}])/iu';
+
+            $text = preg_replace_callback($pattern, function () use ($wordNorm) {
+                return str_repeat('*', max(4, mb_strlen($wordNorm)));
+            }, $text) ?? $text;
+
+            // Also run against a leetspeak-normalized view so "f4ck" etc.
+            // still gets caught even though the ORIGINAL text has digits.
+            $textNorm = $normalize($text);
+            if (preg_match($pattern, $textNorm)) {
+                $text = preg_replace_callback($pattern, function ($m) {
+                    return str_repeat('*', max(4, mb_strlen($m[0])));
+                }, $text) ?? $text;
+            }
+        }
+
+        return $text;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+
     //
     // SMOOTHNESS FIX: sendMessage() itself was already lean (no full-room
     // rebuild), but it used to rely on the old 8s refreshAll() poll to
@@ -670,6 +748,8 @@ new class extends Component {
     {
         $body = trim($this->body);
         if ($body === '' || ! $this->roomId) return;
+
+        $body = $this->censorProfanity($body);
 
         $msgId = DB::table('chat_messages')->insertGetId([
             'room_id'     => $this->roomId,
@@ -756,13 +836,15 @@ new class extends Component {
     {
         if (! $this->editingId || trim($this->editBody) === '') return;
 
+        $editedBody = $this->censorProfanity(trim($this->editBody));
+
         DB::table('chat_messages')
             ->where('id', $this->editingId)
             ->where('sender_type', 'director')
             ->where('sender_id', $this->directorId)
             ->whereNull('deleted_at')
             ->update([
-                'body'       => trim($this->editBody),
+                'body'       => $editedBody,
                 'edited_at'  => now(),
                 'updated_at' => now(),
             ]);
@@ -1264,9 +1346,23 @@ new class extends Component {
     }
 </style>
 
-<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full"
+<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
      style="height: calc(100vh - 250px); max-width: 1400px;"
+     x-data="{ postNavigating: false }"
      wire:poll.2500ms.visible="unifiedPoll">
+
+    {{-- ── Full-panel loading overlay shown while a shared Job/Event
+         "View" link is navigating away, so the click feels instant
+         instead of appearing to do nothing while the page loads. ── --}}
+    <div x-show="postNavigating" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="absolute inset-0 z-[200] flex flex-col items-center justify-center gap-3"
+         style="background: rgba(255,255,255,.85); backdrop-filter: blur(1.5px);">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size: 30px; color:#7a3f91;"></i>
+        <p class="text-xs font-semibold text-[#5c2d7a]">Opening…</p>
+    </div>
 
     @if($room)
     <div class="flex flex-1 min-w-0 flex-col">
@@ -1653,7 +1749,8 @@ new class extends Component {
 
                                         @if($ppAvailable)
                                         <div class="msgr-post-thumb-overlay">
-                                            <a href="{{ $pp['url'] }}" wire:navigate @click.stop
+                                            <a href="{{ $pp['url'] }}" wire:navigate
+                                               @click.stop="postNavigating = true"
                                                class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#5c2d7a] text-xs font-bold shadow-md inline-flex items-center gap-1.5">
                                                 <i class="fa-solid fa-eye"></i>View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}
                                             </a>
